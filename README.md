@@ -1,22 +1,151 @@
 # WAO SDK
 
-- [Installation](#installation)
-- [AR](#ar)
-- [AO](#ao)
+WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and seamless message piping for an enjoyable coding experience. Additionally, it includes a drop-in replacement for `aoconnect`, allowing to test lua scripts 1000x faster than the mainnet by emulating AO units in-memory.
 
-## Installation
+- [Quick Start](#quick-start)
+  - [Installation](#installation)
+  
+- [API Reference](#api-reference)
+  - [AR](#ar)
+  - [AO](#ao)
+
+## Quick Start
+
+### Installation
 
 ```bash
 yarn add wao
 ```
+### Drop-in `aoconnect` Replacement for Tests
 
-WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and seamless message piping for an enjoyable coding experience.
+By replacing `aoconnect` with WAO connect, everything runs in-memory with zero latency and your tests execute 1000x faster. The APIs are identical. So there's no need to change anything else in your code.
 
 ```js
-import { AR, AO } from "wao"
+//import { spawn, message, dryrun, assign, result } from "@permaweb/aoconnect"
+import { connect } from "wao/test"
+const { spawn, message, dryrun, assign, result } = connect()
 ```
 
-## AR
+### Setting up a Project
+
+It's super easy to set up a test AO project manually.
+
+```bash
+mkdir wao-test && cd wao-test
+yarn init && yarn add wao && yarn add mocha chai --dev
+```
+
+Add a `test` command to your `package.json`, and set `module` type to work with ES6.
+
+```json
+{
+  "name": "wao-test",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "wao": "^0.1.1"
+  },
+  "devDependencies": {
+    "chai": "^5.1.2",
+    "mocha": "^10.8.2"
+  },
+  "scripts": {
+    "test": "mocha --node-option=experimental-wasm-memory64"
+  }
+}
+```
+
+Create `test` directory and `test.js` file.
+
+```bash
+mkdir test && touch test.js
+```
+
+### Writing Tests
+
+Write a simple test in `test.js`.
+
+```js
+import { expect } from "chai"
+import { connect } from "wao/test"
+const { accounts, spawn, message, dryrun } = connect()
+// import { wait } from "wao/utils"
+
+const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+    msg.reply({ Data = "Hello, World!" })
+  end
+)
+`
+describe("WAO", function () {
+  this.timeout(0)
+  describe("Aoconnect Replacement", function () {
+    it("should spawn a process and send messages", async () => {
+      const pid = await spawn({ signer: accounts[0].signer })
+	  
+	  // on mainnet, you need to wait here till the process becomes available.
+	  // WAO automatically handles it. No need with in-memory tests.
+	  // await wait({ pid })
+	  
+      await message({
+        process: pid,
+        tags: [{ name: "Action", value: "Eval" }],
+        data: src_data,
+        signer,
+      })
+      const res = await dryrun({
+        process: pid,
+        tags: [{ name: "Action", value: "Hello" }],
+        signer,
+      })
+      expect(res.Messages[0].Data).to.eql("Hello, World!")
+    })
+  })
+})
+```
+Note that generating random Arweave wallets for every test takes time and slows down your test executions, so Wao connect provides pre-generated accounts for your tests, which saves hours if you are to run your tests thousands of times.
+
+- `accounts[0] = { jwk, addr, signer }`
+
+Run the test.
+
+```js
+yarn test
+```
+
+WAO comes with elegant syntactic sugar and makes writing AO projects absolute joy.
+
+The same test can be written as follows.
+
+```js
+import { expect } from "chai"
+import { AO } from "wao/test"
+
+const src_data = `
+Handlers.add( "Hello", "Hello", function (msg)
+    msg.reply({ Data = "Hello, World!" })
+  end
+)
+`
+describe("WAO", function () {
+  this.timeout(0)
+  describe("AO Class", function () {
+    it("should spawn a process send messages", async () => {
+	  const ao = new AO()
+      const { p } = await ao.deploy({ src_data })
+      expect(await p.d("Hello")).to.eql("Hello, World!")
+    })
+  })
+})
+```
+
+The `AO` class is not only for tests, but also for production code. You just need to import from a different path.
+
+- `import { AO } from "wao"`
+
+## API Reference
+
+### AR
 
 `AR` handles operations on the base Arweave Storage layer as well as wallet connections.
 
@@ -32,7 +161,7 @@ import { AR, AO } from "wao"
 - [data](#data)
 - [bundle](#bundle)
 
-### Instantiate
+#### Instantiate
 
 ```js
 const ar = new AR()
@@ -48,7 +177,7 @@ In case of local gateways, you can only set `port` and the rest will be automati
 const ar = new AR({ port: 4000 })
 ```
 
-### Set or Generate Wallet
+#### Set or Generate Wallet
 
 You can initialize AR with a wallet JWK or ArConnect.
 
@@ -68,9 +197,9 @@ You can go on without calling `init` or `gen`, in this case, AR generates a rand
 
 Once a wallet is set, `ar.jwk` and `ar.addr` will be available.
 
-### Token Related Methods
+#### Token Related Methods
 
-#### toAddr
+##### toAddr
 
 Convert a jwk to the corresponding address.
 
@@ -78,7 +207,7 @@ Convert a jwk to the corresponding address.
 const addr = await ar.toAddr(jwk)
 ```
 
-#### mine
+##### mine
 
 Mine pending blocks (only for arlocal).
 
@@ -86,7 +215,7 @@ Mine pending blocks (only for arlocal).
 await ar.mine()
 ```
 
-#### balance | toAR | toWinston
+##### balance | toAR | toWinston
 
 Get the current balance of the specified address in AR. `addr` will be `ar.addr` if omitted.
 
@@ -97,7 +226,7 @@ const balance_AR2 = ar.toAR(balance_Winston)
 const balance_AR3 = await ar.balance(addr) // specify wallet address
 ```
 
-#### transfer
+##### transfer
 
 Transfer AR token. `amount` is in AR, not in winston for simplicity.
 
@@ -114,7 +243,7 @@ const { id } = await ar.transfer(amount, to, jwk)
 For most write functions, `jwk` can be specified as the last parameter or a field like `{ data, tags, jwk }`.
 
 
-#### checkWallet
+##### checkWallet
 
 `checkWallet` is mostly used internally, but it returns `this.jwk` if a wallet has been assigned with `init`, or else it generates a random wallet to use. The following pattern is used in many places. With this pattern, if a wallet is set with `init` and the `jwk` the user is passing is different, `checkWallet` produces an error to prevent the wrong wallet. If no wallet has been set with `init` or `gen` and the `jwk` is not passed, it generates and returns a random wallet.
 
@@ -128,9 +257,9 @@ some_class_method({ jwk }){
 }
 ```
 
-### Storage Related Methods
+#### Storage Related Methods
 
-#### post 
+##### post 
 
 Post a data to Arweave.
 
@@ -151,7 +280,7 @@ const tags = { Name: [ "name-tag-1", "name-tag-2" ] }
 ```
 
 
-#### tx
+##### tx
 
 Get a transaction.
 
@@ -159,7 +288,7 @@ Get a transaction.
 const tx = await ar.tx(txid)
 ```
 
-#### data
+##### data
 
 Get a data.
 
@@ -167,7 +296,7 @@ Get a data.
 const data = await ar.data(txid, true) // true if string
 ```
 
-#### bundle
+##### bundle
 
 Bundle ANS-104 dataitems.
 
@@ -183,7 +312,7 @@ const { err, id } = await ar.bundle([
 ])
 ```
 
-## AO
+### AO
 
 - [Instantiate](#instantiate-1)
 - [deploy](#deploy)
@@ -199,7 +328,7 @@ const { err, id } = await ar.bundle([
 - [wait](#wait)
 - [Function Piping](#function-piping)
 
-### Instantiate
+#### Instantiate
 
 You can initialize AO in the same way as AR.
 
@@ -214,9 +343,9 @@ const addr = ao.ar.addr
 await ao.ar.post({ data, tags })
 ```
 
-### AO Core Functions
+#### AO Core Functions
 
-#### deploy
+##### deploy
 
 Spawn a process, get a Lua source, and eval the script. `src` is an Arweave txid of the Lua script.
 
@@ -250,7 +379,7 @@ await ao.deploy({ tags, loads: [ { src, fills }, { src: src2, fills: fills2 } ] 
 ```
 
 
-#### msg
+##### msg
 
 Send a message.
 
@@ -285,7 +414,7 @@ const get2 = { name: "Profile", json: true } // "Profile" tag with JSON.parse()
 const get3 = { data: true, json: true } // returns Data field with JSON.parse()
 ```
 
-#### dry
+##### dry
 
 Dryrun a message without writing to Arweave.
 
@@ -296,7 +425,7 @@ const { err, res, out } = await ao.dry({
 })
 ```
 
-#### asgn
+##### asgn
 
 Assign an existing message to a process.
 
@@ -304,7 +433,7 @@ Assign an existing message to a process.
 const { err, mid, res, out } = await ao.asgn({ pid, mid, check, checkData, get })
 ```
 
-#### load
+##### load
 
 Get a Lua source script from Arweave and eval it on a process.
 
@@ -312,7 +441,7 @@ Get a Lua source script from Arweave and eval it on a process.
 const { err, res, mid } = await ao.load({ src, fills, pid })
 ```
 
-#### eval
+##### eval
 
 Eval a Lua script on a process.
 
@@ -320,7 +449,7 @@ Eval a Lua script on a process.
 const { err, res, mid } = await ao.eval({ pid, data })
 ```
 
-#### spwn
+##### spwn
 
 Spawn a process. `module` and `scheduler` are auto-set if omitted.
 
@@ -328,7 +457,7 @@ Spawn a process. `module` and `scheduler` are auto-set if omitted.
 const { err, res, pid } = await ao.spwn({ module, scheduler, tags, data })
 ```
 
-### aoconnect Functions
+#### aoconnect Functions
 
 The original aoconnect functions `message` | `spawn` | `result` | `assign` | `dryrun`  are also available.  
 `createDataItemSigner` is available as `toSigner`.
@@ -340,9 +469,9 @@ const message = await ao.message({ process, signer, tags, data })
 const result = await ao.result({ process, message })
 ```
 
-### Advanced Functions
+#### Advanced Functions
 
-#### postModule
+##### postModule
 
 `data` should be wasm binary. `overwrite` to replace the default module set to the AO instance.
 
@@ -351,7 +480,7 @@ const { err, id: module } = await ao.postModule({ data, jwk, tags, overwrite })
 
 ```
 
-#### postScheduler
+##### postScheduler
 
 This will post `Scheduler-Location` with the `jwk` address as the returning `scheduler`.
 
@@ -359,7 +488,7 @@ This will post `Scheduler-Location` with the `jwk` address as the returning `sch
 const { err, scheduler } = await ao.postScheduler({ url, jwk, tags, overwrite })
 ```
 
-#### wait
+##### wait
 
 `wait` untill the process becomes available after `spwn`. This is mostly used internally with `deploy`.
 
@@ -367,7 +496,7 @@ const { err, scheduler } = await ao.postScheduler({ url, jwk, tags, overwrite })
 const { err } = await ao.wait({ pid })
 ```
 
-### Function Piping
+#### Function Piping
 
 Most functions return in the format of `{ err, res, out, pid, mid, id }`, and these function can be chained with `pipe`, which makes executing multiple messages a breeze.
 
@@ -386,7 +515,7 @@ let fns = [
 const { err, res, out, pid } = await this.pipe({ jwk, fns })
 ```
 
-#### bind
+##### bind
 
 If the function comes from other instances rather than `AO`, use `bind`.
 
@@ -394,7 +523,7 @@ If the function comes from other instances rather than `AO`, use `bind`.
 const fns = [{ fn: "post", bind: this.ar, args: { data, tags }}]
 ```
 
-#### then
+##### then
 
 You can pass values between functions with `then`. For instance, passing the result from the previous functions to the next function's arguments is a common operation.
 
@@ -449,7 +578,7 @@ let fns = [
 const { out: { key }, val } = await ao.pipe({ jwk, fns })
 ```
 
-#### cb
+##### cb
 
 `cb` can report the current progress of `pipe` after every function execution.
 
