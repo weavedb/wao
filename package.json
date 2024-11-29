@@ -1,0 +1,35 @@
+{
+  "name": "wao",
+  "version": "0.1.0",
+  "description": "",
+  "type": "module",
+  "main": "dist/cjs/index.js",
+  "module": "dist/src/index.js",
+  "scripts": {
+    "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs && rm dist/cjs/test.js",
+    "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && cp -rf src dist/test && node make.js && cp .npmignore dist/",
+    "test": "mocha --node-option=experimental-wasm-memory64"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@babel/plugin-transform-modules-commonjs": "^7.24.8",
+    "@permaweb/ao-loader": "^0.0.43",
+    "@permaweb/aoconnect": "^0.0.61",
+    "arbundles": "^0.11.1",
+    "arweave": "^1.15.1",
+    "base64url": "^3.0.1",
+    "ramda": "^0.30.1"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.24.8",
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "chai": "^5.1.1",
+    "mocha": "^10.7.3",
+    "yargs": "^17.7.2"
+  }
+}
