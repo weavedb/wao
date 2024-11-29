@@ -1,6 +1,5 @@
 import { expect } from "chai"
-import { connect } from "../src/aoconnect.js"
-import { AO } from "../src/index.js"
+import { AO, connect } from "../src/helpers.js"
 
 const src_data = `
 Handlers.add( "Hello", "Hello", function (msg)
@@ -8,6 +7,7 @@ Handlers.add( "Hello", "Hello", function (msg)
   end
 )
 `
+
 describe("WAO", function () {
   this.timeout(0)
   describe("Aoconnect", function () {
@@ -41,7 +41,7 @@ describe("WAO", function () {
 
   describe("SDK", function () {
     let ao
-    before(async () => (ao = await new AO({ in_memory: true }).init()))
+    before(async () => (ao = new AO({})))
     it("should spawn a process send messages", async () => {
       const { p } = await ao.deploy({ src_data })
       expect(await p.d("Hello")).to.eql("Hello, World!")

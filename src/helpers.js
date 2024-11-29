@@ -1,4 +1,6 @@
-import { AR, AO } from "./index.js"
+import { connect as tconnect } from "./aoconnect.js"
+import { AR } from "./index.js"
+import AO from "./tao.js"
 import assert from "assert"
 import { createDataItemSigner, connect } from "@permaweb/aoconnect"
 import { dirname as _dirname, resolve } from "path"
@@ -159,3 +161,5 @@ export const fail = obj => {
   assert.notEqual(obj.err, null)
   return obj
 }
+
+export { AO, AR, tconnect as connect }
