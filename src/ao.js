@@ -64,8 +64,8 @@ class AO {
     module_type = "aos2",
     scheduler = srcs.scheduler,
     aoconnect,
-    in_memory,
     ar = {},
+    in_memory = false,
   } = {}) {
     if (!module) {
       switch (module_type) {
@@ -86,19 +86,16 @@ class AO {
       let _ar = typeof ar === "object" ? ar : {}
       this.ar = new AR(ar)
     }
-    this.in_memory = in_memory
-    if (aoconnect) {
-      if (in_memory) {
-      } else {
-        const { results, assign, result, message, spawn, dryrun } =
-          connect(aoconnect)
-        this.assign = assign
-        this.result = result
-        this.results = results
-        this.message = message
-        this.spawn = spawn
-        this.dryrun = dryrun
-      }
+    if (in_memory) {
+    } else if (aoconnect) {
+      const { results, assign, result, message, spawn, dryrun } =
+        connect(aoconnect)
+      this.assign = assign
+      this.result = result
+      this.results = results
+      this.message = message
+      this.spawn = spawn
+      this.dryrun = dryrun
     } else {
       this.assign = assign
       this.result = result
@@ -113,29 +110,6 @@ class AO {
   }
 
   async init(jwk) {
-    if (this.in_memory) {
-      const v = await import("./aoconnect.js")
-      const {
-        accounts,
-        modules,
-        results,
-        assign,
-        result,
-        message,
-        spawn,
-        dryrun,
-        txs,
-      } = v.connect()
-      this.module = modules.aos_2_0_1
-      this.assign = assign
-      this.result = result
-      this.results = results
-      this.message = message
-      this.spawn = spawn
-      this.dryrun = dryrun
-      this.ar.txs = txs
-      jwk ??= accounts[0].jwk
-    }
     await this.ar.init(jwk)
     return this
   }
@@ -394,12 +368,12 @@ class AO {
       const getRef = async (ref, txs = []) => {
         let ex = exRef(ref, txs)
         if (!ex) {
-          if (!this.local) await wait(1000)
+          if (!this.in_memory) await wait(1000)
           txs = await this.ar.txs(pid)
           ex = exRef(ref, txs)
         }
         if (ex) return txs
-        if (this.local) await wait(1)
+        if (this.in_memory) await wait(1)
         return Date.now() - start < (this.local ? timeout / 1000 : timeout)
           ? await getRef(ref)
           : []

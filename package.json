@@ -1,17 +1,28 @@
 {
   "name": "wao",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "description": "",
   "type": "module",
   "main": "dist/cjs/index.js",
   "module": "dist/src/index.js",
   "scripts": {
-    "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs && rm dist/cjs/test.js",
-    "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && cp -rf src dist/test && node make.js && cp .npmignore dist/ && cp src/lua dist/cjs/lua -rf",
+    "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs",
+    "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/ && cp src/lua dist/cjs/lua -rf",
     "test": "mocha --node-option=experimental-wasm-memory64"
   },
-  "engines": {
-    "node": ">=20.0.0"
+  "exports": {
+    ".": {
+      "require": "./cjs/index.js",
+      "import": "./esm/index.js"
+    },
+    "./utils": {
+      "require": "./cjs/utils.js",
+      "import": "./esm/utils.js"
+    },
+    "./test": {
+      "require": "./cjs/helpers.js",
+      "import": "./esm/helpers.js"
+    }
   },
   "author": "",
   "license": "MIT",
