@@ -73,10 +73,10 @@ const { accounts, spawn, message, dryrun } = connect()
 
 const src_data = `
 Handlers.add("Hello", "Hello", function (msg)
-    msg.reply({ Data = "Hello, World!" })
-  end
-)
+  msg.reply({ Data = "Hello, World!" })
+end)
 `
+
 describe("WAO", function () {
   this.timeout(0)
   describe("Aoconnect Replacement", function () {
@@ -123,15 +123,14 @@ import { AO } from "wao/test"
 
 const src_data = `
 Handlers.add( "Hello", "Hello", function (msg)
-    msg.reply({ Data = "Hello, World!" })
-  end
-)
+  msg.reply({ Data = "Hello, World!" })
+end)
 `
 describe("WAO", function () {
   this.timeout(0)
   describe("AO Class", function () {
     it("should spawn a process send messages", async () => {
-	  const ao = new AO()
+      const ao = new AO()
       const { p } = await ao.deploy({ src_data })
       expect(await p.d("Hello")).to.eql("Hello, World!")
     })
