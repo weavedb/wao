@@ -37,6 +37,8 @@ const dirname = async () =>
 
 export const acc = accounts.users
 export const mu = accounts.mu
+const scheduler = "GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
+let env = {}
 
 export const connect = () => {
   let wasms = {
@@ -54,12 +56,12 @@ export const connect = () => {
     },
   }
   let modules = {
-    aos_2_0_1: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
-    aos_1: "cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo",
+    aos2_0_1: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
+    aos1: "cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo",
     sqlite: "ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw",
   }
   let modmap = {}
-  let env = { msgs: {} }
+  let msgs = {}
   const transform = input => {
     const output = { Tags: [] }
     if (input.Data) output.Data = input.Data
@@ -146,12 +148,68 @@ export const connect = () => {
     return id
   }
 
+  const spawn = async (opt = {}) => {
+    if (!opt.module) throw Error("module missing")
+    if (!opt.scheduler) throw Error("scheduler missing")
+    let mod = opt.module ?? modules["aos2_0_1"]
+    if (!modmap[mod] && wasms[mod]) {
+      const __dirname = await dirname()
+      const wasm = readFileSync(
+        resolve(__dirname, `lua/${wasms[mod].file}.wasm`),
+      )
+      const handle = await AoLoader(wasm, { format: wasms[mod].format })
+      modmap[mod] = { handle, id: mod }
+    }
+    if (!mod) throw Error("module not found")
+    const _module = modmap[mod]
+    let ex = false
+    opt.tags ??= []
+    for (let v of opt.tags) if (v.name === "Type") ex = true
+    if (!ex) opt.tags.push({ name: "Type", value: "Process" })
+    const { id, owner } = await parse(opt)
+    const _tags = tags(opt.tags)
+    let res = null
+    let memory = null
+    let p = {
+      id: id,
+      handle: _module.handle,
+      module: _module.id,
+      memory,
+      owner,
+      height: 0,
+      res: { [id]: res },
+      results: [id],
+      txs: [],
+      opt,
+    }
+    if (_tags["On-Boot"]) {
+      let data = ""
+      if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
+      else data = msgs[_tags["On-Boot"]]?.data ?? ""
+      const msg = genMsg(p, data, opt.tags, owner, mu.addr, true)
+      const _env = genEnv({
+        pid: p.id,
+        owner: p.owner,
+        module: p.module,
+        auth: mu.addr,
+      })
+      res = await _module.handle(null, msg, _env)
+      p.memory = res.Memory
+      delete res.Memory
+      p.res[id] = res
+    } else {
+      p.height += 1
+    }
+    msgs[id] = opt
+    env[id] = p
+    return id
+  }
+
   const message = async opt => {
     const p = env[opt.process]
     let ex = false
-    for (let v of opt.tags) {
-      if (v.name === "Type") ex = true
-    }
+    for (let v of opt.tags) if (v.name === "Type") ex = true
+
     if (!ex) opt.tags.push({ name: "Type", value: "Message" })
     const { id, owner } = await parse(opt)
     try {
@@ -174,7 +232,7 @@ export const connect = () => {
       p.res[id] = res
       p.results.push(id)
       p.txs.unshift({ id: id, ...opt })
-      env.msgs[id] = opt
+      msgs[id] = opt
       for (const v of res.Messages ?? []) {
         if (env[v.Target]) {
           await message({
@@ -186,81 +244,38 @@ export const connect = () => {
           })
         }
       }
+      for (const v of res.Spawns ?? []) {
+        const _tags = tags(v.Tags)
+        await spawn({
+          module: _tags.Module,
+          scheduler,
+          tags: v.Tags,
+          data: v.Data,
+          from: _tags["From-Process"],
+          signer: mu.signer,
+        })
+      }
       return id
     } catch (e) {
       console.log(e)
     }
     return null
   }
-
   return {
-    scheduler: "GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
+    scheduler,
     modules,
     accounts: acc,
+    mu,
     message,
     txs: async pid => {
       let _txs = []
       for (let v of env[pid].txs) _txs.push({ tags: v.tags, id: v.id })
       return _txs
     },
-    spawn: async (opt = {}) => {
-      if (!opt.module) throw Error("module.missing")
-      if (!opt.scheduler) throw Error("scheduler.missing")
-      let mod = opt.module ?? modules["aos_2_0_1"]
-      if (!modmap[mod] && wasms[mod]) {
-        const __dirname = await dirname()
-        const wasm = readFileSync(
-          resolve(__dirname, `lua/${wasms[mod].file}.wasm`),
-        )
-        const handle = await AoLoader(wasm, { format: wasms[mod].format })
-        modmap[mod] = { handle, id: mod }
-      }
-      if (!mod) throw Error("module not found")
-      const _module = modmap[mod]
-      let ex = false
-      opt.tags ??= []
-      for (let v of opt.tags) if (v.name === "Type") ex = true
-      if (!ex) opt.tags.push({ name: "Type", value: "Process" })
-      const { id, owner } = await parse(opt)
-      const _tags = tags(opt.tags)
-      let res = null
-      let memory = null
-      let p = {
-        id: id,
-        handle: _module.handle,
-        module: _module.id,
-        memory,
-        owner,
-        height: 0,
-        res: { [id]: res },
-        results: [id],
-        txs: [],
-      }
-      if (_tags["On-Boot"]) {
-        let data = ""
-        if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
-        else data = env.msgs[_tags["On-Boot"]]?.data ?? ""
-        const msg = genMsg(p, data, opt.tags, owner, mu.addr, true)
-        const _env = genEnv({
-          pid: p.id,
-          owner: p.owner,
-          module: p.module,
-          auth: mu.addr,
-        })
-        res = await _module.handle(null, msg, _env)
-        memory = res.Memory
-        delete res.Memory
-        p.res[id] = res
-      } else {
-        p.height += 1
-      }
-      env.msgs[id] = opt
-      env[id] = p
-      return id
-    },
+    spawn,
     assign: async opt => {
       const p = env[opt.process]
-      let _opt = clone(env.msgs[opt.message])
+      let _opt = clone(msgs[opt.message])
       const { id, owner } = await parse(_opt)
       try {
         const msg = genMsg(
@@ -282,7 +297,7 @@ export const connect = () => {
         p.res[id] = res
         p.results.push(id)
         p.txs.unshift({ id: id, ..._opt })
-        env.msgs[id] = _opt
+        msgs[id] = _opt
         for (const v of res.Messages ?? []) {
           if (env[v.Target]) {
             await message({
@@ -337,5 +352,6 @@ export const connect = () => {
       }
       return null
     },
+    getProcesses: () => env,
   }
 }

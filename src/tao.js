@@ -18,7 +18,7 @@ class AO extends MAO {
       dryrun,
       txs,
     } = connect()
-    this.module = modules.aos_2_0_1
+    this.module = modules.aos2_0_1
     this.assign = assign
     this.result = result
     this.results = results
