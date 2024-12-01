@@ -648,7 +648,11 @@ class AO {
     }
     fns.push({ fn: this.wait, then: { "args.pid": "pid" } })
     let i = 0
-    for (const v of !loads ? [{ data: src_data, src, fills }] : loads) {
+    for (const v of !loads
+      ? src_data
+        ? [{ data: src_data, src, fills }]
+        : []
+      : loads) {
       if (!isBoot || i !== 0) {
         fns.push({ fn: this.load, args: v, then: { "args.pid": "pid" } })
       }
