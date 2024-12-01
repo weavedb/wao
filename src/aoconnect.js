@@ -55,9 +55,19 @@ export const connect = () => {
       file: "aos2_0_1",
       format: "wasm64-unknown-emscripten-draft_2024_02_15",
     },
+    cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo: {
+      file: "aos_1",
+      format: "wasm64-unknown-emscripten-draft_2024_02_15",
+    },
+    ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw: {
+      file: "sqlite",
+      format: "wasm64-unknown-emscripten-draft_2024_02_15",
+    },
   }
   let modules = {
     aos_2_0_1: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
+    aos_1: "cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo",
+    sqlite: "ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw",
   }
   let modmap = {}
   let env = { msgs: {} }
@@ -196,6 +206,7 @@ export const connect = () => {
   }
 
   return {
+    scheduler: "GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
     modules,
     accounts: accounts.users,
     message,
@@ -205,6 +216,8 @@ export const connect = () => {
       return _txs
     },
     spawn: async (opt = {}) => {
+      if (!opt.module) throw Error("module.missing")
+      if (!opt.scheduler) throw Error("scheduler.missing")
       let mod = opt.module ?? modules["aos_2_0_1"]
       if (!modmap[mod] && wasms[mod]) {
         const __dirname = await dirname()
