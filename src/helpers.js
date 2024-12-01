@@ -87,7 +87,7 @@ export const setup = async ({
   }
 
   // ao
-  const wasm = await src.upload("aos-sqlite", "wasm")
+  const wasm = await src.upload("sqlite", "wasm")
   const wasm2 = await src.upload("aos", "wasm")
   const wasm_aos2 = await src.upload("aos2_0_1", "wasm")
 
