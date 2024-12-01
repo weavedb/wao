@@ -68,7 +68,7 @@ Write a simple test in `test.js`.
 ```js
 import { expect } from "chai"
 import { connect } from "wao/test"
-const { accounts, spawn, message, dryrun } = connect()
+const { acc, spawn, message, dryrun } = connect()
 // import { wait } from "wao/utils"
 
 const src_data = `
@@ -81,7 +81,7 @@ describe("WAO", function () {
   this.timeout(0)
   describe("Aoconnect Replacement", function () {
     it("should spawn a process and send messages", async () => {
-      const pid = await spawn({ signer: accounts[0].signer })
+      const pid = await spawn({ signer: acc[0].signer })
 	  
 	  // on mainnet, you need to wait here till the process becomes available.
 	  // WAO automatically handles it. No need with in-memory tests.
@@ -105,7 +105,7 @@ describe("WAO", function () {
 ```
 Note that generating random Arweave wallets for every test takes time and slows down your test executions, so Wao connect provides pre-generated accounts for your tests, which saves hours if you are to run your tests thousands of times.
 
-- `accounts[0] = { jwk, addr, signer }`
+- `acc[0] = { jwk, addr, signer }`
 
 Run the test.
 
@@ -119,7 +119,7 @@ The same test can be written as follows.
 
 ```js
 import { expect } from "chai"
-import { AO } from "wao/test"
+import { AO, acc } from "wao/test"
 
 const src_data = `
 Handlers.add( "Hello", "Hello", function (msg)
@@ -130,7 +130,7 @@ describe("WAO", function () {
   this.timeout(0)
   describe("AO Class", function () {
     it("should spawn a process send messages", async () => {
-      const ao = new AO()
+      const ao = await new AO().init(acc[0])
       const { p } = await ao.deploy({ src_data })
       expect(await p.d("Hello")).to.eql("Hello, World!")
     })
