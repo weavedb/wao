@@ -27,6 +27,7 @@ class AR {
     if (!jwk && typeof window === "object") jwk = window.arweaveWallet
     if (!jwk) isGen = true
     else {
+      jwk = typeof jwk?.jwk === "object" ? jwk.jwk : jwk
       this.jwk = jwk
       const isWallet = this.isArConnect(this.jwk)
       if (isWallet) {
@@ -60,6 +61,7 @@ class AR {
   }
 
   async checkWallet({ jwk } = {}) {
+    let start = Date.now()
     if (jwk) return { err: null, jwk }
     let [err, addr, pub] = [null, null, null]
     let existWallet = typeof window === "object" && window.arweaveWallet

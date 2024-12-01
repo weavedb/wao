@@ -5,7 +5,7 @@ import { readFileSync } from "fs"
 import { resolve } from "path"
 import { is, clone, fromPairs, map, mergeLeft } from "ramda"
 import accounts from "./accounts.js"
-
+import { tags, action, tag, buildTags } from "./utils.js"
 function isJSON(obj) {
   if (obj === null || obj === undefined) return false
   if (
@@ -35,19 +35,8 @@ const dirname = async () =>
     ? __dirname
     : (await import("./dirname.js")).default
 
-const tags = tags => fromPairs(map(v => [v.name, v.value])(tags))
-const action = value => tag("Action", value)
-const tag = (name, value) => ({ name, value: jsonToStr(value) })
-
-const buildTags = (act, tags) => {
-  let _tags = []
-  if (act) _tags.push(action(act))
-  for (const k in tags) {
-    if (is(Array)(tags[k])) for (const v of tags[k]) _tags.push(tag(k, v))
-    else _tags.push(tag(k, tags[k]))
-  }
-  return _tags
-}
+export const acc = accounts.users
+export const mu = accounts.mu
 
 export const connect = () => {
   let wasms = {
@@ -71,7 +60,6 @@ export const connect = () => {
   }
   let modmap = {}
   let env = { msgs: {} }
-  let mu = accounts.mu
   const transform = input => {
     const output = { Tags: [] }
     if (input.Data) output.Data = input.Data
@@ -208,7 +196,7 @@ export const connect = () => {
   return {
     scheduler: "GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
     modules,
-    accounts: accounts.users,
+    accounts: acc,
     message,
     txs: async pid => {
       let _txs = []
@@ -234,18 +222,40 @@ export const connect = () => {
       for (let v of opt.tags) if (v.name === "Type") ex = true
       if (!ex) opt.tags.push({ name: "Type", value: "Process" })
       const { id, owner } = await parse(opt)
-      env.msgs[id] = opt
-      env[id] = {
+      const _tags = tags(opt.tags)
+      let res = null
+      let memory = null
+      let p = {
         id: id,
         handle: _module.handle,
         module: _module.id,
-        memory: null,
+        memory,
         owner,
-        height: 1,
-        res: { id: null },
+        height: 0,
+        res: { [id]: res },
         results: [id],
         txs: [],
       }
+      if (_tags["On-Boot"]) {
+        let data = ""
+        if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
+        else data = env.msgs[_tags["On-Boot"]]?.data ?? ""
+        const msg = genMsg(p, data, opt.tags, owner, mu.addr, true)
+        const _env = genEnv({
+          pid: p.id,
+          owner: p.owner,
+          module: p.module,
+          auth: mu.addr,
+        })
+        res = await _module.handle(null, msg, _env)
+        memory = res.Memory
+        delete res.Memory
+        p.res[id] = res
+      } else {
+        p.height += 1
+      }
+      env.msgs[id] = opt
+      env[id] = p
       return id
     },
     assign: async opt => {

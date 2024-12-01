@@ -601,7 +601,7 @@ class AO {
     let exist = false
     let err = null
     while (attempts > 0) {
-      await wait(1000)
+      if (!this.in_memory) await wait(1000)
       const { res, err: _err } = await this.dry({ pid, data: "#Inbox" })
       if (typeof res?.Output === "object") break
       attempts -= 1
