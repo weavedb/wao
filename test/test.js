@@ -11,11 +11,13 @@ Handlers.add( "Hello", "Hello", function (msg)
 describe("WAO", function () {
   this.timeout(0)
   describe("Aoconnect", function () {
-    let message, dryrun, spawn, signer
+    let message, dryrun, spawn, signer, modules, scheduler
 
     before(async () => {
       ;({
+        scheduler,
         accounts: [{ signer }],
+        modules,
         spawn,
         message,
         dryrun,
@@ -23,7 +25,7 @@ describe("WAO", function () {
     })
 
     it("should spawn a process send messages", async () => {
-      const pid = await spawn({ signer })
+      const pid = await spawn({ signer, scheduler, module: modules.aos_2_0_1 })
       await message({
         process: pid,
         tags: [{ name: "Action", value: "Eval" }],
