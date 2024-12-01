@@ -49,6 +49,8 @@ const buildTags = (act, tags) => {
   return _tags
 }
 
+export const acc = accounts.users
+export const mu = accounts.mu
 export const connect = () => {
   let wasms = {
     "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM": {
