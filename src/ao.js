@@ -11,6 +11,8 @@ import {
   message,
   spawn,
   dryrun,
+  monitor,
+  unmonitor,
 } from "@permaweb/aoconnect"
 
 import {
@@ -88,14 +90,24 @@ class AO {
     }
     if (in_memory) {
     } else if (aoconnect) {
-      const { results, assign, result, message, spawn, dryrun } =
-        connect(aoconnect)
+      const {
+        results,
+        assign,
+        result,
+        message,
+        spawn,
+        dryrun,
+        monitor,
+        unmonitor,
+      } = connect(aoconnect)
       this.assign = assign
       this.result = result
       this.results = results
       this.message = message
       this.spawn = spawn
       this.dryrun = dryrun
+      this.monitor = monitor
+      this.unmonitor = unmonitor
     } else {
       this.assign = assign
       this.result = result
@@ -103,6 +115,8 @@ class AO {
       this.message = message
       this.spawn = spawn
       this.dryrun = dryrun
+      this.monitor = monitor
+      this.unmonitor = unmonitor
     }
     this.module = module
     this.scheduler = scheduler
