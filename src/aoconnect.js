@@ -186,13 +186,15 @@ export const connect = () => {
       let data = ""
       if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
       else data = msgs[_tags["On-Boot"]]?.data ?? ""
-      const msg = genMsg(p, data, opt.tags, owner, mu.addr, true)
+      let msg = genMsg(p, data, opt.tags, owner, mu.addr, true)
       const _env = genEnv({
         pid: p.id,
         owner: p.owner,
         module: p.module,
         auth: mu.addr,
       })
+
+      const _t = tags(msg.Tags)
       res = await _module.handle(null, msg, _env)
       p.memory = res.Memory
       delete res.Memory
@@ -203,6 +205,49 @@ export const connect = () => {
     msgs[id] = opt
     env[id] = p
     return id
+  }
+
+  const assign = async opt => {
+    const p = env[opt.process]
+    let _opt = clone(msgs[opt.message])
+    const { id, owner } = await parse(_opt)
+    try {
+      const msg = genMsg(
+        p,
+        _opt.data ?? "",
+        _opt.tags,
+        _opt.from ?? owner,
+        mu.addr,
+      )
+      const _env = genEnv({
+        pid: p.id,
+        owner: p.owner,
+        module: p.module,
+        auth: mu.addr,
+      })
+      const res = await p.handle(p.memory, msg, _env)
+      p.memory = res.Memory
+      delete res.Memory
+      p.res[id] = res
+      p.results.push(id)
+      p.txs.unshift({ id: id, ..._opt })
+      msgs[id] = _opt
+      for (const v of res.Messages ?? []) {
+        if (env[v.Target]) {
+          await message({
+            process: v.Target,
+            tags: v.Tags,
+            data: v.Data,
+            signer: mu.signer,
+            from: opt.process,
+          })
+        }
+      }
+      return id
+    } catch (e) {
+      console.log(e)
+    }
+    return null
   }
 
   const message = async opt => {
@@ -255,6 +300,16 @@ export const connect = () => {
           signer: mu.signer,
         })
       }
+      for (const v of res.Assignments ?? []) {
+        for (const v2 of v.Processes) {
+          await assign({
+            message: v.Message,
+            process: v2,
+            from: opt.process,
+            signer: mu.signer,
+          })
+        }
+      }
       return id
     } catch (e) {
       console.log(e)
@@ -273,48 +328,7 @@ export const connect = () => {
       return _txs
     },
     spawn,
-    assign: async opt => {
-      const p = env[opt.process]
-      let _opt = clone(msgs[opt.message])
-      const { id, owner } = await parse(_opt)
-      try {
-        const msg = genMsg(
-          p,
-          _opt.data ?? "",
-          _opt.tags,
-          _opt.from ?? owner,
-          mu.addr,
-        )
-        const _env = genEnv({
-          pid: p.id,
-          owner: p.owner,
-          module: p.module,
-          auth: mu.addr,
-        })
-        const res = await p.handle(p.memory, msg, _env)
-        p.memory = res.Memory
-        delete res.Memory
-        p.res[id] = res
-        p.results.push(id)
-        p.txs.unshift({ id: id, ..._opt })
-        msgs[id] = _opt
-        for (const v of res.Messages ?? []) {
-          if (env[v.Target]) {
-            await message({
-              process: v.Target,
-              tags: v.Tags,
-              data: v.Data,
-              signer: mu.signer,
-              from: opt.process,
-            })
-          }
-        }
-        return id
-      } catch (e) {
-        console.log(e)
-      }
-      return null
-    },
+    assign,
     result: async opt => env[opt.process].res[opt.message],
     results: async opt => {
       const p = env[opt.process]

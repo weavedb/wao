@@ -37,6 +37,22 @@ Handlers.add("Hello3", "Hello3", function (msg)
 end)
 `
 
+const src_data4 = `
+local count = 0
+Handlers.add("Hello4", "Hello4", function (msg)
+   Assign({ Message = msg.Message, Processes = { msg.Process } })
+end)
+
+Handlers.add("Add", "Add", function (msg)
+  count = count + tonumber(msg.Plus)
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+
+`
+
 describe("WAO", function () {
   this.timeout(0)
   describe("Aoconnect", function () {
@@ -88,11 +104,20 @@ describe("WAO", function () {
       const prs = getProcesses()
       let p2 = null
       for (let k in prs) {
-        if (tags(prs[k].opt.tags)["From-Process"] === pid) {
-          p2 = ao.p(k)
-        }
+        if (tags(prs[k].opt.tags)["From-Process"] === pid) p2 = ao.p(k)
       }
       expect(p2).to.not.eql(null)
+    })
+
+    it("should assign a process from a handler", async () => {
+      const { p, pid } = await ao.deploy({ boot: true, src_data: src_data4 })
+      const { mid } = await p.msg("Add", { Plus: "3" })
+      const { p: p2, pid: pid2 } = await ao.deploy({
+        boot: true,
+        src_data: src_data4,
+      })
+      await p.m("Hello4", { Message: mid, Process: pid2 })
+      expect(await p2.d("Get", { get: false })).to.eql("3")
     })
   })
 })
