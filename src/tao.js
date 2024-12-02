@@ -16,6 +16,8 @@ class AO extends MAO {
       message,
       spawn,
       dryrun,
+      monitor,
+      unmonitor,
       txs,
     } = connect()
     this.module = modules.aos2_0_1
@@ -26,6 +28,8 @@ class AO extends MAO {
     this.spawn = spawn
     this.dryrun = dryrun
     this.ar.txs = txs
+    this.monitor = monitor
+    this.unmonitor = unmonitor
     this.accounts = accounts
   }
 

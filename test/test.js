@@ -13,6 +13,8 @@ const {
   spawn,
   message,
   dryrun,
+  monitor,
+  unmonitor,
 } = connect()
 
 const src_data = `
@@ -117,5 +119,22 @@ describe("SDK", function () {
     })
     await p.m("Hello4", { Message: mid, Process: pid2 })
     assert.equal(await p2.d("Get", { get: false }), "3")
+  })
+
+  it("should monitor crons", async () => {
+    const { p, pid } = await ao.deploy({
+      boot: true,
+      src_data: src_data4,
+      tags: {
+        "Cron-Tag-Action": "Add",
+        "Cron-Tag-Plus": "3",
+        "Cron-Interval": "1-second",
+      },
+    })
+    await monitor({ process: pid, signer })
+    setTimeout(async () => {
+      await unmonitor({ process: pid, signer })
+      assert.equal(await p.d("Get"), "15")
+    }, 5000)
   })
 })

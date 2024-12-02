@@ -3,7 +3,7 @@ import base64url from "base64url"
 import AoLoader from "@permaweb/ao-loader"
 import { readFileSync } from "fs"
 import { resolve } from "path"
-import { is, clone, fromPairs, map, mergeLeft } from "ramda"
+import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
 import accounts from "./accounts.js"
 import { tags, action, tag, buildTags } from "./utils.js"
 function isJSON(obj) {
@@ -204,6 +204,41 @@ export const connect = () => {
     }
     msgs[id] = opt
     env[id] = p
+    if (_tags["Cron-Interval"]) {
+      let [num, unit] = _tags["Cron-Interval"].split("-")
+      let int = 0
+      switch (unit.replace(/s$/, "")) {
+        case "millisecond":
+          int = num
+          break
+        case "second":
+          int = num * 1000
+          break
+        case "minute":
+          int = num * 1000 * 60
+          break
+        case "hour":
+          int = num * 1000 * 60 * 60
+          break
+        case "day":
+          int = num * 1000 * 60 * 60 * 24
+          break
+        case "month":
+          int = num * 1000 * 60 * 60 * 24 * 30
+          break
+        case "year":
+          int = num * 1000 * 60 * 60 * 24 * 365
+          break
+      }
+      let cronTags = []
+      for (const k in _tags) {
+        if (/^Cron-Tag-/.test(k)) {
+          cronTags.push({ name: k.replace(/Cron-Tag-/, ""), value: _tags[k] })
+        }
+      }
+      env[id].cronTags = cronTags
+      env[id].span = int
+    }
     return id
   }
 
@@ -322,6 +357,26 @@ export const connect = () => {
     accounts: acc,
     mu,
     message,
+    unmonitor: async opt => {
+      const p = env[opt.process]
+      try {
+        clearInterval(p.cron)
+        p.cron = null
+      } catch (e) {}
+    },
+    monitor: async opt => {
+      const p = env[opt.process]
+      if (isNil(p.cron)) {
+        p.cron = setInterval(async () => {
+          await message({
+            tags: p.cronTags,
+            process: opt.process,
+            signer: mu.signer,
+            from: mu.addr,
+          })
+        }, p.span)
+      }
+    },
     txs: async pid => {
       let _txs = []
       for (let v of env[pid].txs) _txs.push({ tags: v.tags, id: v.id })
