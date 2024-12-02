@@ -8,7 +8,7 @@
   "scripts": {
     "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs",
     "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/ && cp src/lua dist/cjs/lua -rf",
-    "test": "mocha --node-option=experimental-wasm-memory64"
+    "test": "node --experimental-wasm-memory64"
   },
   "exports": {
     ".": {
