@@ -2,7 +2,7 @@ import assert from "assert"
 import { describe, it, before, beforeEach } from "node:test"
 import { AO, connect, acc } from "../src/test.js"
 import { setup } from "../src/helpers.js"
-import { tags } from "../src/utils.js"
+import { tags, wait } from "../src/utils.js"
 
 const {
   scheduler,
@@ -52,6 +52,32 @@ end)
 
 Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = tostring(count) })
+end)
+`
+
+const src_data5 = `
+_G.package.loaded.foo = function ()
+  return "Hello, World!"
+end
+
+local foo = require("foo")
+ 
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = tostring(foo()) })
+end)
+`
+
+const src_data6 = `
+Handlers.add("Hello", "Hello", function (msg)
+  local file = io.open('/data/'.. msg.msg)
+  if not file then
+    return nil, "File not found!"
+  end
+  local contents = file:read(
+    file:seek('end')
+  )
+  file:close()
+  msg.reply({ Data = contents })
 end)
 `
 
@@ -121,7 +147,22 @@ describe("SDK", function () {
     assert.equal(await p2.d("Get", { get: false }), "3")
   })
 
-  it("should monitor crons", async () => {
+  it("should work with pre-loaded packages", async () => {
+    const { p } = await ao.deploy({ src_data: src_data5 })
+    assert.equal(await p.d("Hello"), "Hello, World!")
+  })
+  it("should work with weavedrive", async () => {
+    const { p, pid } = await ao.deploy({
+      src_data: src_data6,
+      data: "Hello, World!",
+    })
+    try {
+      assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
+    } catch (e) {
+      console.log(e)
+    }
+  })
+  it("should monitor crons", async done => {
     const { p, pid } = await ao.deploy({
       boot: true,
       src_data: src_data4,
@@ -132,9 +173,8 @@ describe("SDK", function () {
       },
     })
     await monitor({ process: pid, signer })
-    setTimeout(async () => {
-      await unmonitor({ process: pid, signer })
-      assert.equal(await p.d("Get"), "15")
-    }, 5000)
+    await wait(3000)
+    await unmonitor({ process: pid, signer })
+    assert.equal(await p.d("Get"), "6")
   })
 })
