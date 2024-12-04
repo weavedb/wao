@@ -8,7 +8,8 @@ const {
   scheduler,
   mu,
   blueprint,
-  accounts: [{ signer }],
+  armem,
+  accounts: [{ signer, jwk }],
   modules,
   getProcesses,
   spawn,
@@ -189,6 +190,15 @@ describe("SDK", function () {
     await ao.load({ pid, data: src_data7 })
     const { mid } = await p.msg("Hello2", { data: "Hello, World!" })
     assert.equal(await p.d("Hello", { txid: mid }), "Hello, World!")
+  })
+
+  it("should post tx", async () => {
+    const { id } = await armem.post({
+      data: "Hello, World!",
+      tags: { one: "1" },
+      signer,
+    })
+    assert.equal(armem.data(id), "Hello, World!")
   })
 
   it("should monitor crons", async done => {
