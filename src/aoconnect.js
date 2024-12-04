@@ -1129,5 +1129,8 @@ export const connect = () => {
       return null
     },
     getProcesses: () => env,
+    blueprint: async pkg => {
+      return readFileSync(resolve(await dirname(), `lua/${pkg}.lua`), "utf8")
+    },
   }
 }
