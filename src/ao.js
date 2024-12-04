@@ -689,6 +689,7 @@ const getParams = (tags, opts) => {
   if (
     (!isNil(tags?.get) ||
       !isNil(tags?.check) ||
+      !isNil(tags?.data) ||
       is(Boolean, tags) ||
       is(String, tags)) &&
     isNil(opts)

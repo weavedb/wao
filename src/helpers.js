@@ -1,4 +1,4 @@
-import { AR } from "./index.js"
+import { AR, AO } from "./index.js"
 import assert from "assert"
 import { createDataItemSigner, connect } from "@permaweb/aoconnect"
 import { dirname as _dirname, resolve } from "path"
