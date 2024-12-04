@@ -211,6 +211,10 @@ const srcs = {
 
 const buildTags = (act, tags) => {
   let _tags = []
+  if (isNil(tags) && typeof act !== "string") {
+    tags = act
+    act = null
+  }
   if (act) _tags.push(action(act))
   for (const k in tags) {
     if (is(Array)(tags[k])) for (const v of tags[k]) _tags.push(tag(k, v))
@@ -271,6 +275,11 @@ const isCheckComplete = (checks, check) => {
   return true
 }
 
+const dirname = async () =>
+  typeof __dirname != "undefined"
+    ? __dirname
+    : (await import("./dirname.js")).default
+
 function isJSON(obj) {
   if (obj === null || obj === undefined) return false
   if (
@@ -321,4 +330,5 @@ export {
   isLocalhost,
   udl,
   isJSON,
+  dirname,
 }
