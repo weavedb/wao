@@ -7,7 +7,9 @@ import { tags, wait } from "../src/utils.js"
 const {
   scheduler,
   mu,
-  accounts: [{ signer }],
+  blueprint,
+  armem,
+  accounts: [{ signer, jwk }],
   modules,
   getProcesses,
   spawn,
@@ -80,7 +82,26 @@ Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = contents })
 end)
 `
+const src_data7 = `
+Drive = require('@rakis/WeaveDrive')
 
+Handlers.add("Hello", "Hello", function (msg)
+  --local data = Drive.getData(msg.txid)
+  local file = io.open('/data/'.. msg.txid)
+  if not file then
+    return nil, "File not found!"
+  end
+  local contents = file:read(
+    file:seek('end')
+  )
+  file:close()
+  msg.reply({ Data = contents })
+end)
+
+Handlers.add("Hello2", "Hello2", function (msg)
+end)
+
+`
 describe("AOS Tests", () => {
   before(async () => {})
   it("should spawn a process send messages", async () => {
@@ -151,17 +172,35 @@ describe("SDK", function () {
     const { p } = await ao.deploy({ src_data: src_data5 })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
+
   it("should work with weavedrive", async () => {
     const { p, pid } = await ao.deploy({
       src_data: src_data6,
       data: "Hello, World!",
     })
-    try {
-      assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
-    } catch (e) {
-      console.log(e)
-    }
+    assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
   })
+
+  it("should load apm mock", async () => {
+    const { p, pid } = await ao.deploy({
+      boot: true,
+      src_data: await blueprint("apm"),
+    })
+    await ao.load({ pid, data: `apm.install('@rakis/WeaveDrive')` })
+    await ao.load({ pid, data: src_data7 })
+    const { mid } = await p.msg("Hello2", { data: "Hello, World!" })
+    assert.equal(await p.d("Hello", { txid: mid }), "Hello, World!")
+  })
+
+  it("should post tx", async () => {
+    const { id } = await armem.post({
+      data: "Hello, World!",
+      tags: { one: "1" },
+      signer,
+    })
+    assert.equal(armem.data(id), "Hello, World!")
+  })
+
   it("should monitor crons", async done => {
     const { p, pid } = await ao.deploy({
       boot: true,
