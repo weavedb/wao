@@ -1,3 +1,14 @@
-import { connect, acc, mu } from "./aoconnect.js"
+import { readFileSync } from "fs"
+import { resolve } from "path"
+import { acc, mu, su, cu } from "./accounts.js"
+import { connect } from "./aoconnect.js"
 import AO from "./tao.js"
-export { AO, connect, acc, mu }
+import AR from "./tar.js"
+import { dirname } from "./utils.js"
+
+const blueprint = async pkg => {
+  return readFileSync(resolve(await dirname(), `lua/${pkg}.lua`), "utf8")
+}
+const scheduler = "GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
+
+export { AO, AR, connect, acc, mu, su, cu, blueprint, scheduler }
