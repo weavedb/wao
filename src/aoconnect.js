@@ -1,4 +1,3 @@
-import { createDataItemSigner } from "@permaweb/aoconnect"
 import { DataItem } from "warp-arbundles"
 import base64url from "base64url"
 import {
@@ -15,39 +14,15 @@ import weavedrive from "./weavedrive.js"
 import AoLoader from "@permaweb/ao-loader"
 import { readFileSync } from "fs"
 import { resolve } from "path"
+import { scheduler, mu, su, cu, acc } from "./test.js"
 import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
-import accounts from "./accounts.js"
+import AR from "./tar.js"
 
-const mem = new ArMem()
-const WeaveDrive = new weavedrive(mem).drive
+export const connect = mem => {
+  mem ??= new ArMem()
+  const ar = new AR({ mem })
+  const WeaveDrive = new weavedrive(ar).drive
 
-export const acc = accounts.users
-export const mu = accounts.mu
-const scheduler = "GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
-let env = {}
-
-export const connect = () => {
-  let wasms = {
-    "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM": {
-      file: "aos2_0_1",
-      format: "wasm64-unknown-emscripten-draft_2024_02_15",
-    },
-    cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo: {
-      file: "aos_1",
-      format: "wasm64-unknown-emscripten-draft_2024_02_15",
-    },
-    ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw: {
-      file: "sqlite",
-      format: "wasm64-unknown-emscripten-draft_2024_02_15",
-    },
-  }
-  let modules = {
-    aos2_0_1: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
-    aos1: "cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo",
-    sqlite: "ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw",
-  }
-  let modmap = {}
-  let msgs = {}
   const transform = input => {
     const output = { Tags: [] }
     if (input.Data) output.Data = input.Data
@@ -106,16 +81,6 @@ export const connect = () => {
     }
   }
 
-  const parse = async opt => {
-    const item = await opt.signer({ data: opt.data ?? "", tags: opt.tags })
-    const rowner = new DataItem(item.raw).rawOwner
-    const hashBuffer = Buffer.from(
-      await crypto.subtle.digest("SHA-256", rowner),
-    )
-    const owner = base64url.encode(hashBuffer)
-    return { id: item.id, owner }
-  }
-
   const postModule = async ({ data, tags = {}, signer }) => {
     const t = mergeLeft(tags, {
       "Data-Protocol": "ao",
@@ -128,45 +93,45 @@ export const connect = () => {
       "Compute-Limit": "9000000000000",
     })
     const _tags = buildTags(null, t)
-    const { id, owner } = await parse({ tags: _tags, data, signer })
-    await mem.post({ data, signer, tags: t })
+    const { id, owner } = await ar.dataitem({ tags: _tags, data, signer })
+    await ar.post({ data, signer, tags: t })
     const handle = await AoLoader(data, {
       format: t["Module-Format"],
       mode: "test",
       WeaveDrive,
     })
-    modmap[id] = { handle, id }
+    mem.modmap[id] = { handle, id }
     return id
   }
 
   const spawn = async (opt = {}) => {
     if (!opt.module) throw Error("module missing")
     if (!opt.scheduler) throw Error("scheduler missing")
-    let mod = opt.module ?? modules["aos2_0_1"]
-    if (!modmap[mod] && wasms[mod]) {
+    let mod = opt.module ?? mem.modules["aos2_0_1"]
+    if (!mem.modmap[mod] && mem.wasms[mod]) {
       const __dirname = await dirname()
       const wasm = readFileSync(
-        resolve(__dirname, `lua/${wasms[mod].file}.wasm`),
+        resolve(__dirname, `lua/${mem.wasms[mod].file}.wasm`),
       )
       const handle = await AoLoader(wasm, {
-        format: wasms[mod].format,
+        format: mem.wasms[mod].format,
         mode: "test",
         WeaveDrive,
       })
-      modmap[mod] = { handle, id: mod }
+      mem.modmap[mod] = { handle, id: mod }
     }
     if (!mod) throw Error("module not found")
-    const _module = modmap[mod]
+    const _module = mem.modmap[mod]
     let ex = false
     opt.tags ??= []
     for (let v of opt.tags) if (v.name === "Type") ex = true
     if (!ex) opt.tags.push({ name: "Type", value: "Process" })
-    const { id, owner } = await mem.post({
+    const { id, owner, item } = await ar.dataitem({
       data: opt.data,
       signer: opt.signer,
       tags: tags(opt.tags),
     })
-
+    await ar.postItem(item, su.jwk)
     const _tags = tags(opt.tags)
     let res = null
     let memory = null
@@ -185,7 +150,7 @@ export const connect = () => {
     if (_tags["On-Boot"]) {
       let data = ""
       if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
-      else data = msgs[_tags["On-Boot"]]?.data ?? ""
+      else data = mem.msgs[_tags["On-Boot"]]?.data ?? ""
       let msg = genMsg(p, data, opt.tags, owner, mu.addr, true)
       const _env = genEnv({
         pid: p.id,
@@ -202,8 +167,8 @@ export const connect = () => {
     } else {
       p.height += 1
     }
-    msgs[id] = opt
-    env[id] = p
+    mem.msgs[id] = opt
+    mem.env[id] = p
     if (_tags["Cron-Interval"]) {
       let [num, unit] = _tags["Cron-Interval"].split("-")
       let int = 0
@@ -236,20 +201,21 @@ export const connect = () => {
           cronTags.push({ name: k.replace(/Cron-Tag-/, ""), value: _tags[k] })
         }
       }
-      env[id].cronTags = cronTags
-      env[id].span = int
+      mem.env[id].cronTags = cronTags
+      mem.env[id].span = int
     }
     return id
   }
 
   const assign = async opt => {
-    const p = env[opt.process]
-    let _opt = clone(msgs[opt.message])
-    const { id, owner } = await mem.post({
+    const p = mem.env[opt.process]
+    let _opt = clone(mem.msgs[opt.message])
+    const { id, owner, item } = await ar.dataitem({
       data: _opt.data,
       signer: _opt.signer,
       tags: tags(_opt.tags),
     })
+    await ar.postItem(item, su.jwk)
     try {
       const msg = genMsg(
         p,
@@ -270,9 +236,9 @@ export const connect = () => {
       p.res[id] = res
       p.results.push(id)
       p.txs.unshift({ id: id, ..._opt })
-      msgs[id] = _opt
+      mem.msgs[id] = _opt
       for (const v of res.Messages ?? []) {
-        if (env[v.Target]) {
+        if (mem.env[v.Target]) {
           await message({
             process: v.Target,
             tags: v.Tags,
@@ -290,16 +256,18 @@ export const connect = () => {
   }
 
   const message = async opt => {
-    const p = env[opt.process]
+    const p = mem.env[opt.process]
     let ex = false
     for (let v of opt.tags) if (v.name === "Type") ex = true
 
     if (!ex) opt.tags.push({ name: "Type", value: "Message" })
-    const { id, owner } = await mem.post({
+    const { item, id, owner } = await ar.dataitem({
       data: opt.data,
       signer: opt.signer,
       tags: tags(opt.tags),
     })
+
+    await ar.postItem(item, su.jwk)
     try {
       const msg = genMsg(
         p,
@@ -320,9 +288,9 @@ export const connect = () => {
       p.res[id] = res
       p.results.push(id)
       p.txs.unshift({ id: id, ...opt })
-      msgs[id] = opt
+      mem.msgs[id] = opt
       for (const v of res.Messages ?? []) {
-        if (env[v.Target]) {
+        if (mem.env[v.Target]) {
           await message({
             process: v.Target,
             tags: v.Tags,
@@ -361,20 +329,16 @@ export const connect = () => {
   }
 
   return {
-    scheduler,
-    modules,
-    accounts: acc,
-    mu,
     message,
     unmonitor: async opt => {
-      const p = env[opt.process]
+      const p = mem.env[opt.process]
       try {
         clearInterval(p.cron)
         p.cron = null
       } catch (e) {}
     },
     monitor: async opt => {
-      const p = env[opt.process]
+      const p = mem.env[opt.process]
       if (isNil(p.cron)) {
         p.cron = setInterval(async () => {
           await message({
@@ -386,16 +350,11 @@ export const connect = () => {
         }, p.span)
       }
     },
-    txs: async pid => {
-      let _txs = []
-      for (let v of env[pid].txs) _txs.push({ tags: v.tags, id: v.id })
-      return _txs
-    },
     spawn,
     assign,
-    result: async opt => env[opt.process].res[opt.message],
+    result: async opt => mem.env[opt.process].res[opt.message],
     results: async opt => {
-      const p = env[opt.process]
+      const p = mem.env[opt.process]
       let results = []
       const limit = opt.limit ?? 25
       if (opt.sort === "DESC") {
@@ -412,8 +371,8 @@ export const connect = () => {
       return { edges: results }
     },
     dryrun: async opt => {
-      const p = env[opt.process]
-      const { id, owner } = await parse(opt)
+      const p = mem.env[opt.process]
+      const { id, owner } = await ar.dataitem(opt)
       try {
         const msg = genMsg(p, opt.data ?? "", opt.tags, owner, mu.addr, true)
         const _env = genEnv({
@@ -429,10 +388,6 @@ export const connect = () => {
       }
       return null
     },
-    getProcesses: () => env,
-    blueprint: async pkg => {
-      return readFileSync(resolve(await dirname(), `lua/${pkg}.lua`), "utf8")
-    },
-    armem: mem,
+    mem,
   }
 }

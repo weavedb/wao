@@ -1,47 +1,38 @@
-import { createDataItemSigner } from "@permaweb/aoconnect"
-import { DataItem } from "warp-arbundles"
-import base64url from "base64url"
-import { buildTags } from "./utils.js"
+import Arweave from "arweave"
+import { last } from "ramda"
 
 export default class ArMem {
   constructor() {
+    this.__type__ = "mem"
+    this.arweave = Arweave.init()
+    this.arweave.transactions.getTransactionAnchor = () => {
+      return this.blocks.length === 0 ? "" : last(this.blocks)
+    }
+    this.arweave.transactions.getPrice = () => 0
     this.txs = {}
     this.height = 0
     this.blocks = []
-  }
-  async post({ data = "1984", tags = {}, jwk, signer }) {
-    signer ??= createDataItemSigner(jwk)
-    const _tags = buildTags(tags)
-    const item = await signer({ data, tags: _tags })
-    return await this.postSignedTx(item)
-  }
-  async postSignedTx(item) {
-    const di = new DataItem(item.raw)
-    const rowner = di.rawOwner
-    const hashBuffer = Buffer.from(
-      await crypto.subtle.digest("SHA-256", rowner),
-    )
-    const owner = base64url.encode(hashBuffer)
-    this.height += 1
-    let data = di.data
-    try {
-      data = base64url.decode(di.data)
-    } catch (e) {}
-    this.txs[item.id] = {
-      id: item.id,
-      item: di,
-      owner,
-      height: this.height,
-      tags: di.tags,
-      data,
+    this.env = {}
+    this.modules = {
+      aos2_0_1: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
+      aos1: "cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo",
+      sqlite: "ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw",
     }
-    this.blocks.push(item.id)
-    return this.txs[item.id]
-  }
-  tx(id) {
-    return this.txs[id]
-  }
-  data(id) {
-    return this.txs[id].data
+    this.modmap = {}
+    this.msgs = {}
+    this.wasms = {
+      "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM": {
+        file: "aos2_0_1",
+        format: "wasm64-unknown-emscripten-draft_2024_02_15",
+      },
+      cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo: {
+        file: "aos_1",
+        format: "wasm64-unknown-emscripten-draft_2024_02_15",
+      },
+      ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw: {
+        file: "sqlite",
+        format: "wasm64-unknown-emscripten-draft_2024_02_15",
+      },
+    }
   }
 }

@@ -6,7 +6,7 @@ const CHUNK_SZ = 128 * MB
 const NOTIFY_SZ = 512 * MB
 
 export default class WeaveDrive {
-  constructor(mem) {
+  constructor(ar) {
     this.drive = function WeaveDrive(mod, FS) {
       return {
         reset(fd) {
@@ -77,7 +77,7 @@ export default class WeaveDrive {
         method: "HEAD",
         }).then(res => res.headers.get("Content-Length"))
       */
-          let data = await mem.data(id)
+          let data = await ar.data(id)
           const bytesLength = data ? new TextEncoder().encode(data).length : 100
           node.total_size = Number(bytesLength)
           node.cache = new Uint8Array(0)
@@ -372,7 +372,7 @@ export default class WeaveDrive {
       const reader = response.body.getReader()
       */
           const data = new TextEncoder().encode(
-            (await mem.data(stream.node.name)) ?? "",
+            (await ar.data(stream.node.name)) ?? "",
           )
 
           // Extract the Range header to determine the start and end of the requested chunk
