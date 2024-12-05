@@ -13,9 +13,9 @@ class AR {
       _arweave.protocol = isLocalhost(_arweave.host) ? "http" : "https"
     if (!_arweave.port) _arweave.port = isLocalhost(_arweave.host) ? 1984 : 443
     this.port = _arweave.port
-    this.arweave = Arweave.init(_arweave)
     this.host = _arweave.host
     this.protocol = _arweave.protocol
+    this.arweave = Arweave.init(_arweave)
   }
 
   isArConnect(jwk) {

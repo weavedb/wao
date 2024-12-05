@@ -1,23 +1,13 @@
 import assert from "assert"
 import { describe, it, before, beforeEach } from "node:test"
-import { AO, connect, acc } from "../src/test.js"
+import { blueprint, mu, AO, connect, acc, scheduler } from "../src/test.js"
+import AR from "../src/ar.js"
+import ArMem from "../src/armem.js"
 import { setup } from "../src/helpers.js"
 import { tags, wait } from "../src/utils.js"
 
-const {
-  scheduler,
-  mu,
-  blueprint,
-  armem,
-  accounts: [{ signer, jwk }],
-  modules,
-  getProcesses,
-  spawn,
-  message,
-  dryrun,
-  monitor,
-  unmonitor,
-} = connect()
+const { mem, spawn, message, dryrun } = connect()
+const [{ signer, jwk }] = acc
 
 const src_data = `
 Handlers.add("Hello", "Hello", function (msg)
@@ -100,12 +90,23 @@ end)
 
 Handlers.add("Hello2", "Hello2", function (msg)
 end)
-
 `
+
 describe("AOS Tests", () => {
-  before(async () => {})
+  it("should work with pre-loaded packages", async () => {
+    const mem = new ArMem()
+    const ar = new AR({ port: 4000, mem })
+    await ar.post({ data: "abc", tags: { test: 3 }, jwk })
+  })
   it("should spawn a process send messages", async () => {
-    const pid = await spawn({ signer, scheduler, module: modules.aos2_0_1 })
+    const mem = new ArMem()
+    const { armem, spawn, message, dryrun } = connect(mem)
+
+    const pid = await spawn({
+      signer,
+      scheduler,
+      module: mem.modules.aos2_0_1,
+    })
     await message({
       process: pid,
       tags: [{ name: "Action", value: "Eval" }],
@@ -125,7 +126,7 @@ describe("SDK", function () {
   let ao
   beforeEach(async () => (ao = await new AO().init(acc[0])))
 
-  it("should spawn a process send messages", async () => {
+  it("should spawn a process and send messages", async () => {
     const { p } = await ao.deploy({ src_data })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
@@ -146,10 +147,10 @@ describe("SDK", function () {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data3 })
     await p.m(
       "Hello3",
-      { module: modules.aos2_0_1, auth: mu.addr },
+      { module: ao.ar.mem.modules.aos2_0_1, auth: mu.addr },
       { data: src_data },
     )
-    const prs = getProcesses()
+    const prs = ao.ar.mem.env
     let p2 = null
     for (let k in prs) {
       if (tags(prs[k].opt.tags)["From-Process"] === pid) p2 = ao.p(k)
@@ -193,12 +194,12 @@ describe("SDK", function () {
   })
 
   it("should post tx", async () => {
-    const { id } = await armem.post({
+    const { id } = await ao.ar.post({
       data: "Hello, World!",
       tags: { one: "1" },
-      signer,
+      jwk,
     })
-    assert.equal(armem.data(id), "Hello, World!")
+    assert.equal(ao.ar.data(id), "Hello, World!")
   })
 
   it("should monitor crons", async done => {
@@ -211,9 +212,9 @@ describe("SDK", function () {
         "Cron-Interval": "1-second",
       },
     })
-    await monitor({ process: pid, signer })
+    await ao.monitor({ process: pid, signer })
     await wait(3000)
-    await unmonitor({ process: pid, signer })
+    await ao.unmonitor({ process: pid, signer })
     assert.equal(await p.d("Get"), "6")
   })
 })
