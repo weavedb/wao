@@ -2,6 +2,7 @@ import assert from "assert"
 import { describe, it, before, beforeEach } from "node:test"
 import { blueprint, mu, AO, connect, acc, scheduler } from "../src/test.js"
 import AR from "../src/ar.js"
+import GQL from "../src/gql.js"
 import ArMem from "../src/armem.js"
 import { setup } from "../src/helpers.js"
 import { tags, wait } from "../src/utils.js"
@@ -92,7 +93,22 @@ Handlers.add("Hello2", "Hello2", function (msg)
 end)
 `
 
-describe("AOS Tests", () => {
+describe.only("GraphQL", () => {
+  it("should query with graphql", async () => {
+    const gql = new GQL({ url: "http://localhost:4000/graphql" })
+    const height = (await gql.blocks({ first: 1 }))[0].height
+    const ar = new AR({ port: 4000 })
+    const { id } = await ar.post({ tags: { test: 2 } })
+    const height2 = (await gql.blocks({ first: 1 }))[0].height
+    assert.equal(height, height2 - 2)
+    const id2 = (
+      await gql.txs({ first: 1, tags: { test: "2" }, fields: ["id"] })
+    )[0].id
+    assert.equal(id, id2)
+  })
+})
+
+describe("Aoconnect", () => {
   it("should work with pre-loaded packages", async () => {
     const mem = new ArMem()
     const ar = new AR({ port: 4000, mem })
