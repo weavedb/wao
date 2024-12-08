@@ -11,6 +11,7 @@ export default class ArMem {
         : last(this.blockmap[last(this.blocks)].txs)
     }
     this.arweave.transactions.getPrice = () => 0
+    this.addrmap = {}
     this.txs = {}
     this.jwks = {}
     this.height = 0
