@@ -1,4 +1,5 @@
 import { includes, map, is, isNil, last, clone } from "ramda"
+
 const full = `id anchor signature recipient owner { address key } fee { winston ar } quantity { winston ar } data { size type } tags { name value } block { id timestamp height previous } parent { id }`
 const full_blocks = `id timestamp height previous`
 
