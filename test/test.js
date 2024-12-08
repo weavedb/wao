@@ -98,7 +98,9 @@ describe("GraphQL", () => {
     const gql = new GQL({ url: "http://localhost:4000/graphql" })
     const height = (await gql.blocks({ first: 1 }))[0].height
     const ar = new AR({ port: 4000 })
-    const { id } = await ar.post({ tags: { test: 2 } })
+    const { id } = await ar.post({
+      tags: { test: 2, "Content-Type": "text/plain" },
+    })
     const height2 = (await gql.blocks({ first: 1 }))[0].height
     assert.equal(height, height2 - 2)
     const id2 = (

@@ -127,13 +127,14 @@ export default class GQL {
         let _tx = {
           cursor: tx.id,
           ...tx,
+          data: tx._data,
           block: pick(["id", "timestamp", "height", "previous"], block),
           anchor: tx.anchor ?? "",
           signature: tx.signature ?? "",
-          owner: { address: tx.owner, key: "" },
-          fee: { ar: 0, winston: 0 },
-          quantity: { ar: 0, winston: 0 },
-          data: { size: 0, type: "" },
+          owner: { address: tx.owner, key: this.mem.addrmap[tx.owner] },
+          fee: { ar: "0", winston: "0" },
+          quantity: { ar: "0", winston: "0" },
+          data: { size: "0", type: "" },
         }
         if (!isNil(opt.fields)) {
           let _tx2 = { cursor: tx.id }
