@@ -1,14 +1,15 @@
 import Arweave from "arweave"
 import { ArweaveSigner, bundleAndSignData, createData } from "arbundles"
-import { buildTags, tag, query, queries, isLocalhost } from "./utils.js"
+import { buildTags, tag, isLocalhost } from "./utils.js"
 import { is } from "ramda"
+import GQL from "./gql.js"
 
 class AR {
   constructor({ host, port = 443, protocol } = {}) {
     this.__type__ = "ar"
     let _arweave = { host, port, protocol }
     if (!_arweave.host)
-      _arweave.host = port === 443 ? "arweave.net" : "127.0.0.1"
+      _arweave.host = port === 443 ? "arweave.net" : "localhost"
     if (!_arweave.protocol)
       _arweave.protocol = isLocalhost(_arweave.host) ? "http" : "https"
     if (!_arweave.port) _arweave.port = isLocalhost(_arweave.host) ? 1984 : 443
@@ -16,6 +17,9 @@ class AR {
     this.host = _arweave.host
     this.protocol = _arweave.protocol
     this.arweave = Arweave.init(_arweave)
+    this.gql = new GQL({
+      url: `${_arweave.protocol}://${_arweave.host}:${_arweave.port}/graphql`,
+    })
   }
 
   isArConnect(jwk) {
@@ -211,27 +215,7 @@ class AR {
   }
 
   async tx(txid) {
-    const json = await fetch(
-      `${this.protocol}://${this.host}:${this.port}/graphql`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: query(txid) }),
-      },
-    ).then(r => r.json())
-    return json.data.transactions.edges.map(v => v.node)[0] ?? null
-  }
-
-  async txs(to) {
-    const json = await fetch(
-      `${this.protocol}://${this.host}:${this.port}/graphql`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: queries(to) }),
-      },
-    ).then(r => r.json())
-    return json.data.transactions.edges.map(v => v.node)
+    return (await this.gql.txs({ id: txid }))[0] ?? null
   }
 
   async data(txid, string = false) {

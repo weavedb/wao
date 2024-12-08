@@ -6,12 +6,16 @@ export default class ArMem {
     this.__type__ = "mem"
     this.arweave = Arweave.init()
     this.arweave.transactions.getTransactionAnchor = () => {
-      return this.blocks.length === 0 ? "" : last(this.blocks)
+      return this.blocks.length === 0
+        ? ""
+        : last(this.blockmap[last(this.blocks)].txs)
     }
     this.arweave.transactions.getPrice = () => 0
     this.txs = {}
+    this.jwks = {}
     this.height = 0
     this.blocks = []
+    this.blockmap = {}
     this.env = {}
     this.modules = {
       aos2_0_1: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
