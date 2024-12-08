@@ -214,6 +214,7 @@ export const connect = mem => {
       data: _opt.data,
       signer: _opt.signer,
       tags: tags(_opt.tags),
+      target: opt.process,
     })
     await ar.postItem(item, su.jwk)
     try {
@@ -265,8 +266,8 @@ export const connect = mem => {
       data: opt.data,
       signer: opt.signer,
       tags: tags(opt.tags),
+      target: opt.process,
     })
-
     await ar.postItem(item, su.jwk)
     try {
       const msg = genMsg(
@@ -372,7 +373,7 @@ export const connect = mem => {
     },
     dryrun: async opt => {
       const p = mem.env[opt.process]
-      const { id, owner } = await ar.dataitem(opt)
+      const { id, owner } = await ar.dataitem({ ...opt, target: opt.process })
       try {
         const msg = genMsg(p, opt.data ?? "", opt.tags, owner, mu.addr, true)
         const _env = genEnv({

@@ -384,7 +384,10 @@ class AO {
         let ex = exRef(ref, txs)
         if (!ex) {
           if (!this.in_memory) await wait(1000)
-          txs = await this.ar.txs(pid)
+          txs = await this.ar.gql.txs({
+            recipient: pid,
+            fields: ["id", "recipient", "tags", { owner: ["address"] }],
+          })
           ex = exRef(ref, txs)
         }
         if (ex) return txs
