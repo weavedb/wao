@@ -93,7 +93,7 @@ Handlers.add("Hello2", "Hello2", function (msg)
 end)
 `
 
-describe.only("GraphQL", () => {
+describe("GraphQL", () => {
   it("should query with graphql", async () => {
     const gql = new GQL({ url: "http://localhost:4000/graphql" })
     const height = (await gql.blocks({ first: 1 }))[0].height
@@ -105,6 +105,33 @@ describe.only("GraphQL", () => {
       await gql.txs({ first: 1, tags: { test: "2" }, fields: ["id"] })
     )[0].id
     assert.equal(id, id2)
+  })
+
+  it.only("should query with in-memory graphql", async () => {
+    const ao = new AO()
+    await ao.ar.post({ tags: { test: "1" }, jwk })
+    await ao.ar.post({ tags: { test: "2" }, jwk })
+    await ao.ar.post({ tags: { test: "3" }, jwk })
+    const txs = await ao.ar.gql.txs({
+      first: 1,
+    })
+    assert.equal(txs[0].tags[0].value, "3")
+    const txs2 = await ao.ar.gql.txs({
+      next: true,
+      after: txs[0].cursor,
+      first: 1,
+      fields: ["id", { owner: { key: false } }, { tags: ["value"] }],
+      block: [0, 3],
+    })
+    assert.equal(txs2.data[0].tags[0].value, "2")
+    const txs3 = await txs2.next()
+    assert.equal(txs3.data[0].tags[0].value, "1")
+    const blocks = await ao.ar.gql.blocks({
+      first: 2,
+      asc: true,
+      fields: { id: true, previous: true, height: true },
+    })
+    assert.equal(blocks[0].height, 1)
   })
 })
 

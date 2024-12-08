@@ -91,18 +91,6 @@ const isData = (data, res) => {
   return false
 }
 
-const query = txid => `query {
-  transactions(ids: ["${txid}"]) {
-    edges { node { id tags { name value } owner { address } } }
-  }
-}`
-
-const queries = to => `query {
-  transactions (recipients: ["${to}"]){
-    edges { node { id recipient tags { name value } owner { address } } }
-  }
-}`
-
 const isLocalhost = v => includes(v, ["localhost", "127.0.0.1"])
 
 const udl = ({ payment, access, derivations, commercial, training }) => {
@@ -315,8 +303,6 @@ export {
   srcs,
   getTagVal,
   isData,
-  query,
-  queries,
   getTag,
   tagEq,
   searchTag,
