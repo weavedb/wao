@@ -1,6 +1,6 @@
 {
   "name": "wao",
-  "version": "0.4.2",
+  "version": "0.4.6",
   "description": "",
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -21,8 +21,8 @@
       "import": "./esm/utils.js"
     },
     "./test": {
-      "require": "./cjs/helpers.js",
-      "import": "./esm/helpers.js"
+      "require": "./cjs/test.js",
+      "import": "./esm/test.js"
     }
   },
   "author": "",
