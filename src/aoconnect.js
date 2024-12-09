@@ -44,12 +44,12 @@ export const connect = mem => {
     return output
   }
 
-  const genMsg = (p, data, Tags, from, owner, dry = false) => {
+  const genMsg = (Id, p, data, Tags, from, Owner, dry = false) => {
     if (!dry) p.height += 1
     return {
-      Id: p.height,
+      Id,
       Target: p.id,
-      Owner: owner,
+      Owner,
       Data: data?.length ? data : "",
       "Block-Height": p.height.toString(),
       Timestamp: Date.now().toString(),
@@ -102,7 +102,9 @@ export const connect = mem => {
       mode: "test",
       WeaveDrive,
     })
-    mem.modmap[id] = { handle, id }
+
+    // test me
+    mem.modmap[id] = { handle, id, data, format: t["Module-Format"] }
     return id
   }
 
@@ -110,18 +112,17 @@ export const connect = mem => {
     if (!opt.module) throw Error("module missing")
     if (!opt.scheduler) throw Error("scheduler missing")
     let mod = opt.module ?? mem.modules["aos2_0_1"]
-    if (!mem.modmap[mod] && mem.wasms[mod]) {
-      const __dirname = await dirname()
-      const wasm = readFileSync(
-        resolve(__dirname, `lua/${mem.wasms[mod].file}.wasm`),
-      )
-      const handle = await AoLoader(wasm, {
-        format: mem.wasms[mod].format,
-        mode: "test",
-        WeaveDrive,
-      })
-      mem.modmap[mod] = { handle, id: mod }
-    }
+    let _module = null
+    const __dirname = await dirname()
+    const wasm = readFileSync(
+      resolve(__dirname, `lua/${mem.wasms[mod].file}.wasm`),
+    )
+    const handle = await AoLoader(wasm, {
+      format: mem.wasms[mod].format,
+      mode: "test",
+      WeaveDrive,
+    })
+    _module = { handle, id: mod }
     if (!mod) throw Error("module not found")
     opt.tags = buildTags(
       null,
@@ -135,7 +136,6 @@ export const connect = mem => {
         "Content-Type": "text/plain",
       }),
     )
-    const _module = mem.modmap[mod]
     let ex = false
     opt.tags ??= []
     for (let v of opt.tags) if (v.name === "Type") ex = true
@@ -167,7 +167,7 @@ export const connect = mem => {
       let data = ""
       if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
       else data = mem.msgs[_tags["On-Boot"]]?.data ?? ""
-      let msg = genMsg(p, data, opt.tags, owner, mu.addr, true)
+      let msg = genMsg(id, p, data, opt.tags, owner, mu.addr, true)
       const _env = genEnv({
         pid: p.id,
         owner: p.owner,
@@ -253,7 +253,7 @@ export const connect = mem => {
         "Hash-Chain": hash,
       }),
     )
-    p.epochs.push([opt.id])
+    p.epochs.push([opt.message])
     const { id, owner, item } = await ar.dataitem({
       data: opt.data,
       signer: opt.signer,
@@ -263,6 +263,7 @@ export const connect = mem => {
     await ar.postItem(item, su.jwk)
     try {
       const msg = genMsg(
+        opt.message,
         p,
         _opt.data ?? "",
         _opt.tags,
@@ -398,7 +399,15 @@ export const connect = mem => {
       const p = mem.env[opt.process]
       const { id, owner } = await ar.dataitem({ ...opt, target: opt.process })
       try {
-        const msg = genMsg(p, opt.data ?? "", opt.tags, owner, mu.addr, true)
+        const msg = genMsg(
+          id,
+          p,
+          opt.data ?? "",
+          opt.tags,
+          owner,
+          mu.addr,
+          true,
+        )
         const _env = genEnv({
           pid: p.id,
           owner: p.owner,

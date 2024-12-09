@@ -235,6 +235,7 @@ const mergeChecks = (check1, check2, check) => {
 }
 
 const isOutComplete = (out, get) => {
+  if (isNil(get)) return true
   if (isNil(out)) return false
   const _get = modGet(get)
   if (_get.obj) {
