@@ -1,4 +1,6 @@
-# WAO SDK
+# WAO - Wizard AO SDK & Testing
+
+![](./assets/cover.png)
 
 WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and seamless message piping for an enjoyable coding experience. Additionally, it includes a drop-in replacement for `aoconnect`, allowing to test lua scripts 1000x faster than the mainnet by emulating AO units in-memory.
 
@@ -8,6 +10,7 @@ WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and 
 - [API Reference](#api-reference)
   - [AR](#ar)
   - [AO](#ao)
+  - [GQL](#gql)
 
 ## Quick Start
 
@@ -586,3 +589,7 @@ await ao.pipe({ jwk, fns, cb: ({ i, fns, inp })=>{
   console.log(`${i} / ${fns.length} functions executed`)
 }})
 ```
+
+### GQL
+
+`GQL` simplifies [the Arwave GraphQL](https://gql-guide.vercel.app/) operations to query blocks and transactions.
