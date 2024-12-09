@@ -182,7 +182,7 @@ const query_blocks = (opt = {}) => {
 }
 
 export default class GQL {
-  constructor({ url = "https://arweave.net/graphql" }) {
+  constructor({ url = "https://arweave.net/graphql" } = {}) {
     this.url = url
   }
   async _fetch(query, tar) {

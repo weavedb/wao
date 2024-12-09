@@ -1,4 +1,5 @@
-import Arweave from "arweave"
+import _Arweave from "arweave"
+const Arweave = _Arweave.default ?? _Arweave
 import { ArweaveSigner, bundleAndSignData, createData } from "arbundles"
 import { buildTags, tag, isLocalhost } from "./utils.js"
 import { is } from "ramda"
