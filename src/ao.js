@@ -1,5 +1,5 @@
 import * as WarpArBundles from "warp-arbundles"
-const pkg = WarpArBundles.default ? WarpArBundles.default : WarpArBundles
+const pkg = WarpArBundles.default ?? WarpArBundles
 const { createData, ArweaveSigner } = pkg
 import AR from "./ar.js"
 
