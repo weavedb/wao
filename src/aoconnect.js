@@ -1,4 +1,7 @@
-import { DataItem } from "warp-arbundles"
+import * as WarpArBundles from "warp-arbundles"
+const pkg = WarpArBundles.default ?? WarpArBundles
+const { DataItem } = pkg
+
 import crypto from "crypto"
 import base64url from "base64url"
 

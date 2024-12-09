@@ -1,6 +1,9 @@
 import MAR from "./ar.js"
 import { buildTags } from "./utils.js"
-import { DataItem } from "warp-arbundles"
+import * as WarpArBundles from "warp-arbundles"
+const pkg = WarpArBundles.default ?? WarpArBundles
+const { DataItem } = pkg
+
 import base64url from "base64url"
 import ArMem from "./armem.js"
 import GQL from "./tgql.js"
