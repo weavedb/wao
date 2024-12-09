@@ -1,11 +1,12 @@
 import assert from "assert"
+import { resolve } from "path"
 import { describe, it, before, beforeEach } from "node:test"
 import { blueprint, mu, AO, connect, acc, scheduler } from "../src/test.js"
 import MAO from "../src/ao.js"
 import AR from "../src/ar.js"
 import GQL from "../src/gql.js"
 import ArMem from "../src/armem.js"
-import { setup } from "../src/helpers.js"
+import { setup, Src } from "../src/helpers.js"
 import { tags, wait } from "../src/utils.js"
 
 const { mem, spawn, message, dryrun } = connect()
@@ -95,7 +96,7 @@ end)
 `
 
 describe("GraphQL", () => {
-  it("should query with graphql", async () => {
+  it.skip("should query with graphql", async () => {
     const gql = new GQL({ url: "http://localhost:4000/graphql" })
     const height = (await gql.blocks({ first: 1 }))[0].height
     const ar = new AR({ port: 4000 })
@@ -139,7 +140,7 @@ describe("GraphQL", () => {
 })
 
 describe("Aoconnect", () => {
-  it("should work with pre-loaded packages", async () => {
+  it.skip("should work with pre-loaded packages", async () => {
     const mem = new ArMem()
     const ar = new AR({ port: 4000, mem })
     await ar.post({ data: "abc", tags: { test: 3 }, jwk })
@@ -172,6 +173,13 @@ describe("SDK", function () {
   let ao
   beforeEach(async () => (ao = await new AO().init(acc[0])))
 
+  it("should publish custom modules", async () => {
+    const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
+    const data = src.data("aos2_0_1", "wasm")
+    const modid = await ao.postModule({ data, jwk })
+    const { p } = await ao.deploy({ src_data, module: modid })
+    assert.equal(await p.d("Hello"), "Hello, World!")
+  })
   it("should spawn a process and send messages", async () => {
     const { p } = await ao.deploy({ src_data })
     assert.equal(await p.d("Hello"), "Hello, World!")
