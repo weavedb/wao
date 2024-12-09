@@ -83,40 +83,15 @@ export const connect = mem => {
     }
   }
 
-  const postModule = async ({ data, tags = {}, signer }) => {
-    const t = mergeLeft(tags, {
-      "Data-Protocol": "ao",
-      Variant: "ao.TN.1",
-      Type: "Module",
-      "Module-Format": "wasm64-unknown-emscripten-draft_2024_02_15",
-      "Input-Encoding": "JSON-V1",
-      "Output-Encoding": "JSON-V1",
-      "Memory-Limit": "1-gb",
-      "Compute-Limit": "9000000000000",
-    })
-    const _tags = buildTags(null, t)
-    const { id, owner } = await ar.dataitem({ tags: _tags, data, signer })
-    await ar.post({ data, signer, tags: t })
-    const handle = await AoLoader(data, {
-      format: t["Module-Format"],
-      mode: "test",
-      WeaveDrive,
-    })
-
-    // test me
-    mem.modmap[id] = { handle, id, data, format: t["Module-Format"] }
-    return id
-  }
-
   const spawn = async (opt = {}) => {
     if (!opt.module) throw Error("module missing")
     if (!opt.scheduler) throw Error("scheduler missing")
     let mod = opt.module ?? mem.modules["aos2_0_1"]
     let _module = null
     const __dirname = await dirname()
-    const wasm = readFileSync(
-      resolve(__dirname, `lua/${mem.wasms[mod].file}.wasm`),
-    )
+    const wasm =
+      mem.wasms[mod].data ??
+      readFileSync(resolve(__dirname, `lua/${mem.wasms[mod].file}.wasm`))
     const handle = await AoLoader(wasm, {
       format: mem.wasms[mod].format,
       mode: "test",
