@@ -1,6 +1,7 @@
 import assert from "assert"
 import { describe, it, before, beforeEach } from "node:test"
 import { blueprint, mu, AO, connect, acc, scheduler } from "../src/test.js"
+import MAO from "../src/ao.js"
 import AR from "../src/ar.js"
 import GQL from "../src/gql.js"
 import ArMem from "../src/armem.js"
@@ -109,7 +110,7 @@ describe("GraphQL", () => {
     assert.equal(id, id2)
   })
 
-  it.only("should query with in-memory graphql", async () => {
+  it("should query with in-memory graphql", async () => {
     const ao = new AO()
     await ao.ar.post({ tags: { test: "1" }, jwk })
     await ao.ar.post({ tags: { test: "2" }, jwk })

@@ -1,5 +1,7 @@
 import { DataItem } from "warp-arbundles"
+import crypto from "crypto"
 import base64url from "base64url"
+
 import {
   tags,
   action,
@@ -121,6 +123,18 @@ export const connect = mem => {
       mem.modmap[mod] = { handle, id: mod }
     }
     if (!mod) throw Error("module not found")
+    opt.tags = buildTags(
+      null,
+      mergeLeft(tags(opt.tags ?? []), {
+        "Data-Protocol": "ao",
+        Variant: "ao.TN.1",
+        Type: "Process",
+        SDK: "aoconnect",
+        Module: opt.module,
+        Scheduler: opt.scheduler,
+        "Content-Type": "text/plain",
+      }),
+    )
     const _module = mem.modmap[mod]
     let ex = false
     opt.tags ??= []
@@ -137,8 +151,10 @@ export const connect = mem => {
     let memory = null
     let p = {
       id: id,
+      epochs: [],
       handle: _module.handle,
       module: _module.id,
+      hash: id,
       memory,
       owner,
       height: 0,
@@ -207,62 +223,38 @@ export const connect = mem => {
     return id
   }
 
-  const assign = async opt => {
-    const p = mem.env[opt.process]
-    let _opt = clone(mem.msgs[opt.message])
-    const { id, owner, item } = await ar.dataitem({
-      data: _opt.data,
-      signer: _opt.signer,
-      tags: tags(_opt.tags),
-      target: opt.process,
-    })
-    await ar.postItem(item, su.jwk)
-    try {
-      const msg = genMsg(
-        p,
-        _opt.data ?? "",
-        _opt.tags,
-        _opt.from ?? owner,
-        mu.addr,
-      )
-      const _env = genEnv({
-        pid: p.id,
-        owner: p.owner,
-        module: p.module,
-        auth: mu.addr,
-      })
-      const res = await p.handle(p.memory, msg, _env)
-      p.memory = res.Memory
-      delete res.Memory
-      p.res[id] = res
-      p.results.push(id)
-      p.txs.unshift({ id: id, ..._opt })
-      mem.msgs[id] = _opt
-      for (const v of res.Messages ?? []) {
-        if (mem.env[v.Target]) {
-          await message({
-            process: v.Target,
-            tags: v.Tags,
-            data: v.Data,
-            signer: mu.signer,
-            from: opt.process,
-          })
-        }
-      }
-      return id
-    } catch (e) {
-      console.log(e)
+  function genHashChain(previousHash, previousMessageId = null) {
+    const hasher = crypto.createHash("sha256")
+    hasher.update(Buffer.from(previousHash, "base64url"))
+    if (previousMessageId) {
+      hasher.update(Buffer.from(previousMessageId, "base64url"))
     }
-    return null
+    return base64url(hasher.digest())
   }
 
-  const message = async opt => {
+  const assign = async opt => {
     const p = mem.env[opt.process]
-    let ex = false
-    for (let v of opt.tags) if (v.name === "Type") ex = true
-
-    if (!ex) opt.tags.push({ name: "Type", value: "Message" })
-    const { item, id, owner } = await ar.dataitem({
+    let _opt = mem.msgs[opt.message]
+    let hash = genHashChain(p.hash, opt.message)
+    p.hash = hash
+    opt.tags = buildTags(
+      null,
+      mergeLeft(tags(opt.tags ?? []), {
+        Timestamp: Date.now(),
+        Epoch: p.epochs.length,
+        Nonce: "0",
+        "Data-Protocol": "ao",
+        Variant: "ao.TN.1",
+        SDK: "aoconnect",
+        Type: "Assignment",
+        "Block-Height": mem.height,
+        Process: opt.process,
+        Message: opt.message,
+        "Hash-Chain": hash,
+      }),
+    )
+    p.epochs.push([opt.id])
+    const { id, owner, item } = await ar.dataitem({
       data: opt.data,
       signer: opt.signer,
       tags: tags(opt.tags),
@@ -272,9 +264,9 @@ export const connect = mem => {
     try {
       const msg = genMsg(
         p,
-        opt.data ?? "",
-        opt.tags,
-        opt.from ?? owner,
+        _opt.data ?? "",
+        _opt.tags,
+        _opt.from ?? opt.from ?? owner,
         mu.addr,
       )
       const _env = genEnv({
@@ -286,10 +278,10 @@ export const connect = mem => {
       const res = await p.handle(p.memory, msg, _env)
       p.memory = res.Memory
       delete res.Memory
-      p.res[id] = res
-      p.results.push(id)
-      p.txs.unshift({ id: id, ...opt })
-      mem.msgs[id] = opt
+      p.res[opt.message] = res
+      p.results.push(opt.message)
+      p.txs.unshift({ id: opt.message, ...opt })
+      mem.msgs[opt.message] = _opt
       for (const v of res.Messages ?? []) {
         if (mem.env[v.Target]) {
           await message({
@@ -322,11 +314,42 @@ export const connect = mem => {
           })
         }
       }
+
       return id
     } catch (e) {
       console.log(e)
     }
     return null
+  }
+
+  const message = async opt => {
+    const p = mem.env[opt.process]
+    let ex = false
+    for (let v of opt.tags) if (v.name === "Type") ex = true
+    opt.tags = buildTags(
+      null,
+      mergeLeft(tags(opt.tags ?? []), {
+        "Data-Protocol": "ao",
+        Variant: "ao.TN.1",
+        Type: "Message",
+        SDK: "aoconnect",
+      }),
+    )
+    const { item, id, owner } = await ar.dataitem({
+      data: opt.data,
+      signer: opt.signer,
+      tags: tags(opt.tags),
+      target: opt.process,
+    })
+    await ar.postItem(item, su.jwk)
+    mem.msgs[id] = opt
+    await assign({
+      message: id,
+      process: opt.process,
+      from: owner,
+      signer: mu.signer,
+    })
+    return id
   }
 
   return {
