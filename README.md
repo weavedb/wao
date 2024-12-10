@@ -8,7 +8,9 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing to tes
 
 - [Quick Start](#quick-start)
   - [Installation](#installation)
-  
+  - [Drop-in aoconnect Replacement for Tests](#drop-in-aoconnect-replacement-for-tests)
+  - [Setting up a Project](#setting-up-a-project)
+  - [Writing Tests](#writing-tests)
 - [API Reference](#api-reference)
   - [AR](#ar)
   - [AO](#ao)
@@ -39,7 +41,7 @@ It's super easy to set up a test AO project manually.
 
 ```bash
 mkdir wao-test && cd wao-test
-yarn init && yarn add wao && yarn add mocha chai --dev
+yarn init && yarn add wao
 ```
 
 Add a `test` command to your `package.json`, and set `module` type to work with ES6.
@@ -51,10 +53,6 @@ Add a `test` command to your `package.json`, and set `module` type to work with 
   "type": "module",
   "dependencies": {
     "wao": "^0.1.1"
-  },
-  "devDependencies": {
-    "chai": "^5.1.2",
-    "mocha": "^10.8.2"
   },
   "scripts": {
     "test": "mocha --node-option=experimental-wasm-memory64"
@@ -73,7 +71,8 @@ mkdir test && touch test.js
 Write a simple test in `test.js`.
 
 ```js
-import { expect } from "chai"
+import assert from "assert"
+import { describe, it } from "node:test"
 import { connect } from "wao/test"
 const { acc, spawn, message, dryrun } = connect()
 // import { wait } from "wao/utils"
@@ -85,7 +84,6 @@ end)
 `
 
 describe("WAO", function () {
-  this.timeout(0)
   describe("Aoconnect Replacement", function () {
     it("should spawn a process and send messages", async () => {
       const pid = await spawn({ signer: acc[0].signer })
@@ -105,7 +103,7 @@ describe("WAO", function () {
         tags: [{ name: "Action", value: "Hello" }],
         signer,
       })
-      expect(res.Messages[0].Data).to.eql("Hello, World!")
+      assert.equal(res.Messages[0].Data, "Hello, World!")
     })
   })
 })
@@ -125,7 +123,8 @@ WAO comes with elegant syntactic sugar and makes writing AO projects absolute jo
 The same test can be written as follows.
 
 ```js
-import { expect } from "chai"
+import assert from "assert"
+import { describe, it } from "node:test"
 import { AO, acc } from "wao/test"
 
 const src_data = `
@@ -134,12 +133,11 @@ Handlers.add( "Hello", "Hello", function (msg)
 end)
 `
 describe("WAO", function () {
-  this.timeout(0)
   describe("AO Class", function () {
     it("should spawn a process send messages", async () => {
       const ao = await new AO().init(acc[0])
       const { p } = await ao.deploy({ src_data })
-      expect(await p.d("Hello")).to.eql("Hello, World!")
+      assert.equal(await p.d("Hello"), "Hello, World!")
     })
   })
 })
@@ -849,7 +847,7 @@ const { next: next3, data: blocks6_8 } = await next2()
 
 ```js
 const blocks = await gql.blocks({ 
-  fields: ["id", "timestamp", "height", "previous" ]
+  fields: ["id", "timestamp", "height", "previous"]
 })
 ```
 
