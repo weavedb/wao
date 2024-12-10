@@ -14,7 +14,11 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing to tes
 - [API Reference](#api-reference)
   - [AR](#ar)
   - [AO](#ao)
+  - [Function Piping](#function-piping)
+  - [Process](#process)
   - [GQL](#gql)
+  - [arMem](#armem)
+
 
 ## Quick Start
 
@@ -331,7 +335,6 @@ const { err, id } = await ar.bundle([
 - [postModule](#postmodule)
 - [postScheduler](#postscheduler)
 - [wait](#wait)
-- [Function Piping](#function-piping)
 
 #### Instantiate
 
@@ -356,7 +359,19 @@ await ao.ar.post({ data, tags })
 Spawn a process, get a Lua source, and eval the script. `src` is an Arweave txid of the Lua script.
 
 ```js
-const { err, res, pid } = await ao.deploy({ data, tags, src, fills })
+const { err, res, pid, p } = await ao.deploy({ data, tags, src, fills })
+```
+
+You can directly pass the Lua script with `src_data` instead of `src`.
+
+```js
+const { err, res, pid, p } = await ao.deploy({ data, tags, src_data, fills })
+```
+
+`boot` will use `On-Boot` tag to initialize the process instead of `Eval` action. You can set either `true` to use `src_data`, or set a txid of an existing script. In case of `true`, `data` should be undefined so the `src_data` can fill it with `spawn`.
+
+```js
+const { err, res, pid, p } = await ao.deploy({ boot: true, tags, src_data, fills })
 ```
 
 `fills` replace the Lua source script from `src`.
@@ -404,21 +419,44 @@ const check2 = { "Status" : true } // succeeds if Status tag exists
 ```
 
 
-`checkData` checks `Data` field instead of `Tags`.
+Assigning either a string or boolean value checks `Data` field instead of `Tags`.
 
 ```js
-const checkData = "Success"  // succeeds if Data field is "Success"
-const checkData2 = true // succeeds if Data field exists
+const check3 = "Success"  // succeeds if Data field is "Success"
+const check4 = true // succeeds if Data field exists
+```
+
+Use an array to check multiple conditions.
+
+```js
+const check5 = ["Success", { Age: "30" }] // Data is Success and Age tag is 30
 ```
 
 `get` will return specified data via `out`.
-
 
 ```js
 const get = "ID" // returns the value of "ID" tag
 const get2 = { name: "Profile", json: true } // "Profile" tag with JSON.parse()
 const get3 = { data: true, json: true } // returns Data field with JSON.parse()
+const get4 = true // = { data: true, json: true }
+const get5 = false // = { data: true, json: false }
+const get6 = { obj: { Age: "30", Name: "Bob" }} // get multiple tags
+const get7 = { Age: "30", Name: "Bob" } // same as get6
 ```
+
+`check` and `get` lazy-evaluate tags and data by tracking down async messages. As soon as the conditions are met, they won't track further messages. With `receive()` added with AOS 2.0, you can only get spawned messages up to the `receive()` function from `result`. But WAO automatically tracks down further messages and determines if check conditions are met beyond the `receive()` function. 
+
+For example, consider the following handler.
+
+```js
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+  local name = Send({ Target = msg.to, Action = "Reply" }).receive().Data
+  msg.reply({ Data = "Hello, " .. name .. "!" })
+end)
+```
+
+you can only get the first `Hello, World!`, but not the second `"Hello, " .. name .. "!"` from the aoconnect `result` function.
 
 ##### dry
 
@@ -502,7 +540,15 @@ const { err, scheduler } = await ao.postScheduler({ url, jwk, tags, overwrite })
 const { err } = await ao.wait({ pid })
 ```
 
-#### Function Piping
+### Function Piping
+
+- [pipe](#pipe)
+- [bind](#bind)
+- [then](#then)
+- [err](#err)
+- [cb](#cb)
+
+#### pipe
 
 Most functions return in the format of `{ err, res, out, pid, mid, id }`, and these function can be chained with `pipe`, which makes executing multiple messages a breeze.
 
@@ -521,7 +567,7 @@ let fns = [
 const { err, res, out, pid } = await this.pipe({ jwk, fns })
 ```
 
-##### bind
+#### bind
 
 If the function comes from other instances rather than `AO`, use `bind`.
 
@@ -529,7 +575,7 @@ If the function comes from other instances rather than `AO`, use `bind`.
 const fns = [{ fn: "post", bind: this.ar, args: { data, tags }}]
 ```
 
-##### then
+#### then
 
 You can pass values between functions with `then`. For instance, passing the result from the previous functions to the next function's arguments is a common operation.
 
@@ -556,14 +602,13 @@ const fns = [
   }},
 ]
 const val = await ao.pipe({ jwk, fns })
-
 ```
 
 `then` has many useful parameters.
 
 - `res` : `res` from the previous result
 - `args` : `args` for the next function
-- `out` : `out` the final `out` result from the `pipe` sequence
+- `out` : the final `out` result from the `pipe` sequence
 - `inp` : `out` from the previous result
 - `_` : if values are assigned to the `_` fields, `pipe` returns them as top-level fields in the end
 - `pid` : `pid` will be passed if any previous functions returns `pid` ( e.g. `deploy` )
@@ -584,7 +629,21 @@ let fns = [
 const { out: { key }, val } = await ao.pipe({ jwk, fns })
 ```
 
-##### cb
+#### err
+
+`err` has the same signature as `then`. If `err` returns a value, `pipe` will throw an `Error` with that value.
+
+```js
+const fns = [
+  { fn: "msg", args: { pid, tags }, err: ({ inp })=>{
+     if(!inp.done) return "something went wrong!"
+  }}
+]
+const val = await ao.pipe({ jwk, fns })
+
+```
+
+#### cb
 
 `cb` can report the current progress of `pipe` after every function execution.
 
@@ -594,11 +653,78 @@ await ao.pipe({ jwk, fns, cb: ({ i, fns, inp })=>{
 }})
 ```
 
+### Process
+
+You can go for even more concise syntax with `Process` class.
+
+- [Instantiate](#instantiate-2)
+- [msg](#msg-1)
+- [m](#m)
+- [dry](#dry-1)
+- [d](#d)
+
+#### Instantiate
+
+```js
+const p = ao.p(pid)
+```
+
+or
+
+```js
+const { p, pid } = await ao.deploy({ data, tags, src, fills })
+```
+
+#### msg
+
+The first argument is `Action` and the second argument is `Tags`, then the third argument is the rest of the options.
+
+```js
+const { mid, res, out, err } = await p.msg(
+  "Action", 
+  { Tag1: "value1", Tag2: "value2" }, 
+  { get: true, check: { TagA: "valueA" }, jwk }
+)
+```
+The default third argument is `{ get: true }` to return the JSON decoded `Data`.
+
+```js
+const { mid, out } = await p.msg("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+#### m
+
+You can only get `out` with `m`.
+
+```js
+const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+This is a quite common pattern during testing. Doing the same with `aoconnect` requires an enourmous amount of code, especially if it involves async/await `receive()`.
+
+```js
+const { p } = await ao.deploy({ data, tags, src, fills })
+const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" })
+assert.equal(out, EXPECTED_JSON)
+```
+
+#### dry
+
+```js
+const { mid, out } = await p.dry("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+#### d
+
+```js
+const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
 ### GQL
 
 `GQL` simplifies [the Arwave GraphQL](https://gql-guide.vercel.app/) operations to query blocks and transactions.
 
-- [Instantiate](#instantiate-2)
+- [Instantiate](#instantiate-3)
 - [Txs](#txs)
 - [Blocks](#blocks)
 
