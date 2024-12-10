@@ -11,6 +11,10 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing to tes
   - [Drop-in aoconnect Replacement for Tests](#drop-in-aoconnect-replacement-for-tests)
   - [Setting up a Project](#setting-up-a-project)
   - [Writing Tests](#writing-tests)
+  - [Using WAO SDK](#using-wao-sdk)
+  - [Cherry-Picking Outputs](#cherry-picking-outputs)
+  - [Determining Message Success](#determining-message-success)
+  - [Async Message Tracking with receive()](#async-message-tracking-with-receive)
 - [API Reference](#api-reference)
   - [AO](#ao)
   - [Process](#process)
@@ -114,6 +118,8 @@ Run the test.
 yarn test test/test.js
 ```
 
+### Using WAO SDK
+
 WAO comes with elegant syntactic sugar and makes writing AO projects absolute joy.
 
 The same test can be written as follows.
@@ -124,7 +130,7 @@ import { describe, it } from "node:test"
 import { AO, acc } from "wao/test"
 
 const src_data = `
-Handlers.add( "Hello", "Hello", function (msg)
+Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })
 end)
 `
@@ -142,6 +148,97 @@ The `AO` class is not only for in-memory tests, but also for production code. Yo
 ```js
 import { AR, AO, GQL } from "wao"
 ````
+### Cherry-Picking Outputs
+
+You often need to pick a specific piece of data from returned result with multiple spawned messages. You need to go through all the returned messages and further go through tags and data to find it. That's too much code to write. `AO` comes with `get` parameter to simplify it.
+
+Consider the following Lua handlers.
+
+```lua
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = json.encode({ Name = "Bob" }) })
+end)
+
+Handlers.add("Hello2", "Hello2", function (msg)
+  msg.reply({ Data = "Hello, World!", Name = "Bob", Age = "30" })
+end)
+```
+
+```js
+// by default it extracts JSON decoded Data
+const out = await p.d("Hello")
+assert.equal(out, { Name: "Bob" })
+
+// equivalent
+const out2 = await p.d("Hello", { get: true })
+assert.equal(out2, { Name: "Bob" })
+
+// get string Data
+const out3 = await p.d("Hello2", { get: false })
+assert.equal(out3, "Hello, World!")
+
+// get a tag
+const out4 = await p.d("Hello2", { get: "Age" })
+assert.equal(out4, "30")
+
+// get multiple tags
+const out5 = await p.d("Hello2", { get: { name: "Name", age: "Age" } })
+assert.equal(out5, { name: "Bob", age: "30" })
+```
+
+### Determining Message Success
+
+To determin if your message is successful, you often need to track down a chain of asynchronous messages and examine resulted tags and data. This is actually a fairy complex operation and too much code to write. Luckily for you, `AO` comes with `check` parameter to extremely simplify it. `check` tracks down messages and lazy-evaluate if your `check` conditions are met.
+
+```js
+// check if Data exists
+await p.m("Hello2", { check: true })
+
+// check if Data is a certain value
+await p.m("Hello2", { check: "Hello, World! })
+
+// check if a tag exists
+await p.m("Hello2", { check: "Name" })
+
+// check if tags are certain values
+await p.m("Hello2", { check: { Name: "Bob", Age: "30" } })
+
+// it throws an Error if the conditions are not met
+try{
+  await p.m("Hello2", { check: { Name: "Bob", Age: "20" } })
+}catch(e){
+  console.log("something went wrong!")
+}
+```
+
+### Async Message Tracking with receive()
+
+AOS2 introduced a handy function `receive()` to send a message to another process and receive a reply in the same handler.
+
+```lua
+Handlers.add("Hello3", "Hello3", function (msg)
+  msg.reply({ Data = "How old are you?" })
+  local age = Send({
+    Target = msg.To, Action = "Get-Age", Name = msg.Who
+  }).receive().Data
+  msg.reply({ Data = "got your age!", Name = msg.Who, Age = age })
+end)
+```
+
+Since the second reply will be a part of another message triggerd by the `Target` process reply, you cannot get the final reply simply with the arconnect `result` function. You need to keep pinging the process `results` or track down the chain of messages to examine what went wrong. The AO `get` and `check` automatically handles this complex operation in a lazy short-circuit manner in the background for you.
+
+```js
+const age = await p.m(
+  "Hello3", 
+  { Who: "Bob", To: DB_PROCESS_ID }, // second argument can be tags
+  { get: "Age", check: "got your age!" }
+)
+assert.equal(age, "30")
+```
+
+There are so many more powerful tricks you can utilize to make complex AO development easier.
+
+Read on to the API reference section to find out!
 
 ## API Reference
 
