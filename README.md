@@ -16,6 +16,8 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing to tes
 
 ## Quick Start
 
+*WAO is still actively being developed; please use it with discretion.*
+
 ### Installation
 
 ```bash
@@ -168,6 +170,7 @@ The `AO` class is not only for tests, but also for production code. You just nee
 #### Instantiate
 
 ```js
+import { AR } from "wao"
 const ar = new AR()
 ```
 `host`, `port`, and `protocol` can be set to access a specific gateway rather than `https://arweave.net`.
@@ -337,6 +340,7 @@ const { err, id } = await ar.bundle([
 You can initialize AO in the same way as AR.
 
 ```js
+import { AO } from "wao"
 const ao = await new AO().init(arweaveWallet || jwk)
 ```
 If you need to pass AR settings, use `ar`. `ao.ar` will be automatically available.
@@ -595,3 +599,262 @@ await ao.pipe({ jwk, fns, cb: ({ i, fns, inp })=>{
 ### GQL
 
 `GQL` simplifies [the Arwave GraphQL](https://gql-guide.vercel.app/) operations to query blocks and transactions.
+
+- [Instantiate](#instantiate-2)
+- [Txs](#txs)
+- [Blocks](#blocks)
+
+#### Instantiate
+
+You can instanciate the GQL class with an endpoint `url`.
+
+```js
+import { GQL } from "wao"
+const gql = new GQL({ url: "https://arweave.net/graphql" }) // the default url
+```
+
+#### Txs
+
+Get latest transactions.
+
+```js
+const txs = await gql.txs()
+```
+
+##### asc
+
+Get transactions in ascending order.
+
+```js
+const txs = await gql.txs({ asc: true })
+```
+
+##### first
+
+Get the firxt X transactions.
+
+```js
+const txs = await gql.txs({ first: 3 })
+```
+
+##### after
+
+Get transactions after a specific one to paginate. Pass a `cursor`.
+
+```js
+const txs = await gql.txs({ first: 3 })
+const txs2 = await gql.txs({ first: 3, after: txs[2].cursor })
+```
+
+##### next
+
+Easier pagination with `next`.
+
+```js
+const { next, data: txs0_2 } = await gql.txs({ first: 3, next: true })
+const { next: next2, data: txs3_5 } = await next()
+const { next: next3, data: txs6_8 } = await next2()
+```
+
+`res.next` will be `null` if there's no more transactions to paginate.
+
+##### block
+
+Get transactions within a block height range.
+
+```js
+const txs = await gql.txs({ block: { min: 0, max: 10 } })
+```
+
+or
+
+
+```js
+const txs = await gql.txs({ block: [0, 10] })
+```
+
+You can also specify only `min` or `max`.
+
+##### by Transaction IDs
+
+Get transactions by transaction ids.
+
+```js
+const txs = await gql.txs({ id: TXID })
+```
+or
+
+```js
+const txs = await gql.txs({ ids: [ TXID1, TXID2, TXID3 ] })
+```
+
+##### by Recipients
+
+Get transactions by recipients.
+
+```js
+const txs = await gql.txs({ recipient: ADDR })
+```
+or
+
+```js
+const txs = await gql.txs({ recipients: [ ADDR1, ADDR2, ADDR3 ] })
+```
+
+##### by Owners
+
+Get transactions by owners.
+
+```js
+const txs = await gql.txs({ owner: ADDR })
+```
+or
+
+```js
+const txs = await gql.txs({ owners: [ ADDR1, ADDR2, ADDR3 ] })
+```
+
+##### by Tags
+
+Get transactions that match tags.
+
+```js
+const txs = await gql.txs({ tags: { Name: "Bob", Age: "30" } })
+```
+
+##### fields
+
+Choose fields to be returned.
+
+```js
+const txs = await gql.txs({ fields: ["id", "recipient"] })
+```
+
+For nested objects,
+
+```js
+const txs = await gql.txs({ fields: ["id", { owner: ["address", "key"] }] })
+```
+
+You can use a hashmap to specify fields too.
+
+```js
+const txs = await gql.txs({ 
+  fields: { id: true, { owner: { address: true, key: true } } } 
+})
+```
+
+If you assign `false`, the other fields will be returned.
+
+```js
+const txs = await gql.txs({ 
+  fields: { id: true, { block: { previous: false } } } 
+})
+```
+
+For example, the above will exclude `previous` from `block` and return `id`, `timestamp` and `height`.
+
+The entire available fields for transactions as in a graphql query are as follows.
+
+```js
+const tx_fields = `{
+  id 
+  anchor 
+  signature 
+  recipient 
+  owner { address key } 
+  fee { winston ar } 
+  quantity { winston ar } 
+  data { size type } 
+  tags { name value } 
+  block { id timestamp height previous } 
+  parent { id }
+}`
+```
+
+#### Blocks
+
+Get latest blocks.
+
+```js
+const blocks = await gql.blocks()
+```
+
+##### asc
+
+Get blocks in ascending order.
+
+```js
+const blocks = await gql.blocks({ asc: true })
+```
+
+##### first
+
+Get the firxt X blocks.
+
+```js
+const blocks = await gql.blocks({ first: 3 })
+```
+
+##### after
+
+Get blocks after a specific one to paginate. Pass a `cursor`.
+
+```js
+const blocks = await gql.blocks({ first: 3 })
+const blocks2 = await gql.blocks({ first: 3, after: blocks[2].cursor })
+```
+
+##### by Block IDs
+
+Get blocks by block ids.
+
+```js
+const blocks = await gql.blocks({ id: BLCID })
+```
+or
+
+```js
+const blocks = await gql.blocks({ ids: [ BLKID1, BLKID2, BLKID3 ] })
+```
+
+##### height
+
+Get blocks within a block height range.
+
+```js
+const blocks = await gql.blocks({ height: { min: 0, max: 10 } })
+```
+
+or
+
+
+```js
+const blocks = await gql.blocks({ height: [0, 10] })
+```
+
+##### next
+
+Easier pagination with `next`.
+
+```js
+const { next, data: blocks0_2 } = await gql.blocks({ first: 3, next: true })
+const { next: next2, data: blocks3_5 } = await next() 
+const { next: next3, data: blocks6_8 } = await next2()
+```
+
+`res.next` will be `null` if there's no more blocks to paginate.
+
+##### fields
+
+```js
+const blocks = await gql.blocks({ 
+  fields: ["id", "timestamp", "height", "previous" ]
+})
+```
+
+The entire available fields for transactions as in a graphql query are as follows.
+
+```js
+const block_fields = `{ id timestamp height previous }`
+```
