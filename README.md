@@ -2,7 +2,7 @@
 
 ![](./assets/cover.png)
 
-WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and seamless message piping for an enjoyable coding experience. GraphQL operations are also made super easy.
+WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and seamless message piping for enjoyable coding experience. GraphQL operations are also made super easy.
 
 Additionally, it includes a drop-in replacement for `aoconnect`, allowing to test lua scripts 1000x faster than the mainnet by emulating AO units in-memory. It's even 100x faster than testing with [arlocal](https://github.com/textury/arlocal) and [ao-localnet](https://github.com/permaweb/ao-localnet).
 
@@ -12,12 +12,12 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing to tes
   - [Setting up a Project](#setting-up-a-project)
   - [Writing Tests](#writing-tests)
 - [API Reference](#api-reference)
-  - [AR](#ar)
   - [AO](#ao)
-  - [Function Piping](#function-piping)
   - [Process](#process)
+  - [Function Piping](#function-piping)
+  - [AR](#ar)
   - [GQL](#gql)
-  - [arMem](#armem)
+  - [ArMem](#armem)
 
 
 ## Quick Start
@@ -48,18 +48,13 @@ mkdir wao-test && cd wao-test
 yarn init && yarn add wao
 ```
 
-Add a `test` command to your `package.json`, and set `module` type to work with ES6.
+Add `test` and `test-only` commands to your `package.json`.
 
 ```json
 {
-  "name": "wao-test",
-  "version": "1.0.0",
-  "type": "module",
-  "dependencies": {
-    "wao": "^0.1.1"
-  },
   "scripts": {
-    "test": "mocha --node-option=experimental-wasm-memory64"
+    "test": "node --experimental-wasm-memory64",
+    "test-only": "node --experimental-wasm-memory64 --test-only"
   }
 }
 ```
@@ -80,35 +75,32 @@ import { describe, it } from "node:test"
 import { connect } from "wao/test"
 const { acc, spawn, message, dryrun } = connect()
 // import { wait } from "wao/utils"
-
+const signer = acc[0].signer
 const src_data = `
 Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })
 end)
 `
-
 describe("WAO", function () {
-  describe("Aoconnect Replacement", function () {
-    it("should spawn a process and send messages", async () => {
-      const pid = await spawn({ signer: acc[0].signer })
-	  
-	  // on mainnet, you need to wait here till the process becomes available.
-	  // WAO automatically handles it. No need with in-memory tests.
-	  // await wait({ pid })
-	  
-      await message({
-        process: pid,
-        tags: [{ name: "Action", value: "Eval" }],
-        data: src_data,
-        signer,
-      })
-      const res = await dryrun({
-        process: pid,
-        tags: [{ name: "Action", value: "Hello" }],
-        signer,
-      })
-      assert.equal(res.Messages[0].Data, "Hello, World!")
+  it("should spawn a process and send messages", async () => {
+    const pid = await spawn({ signer })
+
+    // on mainnet, you need to wait here till the process becomes available.
+    // WAO automatically handles it. No need with in-memory tests.
+    // await wait({ pid })
+
+    await message({
+      process: pid,
+      tags: [{ name: "Action", value: "Eval" }],
+      data: src_data,
+      signer,
     })
+    const res = await dryrun({
+      process: pid,
+      tags: [{ name: "Action", value: "Hello" }],
+      signer,
+    })
+    assert.equal(res.Messages[0].Data, "Hello, World!")
   })
 })
 ```
@@ -119,7 +111,7 @@ Note that generating random Arweave wallets for every test takes time and slows 
 Run the test.
 
 ```js
-yarn test
+yarn test test/test.js
 ```
 
 WAO comes with elegant syntactic sugar and makes writing AO projects absolute joy.
@@ -137,21 +129,434 @@ Handlers.add( "Hello", "Hello", function (msg)
 end)
 `
 describe("WAO", function () {
-  describe("AO Class", function () {
-    it("should spawn a process send messages", async () => {
-      const ao = await new AO().init(acc[0])
-      const { p } = await ao.deploy({ src_data })
-      assert.equal(await p.d("Hello"), "Hello, World!")
-    })
+  it("should spawn a process and send messages", async () => {
+    const ao = await new AO().init(acc[0])
+    const { p } = await ao.deploy({ src_data })
+    assert.equal(await p.d("Hello", "Hello, World!")
   })
 })
 ```
 
-The `AO` class is not only for tests, but also for production code. You just need to import from a different path.
+The `AO` class is not only for in-memory tests, but also for production code. You just need to import from a different path.
 
-- `import { AO } from "wao"`
+```js
+import { AR, AO, GQL } from "wao"
+````
 
 ## API Reference
+
+### AO
+
+- [Instantiate](#instantiate-1)
+- [deploy](#deploy)
+- [msg](#msg)
+- [dry](#dry)
+- [asgn](#asgn)
+- [load](#load)
+- [eval](#eval)
+- [spwn](#spwn)
+- [aoconnect Functions](#aoconnect-functions)
+- [postModule](#postmodule)
+- [postScheduler](#postscheduler)
+- [wait](#wait)
+
+#### Instantiate
+
+You can initialize AO in the same way as AR.
+
+```js
+import { AO } from "wao"
+const ao = await new AO().init(jwk || arweaveWallet)
+```
+If you need to pass AR settings, use `ar`. `ao.ar` will be automatically available.
+
+```js
+const ao = await new AO({ ar: { port: 4000 }}).init(jwk || arweaveWallet)
+const addr = ao.ar.addr
+await ao.ar.post({ data, tags })
+```
+
+#### AO Core Functions
+
+##### deploy
+
+Spawn a process, get a Lua source, and eval the script. `src` is an Arweave txid of the Lua script.
+
+```js
+const { err, res, pid, p } = await ao.deploy({ data, tags, src, fills })
+```
+
+You can directly pass the Lua script with `src_data` instead of `src`.
+
+```js
+const { err, res, pid, p } = await ao.deploy({ data, tags, src_data, fills })
+```
+
+`boot` will use `On-Boot` tag to initialize the process instead of `Eval` action. You can set either `true` to use `src_data`, or set a txid of an existing script. In case of `true`, `data` should be undefined so the `src_data` can fill it with `spawn`.
+
+```js
+const { err, res, pid, p } = await ao.deploy({ boot: true, tags, src_data, fills })
+```
+
+`fills` replace the Lua source script from `src`.
+
+```lua
+local replace_me = '<REPLACE_ME>'
+local replace_me_again = '<REPLACE_ME_AGAIN>'
+local replace_me_with_hello_again = '<REPLACE_ME>'
+```
+
+```js
+const fills = { REPLACE_ME: "hello", REPLACE_ME_AGAIN: "world" }
+```
+This will end up in the following lua script.
+
+```lua
+local replace_me = 'hello'
+local replace_me_again = 'world'
+local replace_me_with_hello_again = 'hello'
+```
+
+In case you have multiple scripts, use `loads` and pass `src` and `fills` respectively.
+
+```js
+await ao.deploy({ tags, loads: [ { src, fills }, { src: src2, fills: fills2 } ] })
+```
+
+
+##### msg
+
+Send a message.
+
+
+```js
+const { err, mid, res, out } = await ao.msg({ data, action, tags, check, get })
+```
+
+`check` determins if the message call is successful by checking through `Tags` in `Messages` in `res`.
+
+```js
+const check = { "Status" : "Success" } // succeeds if Status tag is "Success"
+const check2 = { "Status" : true } // succeeds if Status tag exists
+```
+
+
+Assigning either a string or boolean value checks `Data` field instead of `Tags`.
+
+```js
+const check3 = "Success"  // succeeds if Data field is "Success"
+const check4 = true // succeeds if Data field exists
+```
+
+Use an array to check multiple conditions.
+
+```js
+const check5 = ["Success", { Age: "30" }] // Data is Success and Age tag is 30
+```
+
+`get` will return specified data via `out`.
+
+```js
+const get = "ID" // returns the value of "ID" tag
+const get2 = { name: "Profile", json: true } // "Profile" tag with JSON.parse()
+const get3 = { data: true, json: true } // returns Data field with JSON.parse()
+const get4 = true // = { data: true, json: true }
+const get5 = false // = { data: true, json: false }
+const get6 = { obj: { Age: "30", Name: "Bob" }} // get multiple tags
+const get7 = { Age: "30", Name: "Bob" } // same as get6
+```
+
+`check` and `get` lazy-evaluate tags and data by tracking down async messages. As soon as the conditions are met, they won't track further messages. With `receive()` added with AOS 2.0, you can only get spawned messages up to the `receive()` function from `result`. But WAO automatically tracks down further messages and determines if check conditions are met beyond the `receive()` function. 
+
+For example, consider the following handler.
+
+```js
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+  local name = Send({ Target = msg.to, Action = "Reply" }).receive().Data
+  msg.reply({ Data = "Hello, " .. name .. "!" })
+end)
+```
+
+you can only get the first `Hello, World!`, but not the second `"Hello, " .. name .. "!"` from the aoconnect `result` function.
+
+##### dry
+
+Dryrun a message without writing to Arweave.
+
+
+```js
+const { err, res, out } = await ao.dry({ data, action, tags, check, get })
+```
+
+##### asgn
+
+Assign an existing message to a process.
+
+```js
+const { err, mid, res, out } = await ao.asgn({ pid, mid, check, get })
+```
+
+##### load
+
+Get a Lua source script from Arweave and eval it on a process.
+
+```js
+const { err, res, mid } = await ao.load({ src, fills, pid })
+```
+
+##### eval
+
+Eval a Lua script on a process.
+
+```js
+const { err, res, mid } = await ao.eval({ pid, data })
+```
+
+##### spwn
+
+Spawn a process. `module` and `scheduler` are auto-set if omitted.
+
+```js
+const { err, res, pid } = await ao.spwn({ module, scheduler, tags, data })
+```
+
+#### aoconnect Functions
+
+The original aoconnect functions `message` | `spawn` | `result` | `assign` | `dryrun`  are also available.  
+`createDataItemSigner` is available as `toSigner`.
+
+```js
+const signer = ao.toSigner(jwk)
+const process = await ao.spawn({ module, scheduler, signer, tags, data })
+const message = await ao.message({ process, signer, tags, data })
+const result = await ao.result({ process, message })
+```
+
+#### Advanced Functions
+
+##### postModule
+
+`data` should be wasm binary. `overwrite` to replace the default module set to the AO instance.
+
+```js
+const { err, id: module } = await ao.postModule({ data, jwk, tags, overwrite })
+
+```
+
+##### postScheduler
+
+This will post `Scheduler-Location` with the `jwk` address as the returning `scheduler`.
+
+```js
+const { err, scheduler } = await ao.postScheduler({ url, jwk, tags, overwrite })
+```
+
+##### wait
+
+`wait` untill the process becomes available after `spwn`. This is mostly used internally with `deploy`.
+
+```js
+const { err } = await ao.wait({ pid })
+```
+
+### Process
+
+You can go for even more concise syntax with `Process` class.
+
+- [Instantiate](#instantiate-2)
+- [msg](#msg-1)
+- [m](#m)
+- [dry](#dry-1)
+- [d](#d)
+
+#### Instantiate
+
+```js
+const p = ao.p(pid)
+```
+
+or
+
+```js
+const { p, pid } = await ao.deploy({ data, tags, src, fills })
+```
+
+#### msg
+
+The first argument is `Action` and the second argument is `Tags`, then the third argument is the rest of the options.
+
+```js
+const { mid, res, out, err } = await p.msg(
+  "Action", 
+  { Tag1: "value1", Tag2: "value2" }, 
+  { get: true, check: { TagA: "valueA" }, jwk }
+)
+```
+The default third argument is `{ get: true }` to return the JSON decoded `Data`.
+
+```js
+const { mid, out } = await p.msg("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+The third parameter defaults to `get` if it's not an object.
+
+```js
+const { mid, out } = await p.msg("Action", { Tag1: "value1" }, "TagA")
+```
+
+is equivalent to
+
+```js
+const { mid, out } = await p.msg("Action", { Tag1: "value1" }, "TagA") 
+```
+
+You can omit the second argument if there is no tag to pass to.
+
+```js
+const { mid, out } = await p.msg("Action", { check: "success!" }}
+```
+
+#### m
+
+You can only get `out` with `m`. This is the most extreme form.
+
+```js
+const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+This is a quite common pattern during testing. Doing the same with `aoconnect` requires an enourmous amount of code, especially if it involves async/await `receive()`.
+
+```js
+const { p } = await ao.deploy({ tags, src_data, fills })
+const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" }) // get Data
+assert.equal(out, EXPECTED_JSON)
+```
+
+#### dry
+
+```js
+const { mid, out } = await p.dry("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+#### d
+
+```js
+const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+### Function Piping
+
+- [pipe](#pipe)
+- [bind](#bind)
+- [then](#then)
+- [err](#err)
+- [cb](#cb)
+
+#### pipe
+
+Most functions return in the format of `{ err, res, out, pid, mid, id }`, and these function can be chained with `pipe`, which makes executing multiple messages a breeze.
+
+For example, following is how `deploy` uses `pipe` internally. The execusion will be immediately aborted if any of the functions in `fns` produces an error.
+
+```js
+let fns = [
+  {
+    fn: "spwn",
+    args: { module, scheduler, tags, data },
+    then: { "args.pid": "pid" },
+   },
+   { fn: "wait", then: { "args.pid": "pid" } },
+   { fn: "load", args: { src, fills }, then: { "args.pid": "pid" } }
+]
+const { err, res, out, pid } = await this.pipe({ jwk, fns })
+```
+
+#### bind
+
+If the function comes from other instances rather than `AO`, use `bind`.
+
+```js
+const fns = [{ fn: "post", bind: this.ar, args: { data, tags }}]
+```
+
+#### then
+
+You can pass values between functions with `then`. For instance, passing the result from the previous functions to the next function's arguments is a common operation.
+
+```js
+const fns = [
+  { fn: "post", bind: ao.ar, args: { data, tags }, then: ({ id, args, out })=>{
+    args.tags.TxId = id // adding TxId tag to `msg` args
+	out.txid = id // `out` will be returned at last with `pipe`
+  }},
+  { fn: "msg", args: { pid, tags }},
+]
+const { out: { txid } } = await ao.pipe({ fns, jwk })
+```
+
+If `then` returns a value, `pipe` will immediately return with that single value. You can also use `err` to abort `pipe` with an error.
+
+```js
+const fns = [
+  { fn: "msg", args: { pid, tags }, then: ({ inp })=>{
+     if(inp.done) return inp.val
+  }},
+  { fn: "msg", args: { pid, tags }, err: ({ inp })=>{
+     if(!inp.done) return "something went wrong"
+  }},
+]
+const val = await ao.pipe({ jwk, fns })
+```
+
+`then` has many useful parameters.
+
+- `res` : `res` from the previous result
+- `args` : `args` for the next function
+- `out` : the final `out` result from the `pipe` sequence
+- `inp` : `out` from the previous result
+- `_` : if values are assigned to the `_` fields, `pipe` returns them as top-level fields in the end
+- `pid` : `pid` will be passed if any previous functions returns `pid` ( e.g. `deploy` )
+- `mid` : `mid` will be passed if any previous functions returns `mid` ( e.g. `msg` )
+- `id` : `id` will be passed if any previous functions returns `id` ( e.g. `post` )
+
+`then` can be a simplified hashmap object.
+
+```js
+let fns = [
+  {
+    fn: "msg",
+    args: { tags },
+    then: { "args.mid": "mid", "out.key": "inp.a", "_.val": "inp.b" },
+   }, 
+   { fn: "some_func", args: {} } // args.mid will be set from the previous `then`
+]
+const { out: { key }, val } = await ao.pipe({ jwk, fns })
+```
+
+#### err
+
+`err` has the same signature as `then`. If `err` returns a value, `pipe` will throw an `Error` with that value.
+
+```js
+const fns = [
+  { fn: "msg", args: { pid, tags }, err: ({ inp })=>{
+     if(!inp.done) return "something went wrong!"
+  }}
+]
+const val = await ao.pipe({ jwk, fns })
+
+```
+
+#### cb
+
+`cb` can report the current progress of `pipe` after every function execution.
+
+```js
+await ao.pipe({ jwk, fns, cb: ({ i, fns, inp })=>{
+  console.log(`${i} / ${fns.length} functions executed`)
+}})
+```
 
 ### AR
 
@@ -184,6 +589,14 @@ const ar = new AR({ host: "localhost", port: 4000, protocol: "http" })
 In case of local gateways, you can only set `port` and the rest will be automatically figured out.
 ```js
 const ar = new AR({ port: 4000 })
+```
+
+`AO` class auto-instantiates `AR` internally.
+
+```js
+import { AO } from "wao"
+const ao = new AO()
+const ar = ao.ar
 ```
 
 #### Set or Generate Wallet
@@ -321,405 +734,6 @@ const { err, id } = await ar.bundle([
 ])
 ```
 
-### AO
-
-- [Instantiate](#instantiate-1)
-- [deploy](#deploy)
-- [msg](#msg)
-- [dry](#dry)
-- [asgn](#asgn)
-- [load](#load)
-- [eval](#eval)
-- [spwn](#spwn)
-- [aoconnect Functions](#aoconnect-functions)
-- [postModule](#postmodule)
-- [postScheduler](#postscheduler)
-- [wait](#wait)
-
-#### Instantiate
-
-You can initialize AO in the same way as AR.
-
-```js
-import { AO } from "wao"
-const ao = await new AO().init(arweaveWallet || jwk)
-```
-If you need to pass AR settings, use `ar`. `ao.ar` will be automatically available.
-
-```js
-const ao = await new AO({ ar: { port: 4000 }}).init(arweaveWallet || jwk)
-const addr = ao.ar.addr
-await ao.ar.post({ data, tags })
-```
-
-#### AO Core Functions
-
-##### deploy
-
-Spawn a process, get a Lua source, and eval the script. `src` is an Arweave txid of the Lua script.
-
-```js
-const { err, res, pid, p } = await ao.deploy({ data, tags, src, fills })
-```
-
-You can directly pass the Lua script with `src_data` instead of `src`.
-
-```js
-const { err, res, pid, p } = await ao.deploy({ data, tags, src_data, fills })
-```
-
-`boot` will use `On-Boot` tag to initialize the process instead of `Eval` action. You can set either `true` to use `src_data`, or set a txid of an existing script. In case of `true`, `data` should be undefined so the `src_data` can fill it with `spawn`.
-
-```js
-const { err, res, pid, p } = await ao.deploy({ boot: true, tags, src_data, fills })
-```
-
-`fills` replace the Lua source script from `src`.
-
-```lua
-local replace_me = '<REPLACE_ME>'
-local replace_me_again = '<REPLACE_ME_AGAIN>'
-local replace_me_with_hello_again = '<REPLACE_ME>'
-```
-
-```js
-const fills = { REPLACE_ME: "hello", REPLACE_ME_AGAIN: "world" }
-```
-This will end up in the following lua script.
-
-```lua
-local replace_me = 'hello'
-local replace_me_again = 'world'
-local replace_me_with_hello_again = 'hello'
-```
-
-In case you have multiple scripts, use `loads` and pass `src` and `fills` respectively.
-
-```js
-await ao.deploy({ tags, loads: [ { src, fills }, { src: src2, fills: fills2 } ] })
-```
-
-
-##### msg
-
-Send a message.
-
-
-```js
-const { err, mid, res, out } = await ao.msg({ 
-  data, action, tags, check, checkData, get
-})
-```
-
-`check` determins if the message call is successful by checking through `Tags` in `Messages` in `res`.
-
-```js
-const check = { "Status" : "Success" } // succeeds if Status tag is "Success"
-const check2 = { "Status" : true } // succeeds if Status tag exists
-```
-
-
-Assigning either a string or boolean value checks `Data` field instead of `Tags`.
-
-```js
-const check3 = "Success"  // succeeds if Data field is "Success"
-const check4 = true // succeeds if Data field exists
-```
-
-Use an array to check multiple conditions.
-
-```js
-const check5 = ["Success", { Age: "30" }] // Data is Success and Age tag is 30
-```
-
-`get` will return specified data via `out`.
-
-```js
-const get = "ID" // returns the value of "ID" tag
-const get2 = { name: "Profile", json: true } // "Profile" tag with JSON.parse()
-const get3 = { data: true, json: true } // returns Data field with JSON.parse()
-const get4 = true // = { data: true, json: true }
-const get5 = false // = { data: true, json: false }
-const get6 = { obj: { Age: "30", Name: "Bob" }} // get multiple tags
-const get7 = { Age: "30", Name: "Bob" } // same as get6
-```
-
-`check` and `get` lazy-evaluate tags and data by tracking down async messages. As soon as the conditions are met, they won't track further messages. With `receive()` added with AOS 2.0, you can only get spawned messages up to the `receive()` function from `result`. But WAO automatically tracks down further messages and determines if check conditions are met beyond the `receive()` function. 
-
-For example, consider the following handler.
-
-```js
-Handlers.add("Hello", "Hello", function (msg)
-  msg.reply({ Data = "Hello, World!" })
-  local name = Send({ Target = msg.to, Action = "Reply" }).receive().Data
-  msg.reply({ Data = "Hello, " .. name .. "!" })
-end)
-```
-
-you can only get the first `Hello, World!`, but not the second `"Hello, " .. name .. "!"` from the aoconnect `result` function.
-
-##### dry
-
-Dryrun a message without writing to Arweave.
-
-
-```js
-const { err, res, out } = await ao.dry({ 
-  data, action, tags, check, checkData, get
-})
-```
-
-##### asgn
-
-Assign an existing message to a process.
-
-```js
-const { err, mid, res, out } = await ao.asgn({ pid, mid, check, checkData, get })
-```
-
-##### load
-
-Get a Lua source script from Arweave and eval it on a process.
-
-```js
-const { err, res, mid } = await ao.load({ src, fills, pid })
-```
-
-##### eval
-
-Eval a Lua script on a process.
-
-```js
-const { err, res, mid } = await ao.eval({ pid, data })
-```
-
-##### spwn
-
-Spawn a process. `module` and `scheduler` are auto-set if omitted.
-
-```js
-const { err, res, pid } = await ao.spwn({ module, scheduler, tags, data })
-```
-
-#### aoconnect Functions
-
-The original aoconnect functions `message` | `spawn` | `result` | `assign` | `dryrun`  are also available.  
-`createDataItemSigner` is available as `toSigner`.
-
-```js
-const signer = ao.toSigner(jwk)
-const process = await ao.spawn({ module, scheduler, signer, tags, data })
-const message = await ao.message({ process, signer, tags, data })
-const result = await ao.result({ process, message })
-```
-
-#### Advanced Functions
-
-##### postModule
-
-`data` should be wasm binary. `overwrite` to replace the default module set to the AO instance.
-
-```js
-const { err, id: module } = await ao.postModule({ data, jwk, tags, overwrite })
-
-```
-
-##### postScheduler
-
-This will post `Scheduler-Location` with the `jwk` address as the returning `scheduler`.
-
-```js
-const { err, scheduler } = await ao.postScheduler({ url, jwk, tags, overwrite })
-```
-
-##### wait
-
-`wait` untill the process becomes available after `spwn`. This is mostly used internally with `deploy`.
-
-```js
-const { err } = await ao.wait({ pid })
-```
-
-### Function Piping
-
-- [pipe](#pipe)
-- [bind](#bind)
-- [then](#then)
-- [err](#err)
-- [cb](#cb)
-
-#### pipe
-
-Most functions return in the format of `{ err, res, out, pid, mid, id }`, and these function can be chained with `pipe`, which makes executing multiple messages a breeze.
-
-For example, following is how `deploy` uses `pipe` internally. The execusion will be immediately aborted if any of the functions in `fns` produces an error.
-
-```js
-let fns = [
-  {
-    fn: "spwn",
-    args: { module, scheduler, tags, data },
-    then: { "args.pid": "pid" },
-   },
-   { fn: "wait", then: { "args.pid": "pid" } },
-   { fn: "load", args: { src, fills }, then: { "args.pid": "pid" } }
-]
-const { err, res, out, pid } = await this.pipe({ jwk, fns })
-```
-
-#### bind
-
-If the function comes from other instances rather than `AO`, use `bind`.
-
-```js
-const fns = [{ fn: "post", bind: this.ar, args: { data, tags }}]
-```
-
-#### then
-
-You can pass values between functions with `then`. For instance, passing the result from the previous functions to the next function's arguments is a common operation.
-
-```js
-const fns = [
-  { fn: "post", bind: ao.ar, args: { data, tags }, then: ({ id, args, out })=>{
-    args.tags.TxId = id // adding TxId tag to `msg` args
-	out.txid = id // `out` will be returned at last with `pipe`
-  }},
-  { fn: "msg", args: { pid, tags }},
-]
-const { out: { txid } } = await ao.pipe({ fns, jwk })
-```
-
-If `then` returns a value, `pipe` will immediately return with that single value. You can also use `err` to abort `pipe` with an error.
-
-```js
-const fns = [
-  { fn: "msg", args: { pid, tags }, then: ({ inp })=>{
-     if(inp.done) return inp.val
-  }},
-  { fn: "msg", args: { pid, tags }, err: ({ inp })=>{
-     if(!inp.done) return "something went wrong"
-  }},
-]
-const val = await ao.pipe({ jwk, fns })
-```
-
-`then` has many useful parameters.
-
-- `res` : `res` from the previous result
-- `args` : `args` for the next function
-- `out` : the final `out` result from the `pipe` sequence
-- `inp` : `out` from the previous result
-- `_` : if values are assigned to the `_` fields, `pipe` returns them as top-level fields in the end
-- `pid` : `pid` will be passed if any previous functions returns `pid` ( e.g. `deploy` )
-- `mid` : `mid` will be passed if any previous functions returns `mid` ( e.g. `msg` )
-- `id` : `id` will be passed if any previous functions returns `id` ( e.g. `post` )
-
-`then` can be a simplified hashmap object.
-
-```js
-let fns = [
-  {
-    fn: "msg",
-    args: { tags },
-    then: { "args.mid": "mid", "out.key": "inp.a", "_.val": "inp.b" },
-   }, 
-   { fn: "some_func", args: {} } // args.mid will be set from the previous `then`
-]
-const { out: { key }, val } = await ao.pipe({ jwk, fns })
-```
-
-#### err
-
-`err` has the same signature as `then`. If `err` returns a value, `pipe` will throw an `Error` with that value.
-
-```js
-const fns = [
-  { fn: "msg", args: { pid, tags }, err: ({ inp })=>{
-     if(!inp.done) return "something went wrong!"
-  }}
-]
-const val = await ao.pipe({ jwk, fns })
-
-```
-
-#### cb
-
-`cb` can report the current progress of `pipe` after every function execution.
-
-```js
-await ao.pipe({ jwk, fns, cb: ({ i, fns, inp })=>{
-  console.log(`${i} / ${fns.length} functions executed`)
-}})
-```
-
-### Process
-
-You can go for even more concise syntax with `Process` class.
-
-- [Instantiate](#instantiate-2)
-- [msg](#msg-1)
-- [m](#m)
-- [dry](#dry-1)
-- [d](#d)
-
-#### Instantiate
-
-```js
-const p = ao.p(pid)
-```
-
-or
-
-```js
-const { p, pid } = await ao.deploy({ data, tags, src, fills })
-```
-
-#### msg
-
-The first argument is `Action` and the second argument is `Tags`, then the third argument is the rest of the options.
-
-```js
-const { mid, res, out, err } = await p.msg(
-  "Action", 
-  { Tag1: "value1", Tag2: "value2" }, 
-  { get: true, check: { TagA: "valueA" }, jwk }
-)
-```
-The default third argument is `{ get: true }` to return the JSON decoded `Data`.
-
-```js
-const { mid, out } = await p.msg("Action", { Tag1: "value1", Tag2: "value2" })
-```
-
-#### m
-
-You can only get `out` with `m`.
-
-```js
-const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" })
-```
-
-This is a quite common pattern during testing. Doing the same with `aoconnect` requires an enourmous amount of code, especially if it involves async/await `receive()`.
-
-```js
-const { p } = await ao.deploy({ data, tags, src, fills })
-const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" })
-assert.equal(out, EXPECTED_JSON)
-```
-
-#### dry
-
-```js
-const { mid, out } = await p.dry("Action", { Tag1: "value1", Tag2: "value2" })
-```
-
-#### d
-
-```js
-const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
-```
-
 ### GQL
 
 `GQL` simplifies [the Arwave GraphQL](https://gql-guide.vercel.app/) operations to query blocks and transactions.
@@ -730,11 +744,24 @@ const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
 
 #### Instantiate
 
-You can instanciate the GQL class with an endpoint `url`.
+You can instantiate the GQL class with an endpoint `url`.
 
 ```js
 import { GQL } from "wao"
 const gql = new GQL({ url: "https://arweave.net/graphql" }) // the default url
+```
+
+`AR` class auto-instantiates `GQL` internally.
+
+```js
+import { AO } from "wao"
+const ao = new AO()
+const gql = ao.ar.gql
+```
+```js
+import { AR } from "wao"
+const ar = new AR()
+const gql = ar.gql
 ```
 
 #### Txs
@@ -982,3 +1009,52 @@ The entire available fields for transactions as in a graphql query are as follow
 ```js
 const block_fields = `{ id timestamp height previous }`
 ```
+
+### ArMem
+
+`ArMem` stands for Arweave in-memory and is a class to emulate an Arweave node and AO units in-memory, which is internally used in the WAO testing framework. You can instantiate `ArMem` and control multiple emulators by passing it between other classes.
+
+- [Instantiate](#instantiate-3)
+
+#### Instantiate
+
+When you instantiate WAO `connect` or `AO` from `wao/test`, it automatically and internally instantiate `ArMem`.
+
+```js
+import { connect } from "wao/test"
+const { spawn, message, dryrun, assign, result, mem } = connect() // aoconnect APIs
+```
+
+
+```js
+import { AO } from "wao/test"
+const ao = new AO() // ao.mem
+```
+
+You can instantiate `ArMem` and pass it to other classes.
+
+```js
+import { ArMem, AO, AR, connect } = "wao/test"
+const mem = new ArMem()
+const { spawn, message, dryrun, assign, result } = connect(mem)
+const ao = new AO({ mem })
+const ar = new AR({ mem })
+```
+
+If you don't pass the same `ArMem` instance, the two AO instances will have different environments.
+
+```js
+import { AO } = "wao/test"
+const ao = new AO() // ao.mem
+const ao2 = new AO() // ao2.mem
+```
+
+`ao.mem` and `ao2.mem` are not connected. They are on different networks.
+
+```js
+import { AO } = "wao/test"
+const ao = new AO()
+const ao2 = new AO({ mem: ao.mem })
+```
+
+This will connect the two.
