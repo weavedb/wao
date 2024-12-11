@@ -2,9 +2,9 @@
 
 ![](./assets/cover.png)
 
-WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and seamless message piping for enjoyable coding experience. GraphQL operations are also made super easy.
+WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and seamless message piping for enjoyable coding experiences. GraphQL operations are also made super easy.
 
-Additionally, it includes a drop-in replacement for `aoconnect`, allowing to test lua scripts 1000x faster than the mainnet by emulating AO units in-memory. It's even 100x faster than testing with [arlocal](https://github.com/textury/arlocal) and [ao-localnet](https://github.com/permaweb/ao-localnet).
+Additionally, it includes a drop-in replacement for `aoconnect`, allowing the testing of lua scripts 1000x faster than the mainnet by emulating AO units in memory. It's even 100x faster than testing with [arlocal](https://github.com/textury/arlocal) and [ao-localnet](https://github.com/permaweb/ao-localnet).
 
 - [Quick Start](#quick-start)
   - [Installation](#installation)
@@ -26,7 +26,7 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing to tes
 
 ## Quick Start
 
-*WAO is still actively being developed; please use it with discretion.*
+*WAO is still actively being developed; please use it at your discretion.*
 
 ### Installation
 
@@ -35,7 +35,7 @@ yarn add wao
 ```
 ### Drop-in `aoconnect` Replacement for Tests
 
-By replacing `aoconnect` with WAO connect, everything runs in-memory with zero latency and your tests execute 1000x faster. The APIs are identical. So there's no need to change anything else in your code.
+By replacing `aoconnect` with WAO connect, everything runs in-memory with zero latency and your tests are executed 1000x faster. The APIs are identical. So, there's no need to change anything else in your code.
 
 ```js
 //import { spawn, message, dryrun, assign, result } from "@permaweb/aoconnect"
@@ -66,7 +66,7 @@ Add `test` and `test-only` commands to your `package.json`.
 Create `test` directory and `test.js` file.
 
 ```bash
-mkdir test && touch test.js
+mkdir test && touch test/test.js
 ```
 
 ### Writing Tests
@@ -120,7 +120,7 @@ yarn test test/test.js
 
 ### Using WAO SDK
 
-WAO comes with elegant syntactic sugar and makes writing AO projects absolute joy.
+WAO comes with elegant syntactic sugar and makes writing AO projects an absolute joy.
 
 The same test can be written as follows.
 
@@ -150,7 +150,7 @@ import { AR, AO, GQL } from "wao"
 ````
 ### Cherry-Picking Outputs
 
-You often need to pick a specific piece of data from returned result with multiple spawned messages. You need to go through all the returned messages and further go through tags and data to find it. That's too much code to write. `AO` comes with `get` parameter to simplify it.
+You often need to pick a specific piece of data from returned results with multiple spawned messages. You need to go through all the returned messages and further go through tags and data to find it. That's too much code to write. `AO` comes with `get` parameter to simplify it.
 
 Consider the following Lua handlers.
 
@@ -188,7 +188,7 @@ assert.equal(out5, { name: "Bob", age: "30" })
 
 ### Determining Message Success
 
-To determin if your message is successful, you often need to track down a chain of asynchronous messages and examine resulted tags and data. This is actually a fairy complex operation and too much code to write. Luckily for you, `AO` comes with `check` parameter to extremely simplify it. `check` tracks down messages and lazy-evaluate if your `check` conditions are met.
+To determine if your message is successful, you often need to track down a chain of asynchronous messages and examine resulted tags and data. This is actually a fairy complex operation and too much code to write. Luckily for you, `AO` comes with `check` parameter to extremely simplify it. `check` tracks down messages and lazy-evaluate if your `check` conditions are met.
 
 ```js
 // check if Data exists
@@ -451,7 +451,7 @@ const { err, scheduler } = await ao.postScheduler({ url, jwk, tags, overwrite })
 
 ##### wait
 
-`wait` untill the process becomes available after `spwn`. This is mostly used internally with `deploy`.
+`wait` until the process becomes available after `spwn`. This is mostly used internally with `deploy`.
 
 ```js
 const { err } = await ao.wait({ pid })
@@ -481,7 +481,7 @@ const { p, pid } = await ao.deploy({ data, tags, src, fills })
 
 #### msg
 
-The first argument is `Action` and the second argument is `Tags`, then the third argument is the rest of the options.
+The first argument is `Action`, the second argument is `Tags`, and the third argument is the rest of the options.
 
 ```js
 const { mid, res, out, err } = await p.msg(
@@ -522,7 +522,7 @@ You can only get `out` with `m`. This is the most extreme form.
 const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" })
 ```
 
-This is a quite common pattern during testing. Doing the same with `aoconnect` requires an enourmous amount of code, especially if it involves async/await `receive()`.
+This is a quite common pattern during testing. Doing the same with `aoconnect` requires an enormous amount of code, especially if it involves async/await `receive()`.
 
 ```js
 const { p } = await ao.deploy({ tags, src_data, fills })
@@ -554,7 +554,7 @@ const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
 
 Most functions return in the format of `{ err, res, out, pid, mid, id }`, and these function can be chained with `pipe`, which makes executing multiple messages a breeze.
 
-For example, following is how `deploy` uses `pipe` internally. The execusion will be immediately aborted if any of the functions in `fns` produces an error.
+For example, the following is how `deploy` uses `pipe` internally. The execution will be immediately aborted if any of the functions in `fns` produces an error.
 
 ```js
 let fns = [
@@ -613,9 +613,9 @@ const val = await ao.pipe({ jwk, fns })
 - `out` : the final `out` result from the `pipe` sequence
 - `inp` : `out` from the previous result
 - `_` : if values are assigned to the `_` fields, `pipe` returns them as top-level fields in the end
-- `pid` : `pid` will be passed if any previous functions returns `pid` ( e.g. `deploy` )
-- `mid` : `mid` will be passed if any previous functions returns `mid` ( e.g. `msg` )
-- `id` : `id` will be passed if any previous functions returns `id` ( e.g. `post` )
+- `pid` : `pid` will be passed if any previous functions return `pid` ( e.g. `deploy` )
+- `mid` : `mid` will be passed if any previous functions return `mid` ( e.g. `msg` )
+- `id` : `id` will be passed if any previous functions return `id` ( e.g. `post` )
 
 `then` can be a simplified hashmap object.
 
@@ -683,7 +683,7 @@ const ar = new AR()
 const ar = new AR({ host: "localhost", port: 4000, protocol: "http" })
 ```
 
-In case of local gateways, you can only set `port` and the rest will be automatically figured out.
+In the case of local gateways, you can only set `port` and the rest will be automatically figured out.
 ```js
 const ar = new AR({ port: 4000 })
 ```
@@ -753,7 +753,7 @@ Transfer AR token. `amount` is in AR, not in winston for simplicity.
 const { id } = await ar.transfer(amount, to)
 ```
 
-You can set a jwk to the 3rd parameter as a sender, otherwise the sender is `ar.jwk`.
+You can set a jwk to the 3rd parameter as a sender. Otherwise, the sender is `ar.jwk`.
 
 ```js
 const { id } = await ar.transfer(amount, to, jwk)
@@ -771,7 +771,7 @@ some_class_method({ jwk }){
   let err = null
   ;({ err, jwk } = await ar.checkWallet({ jwk }))
   if(!err){
-    // do domething with the jwk
+    // do something with the jwk
   }
 }
 ```
@@ -1115,7 +1115,7 @@ const block_fields = `{ id timestamp height previous }`
 
 #### Instantiate
 
-When you instantiate WAO `connect` or `AO` from `wao/test`, it automatically and internally instantiate `ArMem`.
+When you instantiate WAO `connect` or `AO` from `wao/test`, it automatically and internally instantiates `ArMem`.
 
 ```js
 import { connect } from "wao/test"
