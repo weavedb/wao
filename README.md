@@ -15,6 +15,7 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing the te
   - [Cherry-Picking Outputs](#cherry-picking-outputs)
   - [Determining Message Success](#determining-message-success)
   - [Async Message Tracking with receive()](#async-message-tracking-with-receive)
+  - [Logging](#logging)
 - [API Reference](#api-reference)
   - [AO](#ao)
   - [Process](#process)
@@ -167,11 +168,11 @@ end)
 ```js
 // by default it extracts JSON decoded Data
 const out = await p.d("Hello")
-assert.equal(out, { Name: "Bob" })
+assert.deepEqual(out, { Name: "Bob" })
 
 // equivalent
 const out2 = await p.d("Hello", { get: true })
-assert.equal(out2, { Name: "Bob" })
+assert.deepEqual(out2, { Name: "Bob" })
 
 // get string Data
 const out3 = await p.d("Hello2", { get: false })
@@ -183,12 +184,12 @@ assert.equal(out4, "30")
 
 // get multiple tags
 const out5 = await p.d("Hello2", { get: { name: "Name", age: "Age" } })
-assert.equal(out5, { name: "Bob", age: "30" })
+assert.deepEqual(out5, { name: "Bob", age: "30" })
 ```
 
 ### Determining Message Success
 
-To determine if your message is successful, you often need to track down a chain of asynchronous messages and examine resulted tags and data. This is actually a fairy complex operation and too much code to write. Luckily for you, `AO` comes with `check` parameter to extremely simplify it. `check` tracks down messages and lazy-evaluate if your `check` conditions are met.
+To determine if your message is successful, you often need to track down a chain of asynchronous messages and examine resulted tags and data. This is actually a fairy complex operation and too much code to write. Luckily for you, `AO` comes with `check` parameter to extremely simplify it. `check` tracks down messages and lazy-evaluates if your `check` conditions are met.
 
 ```js
 // check if Data exists
@@ -209,6 +210,10 @@ try{
 }catch(e){
   console.log("something went wrong!")
 }
+
+// check if Name is Bob and Age exists, then get Age
+const age = await p.m("Hello2", { check: { Name: "Bob", Age: true }, get : "Age" })
+assert.equal(age, "30", "Bob is not 30 yo!")
 ```
 
 ### Async Message Tracking with receive()
@@ -225,7 +230,7 @@ Handlers.add("Hello3", "Hello3", function (msg)
 end)
 ```
 
-Since the second reply will be a part of another message triggerd by the `Target` process reply, you cannot get the final reply simply with the arconnect `result` function. You need to keep pinging the process `results` or track down the chain of messages to examine what went wrong. The AO `get` and `check` automatically handles this complex operation in a lazy short-circuit manner in the background for you.
+Since the second reply will be a part of another message triggerd by the `Target` process reply, you cannot get the final reply simply with the arconnect `result` function. You need to keep pinging the process `results` or track down the chain of messages to examine what went wrong. The AO `get` and `check` automatically handle this complex operation in a lazy short-circuit manner in the background for you.
 
 ```js
 const age = await p.m(
@@ -239,6 +244,17 @@ assert.equal(age, "30")
 There are so many more powerful tricks you can utilize to make complex AO development easier.
 
 Read on to the API reference section to find out!
+
+### Logging
+
+WAO hot-patches the core AOS module code so `ao.log` automatically is forwarded to JS `console.log` and whatever you log will be directly displayed in your terminal. Lua tables will be auto-converted to JSON objects. It doesn't affect your production code, it only hot-paches the module during testing. This makes complex debugging so easy.
+
+```lua
+Handlers.add("Hello4", "Hello4", function (msg)
+  ao.log("Hello, Wordl!") -- will be displayed in the terminal
+  ao.log({ Hello = "World!" }) -- will be auto-converted to JSON
+end)
+```
 
 ## API Reference
 
@@ -1101,7 +1117,7 @@ const blocks = await gql.blocks({
 })
 ```
 
-The entire available fields for transactions as in a graphql query are as follows.
+The entire available fields for blocks as in a graphql query are as follows.
 
 ```js
 const block_fields = `{ id timestamp height previous }`
