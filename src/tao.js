@@ -4,8 +4,49 @@ import { srcs, buildTags } from "./utils.js"
 import AR from "./tar.js"
 import { connect } from "./aoconnect.js"
 import { acc } from "./test.js"
-import { mergeLeft } from "ramda"
+import { mergeLeft, is, map } from "ramda"
 
+let log = `
+local json = require("json")
+ao = ao or {}
+
+function ao.log(txt)
+    if type(txt) == 'table' then
+      txt = json.encode(txt)
+    end
+    if type(ao.outbox.Output) == 'string' then
+      ao.outbox.Output = {ao.outbox.Output}
+    end
+    table.insert(ao.outbox.Output, txt)
+    ao.outbox.Logs = ao.outbox.Logs or {}
+    table.insert(ao.outbox.Logs, txt)
+end
+
+function ao.result(result)
+    if ao.outbox.Error or result.Error then
+      return { Error = result.Error or ao.outbox.Error, Output = ao.outbox.Logs }
+    end
+    return {
+        Output = ao.outbox.Logs or result.Output or ao.outbox.Output,
+        Messages = ao.outbox.Messages,
+        Spawns = ao.outbox.Spawns,
+        Assignments = ao.outbox.Assignments,
+    }
+end
+`
+
+const renderLogs = logs => {
+  if (is(Array, logs) && logs.length > 0) {
+    for (const v of logs) {
+      let l = v
+      try {
+        const p = JSON.parse(v)
+        if (JSON.stringify(p) === v) l = p
+      } catch (e) {}
+      console.log(l)
+    }
+  }
+}
 class AO extends MAO {
   constructor(opt = {}) {
     super({ ...opt, in_memory: true })
@@ -24,11 +65,24 @@ class AO extends MAO {
     } = connect(opt.mem)
     this.module = mem.modules.aos2_0_1
     this.assign = assign
-    this.result = result
+    this.result = async (...opt) => {
+      const res = await result(...opt)
+      renderLogs(res.Output)
+      return res
+    }
+
     this.results = results
     this.message = message
-    this.spawn = spawn
-    this.dryrun = dryrun
+    this.spawn = async (...opt) => {
+      const res = await spawn(...opt)
+      await this.load({ data: log, pid: res })
+      return res
+    }
+    this.dryrun = async (...opt) => {
+      const res = await dryrun(...opt)
+      renderLogs(res.Output)
+      return res
+    }
     this.monitor = monitor
     this.unmonitor = unmonitor
     this.mem = mem
