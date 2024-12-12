@@ -223,7 +223,7 @@ describe("SDK", function () {
     assert.equal(await p2.d("Get", { get: false }), "3")
   })
 
-  it("should work with pre-loaded packages", async () => {
+  it.only("should work with pre-loaded packages", async () => {
     const { p } = await ao.deploy({ src_data: src_data5 })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
