@@ -255,6 +255,7 @@ Handlers.add("Hello4", "Hello4", function (msg)
   ao.log({ Hello = "World!" }) -- will be auto-converted to JSON
 end)
 ```
+You can get logs even when an error occurs in the handler, which is extremely handy to identify the error causes.
 
 ## API Reference
 
