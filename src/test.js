@@ -4,6 +4,8 @@ import { acc, mu, su, cu } from "./accounts.js"
 import { connect } from "./aoconnect.js"
 import AO from "./tao.js"
 import AR from "./tar.js"
+import GQL from "./tgql.js"
+import ArMem from "./armem.js"
 import { dirname } from "./utils.js"
 import { Src, setup, ok, fail } from "./helpers.js"
 const blueprint = async pkg => {
@@ -12,6 +14,8 @@ const blueprint = async pkg => {
 const scheduler = "GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
 
 export {
+  GQL,
+  ArMem,
   AO,
   AR,
   connect,
