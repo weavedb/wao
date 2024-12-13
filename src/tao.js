@@ -10,10 +10,9 @@ let log = `
 local json = require("json")
 ao = ao or {}
 
-function ao.log(txt)
-    if type(txt) == 'table' then
-      txt = json.encode(txt)
-    end
+function ao.log(...)
+    local args = {...}
+    local txt = json.encode(args)
     if type(ao.outbox.Output) == 'string' then
       ao.outbox.Output = {ao.outbox.Output}
     end
@@ -42,11 +41,14 @@ const renderLogs = logs => {
       try {
         const p = JSON.parse(v)
         if (JSON.stringify(p) === v) l = p
-      } catch (e) {}
-      console.log(l)
+        console.log(...l)
+      } catch (e) {
+        console.log(l)
+      }
     }
   }
 }
+
 class AO extends MAO {
   constructor(opt = {}) {
     super({ ...opt, in_memory: true })
