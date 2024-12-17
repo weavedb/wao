@@ -343,6 +343,7 @@ class AO {
         data: jsonToStr(data),
       })
     } catch (e) {
+      console.log(e)
       err = e
     }
     return { err, pid }
@@ -540,7 +541,6 @@ class AO {
         data: jsonToStr(data),
       })
       res = _res
-
       let checks = []
       if (!is(Array, check)) check = [check]
       let i = 0
