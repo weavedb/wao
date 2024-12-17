@@ -6,11 +6,16 @@ const packageJsonDist = resolve(import.meta.dirname, "dist/package.json")
 const packageJsonDist2 = resolve(import.meta.dirname, "dist/esm/package.json")
 const json = JSON.parse(readFileSync(packageJson, "utf8"))
 delete json.type
-delete json.devDependencies
 delete json.scripts
 json.main = "cjs/index.js"
 json.module = "esm/index.js"
-
+json.bin = {
+  wao: "./cjs/run.js",
+  "wao-esm": "./esm/run.js",
+}
+json.scripts = {
+  server: "node --experimental-wasm-memory64 cjs/run.js",
+}
 console.log(json)
 writeFileSync(packageJsonDist, JSON.stringify(json, undefined, 2))
 
