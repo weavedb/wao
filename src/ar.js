@@ -18,6 +18,45 @@ class AR {
     this.host = _arweave.host
     this.protocol = _arweave.protocol
     this.arweave = Arweave.init(_arweave)
+    const ArweaveUtils = this.arweave.utils
+
+    this.arweave.transactions.getData = async function (id, options) {
+      let data = undefined
+      try {
+        data = await this.chunks.downloadChunkedData(id)
+      } catch (error) {}
+      if (!data) {
+        try {
+          const {
+            data: resData,
+            ok,
+            status,
+            statusText,
+          } = await this.api.get(`/${id}`, { responseType: "arraybuffer" })
+          if (!ok) {
+            throw new Error(`Bad http status code`, {
+              cause: { status, statusText },
+            })
+          }
+          data = resData
+        } catch (error) {
+          console.error(
+            `Error while trying to download contiguous data from gateway cache for ${id}`,
+          )
+          console.error(error)
+        }
+      }
+      if (!data) {
+        throw new Error(`${id} data was not found!`)
+      }
+      if (options && options.decode && !options.string) return data
+
+      if (options && options.decode && options.string) {
+        return ArweaveUtils.bufferToString(data)
+      }
+      return ArweaveUtils.bufferTob64Url(data)
+    }
+
     this.gql = new GQL({
       url: `${_arweave.protocol}://${_arweave.host}:${_arweave.port}/graphql`,
     })
@@ -196,7 +235,7 @@ class AR {
       let tx = await this.arweave.createTransaction({ data: data })
       let _tags = buildTags(null, tags)
       for (const v of _tags) tx.addTag(v.name, v.value)
-      return this.postTx(tx, jwk)
+      return await this.postTx(tx, jwk)
     }
   }
 
@@ -220,10 +259,11 @@ class AR {
   }
 
   async data(txid, string = false) {
-    return await this.arweave.transactions.getData(txid, {
+    const _data = await this.arweave.transactions.getData(txid, {
       decode: true,
       string,
     })
+    return _data
   }
 }
 

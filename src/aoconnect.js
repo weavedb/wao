@@ -24,7 +24,15 @@ import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
 import AR from "./tar.js"
 
 export const connect = mem => {
-  mem ??= new ArMem()
+  const isMem = mem?.__type__ === "mem"
+  if (!isMem) {
+    let args = {}
+    if (mem?.SU_URL) {
+      args = mem
+      args.scheduler = scheduler
+    }
+    mem = new ArMem(args)
+  }
   const ar = new AR({ mem })
   const WeaveDrive = new weavedrive(ar).drive
 
@@ -92,11 +100,24 @@ export const connect = mem => {
     let mod = opt.module ?? mem.modules["aos2_0_1"]
     let _module = null
     const __dirname = await dirname()
-    const wasm =
-      mem.wasms[mod].data ??
-      readFileSync(resolve(__dirname, `lua/${mem.wasms[mod].file}.wasm`))
+    let format = null
+    let wasm = mem.wasms[mod]?.data
+    if (!wasm) {
+      if (mem.wasms[mod]?.file) {
+        wasm = readFileSync(
+          resolve(__dirname, `lua/${mem.wasms[mod].file}.wasm`),
+        )
+        format = mem.wasms[mod].format
+      } else if (mem.txs[mod]) {
+        wasm = Buffer.from(mem.txs[mod].data, "base64")
+        format = tags(mem.txs[mod].tags)["Module-Format"]
+      }
+    } else {
+      format = mem.wasms[mod].format
+    }
+    format ??= "wasm64-unknown-emscripten-draft_2024_02_15"
     const handle = await AoLoader(wasm, {
-      format: mem.wasms[mod].format,
+      format,
       mode: "test",
       WeaveDrive,
     })
@@ -118,11 +139,19 @@ export const connect = mem => {
     opt.tags ??= []
     for (let v of opt.tags) if (v.name === "Type") ex = true
     if (!ex) opt.tags.push({ name: "Type", value: "Process" })
-    const { id, owner, item } = await ar.dataitem({
+    const {
+      id,
+      owner,
+      item,
+      tags: __tags,
+    } = await ar.dataitem({
+      item: opt.item,
       data: opt.data,
       signer: opt.signer,
       tags: tags(opt.tags),
     })
+    opt.tags = buildTags(null, __tags)
+    if (opt.item) opt.data = base64url.decode(item.data)
     await ar.postItem(item, su.jwk)
     const _tags = tags(opt.tags)
     let res = null
@@ -141,7 +170,7 @@ export const connect = mem => {
       txs: [],
       opt,
     }
-    if (_tags["On-Boot"]) {
+    if (_tags["On-Boot"] || true) {
       let data = ""
       if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
       else data = mem.msgs[_tags["On-Boot"]]?.data ?? ""
@@ -240,14 +269,26 @@ export const connect = mem => {
     })
     await ar.postItem(item, su.jwk)
     try {
-      const msg = genMsg(
-        opt.message,
-        p,
-        _opt.data ?? "",
-        _opt.tags,
-        _opt.from ?? opt.from ?? owner,
-        mu.addr,
-      )
+      let data = _opt.data ?? ""
+      let _tags = _opt.tags
+      let from = _opt.from ?? opt.from ?? owner
+      if (_opt.item) {
+        try {
+          data = base64url.decode(_opt.item.data)
+          _tags = _opt.item.tags
+          if (!from) {
+            const raw_owner = _opt.item.rawOwner
+            const hashBuffer = Buffer.from(
+              await crypto.subtle.digest("SHA-256", raw_owner),
+            )
+            from = base64url.encode(hashBuffer)
+          }
+        } catch (e) {
+          console.log(e)
+        }
+      }
+      // check: is owner=mu.addr right?
+      const msg = genMsg(opt.message, p, data, _tags, from, mu.addr)
       const _env = genEnv({
         pid: p.id,
         owner: p.owner,
@@ -273,13 +314,13 @@ export const connect = mem => {
         }
       }
       for (const v of res.Spawns ?? []) {
-        const _tags = tags(v.Tags)
+        const __tags = tags(v.Tags)
         await spawn({
-          module: _tags.Module,
+          module: __tags.Module,
           scheduler,
           tags: v.Tags,
           data: v.Data,
-          from: _tags["From-Process"],
+          from: __tags["From-Process"],
           signer: mu.signer,
         })
       }
@@ -304,22 +345,27 @@ export const connect = mem => {
   const message = async opt => {
     const p = mem.env[opt.process]
     let ex = false
-    for (let v of opt.tags) if (v.name === "Type") ex = true
-    opt.tags = buildTags(
-      null,
-      mergeLeft(tags(opt.tags ?? []), {
-        "Data-Protocol": "ao",
-        Variant: "ao.TN.1",
-        Type: "Message",
-        SDK: "aoconnect",
-      }),
-    )
-    const { item, id, owner } = await ar.dataitem({
-      data: opt.data,
-      signer: opt.signer,
-      tags: tags(opt.tags),
-      target: opt.process,
-    })
+    let id = opt?.item?.id ?? ""
+    let owner = opt.owner ?? ""
+    let item = opt.item
+    if (!opt.item && opt.signer) {
+      for (let v of opt.tags) if (v.name === "Type") ex = true
+      opt.tags = buildTags(
+        null,
+        mergeLeft(tags(opt.tags ?? []), {
+          "Data-Protocol": "ao",
+          Variant: "ao.TN.1",
+          Type: "Message",
+          SDK: "aoconnect",
+        }),
+      )
+      ;({ item, id, owner } = await ar.dataitem({
+        data: opt.data,
+        signer: opt.signer,
+        tags: tags(opt.tags),
+        target: opt.process,
+      }))
+    }
     await ar.postItem(item, su.jwk)
     mem.msgs[id] = opt
     await assign({
@@ -355,6 +401,7 @@ export const connect = mem => {
     },
     spawn,
     assign,
+    ar,
     result: async opt => mem.env[opt.process].res[opt.message],
     results: async opt => {
       const p = mem.env[opt.process]
@@ -375,7 +422,11 @@ export const connect = mem => {
     },
     dryrun: async opt => {
       const p = mem.env[opt.process]
-      const { id, owner } = await ar.dataitem({ ...opt, target: opt.process })
+      let id = opt.id ?? ""
+      let owner = opt.owner ?? ""
+      if (!opt.id && opt.signer) {
+        ;({ id, owner } = await ar.dataitem({ ...opt, target: opt.process }))
+      }
       try {
         const msg = genMsg(
           id,
@@ -392,6 +443,14 @@ export const connect = mem => {
           module: p.module,
           auth: mu.addr,
         })
+        function cloneMemory(memory) {
+          const buffer = memory.buffer.slice(0) // Clone the ArrayBuffer
+          return new WebAssembly.Memory({
+            initial: memory.buffer.byteLength / 65536, // Memory size in pages (64KB per page)
+            maximum: memory.maximum || undefined,
+            shared: memory.shared || false, // Retain sharing if applicable
+          })
+        }
         const res = await p.handle(p.memory, msg, _env)
         return res
       } catch (e) {

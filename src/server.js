@@ -1,0 +1,375 @@
+import express from "express"
+import base64url from "base64url"
+import { DataItem } from "arbundles"
+import { tags } from "./utils.js"
+import { connect } from "./aoconnect.js"
+import { GQL, cu, su, mu } from "./test.js"
+import bodyParser from "body-parser"
+import { graphql, parse, validate, buildSchema } from "graphql"
+import { map } from "ramda"
+const schema = buildSchema(`
+  schema {
+    query: Query
+  }
+
+  type Query {
+    transactions(
+      ids: [ID!]
+      tags: [TagFilter!]
+      block: BlockFilter
+      after: String
+      first: Int
+    ): TransactionConnection!
+
+    block(id: ID, height: Int): Block
+  }
+
+  type TransactionConnection {
+    edges: [TransactionEdge!]!
+    pageInfo: PageInfo!
+  }
+
+  type TransactionEdge {
+    cursor: String!
+    node: Transaction!
+  }
+
+  type Transaction {
+    id: ID!
+    anchor: String
+    signature: String!
+    recipient: String
+    owner: Owner!
+    fee: Quantity!
+    quantity: Quantity!
+    data: Data!
+    tags: [Tag!]!
+    block: Block
+    parent: Transaction
+  }
+
+  type Owner {
+    address: String!
+    key: String!
+  }
+
+  type Quantity {
+    winston: String!
+    ar: String!
+  }
+
+  type Data {
+    size: String!
+    type: String
+  }
+
+  type Tag {
+    name: String!
+    value: String!
+  }
+
+  type Block {
+    id: ID!
+    timestamp: Int!
+    height: Int!
+    previous: String
+    transactions: [Transaction!]!
+    miner: String!
+    reward: String!
+    tags: [Tag!]!
+    indepHash: String!
+    nonce: String!
+  }
+
+  type PageInfo {
+    hasNextPage: Boolean!
+  }
+
+  input TagFilter {
+    name: String!
+    values: [String!]!
+  }
+
+  input BlockFilter {
+    min: Int
+    max: Int
+  }
+`)
+
+const root = {
+  transactions: ({ first }) => ({
+    edges: [],
+    pageInfo: {
+      hasNextPage: false,
+    },
+  }),
+  block: ({ id }) => ({
+    id,
+    timestamp: Date.now(),
+    height: 123456,
+    previous: "previous-block-id",
+    transactions: [],
+    miner: "example-miner",
+    reward: "1000",
+    tags: [],
+    indepHash: "example-indep-hash",
+    nonce: "000000",
+  }),
+}
+
+const mapParsed = (parsedQuery, variables) => {
+  const operation = parsedQuery.definitions[0]
+
+  if (operation.operation !== "query") {
+    throw new Error("Only 'query' operations are supported.")
+  }
+
+  const rootField = operation.selectionSet.selections[0]
+  const rootFieldName = rootField.name.value
+
+  const parseArgumentValue = argValue => {
+    if (argValue.kind === "Variable") {
+      return variables[argValue.name.value]
+    }
+
+    if (argValue.kind === "ListValue") {
+      return argValue.values.map(value => parseArgumentValue(value))
+    }
+
+    if (argValue.kind === "ObjectValue") {
+      return argValue.fields.reduce((obj, field) => {
+        obj[field.name.value] = parseArgumentValue(field.value)
+        return obj
+      }, {})
+    }
+
+    return argValue.value
+  }
+
+  const args = rootField.arguments.reduce((acc, arg) => {
+    acc[arg.name.value] = parseArgumentValue(arg.value)
+    return acc
+  }, {})
+
+  const extractFields = selectionSet => {
+    return selectionSet.selections.map(selection => {
+      const fieldName = selection.name.value
+
+      if (selection.selectionSet) {
+        return {
+          [fieldName]: extractFields(selection.selectionSet),
+        }
+      }
+      return fieldName
+    })
+  }
+
+  const fields = extractFields(rootField.selectionSet)
+
+  return { rootFieldName, args, fields }
+}
+
+class Server {
+  constructor({ ar = 4000, mu = 4002, su = 4003, cu = 4004, aoconnect } = {}) {
+    const {
+      ar: _ar,
+      message,
+      spawn,
+      dryrun,
+      result,
+      results,
+      mem,
+      monitor,
+      unmonitor,
+    } = connect(aoconnect)
+    this.monitor = monitor
+    this.unmonitor = unmonitor
+    this.spawn = spawn
+    this._ar = _ar
+    this.message = message
+    this.dryrun = dryrun
+    this.result = result
+    this.results = results
+    this.mem = mem
+    this.gql = new GQL({ mem })
+    this.ports = { ar, mu, su, cu }
+    this.servers = []
+    this.ar()
+    this.mu()
+    this.su()
+    this.cu()
+  }
+  ar() {
+    const app = express()
+    app.use(bodyParser.json({ limit: "100mb" }))
+    app.get("/tx/:id/offset", async (req, res) => {
+      res.status(500)
+      res.send(null)
+    })
+    app.get("/tx_anchor", async (req, res) => {
+      res.send(this.mem.getAnchor())
+    })
+    app.get("/mine", async (req, res) => {
+      res.json(req.params)
+    })
+    app.get("/:id", async (req, res) => {
+      const _data = await this._ar.data(req.params.id)
+      if (!_data) {
+        res.status(404)
+        res.send(null)
+      } else {
+        res.send(Buffer.from(_data, "base64"))
+      }
+    })
+    app.get("/price/:id", async (req, res) => {
+      res.send("0")
+    })
+    app.post("/graphql", async (req, res) => {
+      const { query, variables } = req.body
+      const parsedQuery = parse(query)
+      const errors = validate(schema, parsedQuery)
+      const parsed = mapParsed(parsedQuery, variables)
+      const tar = parsed.rootFieldName
+      const fields = parsed.fields[0].edges[0].node
+      const args = parsed.args
+      let res2 = null
+      if (tar === "transactions") {
+        res2 = await this.gql.txs({ ...args })
+      } else if (tar === "blocks") {
+        res2 = await this.gql.blocks()
+      }
+      const edges = map(v => ({ node: v, cursor: v.cursor }), res2)
+      res.json({ data: { transactions: { edges } } })
+    })
+
+    let data = {}
+    app.post("/:id", async (req, res) => {
+      if (req.body.chunk) {
+        if (data[req.body.data_root]) {
+          data[req.body.data_root].data += req.body.chunk
+          const buf = Buffer.from(req.body.chunk, "base64")
+          if (!data[req.body.data_root].chunks) {
+            data[req.body.data_root].chunks = buf
+          } else {
+            data[req.body.data_root].chunks = Buffer.concat([
+              data[req.body.data_root].chunks,
+              buf,
+            ])
+          }
+          delete req.body.chunk
+          if (
+            data[req.body.data_root].data_size <=
+            data[req.body.data_root].chunks.length
+          ) {
+            data[req.body.data_root].data =
+              data[req.body.data_root].chunks.toString("base64")
+            await this._ar.postTx(data[req.body.data_root])
+            delete data[req.body.data_root]
+          }
+        }
+        res.json({ id: req.body.id })
+      } else {
+        if (req.body.data_root && req.body.data === "") {
+          data[req.body.data_root] = req.body
+        } else {
+          await this._ar.postTx(req.body)
+        }
+        res.json({ id: req.body.id })
+      }
+    })
+    app.post("/tx", async (req, res) => {
+      await this._ar.postTx(req.body)
+      res.json({ id: req.body.id })
+    })
+    const server = app.listen(this.ports.ar, () => {
+      console.log(`AR on port ${this.ports.ar}`)
+    })
+    this.servers.push(server)
+  }
+  mu() {
+    const app = express()
+    app.use(express.raw({ type: "*/*" }))
+    app.get("/", (req, res) => res.send("ao messenger unit"))
+    app.post("/monitor/:id", async (req, res) => {
+      await this.monitor({ process: req.params.id })
+      res.json({ id: req.params.id, messag: "cron monitored!" })
+    })
+    app.delete("/monitor/:id", async (req, res) => {
+      await this.unmonitor({ process: req.params.id })
+      res.json({ id: req.params.id, message: "cron deleted!" })
+    })
+    app.post("/", async (req, res) => {
+      const binary = req.body
+      let valid = await DataItem.verify(binary)
+      let type = null
+      let item = null
+      if (valid) item = new DataItem(binary)
+      const _tags = tags(item.tags)
+      let err = null
+      if (_tags.Type === "Process") {
+        await this.spawn({
+          item,
+          module: _tags.Module,
+          scheduler: _tags.Scheduler,
+        })
+      } else if (_tags.Type === "Message") {
+        await this.message({ item, process: item.target })
+      } else {
+        err = true
+      }
+      if (err) res.status(500)
+      res.send({ id: item.id })
+    })
+    const server = app.listen(this.ports.mu, () =>
+      console.log(`MU on port ${this.ports.mu}`),
+    )
+    this.servers.push(server)
+  }
+  su() {
+    const app = express()
+    app.use(bodyParser.json())
+    app.get("/", (req, res) => res.json({ timestamp: Date.now() }))
+    const server = app.listen(this.ports.su, () =>
+      console.log(`SU on port ${this.ports.su}`),
+    )
+    this.servers.push(server)
+  }
+  cu() {
+    const app = express()
+    app.use(bodyParser.json())
+    app.get("/", (req, res) => res.json({ timestamp: Date.now() }))
+    app.get("/result/:mid", async (req, res) => {
+      const res2 = await this.result({
+        message: req.params.mid,
+        process: req.query["process-id"],
+      })
+      res.json(res2)
+    })
+    app.post("/dry-run", async (req, res) => {
+      const process = req.query["process-id"]
+      const { Id: id, Owner: owner, Tags: tags, Data: data } = req.body
+      const res2 = await this.dryrun({ id, owner, tags, data, process })
+      delete res2.Memory
+      res.json(res2)
+    })
+    const server = app.listen(this.ports.cu, () =>
+      console.log(`CU on port ${this.ports.cu}`),
+    )
+    this.servers.push(server)
+  }
+  end() {
+    return new Promise(res => {
+      let count = 0
+      for (const v of this.servers)
+        v.close(() => {
+          count += 1
+          if (count >= 4) {
+            console.log("servers closed!", count)
+            res()
+          }
+        })
+    })
+  }
+}
+
+export default Server
