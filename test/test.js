@@ -1,7 +1,8 @@
 import assert from "assert"
 import { resolve } from "path"
-import { describe, it, before, beforeEach } from "node:test"
+import { afterEach, after, describe, it, before, beforeEach } from "node:test"
 import { blueprint, mu, AO, connect, acc, scheduler } from "../src/test.js"
+import Server from "../src/server.js"
 import MAO from "../src/ao.js"
 import AR from "../src/ar.js"
 import GQL from "../src/gql.js"
@@ -125,7 +126,7 @@ describe("GraphQL", () => {
       after: txs[0].cursor,
       first: 1,
       fields: ["id", { owner: { key: false } }, { tags: ["value"] }],
-      block: [0, 3],
+      block: [0, 4],
     })
     assert.equal(txs2.data[0].tags[0].value, "2")
     const txs3 = await txs2.next()
@@ -135,12 +136,12 @@ describe("GraphQL", () => {
       asc: true,
       fields: { id: true, previous: true, height: true },
     })
-    assert.equal(blocks[0].height, 1)
+    assert.equal(blocks[0].height, 0)
   })
 })
 
 describe("Aoconnect", () => {
-  it.skip("should work with pre-loaded packages", async () => {
+  it("should work with pre-loaded packages", async () => {
     const mem = new ArMem()
     const ar = new AR({ port: 4000, mem })
     await ar.post({ data: "abc", tags: { test: 3 }, jwk })
@@ -170,13 +171,34 @@ describe("Aoconnect", () => {
 })
 
 describe("SDK", function () {
-  let ao
-  beforeEach(async () => (ao = await new AO().init(acc[0])))
+  let ao, server, mem
+  before(async () => {
+    const aoconnect = {
+      MU_URL: "http://localhost:5002",
+      CU_URL: "http://localhost:5004",
+      SU_URL: "http://localhost:5003",
+      GATEWAY_URL: "http://localhost:5000",
+    }
+    ao = await new AO().init(acc[0])
+    mem = ao.mem
+    ao = await new MAO({ ar: { port: 5000 }, aoconnect }).init(acc[0])
+    server = new Server({
+      ar: 5000,
+      mu: 5002,
+      su: 5003,
+      cu: 5004,
+      aoconnect,
+    })
+    mem = server.mem
+  })
+  after(async () => {
+    if (server) await server.end()
+  })
 
   it("should publish custom modules", async () => {
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
     const data = src.data("aos2_0_1", "wasm")
-    const modid = await ao.postModule({ data, jwk })
+    const { id: modid } = await ao.postModule({ data, jwk })
     const { p } = await ao.deploy({ src_data, module: modid })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
@@ -186,7 +208,7 @@ describe("SDK", function () {
   })
 
   it("should spawn a process with On-Boot tag", async () => {
-    const { p, pid } = await ao.deploy({ boot: true, src_data })
+    const { err, p, pid } = await ao.deploy({ boot: true, src_data })
     assert.equal(await p.d("Hello"), "Hello, World!")
     const { p: p2 } = await ao.deploy({ boot: pid })
     assert.equal(await p2.d("Hello"), "Hello, World!")
@@ -199,12 +221,12 @@ describe("SDK", function () {
 
   it("should spawn a process from a handler", async () => {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data3 })
-    await p.m(
+    await p.msg(
       "Hello3",
-      { module: ao.ar.mem.modules.aos2_0_1, auth: mu.addr },
+      { module: mem.modules.aos2_0_1, auth: mu.addr },
       { data: src_data },
     )
-    const prs = ao.ar.mem.env
+    const prs = mem.env
     let p2 = null
     for (let k in prs) {
       if (tags(prs[k].opt.tags)["From-Process"] === pid) p2 = ao.p(k)
@@ -223,7 +245,7 @@ describe("SDK", function () {
     assert.equal(await p2.d("Get", { get: false }), "3")
   })
 
-  it.only("should work with pre-loaded packages", async () => {
+  it("should work with pre-loaded packages", async () => {
     const { p } = await ao.deploy({ src_data: src_data5 })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
@@ -253,7 +275,7 @@ describe("SDK", function () {
       tags: { one: "1" },
       jwk,
     })
-    assert.equal(ao.ar.data(id), "Hello, World!")
+    assert.equal(await ao.ar.data(id, true), "Hello, World!")
   })
 
   it("should monitor crons", async done => {

@@ -80,7 +80,6 @@ export default class GQL {
     let ids = null
     if (is(Array, opt.ids)) ids = opt.ids
     else if (is(String, opt.id)) ids = [opt.id]
-
     let data = []
     let blocks = this.mem.blocks
     if (opt.asc !== true) blocks = reverse(blocks)
