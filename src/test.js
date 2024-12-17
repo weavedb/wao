@@ -8,12 +8,15 @@ import GQL from "./tgql.js"
 import ArMem from "./armem.js"
 import { dirname } from "./utils.js"
 import { Src, setup, ok, fail } from "./helpers.js"
+import Server from "./server.js"
+
 const blueprint = async pkg => {
   return readFileSync(resolve(await dirname(), `lua/${pkg}.lua`), "utf8")
 }
-const scheduler = "GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
+const scheduler = "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
 
 export {
+  Server,
   GQL,
   ArMem,
   AO,

@@ -77,7 +77,7 @@ class AO extends MAO {
     this.message = message
     this.spawn = async (...opt) => {
       const res = await spawn(...opt)
-      await this.load({ data: log, pid: res })
+      //await this.load({ data: log, pid: res })
       return res
     }
     this.dryrun = async (...opt) => {
@@ -117,7 +117,7 @@ class AO extends MAO {
     const { id, owner } = await this.ar.dataitem({ tags: _tags, data, signer })
     await this.ar.post({ data, tags: t, jwk })
     this.mem.wasms[id] = { data, format: t["Module-Format"] }
-    return id
+    return { id }
   }
 }
 
