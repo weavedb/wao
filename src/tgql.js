@@ -98,6 +98,7 @@ export default class GQL {
         }
         if (!isNil(opt.after) && count === 0 && !after) continue
         let tx = this.mem.txs[v2]
+
         if (!isNil(ids) && ids.length > 0) {
           if (!includes(tx.id, ids)) continue
         }
