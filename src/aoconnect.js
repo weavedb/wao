@@ -116,11 +116,13 @@ export const connect = mem => {
       format = mem.wasms[mod].format
     }
     format ??= "wasm64-unknown-emscripten-draft_2024_02_15"
+    const now = Date.now
     const handle = await AoLoader(wasm, {
       format,
       mode: "test",
       WeaveDrive,
     })
+    Date.now = now
     _module = { handle, id: mod }
     if (!mod) throw Error("module not found")
     opt.tags = buildTags(
@@ -241,6 +243,7 @@ export const connect = mem => {
 
   const assign = async opt => {
     const p = mem.env[opt.process]
+    if (!p) return null
     let _opt = mem.msgs[opt.message]
     let hash = genHashChain(p.hash, opt.message)
     p.hash = hash
@@ -300,7 +303,7 @@ export const connect = mem => {
       delete res.Memory
       p.res[opt.message] = res
       p.results.push(opt.message)
-      p.txs.unshift({ id: opt.message, ...opt })
+      p.txs.unshift({ id, ...opt })
       mem.msgs[opt.message] = _opt
       for (const v of res.Messages ?? []) {
         if (mem.env[v.Target]) {
@@ -344,6 +347,7 @@ export const connect = mem => {
 
   const message = async opt => {
     const p = mem.env[opt.process]
+    if (!p) return null
     let ex = false
     let id = opt?.item?.id ?? ""
     let owner = opt.owner ?? ""
@@ -422,6 +426,7 @@ export const connect = mem => {
     },
     dryrun: async opt => {
       const p = mem.env[opt.process]
+      if (!p) return null
       let id = opt.id ?? ""
       let owner = opt.owner ?? ""
       if (!opt.id && opt.signer) {

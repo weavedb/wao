@@ -20,7 +20,7 @@ export class Src {
   constructor({ ar, dir } = {}) {
     this.ar = ar
     this.dir = dir
-    if (!dir) dirname().then(v => (this.dir = v))
+    if (!dir) dirname().then(v => (this.dir = resolve(v, "lua")))
   }
   data(file, ext = "lua") {
     return readFileSync(

@@ -393,9 +393,7 @@ class AO {
         }
         if (ex) return txs
         if (this.in_memory) await wait(1)
-        return Date.now() - start < (this.local ? timeout / 1000 : timeout)
-          ? await getRef(ref)
-          : []
+        return Date.now() - start < timeout ? await getRef(ref) : []
       }
 
       let [cache, checks, isOK] = [[], [], false]

@@ -37,11 +37,8 @@ describe("SDK", function () {
       cu: 5004,
       aoconnect,
     })
-    let ao = new AO({
-      ar: { port: 5000 },
-      aoconnect,
-    })
 
+    let ao = new AO({ ar: { port: 5000 }, aoconnect })
     /*
     let ao2 = new AO({
       ar: { port: 4000 },
@@ -79,6 +76,10 @@ describe("SDK", function () {
     console.log("#1", await p2.d("Hello"))
     console.log("#2", await p2.m("Hello"))
     console.log("#3", await p2.d("Hello"))
+    const txs = await fetch(`http://localhost:5003/${pid2}`).then(v => v.json())
+    for (let v of txs.edges) {
+      console.log(v.node.message.tags)
+    }
     return
   })
 })
