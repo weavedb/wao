@@ -182,6 +182,7 @@ describe("SDK", function () {
     ao = await new AO().init(acc[0])
     mem = ao.mem
     ao = await new MAO({ ar: { port: 5000 }, aoconnect }).init(acc[0])
+    /*
     server = new Server({
       ar: 5000,
       mu: 5002,
@@ -190,6 +191,7 @@ describe("SDK", function () {
       aoconnect,
     })
     mem = server.mem
+    */
   })
   after(async () => {
     if (server) await server.end()
