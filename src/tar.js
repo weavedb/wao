@@ -39,7 +39,7 @@ class AR extends MAR {
     let _tags = buildTags(null, tags)
     for (const v of _tags) tx.addTag(v.name, v.value)
     const owner = await this.arweave.wallets.jwkToAddress(jwk)
-    this.mem.addrmap[owner] = jwk.n
+    this.mem.addrmap[owner] = { address: owner, key: jwk.n }
     return await this.postTx(tx, jwk, {
       recipient: "",
       tags: _tags,
@@ -63,7 +63,7 @@ class AR extends MAR {
       await crypto.subtle.digest("SHA-256", rowner),
     )
     const owner = base64url.encode(hashBuffer)
-    this.mem.addrmap[owner] = di.owner
+    this.mem.addrmap[owner] = { key: di.owner, address: owner }
     let data = di.data
     try {
       data = base64url.decode(di.data)
@@ -123,6 +123,7 @@ class AR extends MAR {
         })
       }
       tx.tags = _tags
+      tx.owner = await this.arweave.wallets.jwkToAddress({ n: tx.owner })
       this.mem.txs[tx.id] = tx
       block.txs = [tx.id]
       this.mem.txs[tx.id].block = block.id
@@ -132,7 +133,7 @@ class AR extends MAR {
 
     if (jwk) {
       const owner = await this.arweave.wallets.jwkToAddress(jwk)
-      this.mem.addrmap[owner] = jwk.n
+      this.mem.addrmap[owner] = { address: owner, key: jwk.n }
     }
     res = { id: tx.id, status: 200, statusText: "200" }
     return { res, err, id: tx.id }
@@ -145,7 +146,13 @@ class AR extends MAR {
   async data(id, string) {
     let tx = this.mem.txs[id]
     let _data = this.mem.txs[id]?.data ?? null
-    if (tx.format === 2 && _data && string) _data = base64url.decode(_data)
+    try {
+      JSON.parse(_data)
+      _data = Buffer.from(_data).toString("base64")
+    } catch (e) {}
+    if (tx.format === 2 && _data && string) {
+      _data = base64url.decode(_data)
+    }
     return _data
   }
 }
