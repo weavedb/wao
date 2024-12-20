@@ -8,6 +8,7 @@ const subs = {
   tags: ["name", "value"],
   block: ["id", "timestamp", "height", "previous"],
   parent: ["id"],
+  bundledIn: ["id"],
 }
 const field = (key, val = true) => {
   if (includes(key, ["id", "anchor", "signature", "recipient"])) {
@@ -60,7 +61,7 @@ export default class GQL {
       if (!isNil(opt.block[0])) _block.min = opt.block[0]
       if (!isNil(opt.block[1])) _block.max = opt.block[1]
     }
-    let first = opt.first ?? 20
+    let first = opt.first ?? 10
     let tags = []
     for (const k in opt.tags ?? {}) {
       if (is(String, opt.tags[k])) {
@@ -132,8 +133,8 @@ export default class GQL {
           anchor: tx.anchor ?? "",
           signature: tx.signature ?? "",
           owner: { address: tx.owner, key: this.mem.addrmap[tx.owner] },
-          fee: { ar: "0", winston: "0" },
-          quantity: { ar: "0", winston: "0" },
+          fee: { ar: "0.000000000000", winston: "0" },
+          quantity: { ar: "0.000000000000", winston: "0" },
           data: { size: "0", type: "" },
         }
         if (!isNil(opt.fields)) {
