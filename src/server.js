@@ -270,11 +270,22 @@ class Server {
         let fields = null
         for (const v of parsed.fields) {
           if (v.edges) {
-            fields = v.edges[0].node
-            break
+            for (const v2 of v.edges) {
+              if (v2.node) {
+                fields = v2.node
+                break
+              }
+            }
           }
         }
         const args = parsed.args
+        if (args.block) {
+          for (const k in args.block) args.block[k] *= 1
+        }
+        if (args.first) args.first *= 1
+        if (fields) args.fields = fields
+        if (args.sort && args.sort === "HEIGHT_ASC") args.asc = true
+        delete args.sort
         if (args.tags) {
           let _tags = {}
           for (const v of args.tags) _tags[v.name] = v.values
@@ -291,6 +302,7 @@ class Server {
           data: { transactions: { pageInfo: { hasNextPage: true }, edges } },
         })
       } catch (e) {
+        console.log(e)
         res.status(400)
         res.json({ error: "bad request" })
       }
