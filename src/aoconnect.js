@@ -23,7 +23,7 @@ import { scheduler, mu, su, cu, acc } from "./test.js"
 import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
 import AR from "./tar.js"
 
-export const connect = mem => {
+export const connect = (mem, log = false) => {
   const isMem = mem?.__type__ === "mem"
   if (!isMem) {
     let args = {}
@@ -33,7 +33,7 @@ export const connect = mem => {
     }
     mem = new ArMem(args)
   }
-  const ar = new AR({ mem })
+  const ar = new AR({ mem, log })
   const WeaveDrive = new weavedrive(ar).drive
 
   const transform = input => {
