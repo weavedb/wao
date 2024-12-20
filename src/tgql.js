@@ -60,6 +60,9 @@ export default class GQL {
       _block = {}
       if (!isNil(opt.block[0])) _block.min = opt.block[0]
       if (!isNil(opt.block[1])) _block.max = opt.block[1]
+    } else if (is(Object, opt.block)) {
+      if (!isNil(opt.block.min)) _block.min = opt.block.min
+      if (!isNil(opt.block.max)) _block.max = opt.block.max
     }
     let first = opt.first ?? 10
     let tags = []
@@ -127,8 +130,12 @@ export default class GQL {
         if (tag_unmatch) continue
         let _tx = {
           cursor: tx.id,
-          ...tx,
+          id: tx.id,
+          recipient: tx.recipient ?? "",
           data: tx._data,
+          tags: tx.tags,
+          parent: tx.parent ?? { id: "" },
+          bundledIn: tx.bundledIn ?? { id: "" },
           block: pick(["id", "timestamp", "height", "previous"], block),
           anchor: tx.anchor ?? "",
           signature: tx.signature ?? "",
