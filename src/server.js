@@ -203,7 +203,14 @@ const mapParsed = (parsedQuery, variables) => {
 }
 
 class Server {
-  constructor({ ar = 4000, mu = 4002, su = 4003, cu = 4004, aoconnect } = {}) {
+  constructor({
+    ar = 4000,
+    mu = 4002,
+    su = 4003,
+    cu = 4004,
+    aoconnect,
+    log = false,
+  } = {}) {
     const {
       ar: _ar,
       message,
@@ -214,7 +221,7 @@ class Server {
       mem,
       monitor,
       unmonitor,
-    } = connect(aoconnect)
+    } = connect(aoconnect, log)
     this.monitor = monitor
     this.unmonitor = unmonitor
     this.spawn = spawn
