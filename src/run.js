@@ -2,6 +2,6 @@
 
 import Server from "./server.js"
 
-const main = async () => new Server()
+const main = async () => new Server({ log: true })
 
 main()

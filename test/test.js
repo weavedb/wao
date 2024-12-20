@@ -277,7 +277,6 @@ describe("SDK", function () {
       tags: { one: "1" },
       jwk,
     })
-    console.log(await ao.ar.data(id))
     assert.equal(await ao.ar.data(id, true), "Hello, World!")
   })
 

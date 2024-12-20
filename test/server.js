@@ -36,6 +36,7 @@ describe("SDK", function () {
       su: 5003,
       cu: 5004,
       aoconnect,
+      log: true,
     })
 
     let ao = new AO({ ar: { port: 5000 }, aoconnect })
