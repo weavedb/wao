@@ -22,6 +22,13 @@ export class Src {
     this.dir = dir
     if (!dir) dirname().then(v => (this.dir = resolve(v, "lua")))
   }
+  async init(dir) {
+    if (!this.dir) {
+      dir ??= await dirname()
+      this.dir = resolve(dir, "lua")
+    }
+    return this
+  }
   data(file, ext = "lua") {
     return readFileSync(
       `${this.dir}/${file}.${ext}`,
@@ -31,6 +38,47 @@ export class Src {
   async upload(file, ext = "lua") {
     const res = await this.ar.post({ data: this.data(file, ext) })
     return res.err ? null : res.id
+  }
+}
+
+export class Testnet {
+  constructor({ port = 4000, arweave, aoconnect, docker = false } = {}) {
+    this.docker = docker
+    this.arweave = arweave ?? { port }
+    this.aoconnect = aoconnect ?? {
+      MU_URL: `http://localhost:${port + 2}`,
+      SU_URL: `http://localhost:${port + 3}`,
+      CU_URL: `http://localhost:${port + 4}`,
+      GATEWAY_URL: `http://localhost:${port}`,
+    }
+    this.ar = new AR(this.arweave)
+  }
+  async init(jwk) {
+    this.authority = (
+      await fetch(this.aoconnect.SU_URL).then(r => r.json())
+    ).address
+    this.src = await new Src({ ar: this.ar }).init()
+    await this.ar.init(jwk)
+    this.jwk = this.ar.jwk
+    this.addr = this.ar.a
+    this.gql = this.ar.gql
+    this.module_src = await this.src.upload("aos2_0_1", "wasm")
+    this.ao = await new AO({
+      ar: this.ar,
+      aoconnect: this.aoconnect,
+      authority: this.authority,
+    }).init(this.ar.jwk)
+    const { id } = await this.ao.postModule({
+      data: await this.ar.data(this.module_src),
+      overwrite: true,
+    })
+    this.module = id
+    const { scheduler } = await this.ao.postScheduler({
+      url: this.docker ? "http://su" : this.aoconnect.SU_URL,
+      overwrite: true,
+    })
+    this.scheduler = scheduler
+    return this
   }
 }
 
@@ -61,7 +109,7 @@ export const setup = async ({
 
   if (opt) {
     const ar = await new AR(opt.ar).init(opt.jwk)
-    const src = new Src({ ar, readFileSync, dir })
+    const src = new Src({ ar, dir })
     const ao = await new AO(opt.ao).init(opt.jwk)
     const ao2 = await new AO(opt.ao2).init(opt.jwk)
     console.log("cache:\t", optPath)
@@ -78,7 +126,7 @@ export const setup = async ({
   }
   const ar = new AR(arweave)
   await ar.gen("10")
-  const src = new Src({ ar, readFileSync, dir })
+  const src = new Src({ ar, dir })
   opt = { ar: { ...arweave }, jwk: ar.jwk }
   if (!auth && /localhost/.test(aoconnect?.CU_URL ?? "")) {
     auth = (await fetch(aoconnect.CU_URL).then(r => r.json())).address

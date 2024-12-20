@@ -3,11 +3,12 @@ import { buildTags, tags as t } from "./utils.js"
 import * as WarpArBundles from "warp-arbundles"
 const pkg = WarpArBundles.default ?? WarpArBundles
 const { DataItem } = pkg
+import { bundleAndSignData, ArweaveSigner } from "arbundles"
 
 import base64url from "base64url"
 import ArMem from "./armem.js"
 import GQL from "./tgql.js"
-import { last } from "ramda"
+import { last, is } from "ramda"
 class AR extends MAR {
   constructor(opt = {}) {
     super({ ...opt, in_memory: true })
@@ -16,7 +17,13 @@ class AR extends MAR {
     this.gql = new GQL({ mem: this.mem })
     this.arweave = this.mem.arweave
   }
-
+  async owner(di) {
+    const raw_owner = di.rawOwner
+    const hashBuffer = Buffer.from(
+      await crypto.subtle.digest("SHA-256", raw_owner),
+    )
+    return base64url.encode(hashBuffer)
+  }
   async dataitem({ target = "", data = "1984", tags = {}, signer, item }) {
     let di = item
     if (!di) {
@@ -26,11 +33,7 @@ class AR extends MAR {
     } else {
       tags = t(di.tags)
     }
-    const raw_owner = di.rawOwner
-    const hashBuffer = Buffer.from(
-      await crypto.subtle.digest("SHA-256", raw_owner),
-    )
-    const owner = base64url.encode(hashBuffer)
+    const owner = await this.owner(di)
     return { id: await di.id, owner, item: di, tags }
   }
 
@@ -48,42 +51,47 @@ class AR extends MAR {
     })
   }
 
-  async postItem(di, jwk) {
+  async postItems(items, jwk) {
+    if (!is(Array, items)) items = [items]
+
+    let _items = []
+    for (const di of items) {
+      di._id = await di.id
+      const data_size = Buffer.byteLength(di.rawData).toString()
+      let data_type = ""
+      for (const t of di.tags)
+        if (t.name === "Content-Type") data_type = t.value
+      const owner = await this.owner(di)
+      this.mem.addrmap[owner] = { key: di.owner, address: owner }
+      let data = di.data
+      try {
+        data = base64url.decode(di.data)
+      } catch (e) {}
+      let _item = {
+        _data: { size: data_size, type: data_type },
+        anchor: di.anchor,
+        signature: di.signature,
+        recipient: di.target,
+        id: await di.id,
+        item: di,
+        owner,
+        tags: di.tags,
+        data,
+      }
+      this.mem.txs[await di.id] = _item
+      _items.push(_item)
+    }
+    const bundle = await bundleAndSignData(items, new ArweaveSigner(jwk))
     const tx = await this.mem.arweave.createTransaction(
-      { data: di.binary },
+      { data: bundle.binary },
       jwk,
     )
     tx.addTag("Bundle-Format", "binary")
     tx.addTag("Bundle-Version", "2.0.0")
-    const data_size = Buffer.byteLength(di.rawData).toString()
-    let data_type = ""
-    for (const t of di.tags) if (t.name === "Content-Type") data_type = t.value
-    const rowner = di.rawOwner
-    const hashBuffer = Buffer.from(
-      await crypto.subtle.digest("SHA-256", rowner),
-    )
-    const owner = base64url.encode(hashBuffer)
-    this.mem.addrmap[owner] = { key: di.owner, address: owner }
-    let data = di.data
-    try {
-      data = base64url.decode(di.data)
-    } catch (e) {}
-    let _item = {
-      _data: { size: data_size, type: data_type },
-      anchor: di.anchor,
-      signature: di.signature,
-      recipient: di.target,
-      id: await di.id,
-      item: di,
-      owner,
-      tags: di.tags,
-      data,
-    }
-    this.mem.txs[await di.id] = _item
-    return await this.postTx(tx, jwk, _item)
+    return await this.postTx(tx, jwk, _items)
   }
 
-  async postTx(tx, jwk, item) {
+  async postTx(tx, jwk, items = []) {
     let [res, err] = [null, null]
     if (!tx.id) await this.mem.arweave.transactions.sign(tx, jwk)
     this.mem.height += 1
@@ -92,42 +100,36 @@ class AR extends MAR {
       timestamp: Date.now(),
       height: this.mem.height,
       previous: last(this.mem.blocks) ?? "",
+      txs: [],
     }
-    if (item) {
-      if (!item.id) {
-        item.id = tx.id
-        this.mem.txs[tx.id] = item
-        this.mem.txs[tx.id].parent = null
-        this.mem.txs[tx.id].signature = tx.signature
-        this.mem.txs[tx.id].anchor = tx.last_tx
+    if (items) {
+      for (const item of items) {
+        this.mem.txs[item.id] = item
+        this.mem.txs[item.id].parent = { id: tx.id }
+        this.mem.txs[item.id].bundledIn = { id: tx.id }
+        this.mem.txs[item.id].anchor = ""
         let data_type = ""
-        for (const v of tx.tags) {
-          if (
-            v.get("name", { decode: true, string: true }) === "Content-Type"
-          ) {
-            data_type = v.get("value", { decode: true, string: true })
-          }
+        for (const v of item.item.tags) {
+          if (v.name === "Content-Type") data_type = v.value
         }
-        this.mem.txs[tx.id]._data = { size: tx.data_size, type: data_type }
-      } else {
-        this.mem.txs[item.id].parent = { id: block.id }
+        //this.mem.txs[tx.id]._data = { size: tx.data_size, type: data_type }
+        block.txs.push(item.id)
+        this.mem.txs[item.id].block = block.id
       }
-      block.txs = [item.id]
-      this.mem.txs[item.id].block = block.id
-    } else {
-      let _tags = []
-      for (const v of tx.tags) {
-        _tags.push({
-          name: base64url.decode(v.name),
-          value: base64url.decode(v.value),
-        })
-      }
-      tx.tags = _tags
-      tx.owner = await this.arweave.wallets.jwkToAddress({ n: tx.owner })
-      this.mem.txs[tx.id] = tx
-      block.txs = [tx.id]
-      this.mem.txs[tx.id].block = block.id
     }
+
+    let _tags = []
+    for (const v of tx.tags) {
+      _tags.push({
+        name: base64url.decode(v.name),
+        value: base64url.decode(v.value),
+      })
+    }
+    tx.tags = _tags
+    tx.owner = await this.arweave.wallets.jwkToAddress({ n: tx.owner })
+    this.mem.txs[tx.id] = tx
+    block.txs.push(tx.id)
+    this.mem.txs[tx.id].block = block.id
     this.mem.blocks.push(block.id)
     this.mem.blockmap[block.id] = block
 

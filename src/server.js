@@ -8,93 +8,125 @@ import { GQL, cu, su, mu } from "./test.js"
 import bodyParser from "body-parser"
 import { graphql, parse, validate, buildSchema } from "graphql"
 import { keys, map, reverse } from "ramda"
+
 const schema = buildSchema(`
-  schema {
-    query: Query
-  }
+type Query {
+  transaction(id: ID!): Transaction
+  transactions(
+    ids: [ID!]
+    owners: [String!]
+    recipients: [String!]
+    tags: [TagFilter!]
+    bundledIn: [ID!]
+    block: BlockFilter
+    first: Int = 10
+    after: String
+    sort: SortOrder = HEIGHT_DESC
+  ): TransactionConnection!
+  block(id: String): Block
+  blocks(
+    ids: [ID!]
+    height: BlockFilter
+    first: Int = 10
+    after: String
+    sort: SortOrder = HEIGHT_DESC
+  ): BlockConnection!
+}
 
-  type Query {
-    transactions(
-      ids: [ID!]
-      tags: [TagFilter!]
-      block: BlockFilter
-      after: String
-      first: Int
-    ): TransactionConnection!
+enum SortOrder {
+  HEIGHT_ASC
+  HEIGHT_DESC
+}
 
-    block(id: ID, height: Int): Block
-  }
+input TagFilter {
+  name: String!
+  values: [String!]!
+  op: TagOperator = EQ
+}
 
-  type TransactionConnection {
-    edges: [TransactionEdge!]!
-    pageInfo: PageInfo!
-  }
+input BlockFilter {
+  min: Int
+  max: Int
+}
 
-  type TransactionEdge {
-    cursor: String!
-    node: Transaction!
-  }
+type BlockConnection {
+  pageInfo: PageInfo!
+  edges: [BlockEdge!]!
+}
 
-  type Transaction {
-    id: ID!
-    anchor: String
-    signature: String!
-    recipient: String
-    owner: Owner!
-    fee: Quantity!
-    quantity: Quantity!
-    data: Data!
-    tags: [Tag!]!
-    block: Block
-    parent: Transaction
-  }
+type BlockEdge {
+  cursor: String!
+  node: Block!
+}
 
-  type Owner {
-    address: String!
-    key: String!
-  }
+type TransactionConnection {
+  pageInfo: PageInfo!
+  edges: [TransactionEdge!]!
+}
 
-  type Quantity {
-    winston: String!
-    ar: String!
-  }
+type TransactionEdge {
+  cursor: String!
+  node: Transaction!
+}
 
-  type Data {
-    size: String!
-    type: String
-  }
+type PageInfo {
+  hasNextPage: Boolean!
+}
 
-  type Tag {
-    name: String!
-    value: String!
-  }
+type Transaction {
+  id: ID!
+  anchor: String!
+  signature: String!
+  recipient: String!
+  owner: Owner!
+  fee: Amount!
+  quantity: Amount!
+  data: MetaData!
+  tags: [Tag!]!
+  block: Block
+  parent: Parent @deprecated(reason: "Use \`bundledIn\`")
+  bundledIn: Bundle
+}
 
-  type Block {
-    id: ID!
-    timestamp: Int!
-    height: Int!
-    previous: String
-    transactions: [Transaction!]!
-    miner: String!
-    reward: String!
-    tags: [Tag!]!
-    indepHash: String!
-    nonce: String!
-  }
+type Parent {
+  id: ID!
+}
 
-  type PageInfo {
-    hasNextPage: Boolean!
-  }
+type Bundle {
+  id: ID!
+}
 
-  input TagFilter {
-    name: String!
-    values: [String!]!
-  }
+type Block {
+  id: ID!
+  timestamp: Int!
+  height: Int!
+  previous: ID!
+}
 
-  input BlockFilter {
-    min: Int
-    max: Int
-  }
+type MetaData {
+  size: String!
+  type: String
+}
+
+type Amount {
+  winston: String!
+  ar: String!
+}
+
+type Owner {
+  address: String!
+  key: String!
+}
+
+type Tag {
+  name: String!
+  value: String!
+}
+
+enum TagOperator {
+  EQ
+  NEQ
+}
 `)
 
 const root = {
@@ -207,7 +239,7 @@ class Server {
     app.get("/wallet/:id/balance", (req, res) => res.send("0"))
     app.get("/mint/:id/:amount", (req, res) => res.json({ id: "0" }))
     app.get("/tx/:id/offset", async (req, res) => {
-      res.status(500)
+      res.status(400)
       res.send(null)
     })
     app.get("/tx_anchor", async (req, res) => {
@@ -229,26 +261,39 @@ class Server {
       res.send("0")
     })
     app.post("/graphql", async (req, res) => {
-      const { query, variables } = req.body
-      const parsedQuery = parse(query)
-      const errors = validate(schema, parsedQuery)
-      const parsed = mapParsed(parsedQuery, variables)
-      const tar = parsed.rootFieldName
-      const fields = parsed.fields[0].edges[0].node
-      const args = parsed.args
-      if (args.tags) {
-        let _tags = {}
-        for (const v of args.tags) _tags[v.name] = v.values
-        args.tags = _tags
+      try {
+        const { query, variables } = req.body
+        const parsedQuery = parse(query)
+        const errors = validate(schema, parsedQuery)
+        const parsed = mapParsed(parsedQuery, variables)
+        const tar = parsed.rootFieldName
+        let fields = null
+        for (const v of parsed.fields) {
+          if (v.edges) {
+            fields = v.edges[0].node
+            break
+          }
+        }
+        const args = parsed.args
+        if (args.tags) {
+          let _tags = {}
+          for (const v of args.tags) _tags[v.name] = v.values
+          args.tags = _tags
+        }
+        let res2 = null
+        if (tar === "transactions") {
+          res2 = await this.gql.txs({ ...args })
+        } else if (tar === "blocks") {
+          res2 = await this.gql.blocks({ ...args })
+        }
+        const edges = map(v => ({ node: v, cursor: v.cursor }), res2)
+        res.json({
+          data: { transactions: { pageInfo: { hasNextPage: true }, edges } },
+        })
+      } catch (e) {
+        res.status(400)
+        res.json({ error: "bad request" })
       }
-      let res2 = null
-      if (tar === "transactions") {
-        res2 = await this.gql.txs({ ...args })
-      } else if (tar === "blocks") {
-        res2 = await this.gql.blocks()
-      }
-      const edges = map(v => ({ node: v, cursor: v.cursor }), res2)
-      res.json({ data: { transactions: { edges } } })
     })
     let data = {}
     app.post("/:id", async (req, res) => {
@@ -325,7 +370,7 @@ class Server {
         err = true
       }
       if (err) {
-        res.status(500)
+        res.status(400)
         res.send({ err })
       } else {
         res.send({ id: item.id })
@@ -407,7 +452,7 @@ class Server {
       const { Id: id, Owner: owner, Tags: tags, Data: data } = req.body
       const res2 = await this.dryrun({ id, owner, tags, data, process })
       if (!res2) {
-        res.status(500)
+        res.status(400)
         res.json({ err: true })
       } else {
         delete res2.Memory

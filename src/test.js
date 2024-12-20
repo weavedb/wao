@@ -7,7 +7,7 @@ import AR from "./tar.js"
 import GQL from "./tgql.js"
 import ArMem from "./armem.js"
 import { dirname } from "./utils.js"
-import { Src, setup, ok, fail } from "./helpers.js"
+import { Testnet, Src, setup, ok, fail } from "./helpers.js"
 import Server from "./server.js"
 
 const blueprint = async pkg => {
@@ -16,6 +16,7 @@ const blueprint = async pkg => {
 const scheduler = "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
 
 export {
+  Testnet,
   Server,
   GQL,
   ArMem,
