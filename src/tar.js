@@ -43,12 +43,7 @@ class AR extends MAR {
     for (const v of _tags) tx.addTag(v.name, v.value)
     const owner = await this.arweave.wallets.jwkToAddress(jwk)
     this.mem.addrmap[owner] = { address: owner, key: jwk.n }
-    return await this.postTx(tx, jwk, {
-      recipient: "",
-      tags: _tags,
-      data,
-      owner,
-    })
+    return await this.postTx(tx, jwk)
   }
 
   async postItems(items, jwk) {
@@ -148,13 +143,17 @@ class AR extends MAR {
   async data(id, string) {
     let tx = this.mem.txs[id]
     let _data = this.mem.txs[id]?.data ?? null
-    try {
-      JSON.parse(_data)
-      _data = Buffer.from(_data).toString("base64")
-    } catch (e) {}
-    if (tx.format === 2 && _data && string) {
-      _data = base64url.decode(_data)
+    if (is(Uint8Array, _data)) {
+      try {
+        _data = Buffer.from(_data).toString("base64")
+      } catch (e) {}
+    } else {
+      try {
+        JSON.parse(_data)
+        _data = Buffer.from(_data).toString("base64")
+      } catch (e) {}
     }
+    if (tx.format === 2 && _data && string) _data = base64url.decode(_data)
     return _data
   }
 }

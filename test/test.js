@@ -181,9 +181,9 @@ describe("SDK", function () {
     }
     ao = await new AO().init(acc[0])
     mem = ao.mem
-    ao = await new MAO({ ar: { port: 5000 }, aoconnect }).init(acc[0])
     /*
-    server = new Server({
+    ao = await new MAO({ ar: { port: 5000 }, aoconnect }).init(acc[0])
+      server = new Server({
       ar: 5000,
       mu: 5002,
       su: 5003,
@@ -271,12 +271,13 @@ describe("SDK", function () {
     assert.equal(await p.d("Hello", { txid: mid }), "Hello, World!")
   })
 
-  it("should post tx", async () => {
+  it.only("should post tx", async () => {
     const { id } = await ao.ar.post({
       data: "Hello, World!",
       tags: { one: "1" },
       jwk,
     })
+    console.log(await ao.ar.data(id))
     assert.equal(await ao.ar.data(id, true), "Hello, World!")
   })
 
