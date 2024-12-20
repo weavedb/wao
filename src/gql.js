@@ -1,6 +1,6 @@
 import { includes, map, is, isNil, last, clone } from "ramda"
 
-const full = `id anchor signature recipient owner { address key } fee { winston ar } quantity { winston ar } data { size type } tags { name value } block { id timestamp height previous } parent { id }`
+const full = `id anchor signature recipient owner { address key } fee { winston ar } quantity { winston ar } data { size type } tags { name value } block { id timestamp height previous } parent { id } bundledIn { id }`
 const full_blocks = `id timestamp height previous`
 
 const subs = {
@@ -11,6 +11,7 @@ const subs = {
   tags: ["name", "value"],
   block: ["id", "timestamp", "height", "previous"],
   parent: ["id"],
+  bundledIn: ["id"],
 }
 const field = (key, val = true) => {
   if (includes(key, ["id", "anchor", "signature", "recipient"])) {
@@ -98,8 +99,11 @@ const query = (opt = {}) => {
   }
   if (opt.first) cond.push(`first: ${opt.first}`)
   if (opt.after) cond.push(`after: "${opt.after}"`)
-  if (opt.asc) cond.push(`sort: HEIGHT_ASC`)
-
+  if (opt.asc) {
+    cond.push(`sort: HEIGHT_ASC`)
+  } else {
+    cond.push(`sort: HEIGHT_DESC`)
+  }
   let _cond = ""
   if (cond.length > 0) _cond = `(${cond.join(", ")})`
   let fields = []
@@ -124,6 +128,7 @@ const query = (opt = {}) => {
   let _fields = fields.length > 0 ? fields.join(" ") : full
   return `query {
   transactions ${_cond}{
+    pageInfo { hasNextPage }
     edges { cursor node { ${_fields} } }
   }
 }`
@@ -176,6 +181,7 @@ const query_blocks = (opt = {}) => {
   let _fields = fields.length > 0 ? fields.join(" ") : full_blocks
   return `query {
   blocks ${_cond}{
+    pageInfo { hasNextPage }
     edges { cursor node { ${_fields} } }
   }
 }`
@@ -191,13 +197,16 @@ export default class GQL {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
     }).then(r => r.json())
-    return map(v => ({ cursor: v.cursor, ...v.node }))(json.data[tar].edges)
+    return {
+      isNext: json.data[tar].pageInfo.hasNextPage,
+      data: map(v => ({ cursor: v.cursor, ...v.node }))(json.data[tar].edges),
+    }
   }
   async fetch(opt = {}, query, tar = "transactions") {
-    const data = await this._fetch(query, tar)
+    const { isNext, data } = await this._fetch(query, tar)
     if (opt.next === true) {
       let cursor = null
-      if (data.length > 0) cursor = last(data).cursor
+      if (isNext && data.length > 0) cursor = last(data).cursor
       const next = !cursor
         ? null
         : async () => {

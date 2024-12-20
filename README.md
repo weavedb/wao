@@ -1037,6 +1037,7 @@ const tx_fields = `{
   tags { name value } 
   block { id timestamp height previous } 
   parent { id }
+  bundledIn { id }
 }`
 ```
 
