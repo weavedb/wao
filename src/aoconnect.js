@@ -154,7 +154,7 @@ export const connect = mem => {
     })
     opt.tags = buildTags(null, __tags)
     if (opt.item) opt.data = base64url.decode(item.data)
-    await ar.postItem(item, su.jwk)
+    await ar.postItems(item, su.jwk)
     const _tags = tags(opt.tags)
     let res = null
     let memory = null
@@ -270,7 +270,11 @@ export const connect = mem => {
       tags: tags(opt.tags),
       target: opt.process,
     })
-    await ar.postItem(item, su.jwk)
+    if (opt.message_item) {
+      await ar.postItems([opt.message_item, item], su.jwk)
+    } else {
+      await ar.postItems(item, su.jwk)
+    }
     try {
       let data = _opt.data ?? ""
       let _tags = _opt.tags
@@ -370,9 +374,10 @@ export const connect = mem => {
         target: opt.process,
       }))
     }
-    await ar.postItem(item, su.jwk)
+    //await ar.postItems(item, su.jwk)
     mem.msgs[id] = opt
     await assign({
+      message_item: item,
       message: id,
       process: opt.process,
       from: owner,
