@@ -76,11 +76,27 @@ describe("SDK", function () {
     console.log("#1", await p2.d("Hello"))
     console.log("#2", await p2.m("Hello"))
     console.log("#3", await p2.d("Hello"))
-    const txs = await fetch(`http://localhost:5003/${pid2}`).then(v => v.json())
+    //const txs = await fetch(`http://localhost:5003/${pid2}`).then(v => v.json())
     //for (let v of txs.edges) console.log(v.node.message.tags)
-    for (let v of await ao.ar.gql.txs()) {
-      //console.log("tags...", v.tags)
+    const res = await ao.ar.gql.txs({
+      /*block: [1, 3],
+      first: 1,
+      tags: { Type: "Message" },
+      fields: {
+        tags: true,
+        bundledIn: true,
+        id: true,
+        owner: ["address"],
+        block: ["height"],
+        },*/
+      fields: ["id"],
+      first: 1,
+      next: true,
+    })
+    for (let v of res.data) {
+      console.log(v)
     }
+    console.log(await res.next())
     return
   })
 })
