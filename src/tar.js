@@ -8,10 +8,11 @@ import { bundleAndSignData, ArweaveSigner } from "arbundles"
 import base64url from "base64url"
 import ArMem from "./armem.js"
 import GQL from "./tgql.js"
-import { last, is } from "ramda"
+import { last, is, includes } from "ramda"
 class AR extends MAR {
   constructor(opt = {}) {
     super({ ...opt, in_memory: true })
+    this.log = opt.log === true
     this.in_memory = true
     this.mem = opt.mem ?? new ArMem()
     this.gql = new GQL({ mem: this.mem })
@@ -41,14 +42,11 @@ class AR extends MAR {
     let tx = await this.arweave.createTransaction({ data: data })
     let _tags = buildTags(null, tags)
     for (const v of _tags) tx.addTag(v.name, v.value)
-    const owner = await this.arweave.wallets.jwkToAddress(jwk)
-    this.mem.addrmap[owner] = { address: owner, key: jwk.n }
     return await this.postTx(tx, jwk)
   }
 
   async postItems(items, jwk) {
     if (!is(Array, items)) items = [items]
-
     let _items = []
     for (const di of items) {
       di._id = await di.id
@@ -97,12 +95,24 @@ class AR extends MAR {
       previous: last(this.mem.blocks) ?? "",
       txs: [],
     }
+    let msg = null
     if (items) {
       for (const item of items) {
         this.mem.txs[item.id] = item
         this.mem.txs[item.id].parent = { id: tx.id }
         this.mem.txs[item.id].bundledIn = { id: tx.id }
         this.mem.txs[item.id].anchor = ""
+        const _tags = t(item.tags)
+        if (
+          includes(_tags.Type, [
+            "Message",
+            "Process",
+            "Module",
+            "Scheduler-Location",
+          ])
+        ) {
+          msg = { id: item.id, type: _tags.Type, pid: item.recipient }
+        }
         let data_type = ""
         for (const v of item.item.tags) {
           if (v.name === "Content-Type") data_type = v.value
@@ -133,6 +143,15 @@ class AR extends MAR {
       this.mem.addrmap[owner] = { address: owner, key: jwk.n }
     }
     res = { id: tx.id, status: 200, statusText: "200" }
+    if (this.log) {
+      if (msg) {
+        console.log(
+          `New ${msg.type}:\t${msg.id}${msg.pid ? ` > ${msg.pid}` : ""}`,
+        )
+      } else {
+        console.log(`New Post:\t${tx.id}`)
+      }
+    }
     return { res, err, id: tx.id }
   }
 
