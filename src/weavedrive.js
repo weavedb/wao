@@ -79,9 +79,9 @@ export default class WeaveDrive {
       var bytesLength = await this.customFetch(`/${id}`, {
         method: "HEAD",
         }).then(res => res.headers.get("Content-Length"))
-      */
+          */
           let data = await ar.data(id)
-          const bytesLength = data ? new TextEncoder().encode(data).length : 100
+          const bytesLength = data?.length ?? 0
           node.total_size = Number(bytesLength)
           node.cache = new Uint8Array(0)
           node.position = 0
@@ -373,11 +373,8 @@ export default class WeaveDrive {
       })
 
       const reader = response.body.getReader()
-      */
-          const data = new TextEncoder().encode(
-            (await ar.data(stream.node.name)) ?? "",
-          )
-
+          */
+          const data = await ar.data(stream.node.name)
           // Extract the Range header to determine the start and end of the requested chunk
           const start = 0
           const end = data.length

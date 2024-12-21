@@ -16,6 +16,7 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing the te
   - [Determining Message Success](#determining-message-success)
   - [Async Message Tracking with receive()](#async-message-tracking-with-receive)
   - [Logging](#logging)
+  - [WeaveDrive](#weavedrive)
 - [API Reference](#api-reference)
   - [AO](#ao)
   - [Process](#process)
@@ -258,7 +259,39 @@ Handlers.add("Hello4", "Hello4", function (msg)
   ao.log("Hi", 3, true, [ 1, 2, 3 ], { Hello = "World!" })
 end)
 ```
+
 You can get logs even when an error occurs in the handler, which is extremely handy to identify the error causes.
+
+### WeaveDrive
+
+The [WeaveDrive](https://hackmd.io/@ao-docs/H1JK_WezR) extension is fully emulated with WAO. You can use `attest` and `avail` functions from `AO`.
+
+```js
+import { blueprint, AO, acc } from "wao/test"
+const attestor = acc[0]
+const handler = `
+apm.install('@rakis/WeaveDrive')
+Drive = require('@rakis/WeaveDrive')
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = Drive.getData(msg.id) })
+end)`
+
+describe("WeaveDrive", () => {
+  it("should load Arweave tx data", async () => {
+    const ao = await new AO().init(attestor)
+	
+    const { p } = await ao.deploy({
+      tags: { Extension: "WeaveDrive", Attestor: attestor.addr },
+      loads: [ await blueprint("apm"), handler ],
+    })
+	
+	const { id } = await ao.ar.post({ data: "Hello" })
+    await ao.attest({ id })
+	
+    assert.equal(await p.d("Get", { id }), "Hello")
+  })
+})
+```
 
 ## API Reference
 
@@ -275,6 +308,8 @@ You can get logs even when an error occurs in the handler, which is extremely ha
 - [aoconnect Functions](#aoconnect-functions)
 - [postModule](#postmodule)
 - [postScheduler](#postscheduler)
+- [attest](#attest)
+- [avail](#avail)
 - [wait](#wait)
 
 #### Instantiate
@@ -340,6 +375,18 @@ In case you have multiple scripts, use `loads` and pass `src` and `fills` respec
 await ao.deploy({ tags, loads: [ { src, fills }, { src: src2, fills: fills2 } ] })
 ```
 
+You can also pass an array of string data to `loads`.
+
+
+```js
+const num = `num = 0`
+const inc = `Handlers.add("Inc", "Inc", function () num = num + 1 end)`
+const get = `Handlers.add("Get", "Get", function (m) m.reply({ Data = num }) end)`
+
+const { p } = await ao.deploy({ tags, loads: [ num, inc, get ] })
+await p.m("Inc")
+assert.equal(await p.d("Get"), 1)
+```
 
 ##### msg
 
@@ -467,6 +514,24 @@ This will post `Scheduler-Location` with the `jwk` address as the returning `sch
 
 ```js
 const { err, scheduler } = await ao.postScheduler({ url, jwk, tags, overwrite })
+```
+
+##### attest
+
+Attest Arweave transactions for WeaveDrive.
+
+```js
+const { err, res, id } = await ao.attest({ id, tags, jwk })
+
+```
+
+##### avail
+
+Make Arweave transactions available for WeaveDrive.
+
+```js
+const { err, res, id } = await ao.avail({ ids, tags, jwk })
+
 ```
 
 ##### wait
