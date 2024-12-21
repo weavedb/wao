@@ -62,7 +62,7 @@ export const connect = (mem, log = false) => {
       Target: p.id,
       Owner,
       Data: data?.length ? data : "",
-      "Block-Height": p.height.toString(),
+      "Block-Height": mem.height.toString(),
       Timestamp: Date.now().toString(),
       Module: p.module,
       From: from,
@@ -116,14 +116,7 @@ export const connect = (mem, log = false) => {
       format = mem.wasms[mod].format
     }
     format ??= "wasm64-unknown-emscripten-draft_2024_02_15"
-    const now = Date.now
-    const handle = await AoLoader(wasm, {
-      format,
-      mode: "test",
-      WeaveDrive,
-    })
-    Date.now = now
-    _module = { handle, id: mod }
+
     if (!mod) throw Error("module not found")
     opt.tags = buildTags(
       null,
@@ -132,7 +125,7 @@ export const connect = (mem, log = false) => {
         Variant: "ao.TN.1",
         Type: "Process",
         SDK: "aoconnect",
-        Module: opt.module,
+        Module: mod,
         Scheduler: opt.scheduler,
         "Content-Type": "text/plain",
       }),
@@ -155,6 +148,17 @@ export const connect = (mem, log = false) => {
     opt.tags = buildTags(null, __tags)
     if (opt.item) opt.data = base64url.decode(item.data)
     await ar.postItems(item, su.jwk)
+    const now = Date.now
+    const handle = await AoLoader(wasm, {
+      format,
+      WeaveDrive,
+      spawn: item,
+      module: mem.txs[mod],
+      blockHeight: "100",
+    })
+    _module = { handle, id: mod }
+    Date.now = now
+
     const _tags = tags(opt.tags)
     let res = null
     let memory = null

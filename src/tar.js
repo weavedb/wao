@@ -39,6 +39,9 @@ class AR extends MAR {
   }
 
   async post({ data = "1984", tags = {}, jwk }) {
+    let err = null
+    ;({ err, jwk } = await this.checkWallet({ jwk }))
+    if (err) return { err }
     let tx = await this.arweave.createTransaction({ data: data })
     let _tags = buildTags(null, tags)
     for (const v of _tags) tx.addTag(v.name, v.value)
@@ -46,6 +49,9 @@ class AR extends MAR {
   }
 
   async postItems(items, jwk) {
+    let err = null
+    ;({ err, jwk } = await this.checkWallet({ jwk }))
+    if (err) return { err }
     if (!is(Array, items)) items = [items]
     let _items = []
     for (const di of items) {
@@ -85,7 +91,11 @@ class AR extends MAR {
   }
 
   async postTx(tx, jwk, items = []) {
-    let [res, err] = [null, null]
+    let err = null
+    ;({ err, jwk } = await this.checkWallet({ jwk }))
+    if (err) return { err }
+
+    let res = null
     if (!tx.id) await this.mem.arweave.transactions.sign(tx, jwk)
     this.mem.height += 1
     let block = {
@@ -109,9 +119,12 @@ class AR extends MAR {
             "Process",
             "Module",
             "Scheduler-Location",
+            "Attestation",
+            "Available",
           ])
         ) {
-          msg = { id: item.id, type: _tags.Type, pid: item.recipient }
+          msg = { id: item.id, type: _tags.Type }
+          if (msg.type === "Process") msg.pid = item.recipient
         }
         let data_type = ""
         for (const v of item.item.tags) {
