@@ -287,6 +287,7 @@ class AO {
       "Output-Encoding": "JSON-V1",
       "Memory-Limit": "1-gb",
       "Compute-Limit": "9000000000000",
+      Extension: "WeaveDrive",
     })
 
     const fns = [
@@ -624,6 +625,28 @@ class AO {
       if (attempts === 0) err = "timeout"
     }
     return { err, pid }
+  }
+  async attest({ id, jwk, tags }) {
+    return await this.ar.post({
+      tags: mergeLeft(tags, {
+        "Data-Protocol": "ao",
+        Type: "Attestation",
+        Message: id,
+      }),
+      jwk,
+    })
+  }
+
+  async avail({ ids, jwk, tags }) {
+    return await this.ar.post({
+      tags: mergeLeft(tags, {
+        "Data-Protocol": "WeaveDrive",
+        Variant: "WeaveDrive.tn.1",
+        Type: "Available",
+        ID: ids,
+      }),
+      jwk,
+    })
   }
 
   async deploy({

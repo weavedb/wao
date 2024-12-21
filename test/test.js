@@ -197,6 +197,14 @@ describe("SDK", function () {
     if (server) await server.end()
   })
 
+  it("should run", async () => {
+    const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
+    const data = src.data("process", "wasm")
+    const { id: modid } = await ao.postModule({ data, jwk })
+    const { p, pid } = await ao.deploy({ module: modid })
+    const { res } = await ao.msg({ pid, data: "ping" })
+  })
+
   it("should publish custom modules", async () => {
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
     const data = src.data("aos2_0_1", "wasm")
@@ -252,26 +260,49 @@ describe("SDK", function () {
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
 
-  it("should work with weavedrive", async () => {
+  it("should work with weavedrive: Assignments", async () => {
     const { p, pid } = await ao.deploy({
       src_data: src_data6,
+      tags: { Extension: "WeaveDrive", Attestor: ao.ar.addr },
       data: "Hello, World!",
     })
+    await ao.attest({ id: pid })
+    assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
+  })
+
+  it("should work with weavedrive: Individual", async () => {
+    const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
+    const data = src.data("aos2_0_1", "wasm")
+    const { id: modid } = await ao.postModule({
+      data,
+      jwk,
+      tags: { "Availability-Type": "Individual" },
+    })
+
+    const { p, pid } = await ao.deploy({
+      module: modid,
+      src_data: src_data6,
+      tags: { Extension: "WeaveDrive", Attestor: ao.ar.addr },
+      data: "Hello, World!",
+    })
+    await ao.avail({ ids: [pid] })
     assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
   })
 
   it("should load apm mock", async () => {
     const { p, pid } = await ao.deploy({
       boot: true,
+      tags: { Extension: "WeaveDrive", Attestor: ao.ar.addr },
       src_data: await blueprint("apm"),
     })
     await ao.load({ pid, data: `apm.install('@rakis/WeaveDrive')` })
     await ao.load({ pid, data: src_data7 })
     const { mid } = await p.msg("Hello2", { data: "Hello, World!" })
+    await ao.attest({ id: mid })
     assert.equal(await p.d("Hello", { txid: mid }), "Hello, World!")
   })
 
-  it.only("should post tx", async () => {
+  it("should post tx", async () => {
     const { id } = await ao.ar.post({
       data: "Hello, World!",
       tags: { one: "1" },
