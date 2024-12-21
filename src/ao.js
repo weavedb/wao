@@ -693,7 +693,9 @@ class AO {
         : []
       : loads) {
       if (!isBoot || i !== 0) {
-        fns.push({ fn: this.load, args: v, then: { "args.pid": "pid" } })
+        let args = v
+        if (typeof args === "string") args = { data: v }
+        fns.push({ fn: this.load, args, then: { "args.pid": "pid" } })
       }
       i++
     }
@@ -731,6 +733,10 @@ class Process {
   constructor(pid, ao) {
     this.ao = ao
     this.pid = pid
+  }
+
+  async load(opt = {}) {
+    return await this.ao.load({ pid: this.pid, ...opt })
   }
   async msg(act, tags, opts) {
     const { _tags, _opts } = getParams(tags, opts)
