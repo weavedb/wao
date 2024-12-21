@@ -79,20 +79,8 @@ end)
 const src_data7 = `
 Drive = require('@rakis/WeaveDrive')
 
-Handlers.add("Hello", "Hello", function (msg)
-  --local data = Drive.getData(msg.txid)
-  local file = io.open('/data/'.. msg.txid)
-  if not file then
-    return nil, "File not found!"
-  end
-  local contents = file:read(
-    file:seek('end')
-  )
-  file:close()
-  msg.reply({ Data = contents })
-end)
-
-Handlers.add("Hello2", "Hello2", function (msg)
+Handlers.add("Get-Data", "Get-Data", function (msg)
+  msg.reply({ Data = Drive.getData(msg.id) })
 end)
 `
 
@@ -290,16 +278,17 @@ describe("SDK", function () {
   })
 
   it("should load apm mock", async () => {
-    const { p, pid } = await ao.deploy({
-      boot: true,
+    const { p } = await ao.deploy({
       tags: { Extension: "WeaveDrive", Attestor: ao.ar.addr },
-      src_data: await blueprint("apm"),
+      loads: [
+        await blueprint("apm"),
+        `apm.install('@rakis/WeaveDrive')`,
+        src_data7,
+      ],
     })
-    await ao.load({ pid, data: `apm.install('@rakis/WeaveDrive')` })
-    await ao.load({ pid, data: src_data7 })
-    const { mid } = await p.msg("Hello2", { data: "Hello, World!" })
-    await ao.attest({ id: mid })
-    assert.equal(await p.d("Hello", { txid: mid }), "Hello, World!")
+    const { id } = await ao.ar.post({ data: "Hello, World!" })
+    await ao.attest({ id })
+    assert.equal(await p.d("Get-Data", { id }), "Hello, World!")
   })
 
   it("should post tx", async () => {
@@ -325,5 +314,29 @@ describe("SDK", function () {
     await wait(3000)
     await ao.unmonitor({ process: pid, signer })
     assert.equal(await p.d("Get"), "6")
+  })
+})
+
+const attestor = acc[0]
+const handler = `
+apm.install('@rakis/WeaveDrive')
+Drive = require('@rakis/WeaveDrive')
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = Drive.getData(msg.id) })
+end)`
+
+describe("WeaveDrive", () => {
+  it("should load Arweave tx data", async () => {
+    const ao = await new AO().init(attestor)
+
+    const { p, err } = await ao.deploy({
+      tags: { Extension: "WeaveDrive", Attestor: attestor.addr },
+      loads: [await blueprint("apm"), handler],
+    })
+
+    const { id } = await ao.ar.post({ data: "Hello" })
+    await ao.attest({ id })
+
+    assert.equal(await p.d("Get", { id }), "Hello")
   })
 })

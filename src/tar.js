@@ -4,11 +4,10 @@ import * as WarpArBundles from "warp-arbundles"
 const pkg = WarpArBundles.default ?? WarpArBundles
 const { DataItem } = pkg
 import { bundleAndSignData, ArweaveSigner } from "arbundles"
-
 import base64url from "base64url"
 import ArMem from "./armem.js"
 import GQL from "./tgql.js"
-import { last, is, includes } from "ramda"
+import { last, is, includes, isNil } from "ramda"
 class AR extends MAR {
   constructor(opt = {}) {
     super({ ...opt, in_memory: true })
@@ -172,20 +171,28 @@ class AR extends MAR {
     return this.mem.txs[id]
   }
 
-  async data(id, string) {
-    let tx = this.mem.txs[id]
-    let _data = this.mem.txs[id]?.data ?? null
-    if (is(Uint8Array, _data)) {
-      try {
-        _data = Buffer.from(_data).toString("base64")
-      } catch (e) {}
-    } else {
-      try {
-        JSON.parse(_data)
-        _data = Buffer.from(_data).toString("base64")
-      } catch (e) {}
+  async data(id, _string) {
+    let decode = true
+    let string = _string
+    if (is(Object, _string)) {
+      if (!isNil(_string.decode)) decode = _string.decode
+      if (!isNil(_string.string)) string = _string.string
     }
-    if (tx.format === 2 && _data && string) _data = base64url.decode(_data)
+
+    let tx = this.mem.txs[id]
+    let _data = tx?.data ?? null
+    let isBuf = is(Uint8Array, _data) || is(ArrayBuffer, _data)
+    let isStr = is(String, _data)
+    if (decode === false) {
+      if (isStr) _data = new TextEncoder().encode(_data)
+      return base64url.encode(_data)
+    } else {
+      if (isBuf && string) {
+        return Buffer.from(_data).toString()
+      } else if (isStr && string !== true) {
+        return new TextEncoder().encode(_data)
+      }
+    }
     return _data
   }
 }

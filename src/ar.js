@@ -2,7 +2,7 @@ import _Arweave from "arweave"
 const Arweave = _Arweave.default ?? _Arweave
 import { ArweaveSigner, bundleAndSignData, createData } from "arbundles"
 import { buildTags, tag, isLocalhost } from "./utils.js"
-import { is } from "ramda"
+import { is, isNil } from "ramda"
 import GQL from "./gql.js"
 
 class AR {
@@ -258,9 +258,15 @@ class AR {
     return (await this.gql.txs({ id: txid }))[0] ?? null
   }
 
-  async data(txid, string = false) {
+  async data(txid, _string = false) {
+    let decode = true
+    let string = _string
+    if (is(Object, _string)) {
+      if (!isNil(_string.decode)) decode = _string.decode
+      if (!isNil(_string.string)) string = _string.string
+    }
     const _data = await this.arweave.transactions.getData(txid, {
-      decode: true,
+      decode,
       string,
     })
     return _data
