@@ -50,6 +50,7 @@ export default class ArMem {
           "Output-Encoding": "JSON-V1",
           "Memory-Limit": "1-gb",
           "Compute-Limit": "9000000000000",
+          Extension: "WeaveDrive",
         }),
       }
     }
