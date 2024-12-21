@@ -77,7 +77,7 @@ class AO extends MAO {
     this.message = message
     this.spawn = async (...opt) => {
       const res = await spawn(...opt)
-      //await this.load({ data: log, pid: res })
+      await this.load({ data: log, pid: res })
       return res
     }
     this.dryrun = async (...opt) => {
@@ -111,11 +111,13 @@ class AO extends MAO {
       "Memory-Limit": "1-gb",
       "Compute-Limit": "9000000000000",
     })
-
-    const _tags = buildTags(null, t)
     const signer = createDataItemSigner(jwk)
-    const { id, owner } = await this.ar.dataitem({ tags: _tags, data, signer })
-    await this.ar.post({ data, tags: t, jwk })
+    const { id, owner, item } = await this.ar.dataitem({
+      tags: t,
+      data,
+      signer,
+    })
+    await this.ar.postItems(item, jwk)
     this.mem.wasms[id] = { data, format: t["Module-Format"] }
     return { id }
   }

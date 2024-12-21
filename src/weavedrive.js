@@ -1,10 +1,13 @@
 import Arweave from "arweave"
+import { toGraphObj } from "./utils.js"
+import { map } from "ramda"
+
 const KB = 1024
 const MB = KB * 1024
 const CACHE_SZ = 32 * KB
 const CHUNK_SZ = 128 * MB
 const NOTIFY_SZ = 512 * MB
-
+const log = console.log
 export default class WeaveDrive {
   constructor(ar) {
     this.drive = function WeaveDrive(mod, FS) {
@@ -520,7 +523,6 @@ export default class WeaveDrive {
             // CAUTION: If the module is initiated with `mode = test` we don't check availability.
             return true
           }
-
           // Check if we are attempting to load the On-Boot id, if so allow it
           // this was added for AOP 6 Boot loader See: https://github.com/permaweb/aos/issues/342
           const bootTag = this.getTagValue("On-Boot", mod.spawn.tags)
@@ -533,6 +535,7 @@ export default class WeaveDrive {
             mod.module.tags,
           )
           const moduleHasWeaveDrive = moduleExtensions.includes("WeaveDrive")
+
           const processExtensions = this.getTagValues(
             "Extension",
             mod.spawn.tags,
@@ -577,9 +580,9 @@ export default class WeaveDrive {
               ...this.getTagValues("Attestor", mod.spawn.tags),
             ].filter(t => !!t),
           )
-
           // Init a set of GraphQL queries to run in order to find a valid attestation
           // Every WeaveDrive process has at least the "Assignments" availability check form.
+
           const assignmentsHaveID = await this.queryHasResult(
             `query {
           transactions(
@@ -603,10 +606,7 @@ export default class WeaveDrive {
           }
         }`,
           )
-
-          if (assignmentsHaveID) {
-            return true
-          }
+          if (assignmentsHaveID) return true
 
           if (processMode == "Individual") {
             const individualsHaveID = await this.queryHasResult(
@@ -633,9 +633,7 @@ export default class WeaveDrive {
           }`,
             )
 
-            if (individualsHaveID) {
-              return true
-            }
+            if (individualsHaveID) return true
           }
 
           // Halt message processing if the process requires Library mode.
@@ -657,7 +655,7 @@ export default class WeaveDrive {
 
         getTagValues(key, tags) {
           var values = []
-          for (i = 0; i < tags.length; i++) {
+          for (let i = 0; i < tags.length; i++) {
             if (tags[i].name == key) {
               values.push(tags[i].value)
             }
@@ -674,7 +672,6 @@ export default class WeaveDrive {
           const json = await this.gqlQuery(query, variables).then(res =>
             res.json(),
           )
-
           return !!json?.data?.transactions?.edges?.length
         },
 
@@ -695,13 +692,25 @@ export default class WeaveDrive {
         },
 
         async gqlQuery(query, variables) {
-          const options = {
-            method: "POST",
-            body: JSON.stringify({ query, variables }),
-            headers: { "Content-Type": "application/json" },
+          let json = null
+          try {
+            const { tar, args } = toGraphObj({ query, variables })
+            let res2 = null
+            if (tar === "transactions") {
+              res2 = await ar.gql.txs({ ...args })
+            } else if (tar === "blocks") {
+              res2 = await ar.gql.blocks({ ...args })
+            }
+            const edges = map(v => ({ node: v, cursor: v.cursor }), res2)
+            json = {
+              data: {
+                transactions: { pageInfo: { hasNextPage: true }, edges },
+              },
+            }
+          } catch (e) {
+            log(e)
           }
-
-          return this.customFetch("graphql", options)
+          return { json: () => json }
         },
       }
     }
