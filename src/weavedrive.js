@@ -1,13 +1,10 @@
-import Arweave from "arweave"
-import { toGraphObj } from "./utils.js"
-import { map } from "ramda"
-
 const KB = 1024
 const MB = KB * 1024
 const CACHE_SZ = 32 * KB
 const CHUNK_SZ = 128 * MB
 const NOTIFY_SZ = 512 * MB
 const log = console.log
+
 export default class WeaveDrive {
   constructor(ar) {
     this.drive = function WeaveDrive(mod, FS) {
@@ -16,44 +13,6 @@ export default class WeaveDrive {
           //console.log("WeaveDrive: Resetting fd: ", fd)
           FS.streams[fd].node.position = 0
           FS.streams[fd].node.cache = new Uint8Array(0)
-        },
-
-        joinUrl({ url, path }) {
-          if (!path) return url
-          if (path.startsWith("/"))
-            return this.joinUrl({ url, path: path.slice(1) })
-
-          url = new URL(url)
-          url.pathname += path
-          return url.toString()
-        },
-
-        async customFetch(path, options) {
-          /**
-           * mod.ARWEAVE may be a comma-delimited list of urls.
-           * So we parse it into an array that we sequentially consume
-           * using fetch, and return the first successful response.
-           *
-           * The first url is considered "primary". So if all urls fail
-           * to produce a successful response, then we return the primary's
-           * error response
-           */
-          const urlList = mod.ARWEAVE.includes(",")
-            ? mod.ARWEAVE.split(",").map(url => url.trim())
-            : [mod.ARWEAVE]
-
-          let p
-          for (const url of urlList) {
-            const res = fetch(this.joinUrl({ url, path }), options)
-            if (await res.then(r => r.ok).catch(() => false)) return res
-            if (!p) p = res
-          }
-
-          /**
-           * None succeeded so fallback to the primary and accept
-           * whatever it returned
-           */
-          return p
         },
 
         async create(id) {
@@ -66,19 +25,14 @@ export default class WeaveDrive {
 
           // Create the file in the emscripten FS
 
-          // This check/mkdir was added for AOP 6 Boot loader because create is
-          // called first because were only loading Data, we needed to create
-          // the directory. See: https://github.com/permaweb/aos/issues/342
-          if (!FS.analyzePath("/data/").exists) {
-            FS.mkdir("/data/")
-          }
+          if (!FS.analyzePath("/data/").exists) FS.mkdir("/data/")
 
           var node = FS.createFile("/", "data/" + id, properties, true, false)
           // Set initial parameters
           /*
-      var bytesLength = await this.customFetch(`/${id}`, {
-        method: "HEAD",
-        }).then(res => res.headers.get("Content-Length"))
+            var bytesLength = await this.customFetch(`/${id}`, {
+            method: "HEAD",
+            }).then(res => res.headers.get("Content-Length"))
           */
           let data = await ar.data(id)
           const bytesLength = data?.length ?? 0
@@ -102,21 +56,21 @@ export default class WeaveDrive {
           return stream
         },
         async createBlockHeader(id) {
-          const customFetch = this.customFetch
-          // todo: add a bunch of retries
-          async function retry(x) {
-            return new Promise(r => {
-              setTimeout(function () {
-                r(customFetch(`/block/height/${id}`))
-              }, x * 10000)
-            })
-          }
-          var result = await this.customFetch(`/block/height/${id}`)
-            .then(res => (!res.ok ? retry(1) : res))
-            .then(res => (!res.ok ? retry(2) : res))
-            .then(res => (!res.ok ? retry(3) : res))
-            .then(res => (!res.ok ? retry(4) : res))
-            .then(res => res.text())
+          var result = ""
+          try {
+            // todo: implement indep_hash
+            // fetch(`/block/height/${id}`)
+            const block = ar.mem.blockmap[ar.mem.blocks[id]]
+            if (block) {
+              result = JSON.stringify({
+                id: block.id,
+                timestamp: block.timestamp,
+                previous_block: block.previous,
+                txs: block.txs,
+                height: id,
+              })
+            }
+          } catch (e) {}
 
           var bytesLength = result.length
 
@@ -132,33 +86,12 @@ export default class WeaveDrive {
           return stream
         },
         async createTxHeader(id) {
-          const customFetch = this.customFetch
-          async function toAddress(owner) {
-            return Arweave.utils.bufferTob64Url(
-              await Arweave.crypto.hash(Arweave.utils.b64UrlToBuffer(owner)),
-            )
-          }
-          async function retry(x) {
-            return new Promise(r => {
-              setTimeout(function () {
-                r(customFetch(`/tx/${id}`))
-              }, x * 10000)
-            })
-          }
-          // todo: add a bunch of retries
-          var result = await this.customFetch(`/tx/${id}`)
-            .then(res => (!res.ok ? retry(1) : res))
-            .then(res => (!res.ok ? retry(2) : res))
-            .then(res => (!res.ok ? retry(3) : res))
-            .then(res => (!res.ok ? retry(4) : res))
-            .then(res => res.json())
-            .then(async entry => ({
-              ...entry,
-              ownerAddress: await toAddress(entry.owner),
-            }))
-            //.then(x => (console.error(x), x))
-            .then(x => JSON.stringify(x))
-
+          var result = ""
+          // fetch(`/tx/${id}`)
+          try {
+            let tx = ar.mem.txs[id]
+            if (tx) result = JSON.stringify(tx)
+          } catch (e) {}
           var node = FS.createDataFile(
             "/",
             "tx/" + id,
@@ -170,89 +103,25 @@ export default class WeaveDrive {
           return stream
         },
         async createDataItemTxHeader(id) {
-          const gqlQuery = this.gqlQuery
-          var GET_TRANSACTION_QUERY = `
-      query GetTransactions ($transactionIds: [ID!]!) {
-        transactions(ids: $transactionIds) {
-          edges {
-            node {
-              id
-              anchor
-              data {
-                size
-              }
-              signature
-              recipient 
-              owner {
-                address 
-                key
-              }
-              fee {
-                ar 
-                winston
-              }
-              quantity {
-                winston
-                ar
-              }
-              tags {
-                name 
-                value 
-              }
-              bundledIn {
-                id
-              }
-              block { 
-                id
-                timestamp
-                height
-                previous
-              }
-            }
-          }
-        }
-      }`
-          var variables = { transactionIds: [id] }
-          async function retry(x) {
-            return new Promise(r => {
-              setTimeout(function () {
-                r(gqlQuery(GET_TRANSACTION_QUERY, variables))
-              }, x * 10000)
+          let result = (
+            await ar.gql.txs({
+              id,
+              fields: [
+                "id",
+                "anchor",
+                { data: ["size"] },
+                "signature",
+                "recipient",
+                "owner",
+                "fee",
+                "quantity",
+                "tags",
+                "bundledIn",
+                "block",
+              ],
             })
-          }
-
-          const gqlExists = await this.gqlExists()
-          if (!gqlExists) {
-            return "GQL Not Found!"
-          }
-
-          // todo: add a bunch of retries
-          var result = await this.gqlQuery(GET_TRANSACTION_QUERY, variables)
-            .then(res => (!res.ok ? retry(1) : res))
-            .then(res => (!res.ok ? retry(2) : res))
-            .then(res => (!res.ok ? retry(3) : res))
-            .then(res => (!res.ok ? retry(4) : res))
-            .then(res => res.json())
-            .then(res => {
-              return res?.data?.transactions?.edges?.[0]?.node
-                ? res.data.transactions.edges[0].node
-                : "No results"
-            })
-            .then(async entry => {
-              return typeof entry == "string"
-                ? entry
-                : {
-                    format: 3,
-                    ...entry,
-                  }
-            })
-            .then(x => {
-              return typeof x == "string" ? x : JSON.stringify(x)
-            })
-
-          if (result === "No results") {
-            return result
-          }
+          )[0]
+          result = result ? JSON.stringify(result) : "No results"
           FS.createDataFile(
             "/",
             "tx2/" + id,
@@ -364,17 +233,9 @@ export default class WeaveDrive {
           )
           //console.log("WeaveDrive: fd: ", fd, " Read length: ", to_read, " Reading ahead:", to - to_read - stream.position)
 
-          // Fetch with streaming
-          /*
-      const response = await this.customFetch(`/${stream.node.name}`, {
-        method: "GET",
-        redirect: "follow",
-        headers: { Range: `bytes=${stream.position}-${to}` },
-      })
-
-      const reader = response.body.getReader()
-          */
+          // fetch(`/${stream.node.name}`)
           const data = await ar.data(stream.node.name)
+
           // Extract the Range header to determine the start and end of the requested chunk
           const start = 0
           const end = data.length
@@ -465,9 +326,7 @@ export default class WeaveDrive {
         close(fd) {
           var stream = 0
           for (var i = 0; i < FS.streams.length; i++) {
-            if (FS.streams[i].fd === fd) {
-              stream = FS.streams[i]
-            }
+            if (FS.streams[i].fd === fd) stream = FS.streams[i]
           }
           FS.close(stream)
         },
@@ -516,10 +375,9 @@ export default class WeaveDrive {
 
         // General helpder functions
         async checkAdmissible(ID) {
-          if (mod.mode && mod.mode == "test") {
-            // CAUTION: If the module is initiated with `mode = test` we don't check availability.
-            return true
-          }
+          // CAUTION: If the module is initiated with `mode = test` we don't check availability.
+          if (mod.mode && mod.mode == "test") return true
+
           // Check if we are attempting to load the On-Boot id, if so allow it
           // this was added for AOP 6 Boot loader See: https://github.com/permaweb/aos/issues/342
           const bootTag = this.getTagValue("On-Boot", mod.spawn.tags)
@@ -546,7 +404,6 @@ export default class WeaveDrive {
             )
             return false
           }
-
           const modes = ["Assignments", "Individual", "Library"]
           // Get the Availability-Type from the spawned process's Module or Process item
           // First check the module for its defaults
@@ -579,66 +436,30 @@ export default class WeaveDrive {
           )
           // Init a set of GraphQL queries to run in order to find a valid attestation
           // Every WeaveDrive process has at least the "Assignments" availability check form.
-
-          const assignmentsHaveID = await this.queryHasResult(
-            `query {
-          transactions(
-            owners: ${attestors},
-            block: {min: 0, max: ${blockHeight}},
-            tags: [
-              { name: "Type", values: ["Attestation"] },
-              { name: "Message", values: ["${ID}"]}
-              { name: "Data-Protocol", values: ["ao"] },
-            ]
-          ) 
-          {
-            edges {
-              node {
-                tags {
-                  name
-                  value
-                }
-              }
+          const exists = async tags => {
+            const common = {
+              owners: attestors,
+              block: [0, blockHeight],
+              fields: ["tags"],
             }
+            return (await ar.gql.txs({ ...common, tags })).length > 0
           }
-        }`,
-          )
+          const assignmentsHaveID = await exists({
+            Type: "Attestation",
+            Message: ID,
+            "Data-Protocol": "ao",
+          })
           if (assignmentsHaveID) return true
 
           if (processMode == "Individual") {
-            const individualsHaveID = await this.queryHasResult(
-              `query {
-            transactions(
-              owners: ${attestors},
-              block: {min: 0, max: ${blockHeight}},
-              tags: [
-                { name: "Type", values: ["Available"]},
-                { name: "ID", values: ["${ID}"]}
-                { name: "Data-Protocol", values: ["WeaveDrive"] },
-              ]
-            ) 
-            {
-              edges {
-                node {
-                  tags {
-                    name
-                    value
-                  }
-                }
-              }
-            }
-          }`,
-            )
-
+            const individualsHaveID = await exists({
+              Type: "Available",
+              ID,
+              "Data-Protocol": "WeaveDrive",
+            })
             if (individualsHaveID) return true
           }
 
-          // Halt message processing if the process requires Library mode.
-          // This should signal 'Cannot Process' to the CU, not that the message itself is
-          // invalid. Subsequently, the CU should not be slashable for saying that the process
-          // execution failed on this message. The CU must also not continue to execute further
-          // messages on this process. Attesting to them would be slashable, as the state would
-          // be incorrect.
           if (processMode == "Library") {
             throw "This WeaveDrive implementation does not support Library attestations yet!"
           }
@@ -653,9 +474,7 @@ export default class WeaveDrive {
         getTagValues(key, tags) {
           var values = []
           for (let i = 0; i < tags.length; i++) {
-            if (tags[i].name == key) {
-              values.push(tags[i].value)
-            }
+            if (tags[i].name == key) values.push(tags[i].value)
           }
           return values
         },
@@ -663,51 +482,6 @@ export default class WeaveDrive {
         getTagValue(key, tags) {
           const values = this.getTagValues(key, tags)
           return values.pop()
-        },
-
-        async queryHasResult(query, variables) {
-          const json = await this.gqlQuery(query, variables).then(res =>
-            res.json(),
-          )
-          return !!json?.data?.transactions?.edges?.length
-        },
-
-        async gqlExists() {
-          const query = `query {
-        transactions(
-          first: 1
-        ) {
-          pageInfo {
-            hasNextPage
-          }
-        }
-      }
-      `
-
-          const gqlExists = await this.gqlQuery(query, {}).then(res => res.ok)
-          return gqlExists
-        },
-
-        async gqlQuery(query, variables) {
-          let json = null
-          try {
-            const { tar, args } = toGraphObj({ query, variables })
-            let res2 = null
-            if (tar === "transactions") {
-              res2 = await ar.gql.txs({ ...args })
-            } else if (tar === "blocks") {
-              res2 = await ar.gql.blocks({ ...args })
-            }
-            const edges = map(v => ({ node: v, cursor: v.cursor }), res2)
-            json = {
-              data: {
-                transactions: { pageInfo: { hasNextPage: true }, edges },
-              },
-            }
-          } catch (e) {
-            log(e)
-          }
-          return { json: () => json }
         },
       }
     }
