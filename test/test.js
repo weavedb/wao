@@ -8,7 +8,7 @@ import AR from "../src/ar.js"
 import GQL from "../src/gql.js"
 import ArMem from "../src/armem.js"
 import { setup, Src } from "../src/helpers.js"
-import { tags, wait } from "../src/utils.js"
+import { optAO, optServer, tags, wait } from "../src/utils.js"
 
 const { mem, spawn, message, dryrun } = connect()
 const [{ signer, jwk }] = acc
@@ -161,25 +161,13 @@ describe("Aoconnect", () => {
 describe("SDK", function () {
   let ao, server, mem
   before(async () => {
-    const aoconnect = {
-      MU_URL: "http://localhost:5002",
-      CU_URL: "http://localhost:5004",
-      SU_URL: "http://localhost:5003",
-      GATEWAY_URL: "http://localhost:5000",
-    }
     ao = await new AO().init(acc[0])
     mem = ao.mem
-    /*
-    ao = await new MAO({ ar: { port: 5000 }, aoconnect }).init(acc[0])
-      server = new Server({
-      ar: 5000,
-      mu: 5002,
-      su: 5003,
-      cu: 5004,
-      aoconnect,
-    })
-    mem = server.mem
-    */
+
+    //const aoconnect = optAO(5000)
+    //ao = await new MAO({ ar: { port: 5000 }, aoconnect }).init(acc[0])
+    //server = new Server({ ...optServer(5000), aoconnect })
+    //mem = server.mem
   })
   after(async () => {
     if (server) await server.end()

@@ -285,7 +285,7 @@ describe("WeaveDrive", () => {
       loads: [ await blueprint("apm"), handler ],
     })
 	
-	const { id } = await ao.ar.post({ data: "Hello" })
+    const { id } = await ao.ar.post({ data: "Hello" })
     await ao.attest({ id })
 	
     assert.equal(await p.d("Get", { id }), "Hello")
