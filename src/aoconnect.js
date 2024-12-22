@@ -16,6 +16,7 @@ import {
 } from "./utils.js"
 import ArMem from "./armem.js"
 import weavedrive from "./weavedrive.js"
+import kv from "./kv.js"
 import AoLoader from "@permaweb/ao-loader"
 import { readFileSync } from "fs"
 import { resolve } from "path"
@@ -35,6 +36,7 @@ export const connect = (mem, log = false) => {
   }
   const ar = new AR({ mem, log })
   const WeaveDrive = new weavedrive(ar).drive
+  const KV = new kv(ar).kv
 
   const transform = input => {
     const output = { Tags: [] }
@@ -149,9 +151,11 @@ export const connect = (mem, log = false) => {
     if (opt.item) opt.data = base64url.decode(item.data)
     await ar.postItems(item, su.jwk)
     const now = Date.now
+    const t = tags(opt.tags)
+    const wd = t.Extension === "KV" ? KV : WeaveDrive
     const handle = await AoLoader(wasm, {
       format,
-      WeaveDrive,
+      WeaveDrive: wd,
       spawn: item,
       module: mem.txs[mod],
       blockHeight: "100",
@@ -378,7 +382,6 @@ export const connect = (mem, log = false) => {
         target: opt.process,
       }))
     }
-    //await ar.postItems(item, su.jwk)
     mem.msgs[id] = opt
     await assign({
       message_item: item,
@@ -458,11 +461,11 @@ export const connect = (mem, log = false) => {
           auth: mu.addr,
         })
         function cloneMemory(memory) {
-          const buffer = memory.buffer.slice(0) // Clone the ArrayBuffer
+          const buffer = memory.buffer.slice(0)
           return new WebAssembly.Memory({
-            initial: memory.buffer.byteLength / 65536, // Memory size in pages (64KB per page)
+            initial: memory.buffer.byteLength / 65536,
             maximum: memory.maximum || undefined,
-            shared: memory.shared || false, // Retain sharing if applicable
+            shared: memory.shared || false,
           })
         }
         const res = await p.handle(p.memory, msg, _env)

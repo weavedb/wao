@@ -46,6 +46,7 @@ import {
   mergeOut,
   isOutComplete,
   jsonToStr,
+  optAO,
 } from "./utils.js"
 
 function createDataItemSigner2(wallet) {
@@ -61,15 +62,26 @@ function createDataItemSigner2(wallet) {
 }
 
 class AO {
-  constructor({
-    authority = srcs.authority,
-    module,
-    module_type = "aos2",
-    scheduler = srcs.scheduler,
-    aoconnect,
-    ar = {},
-    in_memory = false,
-  } = {}) {
+  constructor(opt = {}) {
+    let _port = null
+    if (typeof opt === "number") {
+      _port = opt
+      opt = {}
+    }
+    let {
+      authority = srcs.authority,
+      module,
+      module_type = "aos2",
+      scheduler = srcs.scheduler,
+      aoconnect,
+      ar,
+      in_memory = false,
+      port,
+    } = opt
+
+    if (!_port && port) _port = port
+    if (!aoconnect && _port) aoconnect = optAO(_port)
+    if (!ar && _port) ar = { port: _port }
     if (!module) {
       switch (module_type) {
         case "sqlite":
@@ -83,14 +95,13 @@ class AO {
       }
     }
     this.__type__ = "ao"
-
     if (ar?.__type__ === "ar") this.ar = ar
     else {
       let _ar = typeof ar === "object" ? ar : {}
-      this.ar = new AR(ar)
+      this.ar = new AR(_ar)
     }
-    if (in_memory) {
-    } else if (aoconnect) {
+
+    if (!in_memory && aoconnect) {
       const {
         results,
         assign,
@@ -620,6 +631,7 @@ class AO {
     while (attempts > 0) {
       if (!this.in_memory) await wait(1000)
       const { res, err: _err } = await this.dry({ pid, data: "#Inbox" })
+      if (res?.error) return { err: res.error, pid }
       if (typeof res?.Output === "object") break
       attempts -= 1
       if (attempts === 0) err = "timeout"
