@@ -3,6 +3,7 @@ import assert from "assert"
 import { createDataItemSigner, connect } from "@permaweb/aoconnect"
 import { dirname as _dirname, resolve } from "path"
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from "fs"
+import { optAO } from "./utils.js"
 import yargs from "yargs"
 
 let {
@@ -45,12 +46,7 @@ export class Testnet {
   constructor({ port = 4000, arweave, aoconnect, docker = false } = {}) {
     this.docker = docker
     this.arweave = arweave ?? { port }
-    this.aoconnect = aoconnect ?? {
-      MU_URL: `http://localhost:${port + 2}`,
-      SU_URL: `http://localhost:${port + 3}`,
-      CU_URL: `http://localhost:${port + 4}`,
-      GATEWAY_URL: `http://localhost:${port}`,
-    }
+    this.aoconnect = aoconnect ?? optAO(port)
     this.ar = new AR(this.arweave)
   }
   async init(jwk) {
@@ -60,7 +56,7 @@ export class Testnet {
     this.src = await new Src({ ar: this.ar }).init()
     await this.ar.init(jwk)
     this.jwk = this.ar.jwk
-    this.addr = this.ar.a
+    this.addr = this.ar.addr
     this.gql = this.ar.gql
     this.module_src = await this.src.upload("aos2_0_1", "wasm")
     this.ao = await new AO({
@@ -119,11 +115,7 @@ export const setup = async ({
 
   // ar
   arweave ??= { port: 4000 }
-  aoconnect ??= {
-    MU_URL: "http://localhost:4002",
-    CU_URL: "http://localhost:4004",
-    GATEWAY_URL: "http://localhost:4000",
-  }
+  aoconnect ??= optAO(4000)
   const ar = new AR(arweave)
   await ar.gen("10")
   const src = new Src({ ar, dir })

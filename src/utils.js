@@ -519,7 +519,21 @@ const toGraphObj = ({ query, variables }) => {
   }
   return { tar, args }
 }
+const optAO = port => {
+  return {
+    MU_URL: `http://localhost:${port + 2}`,
+    SU_URL: `http://localhost:${port + 3}`,
+    CU_URL: `http://localhost:${port + 4}`,
+    GATEWAY_URL: `http://localhost:${port}`,
+  }
+}
+const optServer = port => {
+  return { ar: port, mu: port + 2, su: port + 3, cu: port + 4 }
+}
+
 export {
+  optAO,
+  optServer,
   toGraphObj,
   jsonToStr,
   mergeChecks,
