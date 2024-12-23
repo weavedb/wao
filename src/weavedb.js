@@ -1,46 +1,89 @@
-import Arweave from "arweave"
-import { toGraphObj } from "./utils.js"
-import { map } from "ramda"
-
+import { resolve } from "path"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 const KB = 1024
 const MB = KB * 1024
 const CACHE_SZ = 32 * KB
 const CHUNK_SZ = 128 * MB
 const NOTIFY_SZ = 512 * MB
 const log = console.log
+const rand = Math.floor(Math.random() * 1000000).toString()
 
-export default class KV {
-  constructor(ar) {
-    this.kv = function WeaveDrive(mod, FS) {
+export default class WeaveDB {
+  constructor(ar, dir) {
+    dir ??= resolve(import.meta.dirname, ".db")
+    const kv_dir = resolve(dir, rand)
+    const data_dir = resolve(kv_dir, "data")
+    const rollup_dir = resolve(kv_dir, "rollup")
+    for (const v of [dir, kv_dir, rollup_dir, data_dir]) {
+      if (!existsSync(v)) mkdirSync(v)
+    }
+    this.ext = (mod, FS) => {
+      let cache = { data: {}, rollup: {} }
       return {
         async create(id) {
           let properties = { isDevice: false, contents: null }
-          if (!FS.analyzePath("/data/").exists) FS.mkdir("/data/")
-          let node = FS.createFile("/", "data/" + id, properties, true, false)
-          // Set initial parameters
-          const bytesLength = (await ar.data(id))?.length ?? 0
+          if (!FS.analyzePath("/rollup/").exists) FS.mkdir("/rollup/")
+          let node = FS.createFile("/", "rollup/" + id, properties, true, false)
+
+          // Set initial parame
+          let data = await ar.data(id)
+          const bytesLength = data?.length ?? 0
           node.total_size = Number(bytesLength)
           node.cache = new Uint8Array(0)
           node.position = 0
 
           // Add a function that defers querying the file size until it is asked the first time.
           Object.defineProperties(node, {
-            usedBytes: {
-              get: () => bytesLength,
-            },
+            usedBytes: { get: () => bytesLength },
           })
 
           // Now we have created the file in the emscripten FS, we can open it as a stream
-          let stream = FS.open("/data/" + id, "r")
+          let stream = FS.open("/rollup/" + id, "r")
 
           //console.log("JS: Created file: ", id, " fd: ", stream.fd);
           return stream
         },
-        async open(filename) {
+        async createData(col, doc, val) {
+          let properties = { isDevice: false, contents: null }
+          if (!FS.analyzePath("/data/").exists) FS.mkdir("/data/")
+          if (!FS.analyzePath(`/data/${col}`).exists) FS.mkdir(`/data/${col}`)
+          let node = FS.createFile(
+            "/",
+            `data/${col}/${doc}`,
+            properties,
+            true,
+            false,
+          )
+
+          // Set initial parame
+          let data = val
+          if (!val) {
+            const col_dir = resolve(data_dir, col)
+            const _data =
+              readFileSync(resolve(col_dir, `${doc}.json`), "utf8") ?? ""
+            data = Buffer.from(_data, "utf8")
+          }
+          const bytesLength = data?.length ?? 0
+          node.total_size = Number(bytesLength)
+          node.cache = new Uint8Array(0)
+          node.position = 0
+
+          // Add a function that defers querying the file size until it is asked the first time.
+          Object.defineProperties(node, {
+            usedBytes: { get: () => bytesLength },
+          })
+
+          // Now we have created the file in the emscripten FS, we can open it as a stream
+          let stream = FS.open("/data/" + `${col}/${doc}`, "r")
+
+          //console.log("JS: Created file: ", id, " fd: ", stream.fd);
+          return stream
+        },
+        async open(filename, val) {
           const pathCategory = filename.split("/")[1]
-          const id = filename.split("/")[2]
-          //log("JS: Opening ID: ", id)
-          if (pathCategory === "data") {
+          if (pathCategory === "rollup") {
+            //log("JS: Opening ID: ", id)
+            const id = filename.split("/")[2]
             if (FS.analyzePath(filename).exists) {
               let stream = FS.open(filename, "r")
               if (stream.fd) return stream.fd
@@ -52,19 +95,33 @@ export default class KV {
               //console.log("JS: Open => Created file: ", id, " fd: ", stream.fd);
               return stream.fd
             }
+          } else if (pathCategory === "data") {
+            //log("JS: Opening ID: ", id)
+            const col = filename.split("/")[2]
+            const doc = filename.split("/")[3]
+            if (FS.analyzePath(filename).exists) {
+              let stream = FS.open(filename, "r")
+              if (stream.fd) return stream.fd
+              console.log("JS: File not found: ", filename)
+              return 0
+            } else {
+              //console.log("JS: Open => Creating file: ", id);
+              const stream = await this.createData(col, doc, val)
+              //console.log("JS: Open => Created file: ", id, " fd: ", stream.fd);
+              return stream.fd
+            }
           } else {
             console.log("JS: Invalid path category: ", pathCategory)
             return 0
           }
         },
-        async read(fd, raw_dst_ptr, raw_length) {
+        async read(fd, raw_dst_ptr, raw_length, val) {
           let to_read = Number(raw_length)
           let dst_ptr = Number(raw_dst_ptr)
           let stream = 0
           for (let i = 0; i < FS.streams.length; i++) {
             if (FS.streams[i].fd === fd) stream = FS.streams[i]
           }
-
           // Satisfy what we can with the cache first
           let bytes_read = this.readFromCache(stream, dst_ptr, to_read)
           stream.position += bytes_read
@@ -73,22 +130,51 @@ export default class KV {
           to_read -= bytes_read
 
           // Return if we have satisfied the request
-          if (to_read === 0) {
-            //console.log("WeaveDrive: Satisfied request with cache. Returning...")
-            return bytes_read
-          }
-          //console.log("WeaveDrive: Read from cache: ", bytes_read, " Remaining to read: ", to_read)
+
+          //console.log("KV: Satisfied request with cache. Returning...")
+          if (to_read === 0) return bytes_read
+
+          //console.log("KV: Read from cache: ", bytes_read, " Remaining to read: ", to_read)
 
           const chunk_download_sz = Math.max(to_read, CACHE_SZ)
           const to = Math.min(
             stream.node.total_size,
             stream.position + chunk_download_sz,
           )
-          const data = await ar.data(stream.node.name)
+          let data = val
+          if (!data) {
+            const sp = stream.path.split("/")
+            if (sp[1] === "data") {
+              const col_dir = resolve(data_dir, sp[2])
+              const _data =
+                readFileSync(resolve(col_dir, `${sp[3]}.json`), "utf8") ?? ""
+              data = Buffer.from(_data, "utf8")
+            } else {
+              data = await ar.data(stream.node.name)
+              try {
+                const json = JSON.parse(Buffer.from(data).toString())
+                for (const v of json.diffs) {
+                  const val = Buffer.from(JSON.stringify(v.data))
+                  const _fd = await this.open(
+                    `/data/${v.collection}/${v.doc}`,
+                    val,
+                  )
+                  const col_dir = resolve(data_dir, v.collection)
+                  if (!existsSync(col_dir)) mkdirSync(col_dir)
+                  writeFileSync(
+                    resolve(col_dir, `${v.doc}.json`),
+                    JSON.stringify(v.data),
+                  )
+                  await this.read(_fd, _fd, val.length, val)
+                }
+              } catch (e) {
+                log(e)
+              }
+            }
+          }
           // Extract the Range header to determine the start and end of the requested chunk
           const start = 0
           const end = data.length
-
           // Create a ReadableStream for the requested chunk
           const chunk = data.subarray(start, end)
           const response = new Response(
@@ -120,7 +206,7 @@ export default class KV {
               // Write bytes from the chunk and update the pointer if necessary
               const write_length = Math.min(chunk_bytes.length, to_read)
               if (write_length > 0) {
-                //console.log("WeaveDrive: Writing: ", write_length, " bytes to: ", dst_ptr)
+                //console.log("KV: Writing: ", write_length, " bytes to: ", dst_ptr)
                 mod.HEAP8.set(chunk_bytes.subarray(0, write_length), dst_ptr)
                 dst_ptr += write_length
                 bytes_read += write_length
@@ -131,14 +217,11 @@ export default class KV {
               if (to_read == 0) {
                 // Add excess bytes to our cache
                 const chunk_to_cache = chunk_bytes.subarray(write_length)
-                //console.log("WeaveDrive: Cacheing excess: ", chunk_to_cache.length)
+                //console.log("KV: Cacheing excess: ", chunk_to_cache.length)
                 cache_chunks.push(chunk_to_cache)
               }
-
               if (bytes_until_cache <= 0) {
-                console.log(
-                  "WeaveDrive: Chunk size reached. Compressing cache...",
-                )
+                console.log("KV: Chunk size reached. Compressing cache...")
                 stream.node.cache = this.addChunksToCache(
                   stream.node.cache,
                   cache_chunks,
@@ -149,7 +232,7 @@ export default class KV {
 
               if (bytes_until_notify <= 0) {
                 console.log(
-                  "WeaveDrive: Downloaded: ",
+                  "KV: Downloaded: ",
                   (downloaded_bytes / stream.node.total_size) * 100,
                   "%",
                 )
@@ -157,7 +240,7 @@ export default class KV {
               }
             }
           } catch (error) {
-            console.error("WeaveDrive: Error reading the stream: ", error)
+            console.error("KV: Error reading the stream: ", error)
           } finally {
             reader.releaseLock()
           }
@@ -183,7 +266,7 @@ export default class KV {
         readFromCache(stream, dst_ptr, length) {
           // Check if the cache has been invalidated by a seek
           if (stream.lastReadPosition !== stream.position) {
-            //console.log("WeaveDrive: Invalidating cache for fd: ", stream.fd, " Current pos: ", stream.position, " Last read pos: ", stream.lastReadPosition)
+            //console.log("KV: Invalidating cache for fd: ", stream.fd, " Current pos: ", stream.position, " Last read pos: ", stream.lastReadPosition)
             stream.node.cache = new Uint8Array(0)
             return 0
           }
