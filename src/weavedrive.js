@@ -7,7 +7,7 @@ const log = console.log
 
 export default class WeaveDrive {
   constructor(ar) {
-    this.drive = function WeaveDrive(mod, FS) {
+    this.ext = (mod, FS) => {
       return {
         reset(fd) {
           //console.log("WeaveDrive: Resetting fd: ", fd)
@@ -18,10 +18,8 @@ export default class WeaveDrive {
         async create(id) {
           var properties = { isDevice: false, contents: null }
 
-          if (!(await this.checkAdmissible(id))) {
-            //console.log("WeaveDrive: Arweave ID is not admissable! ", id)
-            return 0
-          }
+          //console.log("WeaveDrive: Arweave ID is not admissable! ", id)
+          if (!(await this.checkAdmissible(id))) return 0
 
           // Create the file in the emscripten FS
 
@@ -42,11 +40,7 @@ export default class WeaveDrive {
 
           // Add a function that defers querying the file size until it is asked the first time.
           Object.defineProperties(node, {
-            usedBytes: {
-              get: function () {
-                return bytesLength
-              },
-            },
+            usedBytes: { get: () => bytesLength },
           })
 
           // Now we have created the file in the emscripten FS, we can open it as a stream
@@ -71,8 +65,6 @@ export default class WeaveDrive {
               })
             }
           } catch (e) {}
-
-          var bytesLength = result.length
 
           var node = FS.createDataFile(
             "/",
@@ -220,10 +212,10 @@ export default class WeaveDrive {
           to_read -= bytes_read
 
           // Return if we have satisfied the request
-          if (to_read === 0) {
-            //console.log("WeaveDrive: Satisfied request with cache. Returning...")
-            return bytes_read
-          }
+
+          //console.log("WeaveDrive: Satisfied request with cache. Returning...")
+          if (to_read === 0) return bytes_read
+
           //console.log("WeaveDrive: Read from cache: ", bytes_read, " Remaining to read: ", to_read)
 
           const chunk_download_sz = Math.max(to_read, CACHE_SZ)
