@@ -27,7 +27,7 @@ class Server {
       mem,
       monitor,
       unmonitor,
-    } = connect(aoconnect, log)
+    } = connect(aoconnect, { log })
     this.monitor = monitor
     this.unmonitor = unmonitor
     this.spawn = spawn
