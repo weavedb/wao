@@ -16,7 +16,6 @@ import {
 } from "./utils.js"
 import ArMem from "./armem.js"
 import weavedrive from "./weavedrive.js"
-import kv from "./kv.js"
 import AoLoader from "@permaweb/ao-loader"
 import { readFileSync } from "fs"
 import { resolve } from "path"
@@ -24,7 +23,7 @@ import { scheduler, mu, su, cu, acc } from "./test.js"
 import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
 import AR from "./tar.js"
 
-export const connect = (mem, log = false) => {
+export const connect = (mem, { log = false, extensions = {} }) => {
   const isMem = mem?.__type__ === "mem"
   if (!isMem) {
     let args = {}
@@ -35,8 +34,8 @@ export const connect = (mem, log = false) => {
     mem = new ArMem(args)
   }
   const ar = new AR({ mem, log })
-  const WeaveDrive = new weavedrive(ar).drive
-  const KV = new kv(ar).kv
+  for (const k in extensions) extensions[k] = new extensions[k](ar).ext
+  extensions.WeaveDrive = new weavedrive(ar).ext
 
   const transform = input => {
     const output = { Tags: [] }
@@ -152,10 +151,9 @@ export const connect = (mem, log = false) => {
     await ar.postItems(item, su.jwk)
     const now = Date.now
     const t = tags(opt.tags)
-    const wd = t.Extension === "KV" ? KV : WeaveDrive
     const handle = await AoLoader(wasm, {
       format,
-      WeaveDrive: wd,
+      WeaveDrive: extensions[t.Extension],
       spawn: item,
       module: mem.txs[mod],
       blockHeight: "100",
