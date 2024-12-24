@@ -2,7 +2,7 @@ import express from "express"
 import cors from "cors"
 import base64url from "base64url"
 import { DataItem } from "arbundles"
-import { tags, toGraphObj } from "./utils.js"
+import { tags, toGraphObj, optAO } from "./utils.js"
 import { connect } from "./aoconnect.js"
 import { GQL, cu, su, mu } from "./test.js"
 import bodyParser from "body-parser"
@@ -16,7 +16,15 @@ class Server {
     cu = 4004,
     aoconnect,
     log = false,
+    port,
   } = {}) {
+    if (port) {
+      ar = port
+      mu = port + 2
+      su = port + 3
+      cu = port + 4
+      aoconnect = optAO(5000)
+    }
     const {
       ar: _ar,
       message,
@@ -49,6 +57,15 @@ class Server {
     const app = express()
     app.use(cors())
     app.use(bodyParser.json({ limit: "100mb" }))
+    app.get("/", (req, res) =>
+      res.json({
+        version: 1,
+        timestamp: Date.now(),
+        height: this.mem.height,
+        network: "wao.LN.1",
+        current: this.mem.getAnchor(),
+      }),
+    )
     app.get("/wallet/:id/balance", (req, res) => res.send("0"))
     app.get("/mint/:id/:amount", (req, res) => res.json({ id: "0" }))
     app.get("/tx/:id/offset", async (req, res) => {
@@ -124,6 +141,7 @@ class Server {
         if (req.body.data_root && req.body.data === "") {
           data[req.body.data_root] = req.body
         } else {
+          console.log("or here...", req.body)
           await this._ar.postTx(req.body)
         }
         res.json({ id: req.body.id })
@@ -157,11 +175,12 @@ class Server {
       const _tags = tags(item.tags)
       let err = null
       if (_tags.Type === "Process") {
-        await this.spawn({
+        const res = await this.spawn({
           item,
           module: _tags.Module,
           scheduler: _tags.Scheduler,
         })
+        if (!res) err = "bad requrest"
       } else if (_tags.Type === "Message") {
         await this.message({ item, process: item.target })
       } else {
