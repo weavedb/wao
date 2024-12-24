@@ -23,7 +23,7 @@ import { scheduler, mu, su, cu, acc } from "./test.js"
 import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
 import AR from "./tar.js"
 
-export const connect = (mem, { log = false, extensions = {} }) => {
+export const connect = (mem, { log = false, extensions = {} } = {}) => {
   const isMem = mem?.__type__ === "mem"
   if (!isMem) {
     let args = {}
@@ -151,13 +151,17 @@ export const connect = (mem, { log = false, extensions = {} }) => {
     await ar.postItems(item, su.jwk)
     const now = Date.now
     const t = tags(opt.tags)
-    const handle = await AoLoader(wasm, {
-      format,
-      WeaveDrive: extensions[t.Extension],
-      spawn: item,
-      module: mem.txs[mod],
-      blockHeight: "100",
-    })
+    const wdrive = extensions[t.Extension || "WeaveDrive"]
+    let handle = null
+    try {
+      handle = await AoLoader(wasm, {
+        format,
+        WeaveDrive: wdrive,
+        spawn: item,
+        module: mem.txs[mod],
+      })
+    } catch (e) {}
+    if (!handle) return null
     _module = { handle, id: mod }
     Date.now = now
 

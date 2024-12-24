@@ -134,13 +134,19 @@ class AR extends MAR {
         this.mem.txs[item.id].block = block.id
       }
     }
-
     let _tags = []
     for (const v of tx.tags) {
       _tags.push({
         name: base64url.decode(v.name),
         value: base64url.decode(v.value),
       })
+    }
+    const __tags = t(_tags)
+    if (__tags.Type === "Module") {
+      this.mem.wasms[tx.id] = {
+        data: Buffer.from(tx.data, "base64"),
+        format: __tags["Module-Format"],
+      }
     }
     tx.tags = _tags
     tx.owner = await this.arweave.wallets.jwkToAddress({ n: tx.owner })
@@ -178,9 +184,9 @@ class AR extends MAR {
       if (!isNil(_string.decode)) decode = _string.decode
       if (!isNil(_string.string)) string = _string.string
     }
-
     let tx = this.mem.txs[id]
     let _data = tx?.data ?? null
+    if (tx?.format === 2 && _data) _data = Buffer.from(_data, "base64")
     let isBuf = is(Uint8Array, _data) || is(ArrayBuffer, _data)
     let isStr = is(String, _data)
     if (decode === false) {

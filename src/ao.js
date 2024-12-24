@@ -625,7 +625,7 @@ class AO {
     return await this.pipe({ jwk, fns })
   }
 
-  async wait({ pid, attempts = 5 }) {
+  async wait({ pid, attempts = 10 }) {
     let exist = false
     let err = null
     while (attempts > 0) {
