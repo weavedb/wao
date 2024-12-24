@@ -8,7 +8,7 @@ import AR from "../src/ar.js"
 import GQL from "../src/gql.js"
 import ArMem from "../src/armem.js"
 import { setup, Src } from "../src/helpers.js"
-import { tags, wait } from "../src/utils.js"
+import { tags, wait, optAO } from "../src/utils.js"
 import Server from "../src/server.js"
 const { mem, spawn, message, dryrun } = connect()
 const [{ signer, jwk }] = acc
@@ -24,22 +24,8 @@ end)
 describe("SDK", function () {
   after(() => setTimeout(() => process.exit(), 100))
   it("should publish custom modules", async () => {
-    const aoconnect = {
-      MU_URL: "http://localhost:5002",
-      CU_URL: "http://localhost:5004",
-      SU_URL: "http://localhost:5003",
-      GATEWAY_URL: "http://localhost:5000",
-    }
-    const server = new Server({
-      ar: 5000,
-      mu: 5002,
-      su: 5003,
-      cu: 5004,
-      aoconnect,
-      log: true,
-    })
-
-    let ao = new AO({ ar: { port: 5000 }, aoconnect })
+    const server = new Server({ port: 5000, log: true })
+    let ao = new AO({ port: 5000 })
     /*
     let ao2 = new AO({
       ar: { port: 4000 },
@@ -98,6 +84,21 @@ describe("SDK", function () {
       console.log(v)
     }
     console.log(await res.next())
+    return
+  })
+})
+
+describe("ArMem", () => {
+  after(() => setTimeout(() => process.exit(), 100))
+  it.only("should upload data with the right format", async () => {
+    const server = new Server({ port: 5000, log: true })
+    let ao = new AO({ port: 5000 })
+    const src = new Src({
+      ar: ao.ar,
+      dir: resolve(import.meta.dirname, "../src/lua"),
+    })
+    const wasm_aos2 = await src.upload("aos2_0_1", "wasm")
+    console.log(await ao.ar.data(wasm_aos2))
     return
   })
 })
