@@ -131,7 +131,7 @@ describe("GraphQL", () => {
 describe("Aoconnect", () => {
   it("should work with pre-loaded packages", async () => {
     const mem = new ArMem()
-    const ar = new AR({ port: 4000, mem })
+    const ar = new AR({ mem })
     await ar.post({ data: "abc", tags: { test: 3 }, jwk })
   })
   it("should spawn a process send messages", async () => {

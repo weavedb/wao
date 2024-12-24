@@ -118,7 +118,6 @@ class AO extends MAO {
       signer,
     })
     await this.ar.postItems(item, jwk)
-    this.mem.wasms[id] = { data, format: t["Module-Format"] }
     return { id }
   }
 }
