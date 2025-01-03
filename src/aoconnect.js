@@ -72,16 +72,15 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
     }
   }
 
-  const genEnv = ({ pid, owner = "", module = "", auth = "" }) => {
+  const processTagsByPid = {}
+  const genEnv = ({ pid, owner = "", module = "", auth = "", processTags = null }) => {
+    if(!processTags) processTags = processTagsByPid[pid]
+    else processTagsByPid[pid] = processTags
+
     return {
       Process: {
         Id: pid,
-        Tags: [
-          { name: "Data-Protocol", value: "ao" },
-          { name: "Variant", value: "ao.TN.1" },
-          { name: "Type", value: "Process" },
-          { name: "Authority", value: auth },
-        ],
+        Tags: processTags,
         Owner: owner,
       },
       Module: {
@@ -192,6 +191,7 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
         owner: p.owner,
         module: p.module,
         auth: mu.addr,
+        processTags: opt.tags
       })
 
       const _t = tags(msg.Tags)
