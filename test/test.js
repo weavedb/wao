@@ -328,3 +328,30 @@ describe("WeaveDrive", () => {
     assert.equal(await p.d("Get", { id }), "Hello")
   })
 })
+
+const src_counter = `
+local count = 0
+
+Handlers.add("Add", "Add", function (msg)
+  count = count + tonumber(msg.Plus)
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+`
+
+describe("Fork", function () {
+  it("should fork wasm memory", async () => {
+    const ao = await new AO().init(acc[0])
+    const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
+    await p.m("Add", { Plus: 3 })
+    assert.equal(await p.d("Get"), "3")
+    const memory = ao.mem.env[pid].memory
+    const ao2 = await new AO().init(acc[0])
+    const { p: p2 } = await ao2.spwn({ memory })
+    assert.equal(await p2.d("Get"), "3")
+    await p2.m("Add", { Plus: 2 })
+    assert.equal(await p2.d("Get"), "5")
+  })
+})
