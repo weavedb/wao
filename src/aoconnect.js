@@ -167,7 +167,7 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
 
     const _tags = tags(opt.tags)
     let res = null
-    let memory = null
+    let memory = opt.memory ?? null
     let p = {
       id: id,
       epochs: [],
@@ -182,7 +182,9 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
       txs: [],
       opt,
     }
-    if (_tags["On-Boot"] || true) {
+    if (memory) {
+      // forking...
+    } else if (_tags["On-Boot"] || true) {
       let data = ""
       if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
       else data = mem.msgs[_tags["On-Boot"]]?.data ?? ""
@@ -193,7 +195,6 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
         module: p.module,
         auth: mu.addr,
       })
-      const _t = tags(msg.Tags)
       res = await _module.handle(null, msg, _env)
       p.memory = res.Memory
       delete res.Memory

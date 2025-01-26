@@ -333,6 +333,7 @@ class AO {
     boot,
     module = this.module,
     scheduler = this.scheduler,
+    memory,
     jwk,
     tags = {},
     data,
@@ -348,6 +349,7 @@ class AO {
       if (!tags.Authority && this.authority) tags.Authority = this.authority
       let _tags = buildTags(null, tags)
       pid = await this.spawn({
+        memory,
         module,
         scheduler,
         signer: this.toSigner(jwk),
@@ -358,7 +360,8 @@ class AO {
       console.log(e)
       err = e
     }
-    return { err, pid }
+    const p = pid ? this.p(pid) : null
+    return { err, pid, p }
   }
 
   async msg({
