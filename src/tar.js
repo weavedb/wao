@@ -63,7 +63,7 @@ class AR extends MAR {
       this.mem.addrmap[owner] = { key: di.owner, address: owner }
       let data = di.data
       try {
-        data = base64url.decode(di.data)
+        //data = base64url.decode(di.data)
       } catch (e) {}
       let _item = {
         _data: { size: data_size, type: data_type },
@@ -177,7 +177,7 @@ class AR extends MAR {
     return this.mem.txs[id]
   }
 
-  async data(id, _string) {
+  async data(id, _string, log) {
     let decode = true
     let string = _string
     if (is(Object, _string)) {
@@ -186,7 +186,11 @@ class AR extends MAR {
     }
     let tx = this.mem.txs[id]
     let _data = tx?.data ?? null
-    if (tx?.format === 2 && _data) _data = Buffer.from(_data, "base64")
+    if (tx?.format === 2 && _data) {
+      _data = Buffer.from(_data, "base64")
+    } else {
+      _data = Buffer.from(base64url.decode(_data))
+    }
     let isBuf = is(Uint8Array, _data) || is(ArrayBuffer, _data)
     let isStr = is(String, _data)
     if (decode === false) {
@@ -194,7 +198,7 @@ class AR extends MAR {
       return base64url.encode(_data)
     } else {
       if (isBuf && string) {
-        return Buffer.from(_data).toString()
+        return _data.toString()
       } else if (isStr && string !== true) {
         return new TextEncoder().encode(_data)
       }
