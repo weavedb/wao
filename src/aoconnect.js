@@ -193,7 +193,6 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
         module: p.module,
         auth: mu.addr,
       })
-
       const _t = tags(msg.Tags)
       res = await _module.handle(null, msg, _env)
       p.memory = res.Memory
