@@ -35,9 +35,10 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing the te
 ```bash
 yarn add wao
 ```
+
 ### Drop-in `aoconnect` Replacement for Tests
 
-By replacing `aoconnect` with WAO connect, everything runs in-memory with zero latency and your tests are executed 1000x faster. The APIs are identical. So, there's no need to change anything else in your code.
+By replacing `aoconnect` with WAO connect, everything runs in memory with zero latency and your tests are executed 1000x faster. The APIs are identical. So, there's no need to change anything else in your code.
 
 ```js
 //import { spawn, message, dryrun, assign, result } from "@permaweb/aoconnect"
@@ -150,6 +151,7 @@ The `AO` class is not only for in-memory tests, but also for production code. Yo
 ```js
 import { AR, AO, GQL } from "wao"
 ````
+
 ### Cherry-Picking Outputs
 
 You often need to pick a specific piece of data from returned results with multiple spawned messages. You need to go through all the returned messages and further go through tags and data to find it. That's too much code to write. `AO` comes with `get` parameter to simplify it.
@@ -1195,7 +1197,7 @@ const block_fields = `{ id timestamp height previous }`
 
 ### ArMem
 
-`ArMem` stands for Arweave in-memory and is a class to emulate an Arweave node and AO units in-memory, which is internally used in the WAO testing framework. You can instantiate `ArMem` and control multiple emulators by passing it between other classes.
+`ArMem` stands for Arweave in memory and is a class to emulate an Arweave node and AO units in memory, which is internally used in the WAO testing framework. You can instantiate `ArMem` and control multiple emulators by passing it between other classes.
 
 - [Instantiate](#instantiate-3)
 

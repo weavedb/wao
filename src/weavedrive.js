@@ -122,7 +122,6 @@ export default class WeaveDrive {
             false,
           )
           var stream = FS.open("/tx2/" + id, "r")
-
           return stream
         },
         async open(filename) {
@@ -190,9 +189,7 @@ export default class WeaveDrive {
 
           var stream = 0
           for (var i = 0; i < FS.streams.length; i++) {
-            if (FS.streams[i].fd === fd) {
-              stream = FS.streams[i]
-            }
+            if (FS.streams[i].fd === fd) stream = FS.streams[i]
           }
           // read block headers
           if (stream.path.includes("/block")) {
@@ -226,8 +223,7 @@ export default class WeaveDrive {
           //console.log("WeaveDrive: fd: ", fd, " Read length: ", to_read, " Reading ahead:", to - to_read - stream.position)
 
           // fetch(`/${stream.node.name}`)
-          const data = await ar.data(stream.node.name)
-
+          const data = await ar.data(stream.node.name, null, log)
           // Extract the Range header to determine the start and end of the requested chunk
           const start = 0
           const end = data.length
