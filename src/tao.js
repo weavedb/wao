@@ -3,7 +3,7 @@ import { createDataItemSigner } from "@permaweb/aoconnect"
 import { srcs, buildTags } from "./utils.js"
 import AR from "./tar.js"
 import { connect } from "./aoconnect.js"
-import { acc } from "./test.js"
+import { acc, mu } from "./test.js"
 import { mergeLeft, is, map } from "ramda"
 
 let log = `
@@ -69,7 +69,6 @@ class AO extends MAO {
       cache: opt.cache,
       reset: opt.reset,
     })
-    this.module = mem.modules.aos2_0_1
     this.assign = assign
     this.result = async (...opt) => {
       const res = await result(...opt)
