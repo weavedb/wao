@@ -135,7 +135,7 @@ describe("Aoconnect", () => {
     const ar = new AR({ mem })
     await ar.post({ data: "abc", tags: { test: 3 }, jwk })
   })
-  it("should spawn a process send messages", async () => {
+  it("should spawn a process and send messages", async () => {
     const mem = new ArMem()
     const { armem, spawn, message, dryrun } = connect(mem)
 
@@ -164,11 +164,6 @@ describe("SDK", function () {
   before(async () => {
     ao = await new AO().init(acc[0])
     mem = ao.mem
-
-    //const aoconnect = optAO(5000)
-    //ao = await new MAO({ ar: { port: 5000 }, aoconnect }).init(acc[0])
-    //server = new Server({ ...optServer(5000), aoconnect })
-    //mem = server.mem
   })
   after(async () => {
     if (server) await server.end()
@@ -358,7 +353,7 @@ describe("Fork", function () {
 })
 
 describe("Persistency", function () {
-  it.only("should persist the data", async () => {
+  it("should persist the data", async () => {
     const cache = resolve(import.meta.dirname, ".cache")
     try {
       unlinkSync(cache)
