@@ -336,13 +336,17 @@ npx wao
 ```
 
 - `port` : Arweave port, the ports of AO units are based on this port (default to `4000`)
+  - AR: [localhost:4000](http://localhost:4000)
+  - MU: [localhost:4002](http://localhost:4002)
+  - SU: [localhost:4003](http://localhost:4003)
+  - CU: [localhost:4004](http://localhost:4004)  
 - `db` : a directory to store data (default to `.cache`)
 - `reset` : to reset the database
 
 ```bash
 npx wao --port 5000 --db .custom_cache_dir --reset
 ```
-The ports are, AR => `5000`, MU => `5002`, SU => `5003`, CU => `5004`.
+The ports will be, AR => `5000`, MU => `5002`, SU => `5003`, CU => `5004`.
 
 ## API Reference
 
