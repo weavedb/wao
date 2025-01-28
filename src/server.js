@@ -16,6 +16,7 @@ class Server {
     cu = 4004,
     aoconnect,
     log = false,
+    db,
     port,
   } = {}) {
     if (port) {
@@ -35,7 +36,7 @@ class Server {
       mem,
       monitor,
       unmonitor,
-    } = connect(aoconnect, { log })
+    } = connect(aoconnect, { log, cache: db })
     this.monitor = monitor
     this.unmonitor = unmonitor
     this.spawn = spawn
@@ -242,7 +243,7 @@ class Server {
             },
           },
         }
-      })(reverse(this.mem.env[pid].txs))
+      })(reverse(this.mem.env[pid]?.txs ?? []))
       res.json({ page_info: { has_next_page: false }, edges })
     })
     const server = app.listen(this.ports.su, () =>
@@ -288,7 +289,7 @@ class Server {
         v.close(() => {
           count += 1
           if (count >= 4) {
-            console.log("servers closed!", count)
+            console.log("servers closed!")
             res()
           }
         })

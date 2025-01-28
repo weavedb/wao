@@ -10,8 +10,8 @@ delete json.scripts
 json.main = "cjs/index.js"
 json.module = "esm/index.js"
 json.bin = {
-  wao: "./cjs/run.js",
-  "wao-esm": "./esm/run.js",
+  wao: "./cjs/cli.js",
+  "wao-esm": "./esm/cli.js",
 }
 json.scripts = {
   server: "node --experimental-wasm-memory64 cjs/run.js",
