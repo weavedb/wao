@@ -23,12 +23,12 @@ import { scheduler, mu, su, cu, acc } from "./test.js"
 import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
 import AR from "./tar.js"
 
-export const connect = (mem, { log = false, extensions = {} } = {}) => {
+export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
   const isMem = mem?.__type__ === "mem"
   if (!isMem) {
-    let args = {}
+    let args = { cache }
     if (mem?.SU_URL) {
-      args = mem
+      args = mergeLeft(mem, args)
       args.scheduler = scheduler
     }
     mem = new ArMem(args)
@@ -56,14 +56,14 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
     return output
   }
 
-  const genMsg = (Id, p, data, Tags, from, Owner, dry = false) => {
+  const genMsg = async (Id, p, data, Tags, from, Owner, dry = false) => {
     if (!dry) p.height += 1
     return {
       Id,
       Target: p.id,
       Owner,
       Data: data?.length ? data : "",
-      "Block-Height": mem.height.toString(),
+      "Block-Height": (await mem.get("height")).toString(),
       Timestamp: Date.now().toString(),
       Module: p.module,
       From: from,
@@ -94,31 +94,10 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
       },
     }
   }
-
   const spawn = async (opt = {}) => {
     if (!opt.module) throw Error("module missing")
     if (!opt.scheduler) throw Error("scheduler missing")
-    let mod = opt.module ?? mem.modules["aos2_0_1"]
-    let _module = null
-    const __dirname = await dirname()
-    let format = null
-    let wasm = mem.wasms[mod]?.data
-    if (!wasm) {
-      if (mem.wasms[mod]?.file) {
-        wasm = readFileSync(
-          resolve(__dirname, `lua/${mem.wasms[mod].file}.wasm`),
-        )
-        format = mem.wasms[mod].format
-      } else if (mem.txs[mod]) {
-        wasm = Buffer.from(mem.txs[mod].data, "base64")
-        format = tags(mem.txs[mod].tags)["Module-Format"]
-      }
-    } else {
-      format = mem.wasms[mod].format
-    }
-    format ??= "wasm64-unknown-emscripten-draft_2024_02_15"
-
-    if (!mod) throw Error("module not found")
+    const { mod, wasm, format } = await mem.getWasm(opt.module, mem)
     opt.tags = buildTags(
       null,
       mergeLeft(tags(opt.tags ?? []), {
@@ -132,7 +111,6 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
       }),
     )
     let ex = false
-    opt.tags ??= []
     for (let v of opt.tags) if (v.name === "Type") ex = true
     if (!ex) opt.tags.push({ name: "Type", value: "Process" })
     const {
@@ -151,24 +129,28 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
     await ar.postItems(item, su.jwk)
     const now = Date.now
     const t = tags(opt.tags)
-    const wdrive = extensions[t.Extension || "WeaveDrive"]
+    const ext = t.Extension || "WeaveDrive"
+    const wdrive = extensions[ext]
     let handle = null
     try {
       handle = await AoLoader(wasm, {
         format,
         WeaveDrive: wdrive,
         spawn: item,
-        module: mem.txs[mod],
+        module: await mem.get("txs", mod),
       })
     } catch (e) {}
     if (!handle) return null
+    let _module = null
     _module = { handle, id: mod }
     Date.now = now
-
     const _tags = tags(opt.tags)
     let res = null
     let memory = opt.memory ?? null
     let p = {
+      extension: ext,
+      item: item?.binary,
+      format,
       id: id,
       epochs: [],
       handle: _module.handle,
@@ -187,8 +169,8 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
     } else if (_tags["On-Boot"] || true) {
       let data = ""
       if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
-      else data = mem.msgs[_tags["On-Boot"]]?.data ?? ""
-      let msg = genMsg(id, p, data, opt.tags, owner, mu.addr, true)
+      else data = (await mem.get("msgs", _tags["On-Boot"]))?.data ?? ""
+      let msg = await genMsg(id, p, data, opt.tags, owner, mu.addr, true)
       const _env = genEnv({
         pid: p.id,
         owner: p.owner,
@@ -202,8 +184,7 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
     } else {
       p.height += 1
     }
-    mem.msgs[id] = opt
-    mem.env[id] = p
+    await mem.set(opt, "msgs", id)
     if (_tags["Cron-Interval"]) {
       let [num, unit] = _tags["Cron-Interval"].split("-")
       let int = 0
@@ -236,9 +217,10 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
           cronTags.push({ name: k.replace(/Cron-Tag-/, ""), value: _tags[k] })
         }
       }
-      mem.env[id].cronTags = cronTags
-      mem.env[id].span = int
+      p.cronTags = cronTags
+      p.span = int
     }
+    await mem.set(p, "env", id)
     return id
   }
 
@@ -252,9 +234,9 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
   }
 
   const assign = async opt => {
-    const p = mem.env[opt.process]
+    const p = await mem.get("env", opt.process)
     if (!p) return null
-    let _opt = mem.msgs[opt.message]
+    let _opt = await mem.get("msgs", opt.message)
     let hash = genHashChain(p.hash, opt.message)
     p.hash = hash
     opt.tags = buildTags(
@@ -267,7 +249,7 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
         Variant: "ao.TN.1",
         SDK: "aoconnect",
         Type: "Assignment",
-        "Block-Height": mem.height,
+        "Block-Height": await mem.get("height"),
         Process: opt.process,
         Message: opt.message,
         "Hash-Chain": hash,
@@ -305,22 +287,34 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
         }
       }
       // check: is owner=mu.addr right?
-      const msg = genMsg(opt.message, p, data, _tags, from, mu.addr)
+      const msg = await genMsg(opt.message, p, data, _tags, from, mu.addr)
       const _env = genEnv({
         pid: p.id,
         owner: p.owner,
         module: p.module,
         auth: mu.addr,
       })
+      if (!p.handle) {
+        const { format, mod, wasm } = await mem.getWasm(p.modulea)
+        const wdrive = extensions[p.extention]
+        p.handle = await AoLoader(wasm, {
+          format,
+          WeaveDrive: wdrive,
+          spawn: new DataItem(p.item),
+          module: await mem.get("txs", mod),
+        })
+        mem.env[opt.process].handle = p.handle
+      }
       const res = await p.handle(p.memory, msg, _env)
       p.memory = res.Memory
       delete res.Memory
       p.res[opt.message] = res
       p.results.push(opt.message)
       p.txs.unshift({ id, ...opt })
-      mem.msgs[opt.message] = _opt
+      await mem.set(p, "env", opt.process)
+      await mem.set(_opt, "msgs", opt.message)
       for (const v of res.Messages ?? []) {
-        if (mem.env[v.Target]) {
+        if (await mem.get("env", v.Target)) {
           await message({
             process: v.Target,
             tags: v.Tags,
@@ -360,7 +354,7 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
   }
 
   const message = async opt => {
-    const p = mem.env[opt.process]
+    const p = await mem.get("env", opt.process)
     if (!p) return null
     let ex = false
     let id = opt?.item?.id ?? ""
@@ -384,7 +378,7 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
         target: opt.process,
       }))
     }
-    mem.msgs[id] = opt
+    await mem.set(opt, "msgs", id)
     await assign({
       message_item: item,
       message: id,
@@ -398,14 +392,14 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
   return {
     message,
     unmonitor: async opt => {
-      const p = mem.env[opt.process]
+      const p = await mem.get("env", opt.process)
       try {
         clearInterval(p.cron)
         p.cron = null
       } catch (e) {}
     },
     monitor: async opt => {
-      const p = mem.env[opt.process]
+      const p = await mem.get("env", opt.process)
       if (isNil(p.cron)) {
         p.cron = setInterval(async () => {
           await message({
@@ -420,9 +414,9 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
     spawn,
     assign,
     ar,
-    result: async opt => mem.env[opt.process].res[opt.message],
+    result: async opt => (await mem.get("env", opt.process)).res[opt.message],
     results: async opt => {
-      const p = mem.env[opt.process]
+      const p = await mem.get("env", opt.process)
       let results = []
       const limit = opt.limit ?? 25
       if (opt.sort === "DESC") {
@@ -439,7 +433,7 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
       return { edges: results }
     },
     dryrun: async opt => {
-      const p = mem.env[opt.process]
+      const p = await mem.get("env", opt.process)
       if (!p) return null
       let id = opt.id ?? ""
       let owner = opt.owner ?? ""
@@ -447,7 +441,7 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
         ;({ id, owner } = await ar.dataitem({ ...opt, target: opt.process }))
       }
       try {
-        const msg = genMsg(
+        const msg = await genMsg(
           id,
           p,
           opt.data ?? "",
@@ -469,6 +463,17 @@ export const connect = (mem, { log = false, extensions = {} } = {}) => {
             maximum: memory.maximum || undefined,
             shared: memory.shared || false,
           })
+        }
+        if (!p.handle) {
+          const { format, mod, wasm } = await mem.getWasm(p.modulea)
+          const wdrive = extensions[p.extention]
+          p.handle = await AoLoader(wasm, {
+            format,
+            WeaveDrive: wdrive,
+            spawn: new DataItem(p.item),
+            module: await mem.get("txs", mod),
+          })
+          mem.env[opt.process].handle = p.handle
         }
         const res = await p.handle(p.memory, msg, _env)
         return res
