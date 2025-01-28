@@ -1,3 +1,4 @@
+import { connect as _connect, createDataItemSigner } from "@permaweb/aoconnect"
 import assert from "assert"
 import { resolve } from "path"
 import { after, describe, it, before, beforeEach } from "node:test"
@@ -52,6 +53,48 @@ describe("SDK", function () {
     assert.equal(await p2.d("Get"), "3")
     await p2.m("Add", { Plus: 2 })
     assert.equal(await p2.d("Get"), "5")
+  })
+
+  it.only("should connect with aoconnect", async () => {
+    const { spawn, message, dryrun, assign, result } = _connect({
+      MU_URL: `http://localhost:4002`,
+      CU_URL: `http://localhost:4004`,
+      GATEWAY_URL: `http://localhost:4000`,
+    })
+    const pid = await spawn({
+      module: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
+      scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
+      tags: [
+        {
+          name: "Authority",
+          value: "eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg",
+        },
+      ],
+      signer: createDataItemSigner(acc[0].jwk),
+    })
+    console.log(pid)
+    const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)
+`
+    await wait(1000)
+    const mid = await message({
+      process: pid,
+      tags: [{ name: "Action", value: "Eval" }],
+      data: src_data,
+      signer: createDataItemSigner(acc[0].jwk),
+    })
+
+    console.log(await result({ process: pid, message: mid }))
+    const res = await dryrun({
+      process: pid,
+      data: "",
+      tags: [{ name: "Action", value: "Hello" }],
+      anchor: "1234",
+    })
+    console.log(res)
+    assert.equal(res.Messages[0].Data, "Hello, World!")
   })
 
   it("should publish custom modules", async () => {
