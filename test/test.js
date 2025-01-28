@@ -1,5 +1,6 @@
 import assert from "assert"
 import { resolve } from "path"
+import { unlinkSync } from "fs"
 import { afterEach, after, describe, it, before, beforeEach } from "node:test"
 import { blueprint, mu, AO, connect, acc, scheduler } from "../src/test.js"
 import Server from "../src/server.js"
@@ -350,6 +351,27 @@ describe("Fork", function () {
     const memory = ao.mem.env[pid].memory
     const ao2 = await new AO().init(acc[0])
     const { p: p2 } = await ao2.spwn({ memory })
+    assert.equal(await p2.d("Get"), "3")
+    await p2.m("Add", { Plus: 2 })
+    assert.equal(await p2.d("Get"), "5")
+  })
+})
+
+describe("Persistency", function () {
+  it.only("should persist the data", async () => {
+    const cache = resolve(import.meta.dirname, ".cache")
+    try {
+      unlinkSync(cache)
+    } catch (e) {}
+    const ao = await new AO({ cache }).init(acc[0])
+    const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
+    await p.m("Add", { Plus: 3 })
+    assert.equal(await p.d("Get"), "3")
+
+    const ao2 = await new AO({
+      cache: resolve(import.meta.dirname, ".cache"),
+    }).init(acc[0])
+    const p2 = ao2.p(pid)
     assert.equal(await p2.d("Get"), "3")
     await p2.m("Add", { Plus: 2 })
     assert.equal(await p2.d("Get"), "5")

@@ -1,12 +1,83 @@
 import Arweave from "arweave"
 import { last } from "ramda"
-import { buildTags } from "./utils.js"
+import { tags, buildTags, dirname } from "./utils.js"
+import { open } from "lmdb"
+import { readFileSync } from "fs"
+import { resolve } from "path"
+
 export default class ArMem {
-  constructor({ MU_URL, CU_URL, SU_URL, GATEWAY_URL, scheduler } = {}) {
+  constructor({ MU_URL, CU_URL, SU_URL, GATEWAY_URL, scheduler, cache } = {}) {
     this.__type__ = "mem"
+    this.isInit = false
+    if (cache) this.db = open({ path: cache, compression: true })
     this.arweave = Arweave.init()
     this.arweave.transactions.getTransactionAnchor = () => this.getAnchor()
     this.arweave.transactions.getPrice = () => 0
+    this.scheduler = scheduler
+    this.SU_URL = SU_URL
+    this.initSync()
+  }
+  async putAll(key) {
+    for (let k in this[key]) await this.set(this[key][k], key, k)
+  }
+  async init() {
+    if (this.isInit) return
+    this.isInit = true
+    if (this.db) {
+      for (const v of ["height", "blocks"]) this[v] = await this.get(v)
+      for (const v of [
+        "txs",
+        "jwks",
+        "env",
+        "modules",
+        "wasms",
+        "addrmap",
+        "blockmap",
+        "modmap",
+        "msgs",
+      ]) {
+        this[v] ??= {}
+        const items = await this.db.getKeys({ start: v, end: v + "a" })
+        for (const v2 of items) {
+          const key = v2.split(".")[0]
+          const field = v2.split(".")[1]
+          if (key === v) this[v][field] = await this.db.get(v2)
+        }
+      }
+    } else {
+      for (const v of ["height", "blocks"]) await this.set(this[v], v)
+      for (const v of ["modules", "wasms", "addrmap", "blockmap"]) {
+        await this.putAll(v)
+      }
+    }
+  }
+  async getWasm(module) {
+    let mod = module ?? this.modules.aos2_0_1
+    if (!mod) throw Error("module not found")
+    const __dirname = await dirname()
+    let format = null
+    let _wasm = await this.wasms[mod]
+    let wasm = _wasm?.data
+    if (!wasm) {
+      if (_wasm?.file) {
+        wasm = readFileSync(
+          resolve(__dirname, `lua/${this.wasms[mod].file}.wasm`),
+        )
+        format = _wasm.format
+      } else {
+        const tx = await this.get("txs", mod)
+        if (tx) {
+          wasm = Buffer.from(tx.data, "base64")
+          format = tags(tx.tags)["Module-Format"]
+        }
+      }
+    } else {
+      format = _wasm.format
+    }
+    format ??= "wasm64-unknown-emscripten-draft_2024_02_15"
+    return { format, mod, wasm }
+  }
+  initSync() {
     this.addrmap = {}
     this.txs = {}
     this.jwks = {}
@@ -54,19 +125,19 @@ export default class ArMem {
         }),
       }
     }
-    if (scheduler && SU_URL) {
-      const key = scheduler
+    if (this.scheduler && this.SU_URL) {
+      const key = this.scheduler
       txs.push(key)
-      this.addrmap[scheduler] = { address: scheduler }
+      this.addrmap[this.scheduler] = { address: this.scheduler }
       this.txs[key] = {
         id: key,
         block: 0,
-        owner: scheduler,
+        owner: this.scheduler,
         tags: buildTags(null, {
           "Data-Protocol": "ao",
           Variant: "ao.TN.1",
           Type: "Scheduler-Location",
-          Url: SU_URL,
+          Url: this.SU_URL,
           "Time-To-Live": 1000 * 60 * 60 * 24 * 365 * 10,
         }),
       }
@@ -85,5 +156,21 @@ export default class ArMem {
     return this.blocks.length === 0
       ? "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM"
       : last(this.blockmap[last(this.blocks)].txs)
+  }
+  async get(key, field) {
+    await this.init()
+    if (!field) return this[key]
+    return this[key]?.[field]
+  }
+  async set(val, key, field) {
+    await this.init()
+    if (!field) {
+      this[key] = val
+      if (this.db) await this.db.put(`${key}`, this[key])
+    } else {
+      this[key] ??= {}
+      this[key][field] = val
+      if (this.db) await this.db.put(`${key}.${field}`, this[key][field])
+    }
   }
 }

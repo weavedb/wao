@@ -8,6 +8,7 @@ import base64url from "base64url"
 import ArMem from "./armem.js"
 import GQL from "./tgql.js"
 import { last, is, includes, isNil } from "ramda"
+
 class AR extends MAR {
   constructor(opt = {}) {
     super({ ...opt, in_memory: true })
@@ -60,11 +61,8 @@ class AR extends MAR {
       for (const t of di.tags)
         if (t.name === "Content-Type") data_type = t.value
       const owner = await this.owner(di)
-      this.mem.addrmap[owner] = { key: di.owner, address: owner }
+      await this.mem.set({ key: di.owner, address: owner }, "addrmap", owner)
       let data = di.data
-      try {
-        //data = base64url.decode(di.data)
-      } catch (e) {}
       let _item = {
         _data: { size: data_size, type: data_type },
         anchor: di.anchor,
@@ -76,7 +74,7 @@ class AR extends MAR {
         tags: di.tags,
         data,
       }
-      this.mem.txs[await di.id] = _item
+      await this.mem.set(_item, "txs", await di.id)
       _items.push(_item)
     }
     const bundle = await bundleAndSignData(items, new ArweaveSigner(jwk))
@@ -96,21 +94,22 @@ class AR extends MAR {
 
     let res = null
     if (!tx.id) await this.mem.arweave.transactions.sign(tx, jwk)
-    this.mem.height += 1
+    let height = (await this.mem.get("height")) + 1
+    await this.mem.set(height, "height")
     let block = {
       id: tx.id,
       timestamp: Date.now(),
-      height: this.mem.height,
-      previous: last(this.mem.blocks) ?? "",
+      height,
+      previous: last(await this.mem.get("blocks")) ?? "",
       txs: [],
     }
     let msg = null
     if (items) {
       for (const item of items) {
-        this.mem.txs[item.id] = item
-        this.mem.txs[item.id].parent = { id: tx.id }
-        this.mem.txs[item.id].bundledIn = { id: tx.id }
-        this.mem.txs[item.id].anchor = ""
+        let _txs = item
+        _txs.parent = { id: tx.id }
+        _txs.bundledIn = { id: tx.id }
+        _txs.anchor = ""
         const _tags = t(item.tags)
         if (
           includes(_tags.Type, [
@@ -129,9 +128,9 @@ class AR extends MAR {
         for (const v of item.item.tags) {
           if (v.name === "Content-Type") data_type = v.value
         }
-        //this.mem.txs[tx.id]._data = { size: tx.data_size, type: data_type }
         block.txs.push(item.id)
-        this.mem.txs[item.id].block = block.id
+        _txs.block = block.id
+        await this.mem.set(_txs, "txs", item.id)
       }
     }
     let _tags = []
@@ -143,22 +142,29 @@ class AR extends MAR {
     }
     const __tags = t(_tags)
     if (__tags.Type === "Module") {
-      this.mem.wasms[tx.id] = {
-        data: Buffer.from(tx.data, "base64"),
-        format: __tags["Module-Format"],
-      }
+      await this.mem.set(
+        {
+          data: Buffer.from(tx.data, "base64"),
+          format: __tags["Module-Format"],
+        },
+        "wasms",
+        tx.id,
+      )
     }
     tx.tags = _tags
     tx.owner = await this.arweave.wallets.jwkToAddress({ n: tx.owner })
-    this.mem.txs[tx.id] = tx
+    let _txs = tx
     block.txs.push(tx.id)
-    this.mem.txs[tx.id].block = block.id
-    this.mem.blocks.push(block.id)
-    this.mem.blockmap[block.id] = block
+    _txs.block = block.id
+    await this.mem.set(_txs, "txs", tx.id)
+    let blocks = await this.mem.get("blocks")
+    blocks.push(block.id)
+    await this.mem.set(blocks, "blocks")
+    await this.mem.set(block, "blockmap", block.id)
 
     if (jwk) {
       const owner = await this.arweave.wallets.jwkToAddress(jwk)
-      this.mem.addrmap[owner] = { address: owner, key: jwk.n }
+      await this.mem.set({ address: owner, key: jwk.n }, "addrmap", owner)
     }
     res = { id: tx.id, status: 200, statusText: "200" }
     if (this.log) {
@@ -174,7 +180,7 @@ class AR extends MAR {
   }
 
   async tx(id) {
-    return this.mem.txs[id]
+    return await this.mem.get("txs", id)
   }
 
   async data(id, _string, log) {
@@ -184,11 +190,11 @@ class AR extends MAR {
       if (!isNil(_string.decode)) decode = _string.decode
       if (!isNil(_string.string)) string = _string.string
     }
-    let tx = this.mem.txs[id]
+    let tx = await this.mem.get("txs", id)
     let _data = tx?.data ?? null
     if (tx?.format === 2 && _data) {
       _data = Buffer.from(_data, "base64")
-    } else {
+    } else if (_data) {
       _data = Buffer.from(base64url.decode(_data))
     }
     let isBuf = is(Uint8Array, _data) || is(ArrayBuffer, _data)

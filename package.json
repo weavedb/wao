@@ -1,7 +1,7 @@
 {
   "name": "wao",
-  "version": "0.7.2",
-  "description": "",
+  "version": "0.8.3",
+  "bin": "./src/cli.js",
   "type": "module",
   "main": "dist/cjs/index.js",
   "module": "dist/src/index.js",
@@ -10,7 +10,7 @@
     "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/ && cp src/lua dist/cjs/lua -rf",
     "test": "node --experimental-wasm-memory64",
     "test-only": "node --experimental-wasm-memory64 --test-only",
-    "server": "node --experimental-wasm-memory64 src/run.js"
+    "server": "node cli-esm.js"
   },
   "exports": {
     ".": {
@@ -26,8 +26,6 @@
       "import": "./esm/test.js"
     }
   },
-  "author": "",
-  "license": "MIT",
   "dependencies": {
     "@babel/plugin-transform-modules-commonjs": "^7.24.8",
     "@permaweb/ao-loader": "^0.0.44",
@@ -39,14 +37,14 @@
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "graphql": "^16.10.0",
+    "lmdb": "^3.2.2",
+    "pm2": "^5.4.3",
     "ramda": "^0.30.1",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
     "@babel/cli": "^7.24.8",
     "@babel/core": "^7.25.2",
-    "@babel/preset-env": "^7.25.3",
-    "chai": "^5.1.1",
-    "mocha": "^10.7.3"
+    "@babel/preset-env": "^7.25.3"
   }
 }
