@@ -64,7 +64,11 @@ class AO extends MAO {
       monitor,
       unmonitor,
       mem,
-    } = connect(opt.mem, { extensions: opt.extensions })
+    } = connect(opt.mem, {
+      extensions: opt.extensions,
+      cache: opt.cache,
+      reset: opt.reset,
+    })
     this.module = mem.modules.aos2_0_1
     this.assign = assign
     this.result = async (...opt) => {
