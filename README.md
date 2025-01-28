@@ -367,8 +367,8 @@ end)`
 describe("WAO Server", ()=>{
   it("should connect with WAO SDK", async ()=>{
     const ao = await new AO(4000).init(YOUR_JWK)
-	const { p } = await ao.deploy({ src_data })
-	assert.equal(await p.d("Hello"), "Hello, World!")
+    const { p } = await ao.deploy({ src_data })
+    assert.equal(await p.d("Hello"), "Hello, World!")
   })
 })
 ```
