@@ -78,10 +78,11 @@ class AO {
       in_memory = false,
       port,
     } = opt
-
     if (!_port && port) _port = port
     if (!aoconnect && _port) aoconnect = optAO(_port)
     if (!ar && _port) ar = { port: _port }
+    this.wao = opt.wao
+    if (isNil(this.wao)) this.wao = in_memory || !isNil(ar?.port)
     if (!module) {
       switch (module_type) {
         case "sqlite":
@@ -130,9 +131,15 @@ class AO {
       this.monitor = monitor
       this.unmonitor = unmonitor
     }
-    this.module = module
-    this.scheduler = scheduler
-    this.authority = authority
+    if (this.wao) {
+      this.module = srcs.module_wao
+      this.scheduler = srcs.scheduler_wao
+      this.authority = srcs.authority_wao
+    } else {
+      this.module = module
+      this.scheduler = scheduler
+      this.authority = authority
+    }
   }
 
   async init(jwk) {
