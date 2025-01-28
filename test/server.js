@@ -36,16 +36,18 @@ end)
 describe("SDK", function () {
   after(() => setTimeout(() => process.exit(), 100))
 
-  it.skip("should run server", async () => {
-    let ao = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
-      acc[0],
-    )
+  it("should run server", async () => {
+    let ao = await new AO({
+      ar: { port: 4000 },
+      aoconnect: optAO(4000),
+    }).init(acc[0])
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
     await p.m("Add", { Plus: 3 })
     assert.equal(await p.d("Get"), "3")
-    let ao2 = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
-      acc[0],
-    )
+    let ao2 = await new AO({
+      ar: { port: 4000 },
+      aoconnect: optAO(4000),
+    }).init(acc[0])
     const p2 = ao2.p(pid)
     assert.equal(await p2.d("Get"), "3")
     await p2.m("Add", { Plus: 2 })

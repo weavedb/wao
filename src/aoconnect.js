@@ -72,24 +72,16 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
     }
   }
 
-  const processTagsByPid = {}
-  const genEnv = ({ pid, owner = "", module = "", auth = "", processTags = null }) => {
-    if(!processTags) processTags = processTagsByPid[pid]
-    else processTagsByPid[pid] = processTags
-
+  const genEnv = async ({ pid, owner = "", module = "" }) => {
     return {
       Process: {
         Id: pid,
-        Tags: processTags,
+        Tags: (await mem.get("txs", pid))?.tags ?? [],
         Owner: owner,
       },
       Module: {
         Id: module,
-        Tags: [
-          { name: "Data-Protocol", value: "ao" },
-          { name: "Variant", value: "ao.TN.1" },
-          { name: "Type", value: "Module" },
-        ],
+        Tags: (await mem.get("txs", module))?.tags ?? [],
       },
     }
   }
@@ -107,6 +99,7 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
         Module: mod,
         Scheduler: opt.scheduler,
         "Content-Type": "text/plain",
+        Authority: mu.addr,
       }),
     )
     let ex = false
@@ -170,12 +163,10 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
       if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
       else data = (await mem.get("msgs", _tags["On-Boot"]))?.data ?? ""
       let msg = await genMsg(id, p, data, opt.tags, owner, mu.addr, true)
-      const _env = genEnv({
+      const _env = await genEnv({
         pid: p.id,
         owner: p.owner,
         module: p.module,
-        auth: mu.addr,
-        processTags: opt.tags
       })
       res = await _module.handle(null, msg, _env)
       p.memory = res.Memory
@@ -288,11 +279,10 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
       }
       // check: is owner=mu.addr right?
       const msg = await genMsg(opt.message, p, data, _tags, from, mu.addr)
-      const _env = genEnv({
+      const _env = await genEnv({
         pid: p.id,
         owner: p.owner,
         module: p.module,
-        auth: mu.addr,
       })
       if (!p.handle) {
         const { format, mod, wasm } = await mem.getWasm(p.modulea)
@@ -450,11 +440,10 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
           mu.addr,
           true,
         )
-        const _env = genEnv({
+        const _env = await genEnv({
           pid: p.id,
           owner: p.owner,
           module: p.module,
-          auth: mu.addr,
         })
         function cloneMemory(memory) {
           const buffer = memory.buffer.slice(0)
