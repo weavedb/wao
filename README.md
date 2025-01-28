@@ -426,6 +426,17 @@ describe("WAO Server", () => {
 })
 ```
 
+Connecting with the AOS terminal,
+
+```bash
+aos \
+  --gateway-url http://localhost:4000 \
+  --cu-url http://localhost:4004 \
+  --mu-url http://localhost:4002 \
+  --tag-name Authority \
+  --tag-value eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg
+```
+
 ## API Reference
 
 ### AO
