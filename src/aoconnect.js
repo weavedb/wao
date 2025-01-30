@@ -105,6 +105,7 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
     let ex = false
     for (let v of opt.tags) if (v.name === "Type") ex = true
     if (!ex) opt.tags.push({ name: "Type", value: "Process" })
+    if (opt.for) opt.tags.push({ name: "Pushed-For", value: opt.for })
     const {
       id,
       owner,
@@ -306,6 +307,7 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
       for (const v of res.Messages ?? []) {
         if (await mem.get("env", v.Target)) {
           await message({
+            for: opt.message,
             process: v.Target,
             tags: v.Tags,
             data: v.Data,
@@ -317,6 +319,7 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
       for (const v of res.Spawns ?? []) {
         const __tags = tags(v.Tags)
         await spawn({
+          for: opt.message,
           module: __tags.Module,
           scheduler,
           tags: v.Tags,
@@ -361,6 +364,14 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
           SDK: "aoconnect",
         }),
       )
+      if (opt.for) {
+        opt.tags.push({ name: "Pushed-For", value: opt.for })
+        opt.tags.push({ name: "From-Process", value: opt.from })
+        const pr = (await mem.get("txs", opt.from))?.tags ?? []
+        const module = tags(pr).Module
+        if (module) opt.tags.push({ name: "From-Module", value: module })
+      }
+
       ;({ item, id, owner } = await ar.dataitem({
         data: opt.data,
         signer: opt.signer,
@@ -404,7 +415,7 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
     spawn,
     assign,
     ar,
-    result: async opt => (await mem.get("env", opt.process)).res[opt.message],
+    result: async opt => (await mem.get("env", opt.process))?.res[opt.message],
     results: async opt => {
       const p = await mem.get("env", opt.process)
       let results = []

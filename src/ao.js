@@ -17,6 +17,7 @@ import {
 } from "@permaweb/aoconnect"
 
 import {
+  equals,
   concat,
   is,
   mergeLeft,
@@ -29,6 +30,7 @@ import {
 } from "ramda"
 
 import {
+  allChecked,
   searchTag,
   checkTag,
   wait,
@@ -379,11 +381,42 @@ class AO {
     tags = {},
     check = [],
     get,
-    timeout = 10000,
+    timeout = 0,
   }) {
     let err = null
     ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
     if (err) return { err }
+    const getNewTxs = async (pid, _txs, _txmap) => {
+      const txs = await this.ar.gql.txs({
+        recipient: pid,
+        fields: ["id", "recipient", "tags", { owner: ["address"] }],
+      })
+      for (const v of txs) {
+        if (isNil(_txmap[v.id])) {
+          const t = ltags(v.tags)
+          if (t.type === "Message") {
+            v.from = t["from-process"] ?? v.owner?.address
+            _txs.unshift(v)
+            _txmap[v.id] = { checked: false, ref: t["x-reference"] }
+          }
+        }
+      }
+    }
+    const checkOut = async (get, _txs, _txmap) => {
+      let out = null
+      for (let v of _txs) {
+        if (isNil(_txmap[v.id].res)) {
+          const res = await this.result({ process: pid, message: v.id })
+          _txmap[v.id].res = res
+        }
+        if (!isNil(_txmap[v.id].res) && _txmap[v.id].out !== true) {
+          _txmap[v.id].out = true
+          out = getTagVal(get, _txmap[v.id].res, v.from)
+          if (out) break
+        }
+      }
+      return out
+    }
     let [res, out, mid, results] = [null, null, null, []]
     let _tags = buildTags(act, tags)
     let start = Date.now()
@@ -394,108 +427,51 @@ class AO {
         tags: _tags,
         data: jsonToStr(data),
       })
-
-      const exRef = (ref, txs) => {
-        for (const v2 of txs ?? []) {
-          const t = ltags(v2.tags)
-          if (t.type === "Message" && t["x-reference"] === ref) return true
-        }
-        return false
-      }
-
-      const getRef = async (ref, txs = []) => {
-        let ex = exRef(ref, txs)
-        if (!ex) {
-          if (!this.in_memory) await wait(1000)
-          txs = await this.ar.gql.txs({
-            recipient: pid,
-            fields: ["id", "recipient", "tags", { owner: ["address"] }],
-          })
-          ex = exRef(ref, txs)
-        }
-        if (ex) return txs
-        if (this.in_memory) await wait(1)
-        return Date.now() - start < timeout ? await getRef(ref) : []
-      }
-
-      let [cache, checks, isOK] = [[], [], false]
-      const getResult = async mid => {
-        const res = await this.result({ process: pid, message: mid })
-        results.push({ mid, res })
-        let err = null
-        if (res.Error) err = res.Error
-        else {
-          if (!is(Array, check)) check = [check]
-          let i = 0
-          for (const v of check) {
-            let _checks = checks[i] ?? null
-            if (isRegExp(v) || includes(typeof v)(["string", "boolean"])) {
-              _checks = mergeChecks(_checks, isData(v, res), v)
-            } else {
-              const checks2 = {}
-              for (const k in v ?? {}) {
-                checks2[k] = checkTag(res, k, v[k])
-              }
-              _checks = mergeChecks(_checks, checks2, v)
+      if (!is(Array, check)) check = [check]
+      let _txs = [{ id: mid, from: await this.ar.toAddr(jwk) }]
+      let _txmap = {}
+      const t = ltags(_tags)
+      let checked = false
+      _txmap[mid] = { checked: false, ref: t["x-reference"] }
+      do {
+        for (let v of _txs) {
+          if (!_txmap[v.id].checked) {
+            _txmap[v.id].checked = true
+            const _res = await this.result({ process: pid, message: v.id })
+            if (isNil(res)) {
+              res = _res
+              mid = v.id
+              results.push({ mid, res })
             }
-            checks[i] = _checks
-            i++
-          }
-          if (isCheckComplete(checks, check)) isOK = true
-          if (!isNil(get) && !isOutComplete(out, get)) {
-            out = mergeOut(out, getTagVal(get, res), get)
+            _txmap[v.id].res = _res
+            checked = allChecked(check, _res, v.from)
+            if (checked) break
           }
         }
-        if ((!isOutComplete(out, get) || !isOK) && !err) {
-          let refs = []
-          for (const v of res.Messages) {
-            const _ltags = ltags(v.Tags)
-            if (_ltags.type === "Message" && _ltags.reference) {
-              refs.push(_ltags.reference)
-            }
-          }
-
-          for (const v of res.Messages) {
-            const _ltags = ltags(v.Tags)
-            if (_ltags.type === "Message" && _ltags.reference) {
-              const txs = await getRef(_ltags.reference, cache)
-              cache = o(uniqBy(prop("id")), concat(cache))(txs)
-              for (const v2 of txs) {
-                const _ltags2 = ltags(v2.tags)
-                if (
-                  _ltags2.type === "Message" &&
-                  _ltags2["x-reference"] === _ltags.reference
-                ) {
-                  const {
-                    res: _res,
-                    out: _out,
-                    err: _err,
-                    ok: _ok,
-                  } = await getResult(v2.id)
-                  if (_err) {
-                    err = _err
-                    break
-                  }
-                  if (!isOutComplete(out, get) && _out)
-                    out = mergeOut(out, _out, get)
-                  if (isOutComplete(out, get) && isOK) break
-                }
-              }
-              if (isOutComplete(out, get) && isOK) break
-            }
+        if (checked) break
+        await wait(1000)
+        await getNewTxs(pid, _txs, _txmap)
+      } while (Date.now() - start < timeout)
+      if (!checked) {
+        err = "something went wrong!"
+      } else {
+        out = mergeOut(out, await checkOut(get, _txs, _txmap), get)
+        if (!isOutComplete(out, get) && !isNil(get)) {
+          while (Date.now() - start < timeout) {
+            await getNewTxs(pid, _txs, _txmap)
+            out = mergeOut(out, await checkOut(get, _txs, _txmap), get)
+            if (isOutComplete(out, get)) break
+            await wait(1000)
           }
         }
-        return { res, err }
       }
-      ;({ res, err } = await getResult(mid))
-      if (!isOK && !err) err = "something went wrong!"
     } catch (e) {
       err = e
     }
     return { mid, res, err, out, results }
   }
 
-  async asgn({ pid, mid, jwk, check, get }) {
+  async asgn({ pid, mid, jwk, check = [], get }) {
     let err = null
     ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
     if (err) return { err }
@@ -509,28 +485,11 @@ class AO {
       })
       res = await this.result({ process: pid, message: mid })
       if (!res) err = "something went wrong"
-
       if (res.Error) err = res.Error
       else {
-        let checks = []
         if (!is(Array, check)) check = [check]
-        let i = 0
-        for (const v of check) {
-          let _checks = checks[i] ?? null
-          if (isRegExp(v) || includes(typeof v)(["string", "boolean"])) {
-            _checks = mergeChecks(_checks, isData(v, res), v)
-          } else {
-            const checks2 = {}
-            for (const k in v ?? {}) {
-              checks2[k] = checkTag(res, k, v[k])
-            }
-            _checks = mergeChecks(_checks, checks2, v)
-          }
-          checks[i] = _checks
-          i++
-        }
-        if (!isCheckComplete(checks, check)) err = "something went wrong"
-        if (!err && !isNil(get)) out = getTagVal(get, res)
+        if (!allChecked(check, res)) err = "something went wrong"
+        if (!err && !isNil(get)) out = getTagVal(get, res) // todo: from
       }
     } catch (e) {
       err = e
@@ -538,16 +497,7 @@ class AO {
     return { mid, res, err, out }
   }
 
-  async dry({
-    pid,
-    jwk,
-    data,
-    act = "Eval",
-    tags = {},
-    check,
-    get,
-    timeout = 10000,
-  }) {
+  async dry({ pid, jwk, data, act = "Eval", tags = {}, check = [], get }) {
     let err = null
     ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
     if (err) return { err }
@@ -563,22 +513,7 @@ class AO {
       res = _res
       let checks = []
       if (!is(Array, check)) check = [check]
-      let i = 0
-      for (const v of check) {
-        let _checks = checks[i] ?? null
-        if (isRegExp(v) || includes(typeof v)(["string", "boolean"])) {
-          _checks = mergeChecks(_checks, isData(v, res), v)
-        } else {
-          const checks2 = {}
-          for (const k in v ?? {}) {
-            checks2[k] = checkTag(res, k, v[k])
-          }
-          _checks = mergeChecks(_checks, checks2, v)
-        }
-        checks[i] = _checks
-        i++
-      }
-      if (!isCheckComplete(checks, check)) err = "something went wrong"
+      if (!allChecked(check, res)) err = "something went wrong"
       if (!err && !isNil(get)) out = getTagVal(get, res)
     } catch (e) {
       err = e
