@@ -14,12 +14,12 @@ import {
   jsonToStr,
   dirname,
 } from "./utils.js"
-import ArMem from "./armem.js"
+import ArMem from "./armem-web.js"
 import weavedrive from "./weavedrive.js"
-import AoLoader from "@permaweb/ao-loader"
-import { scheduler, mu, su, cu, acc } from "./test.js"
+import AoLoader from "./ao-loader.js"
+import { scheduler, mu, su, cu, acc } from "./web.js"
 import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
-import AR from "./tar.js"
+import AR from "./war.js"
 
 export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
   const isMem = mem?.__type__ === "mem"
@@ -216,9 +216,9 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
 
   function genHashChain(previousHash, previousMessageId = null) {
     const hasher = crypto.createHash("sha256")
-    hasher.update(Buffer.from(previousHash, "base64url"))
+    hasher.update(Buffer.from(previousHash, "base64"))
     if (previousMessageId) {
-      hasher.update(Buffer.from(previousMessageId, "base64url"))
+      hasher.update(Buffer.from(previousMessageId, "base64"))
     }
     return base64url(hasher.digest())
   }
@@ -369,7 +369,6 @@ export const connect = (mem, { cache, log = false, extensions = {} } = {}) => {
         const module = tags(pr).Module
         if (module) opt.tags.push({ name: "From-Module", value: module })
       }
-
       ;({ item, id, owner } = await ar.dataitem({
         data: opt.data,
         signer: opt.signer,

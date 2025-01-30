@@ -55,10 +55,13 @@ function createDataItemSigner2(wallet) {
   const signer = async ({ data, tags, target, anchor }) => {
     const signer = new ArweaveSigner(wallet)
     const dataItem = createData(data, signer, { tags, target, anchor })
-    return dataItem.sign(signer).then(async () => ({
-      id: await dataItem.id,
-      raw: await dataItem.getRaw(),
-    }))
+    const sig = dataItem.sign(signer).then(async () => {
+      return {
+        id: await dataItem.id,
+        raw: await dataItem.getRaw(),
+      }
+    })
+    return sig
   }
   return signer
 }
