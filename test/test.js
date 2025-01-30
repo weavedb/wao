@@ -23,7 +23,7 @@ end)
 const src_data2 = `
 Handlers.add("Hello2", "Hello2", function (msg)
   local name = Send({ Target = ao.id, Action = "Reply" }).receive().Data
-  msg.reply({ Data = "Hello, " .. name .. "!" })
+  msg.reply({ Hello = "Hello, " .. name .. "!" })
 end)
 
 Handlers.add("Reply", "Reply", function (msg)
@@ -79,7 +79,6 @@ end)
 `
 const src_data7 = `
 Drive = require('@rakis/WeaveDrive')
-
 Handlers.add("Get-Data", "Get-Data", function (msg)
   msg.reply({ Data = Drive.getData(msg.id) })
 end)
@@ -198,7 +197,10 @@ describe("SDK", function () {
 
   it("should spawn a message from a handler with receive", async () => {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data2 })
-    assert.equal(await p.m("Hello2"), "Hello, Japan!")
+    assert.equal(
+      await p.m("Hello2", { get: "Hello", timeout: 3000 }),
+      "Hello, Japan!",
+    )
   })
 
   it("should spawn a process from a handler", async () => {
@@ -273,6 +275,7 @@ describe("SDK", function () {
     const { id } = await ao.ar.post({ data: "Hello, World!" })
     await ao.attest({ id })
     assert.equal(await p.d("Get-Data", { id }), "Hello, World!")
+    return
   })
 
   it("should post tx", async () => {
@@ -362,7 +365,6 @@ describe("Persistency", function () {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
     await p.m("Add", { Plus: 3 })
     assert.equal(await p.d("Get"), "3")
-
     const ao2 = await new AO({
       cache: resolve(import.meta.dirname, ".cache"),
     }).init(acc[0])
@@ -370,5 +372,56 @@ describe("Persistency", function () {
     assert.equal(await p2.d("Get"), "3")
     await p2.m("Add", { Plus: 2 })
     assert.equal(await p2.d("Get"), "5")
+  })
+})
+
+const src_data_r1 = `
+local json = require("json")
+Handlers.add("Hello", "Hello", function (msg)
+  Send({Target = msg.To, Action = "Hello2", To2 = msg.To2, To3 = ao.id, Data = "data", Test = "test1"})
+  local res = Receive({Data = "Hello"})
+  msg.reply({ Data = "Hello, World!", Test2 = "test", JSON = json.encode( { a = 3, b = 4 } ) })
+end)
+`
+const src_data_r2 = `
+Handlers.add("Hello2", "Hello2", function (msg)
+  Send({Target = msg.To2, Action = "Hello3", To = msg.To3})
+end)
+`
+
+const src_data_r3 = `
+Handlers.add("Hello3", "Hello3", function (msg)
+  Send({Target = msg.To, Data = "Hello"})
+end)
+`
+
+describe("AOS1", function () {
+  it("should wait reply from another process", async () => {
+    const ao = await new AO({}).init(acc[0])
+    const { p, pid } = await ao.deploy({ src_data: src_data_r1 })
+    const ao2 = await new AO({ mem: ao.mem }).init(acc[0])
+    const { pid: pid2 } = await ao2.deploy({ src_data: src_data_r2 })
+    const ao3 = await new AO({ mem: ao.mem }).init(acc[0])
+    const { pid: pid3 } = await ao3.deploy({ src_data: src_data_r3 })
+    assert.deepEqual(
+      await p.m(
+        "Hello",
+        { To: pid2, To2: pid3 },
+        {
+          check: [
+            {
+              from: pid3,
+              data: "Hello, World!",
+              tags: {
+                Test2: /test/,
+                JSON: { json: { a: 3, b: () => true } },
+              },
+            },
+          ],
+          get: { test: { name: "Test2", from: pid3 } },
+        },
+      ),
+      { test: "test" },
+    )
   })
 })
