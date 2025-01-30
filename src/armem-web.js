@@ -1,15 +1,79 @@
 import _Arweave from "arweave"
-import { last } from "ramda"
+import { is, last, keys } from "ramda"
 import { tags, buildTags, dirname } from "./utils.js"
 const Arweave = _Arweave.default ?? _Arweave
-//import { readFileSync } from "fs"
-//import { resolve } from "path"
+import lf from "localforage"
 import wdb from "./lua/weavedb-lite.js"
+
 export default class ArMem {
   constructor({ MU_URL, CU_URL, SU_URL, GATEWAY_URL, scheduler, cache } = {}) {
     this.__type__ = "mem"
     this.isInit = false
-    //if (cache) this.db = open({ path: cache, compression: true })
+    this.keyInit = false
+    this.keys = {}
+    this.db = {
+      put: async (key, val) => {
+        let _val = null
+        if (typeof val === "object" && !is(Array, val)) {
+          _val = {}
+          for (let k in val) {
+            if (typeof val[k] !== "function") {
+              if (is(Array, val[k])) {
+                let _arr = []
+                for (let v of val[k]) {
+                  if (
+                    typeof v === "object" &&
+                    !is(Array, v) &&
+                    !(v instanceof Uint8Array) &&
+                    !(v instanceof ArrayBuffer)
+                  ) {
+                    let __val = {}
+                    for (let k2 in v) {
+                      if (typeof v[k2] !== "function") __val[k2] = v[k2]
+                    }
+                    _arr.push(__val)
+                  } else {
+                    _arr.push(v)
+                  }
+                }
+                _val[k] = _arr
+              } else if (
+                typeof val[k] === "object" &&
+                !(val[k] instanceof Uint8Array) &&
+                !(val[k] instanceof ArrayBuffer)
+              ) {
+                let __val = {}
+                for (let k2 in val[k]) {
+                  if (typeof val[k][k2] !== "function") __val[k2] = val[k][k2]
+                }
+                _val[k] = __val
+              } else {
+                _val[k] = val[k]
+              }
+            }
+          }
+        } else _val = val
+        await lf.setItem(key, _val)
+        this.keys[key] = true
+        await lf.setItem("keys", keys(this.keys))
+      },
+      get: async key => {
+        return await lf.getItem(key)
+      },
+      getKeys: async ({ start, end }) => {
+        if (!this.keyInit) {
+          const _keys = (await lf.getItem("keys")) ?? []
+          this.keys = {}
+          for (const v of _keys) this.keys[v] = true
+        }
+        let __keys = []
+        for (const k in this.keys) {
+          const sp = k.split(".")
+          if (sp[0] === start) __keys.push(k)
+        }
+        return __keys
+      },
+    }
     this.arweave = Arweave.init()
     this.arweave.transactions.getTransactionAnchor = () => this.getAnchor()
     this.arweave.transactions.getPrice = () => 0
@@ -38,7 +102,7 @@ export default class ArMem {
       ]) {
         this[v] ??= {}
         const items = await this.db.getKeys({ start: v, end: v + "a" })
-        for (const v2 of items) {
+        for (const v2 of items || []) {
           const key = v2.split(".")[0]
           const field = v2.split(".")[1]
           if (key === v) this[v][field] = await this.db.get(v2)
