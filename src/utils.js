@@ -1,6 +1,6 @@
 import { graphql, parse, validate, buildSchema } from "graphql"
 
-import { clone, is, includes, fromPairs, map, isNil } from "ramda"
+import { clone, is, includes, fromPairs, map, isNil, equals } from "ramda"
 
 const allows = [
   { key: "allowed", val: "Allowed" },
@@ -86,6 +86,8 @@ const isData = (data, res) => {
       try {
         if (data.test(v.Data)) return true
       } catch (e) {}
+    } else if (typeof data === "function") {
+      return data(v.Data)
     } else {
       if (data === true || v.Data === data) return true
     }
@@ -149,6 +151,7 @@ const modGet = get => {
   } else if (
     is(Object, get) &&
     isNil(get.data) &&
+    isNil(get.from) &&
     isNil(get.json) &&
     isNil(get.name) &&
     isNil(get.obj)
@@ -158,23 +161,32 @@ const modGet = get => {
   return _get
 }
 
-const _getTagVal = (get, res) => {
+const _getTagVal = (get, res, from) => {
   let out = null
   const _get = modGet(get)
   if (typeof _get === "object" && _get.obj) {
     out = {}
-    for (const k in _get.obj ?? {}) out[k] = _getTagVal(_get.obj[k], res)
+    for (const k in _get.obj ?? {}) out[k] = _getTagVal(_get.obj[k], res, from)
   } else {
     for (const v of res.Messages ?? []) {
+      if (typeof _get === "object" && isNil(_get.name) && isNil(_get.data)) {
+        _get.data = true
+      }
       if (
         (typeof _get === "object" && _get.data) ||
         typeof _get === "boolean"
       ) {
+        let _from = null
+        if (is(Object, _get) && _get.from) _from = _get.from
+        if (_from && _from !== from) break
         if (v.Data) out = v.Data
         try {
           if (_get.json || _get === true) out = JSON.parse(out)
         } catch (e) {}
       } else if (typeof _get === "object" && typeof _get.name === "string") {
+        let _from = null
+        if (is(Object, _get) && _get.from) _from = _get.from
+        if (_from && _from !== from) break
         out = getTag(v.Tags ?? [], _get.name)
         try {
           if (_get.json) out = JSON.parse(out)
@@ -186,9 +198,9 @@ const _getTagVal = (get, res) => {
   return out
 }
 
-const getTagVal = (get, res) => {
+const getTagVal = (get, res, from) => {
   const _get = modGet(get)
-  return _getTagVal(_get, res)
+  return _getTagVal(_get, res, from)
 }
 
 const srcs = {
@@ -218,7 +230,7 @@ const buildTags = (act, tags) => {
 
 const mergeOut = (out, out2, get) => {
   const _get = modGet(get)
-  if (_get.obj) {
+  if (_get?.obj) {
     for (const k in out2 ?? {}) {
       if (isNil(out?.[k])) {
         if (!out) out = {}
@@ -243,27 +255,20 @@ const isOutComplete = (out, get) => {
   if (isNil(get)) return true
   if (isNil(out)) return false
   const _get = modGet(get)
-  if (_get.obj) {
-    for (const k in out ?? {}) {
-      if (isNil(out[k])) return false
-    }
-  }
+  if (_get.obj) for (const k in out ?? {}) if (isNil(out[k])) return false
   return true
 }
 
 const isCheckComplete = (checks, check) => {
   let i = 0
-  for (const v of checks) {
+  for (const v of checks || []) {
+    if (!v) return false
     if (
       isRegExp(check[i]) ||
       includes(typeof check[i])(["string", "boolean"])
     ) {
       if (!v) return false
-    } else {
-      for (const k in v) {
-        if (!v[k]) return false
-      }
-    }
+    } else for (const k in v) if (!v[k]) return false
     i++
   }
   return true
@@ -534,7 +539,91 @@ const optServer = port => {
   return { ar: port, mu: port + 2, su: port + 3, cu: port + 4 }
 }
 
+const allChecked = (check, res, from) => {
+  let checks = []
+  let i = 0
+  for (let v of check || []) {
+    let _checks = checks[i] ?? null
+    if (isRegExp(v) || includes(typeof v)(["string", "boolean", "function"])) {
+      _checks = isData(v, res)
+    } else {
+      const _checkVal = (val, data) => {
+        if (isRegExp(val)) {
+          try {
+            if (val.test(data)) return true
+          } catch (e) {}
+        } else if (typeof val === "function") {
+          return val(data)
+        } else if (typeof val === "object" && !isNil(val.json)) {
+          try {
+            data = JSON.parse(data)
+            if (typeof val.json === "function") {
+              return val.json(data)
+            } else if (typeof val.json === "object") {
+              if (val.eq) return equals(data, val.json)
+              let ok = true
+              for (let k in val.json) {
+                if (!_checkVal(val.json[k], data[k])) {
+                  ok = false
+                  break
+                }
+              }
+              return ok
+            } else if (val.json === true) {
+              return true
+            }
+          } catch (e) {
+            return false
+          }
+        } else {
+          if (val === true || data === val) return true
+        }
+        return false
+      }
+      const checkVal = (res, val, name) => {
+        for (let v of res.Messages || []) {
+          let data = v.Data
+          if (!isNil(name)) {
+            const t = tags(v.Tags || [])
+            data = t[name]
+          }
+          if (isNil(data)) return false
+          return _checkVal(val, data)
+        }
+        return false
+      }
+
+      if (typeof v === "object") {
+        if (!isNil(v.json)) {
+          const _from = v.from
+          v = { data: v, from: _from }
+        } else if (isNil(v.tags) && isNil(v.data) && isNil(v.from)) {
+          v = { tags: v }
+        }
+        const _from = v.from ?? null
+        let checks2 = {}
+        if (!isNil(v.from) && v.from !== from) {
+          _checks = false
+        } else {
+          let ok = true
+          if (!isNil(v.data)) {
+            if (!checkVal(res, v.data)) ok = false
+          }
+          for (const k in v.tags ?? {}) {
+            if (!checkVal(res, v.tags[k], k)) ok = false
+          }
+          _checks = ok
+        }
+      }
+    }
+    checks[i] = _checks
+    i++
+  }
+  return isCheckComplete(checks, check)
+}
+
 export {
+  allChecked,
   optAO,
   optServer,
   toGraphObj,

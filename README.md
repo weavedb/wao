@@ -235,13 +235,13 @@ Handlers.add("Hello3", "Hello3", function (msg)
 end)
 ```
 
-Since the second reply will be a part of another message triggerd by the `Target` process reply, you cannot get the final reply simply with the arconnect `result` function. You need to keep pinging the process `results` or track down the chain of messages to examine what went wrong. The AO `get` and `check` automatically handle this complex operation in a lazy short-circuit manner in the background for you.
+Since the second reply will be a part of another message triggerd by the `Target` process reply, you cannot get the final reply simply with the arconnect `result` function. You need to keep pinging the process `results` or track down the chain of messages to examine what went wrong. The AO `get` and `check` automatically handle this complex operation in a lazy short-circuit manner in the background for you. A proper `timeout` (ms) should be specified.
 
 ```js
 const age = await p.m(
   "Hello3", 
   { Who: "Bob", To: DB_PROCESS_ID }, // second argument can be tags
-  { get: "Age", check: "got your age!" }
+  { get: "Age", check: "got your age!", timeout: 5000 }
 )
 assert.equal(age, "30")
 ```
@@ -544,8 +544,8 @@ const { err, mid, res, out } = await ao.msg({ data, action, tags, check, get })
 `check` determins if the message call is successful by checking through `Tags` in `Messages` in `res`.
 
 ```js
-const check = { "Status" : "Success" } // succeeds if Status tag is "Success"
-const check2 = { "Status" : true } // succeeds if Status tag exists
+const check = { Status : "Success" } // succeeds if Status tag is "Success"
+const check2 = { Status : true } // succeeds if Status tag exists
 ```
 
 
@@ -554,12 +554,19 @@ Assigning either a string or boolean value checks `Data` field instead of `Tags`
 ```js
 const check3 = "Success"  // succeeds if Data field is "Success"
 const check4 = true // succeeds if Data field exists
+const check5 = /ok/ // succeeds if Data field is string containing "ok"
+const check6 = (n)=> +n > 10 // succeeds if Data field is bigger than 10
+const check7 = { json: { a: 3 } } // succeeds if Data field is JSON and a is 3
+const check8 = { json: { a: 3, b: 4 }, eq: true } // deep equal JSON
+const check9 = { data: true, tags: { Status: true, Balance: (n)=> +n > 10 } }
+const check10 = { data: true, from: PID } // specify message sender process
 ```
 
 Use an array to check multiple conditions.
 
 ```js
-const check5 = ["Success", { Age: "30" }] // Data is Success and Age tag is 30
+const check11 = ["Success", { Age: "30" }] // Data is Success and Age tag is 30
+const check12 = [{ data: "Success", from: PID }, { Age: "30", from: PID2 }]
 ```
 
 `get` will return specified data via `out`.
@@ -568,10 +575,12 @@ const check5 = ["Success", { Age: "30" }] // Data is Success and Age tag is 30
 const get = "ID" // returns the value of "ID" tag
 const get2 = { name: "Profile", json: true } // "Profile" tag with JSON.parse()
 const get3 = { data: true, json: true } // returns Data field with JSON.parse()
-const get4 = true // = { data: true, json: true }
-const get5 = false // = { data: true, json: false }
-const get6 = { obj: { Age: "30", Name: "Bob" }} // get multiple tags
-const get7 = { Age: "30", Name: "Bob" } // same as get6
+const get4 = true // => { data: true, json: true }
+const get5 = false // => { data: true, json: false }
+const get6 = { obj: { age: "Age", who: "Name" }} // => { age: 30, who: "Bob" }
+const get7 = { age: "Age", who: "Name" } // same as get6
+const get8 = { name: "Profile", json: true, from: PID } // specify sender process
+const get9 = { age: { name: "Age", from: PID }, who: "Name" } // another example
 ```
 
 `check` and `get` lazy-evaluate tags and data by tracking down async messages. As soon as the conditions are met, they won't track further messages. With `receive()` added with AOS 2.0, you can only get spawned messages up to the `receive()` function from `result`. But WAO automatically tracks down further messages and determines if check conditions are met beyond the `receive()` function. 
