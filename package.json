@@ -1,6 +1,6 @@
 {
   "name": "wao",
-  "version": "0.8.5",
+  "version": "0.9.0",
   "bin": "./src/cli.js",
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -24,6 +24,10 @@
     "./test": {
       "require": "./cjs/test.js",
       "import": "./esm/test.js"
+    },
+    "./web": {
+      "require": "./cjs/web.js",
+      "import": "./esm/web.js"
     }
   },
   "dependencies": {
@@ -34,6 +38,7 @@
     "arweave": "^1.15.1",
     "base64url": "^3.0.1",
     "body-parser": "^1.20.3",
+    "buffer": "^6.0.3",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "graphql": "^16.10.0",
