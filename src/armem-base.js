@@ -136,7 +136,12 @@ export default class ArMemBase {
         for (const v2 of items || []) {
           const key = v2.split(".")[0]
           const field = v2.split(".")[1]
-          if (key === v) this[v][field] = await this.db.get(v2)
+          if (key === v) {
+            this[v][field] = await this.db.get(v2)
+            if (v === "env") {
+              console.log(this[v][field])
+            }
+          }
         }
       }
     } else {

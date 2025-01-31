@@ -1,5 +1,6 @@
 import lf from "localforage"
 import { is, keys } from "ramda"
+import { compress, decompress } from "./compress.js"
 
 export default _this => {
   return {
@@ -44,12 +45,15 @@ export default _this => {
           }
         }
       } else _val = val
+      if (key.match(/^env/)) _val.memory = compress(_val.memory)
       await lf.setItem(key, _val)
       _this.keys[key] = true
       await lf.setItem("keys", keys(_this.keys))
     },
     get: async key => {
-      return await lf.getItem(key)
+      const val = await lf.getItem(key)
+      if (key.match(/^env/)) val.memory = decompress(val.memory)
+      return val
     },
     getKeys: async ({ start, end }) => {
       if (!_this.keyInit) {
