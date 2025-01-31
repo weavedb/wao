@@ -1,6 +1,6 @@
 import _Arweave from "arweave"
 const Arweave = _Arweave.default ?? _Arweave
-
+import init, { Compressor, Decompressor } from "./waosm/waosm.js"
 import { last } from "ramda"
 import { buildTags, tags } from "./utils.js"
 
@@ -118,6 +118,9 @@ export default class ArMemBase {
   async init() {
     if (this.isInit) return
     this.isInit = true
+    await init()
+    this.compressor = new Compressor()
+    this.decompressor = new Decompressor()
     if (this.db) {
       for (const v of ["height", "blocks"]) this[v] = await this.get(v)
       for (const v of [
@@ -136,12 +139,7 @@ export default class ArMemBase {
         for (const v2 of items || []) {
           const key = v2.split(".")[0]
           const field = v2.split(".")[1]
-          if (key === v) {
-            this[v][field] = await this.db.get(v2)
-            if (v === "env") {
-              console.log(this[v][field])
-            }
-          }
+          if (key === v) this[v][field] = await this.db.get(v2)
         }
       }
     } else {
