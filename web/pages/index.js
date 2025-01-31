@@ -1,8 +1,8 @@
 import { Link, ssr } from "arnext"
 import { useEffect, useState } from "react"
 import wasm from "../lib/wasm"
-import { AO } from "../../src/web"
-//import { AO } from "wao/web"
+//import { AO } from "../../src/web"
+import { AO } from "wao/web"
 import client from "../lib/client"
 
 const getDate = async date => date ?? Date.now()
