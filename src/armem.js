@@ -5,7 +5,7 @@ import { open } from "lmdb"
 import { readFileSync } from "fs"
 import { resolve } from "path"
 import Base from "./armem-base.js"
-import init, { Compressor, Decompressor } from "./waosm-node/waosm.js"
+import { Compressor, Decompressor } from "./waosm-node.js"
 
 export default class ArMem extends Base {
   constructor(args = {}) {
