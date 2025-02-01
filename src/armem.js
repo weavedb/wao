@@ -5,11 +5,12 @@ import { open } from "lmdb"
 import { readFileSync } from "fs"
 import { resolve } from "path"
 import Base from "./armem-base.js"
+import init, { Compressor, Decompressor } from "./waosm-node/waosm.js"
 
 export default class ArMem extends Base {
   constructor(args = {}) {
     const { cache } = args
-    super(args)
+    super({ ...args, Compressor, Decompressor })
     if (cache) this.db = open({ path: cache, compression: true })
     this.initSync()
   }
