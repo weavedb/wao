@@ -44,20 +44,11 @@ export default _this => {
           }
         }
       } else _val = val
-      if (key.match(/^env/)) {
-        _val.memory = Array.from(_this.compressor.compress(_val.memory))
-      }
       await lf.setItem(key, _val)
       _this.keys[key] = true
       await lf.setItem("keys", keys(_this.keys))
     },
-    get: async key => {
-      const val = await lf.getItem(key)
-      if (key.match(/^env/)) {
-        val.memory = _this.decompressor.decompress(val.memory)
-      }
-      return val
-    },
+    get: async key => await lf.getItem(key),
     getKeys: async ({ start, end }) => {
       if (!_this.keyInit) {
         const _keys = (await lf.getItem("keys")) ?? []
