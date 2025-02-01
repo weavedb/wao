@@ -85,7 +85,6 @@ export const decompress = d => {
         nums.push(third)
         elm = second - 1
       } else elm = second
-      console.log(flag, first, second, third, elm, nums)
     } else if (sum === 0) {
       elm -= 1
       nums.push(v)
