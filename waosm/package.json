@@ -1,0 +1,10 @@
+{
+  "name": "waosm",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build:web": "rm -rf pkg && wasm-pack build --target web && rm -rf ../src/waosm && cp -rf ./pkg ../src/waosm && rm ../src/waosm/.gitignore",
+    "build:node": "rm -rf pkg-node && wasm-pack build --target bundler --out-dir pkg-node && rm -rf ../src/waosm-node && cp -rf ./pkg-node ../src/waosm-node && rm ../src/waosm-node/package.json && rm ../src/waosm-node/.gitignore",
+    "build": "yarn build:web && yarn build:node"
+  }
+}
