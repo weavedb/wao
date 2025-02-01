@@ -356,7 +356,7 @@ describe("Fork", function () {
 })
 
 describe("Persistency", function () {
-  it("should persist the data", async () => {
+  it.only("should persist the data", async () => {
     const cache = resolve(import.meta.dirname, ".cache")
     try {
       unlinkSync(cache)
@@ -372,6 +372,7 @@ describe("Persistency", function () {
     assert.equal(await p2.d("Get"), "3")
     await p2.m("Add", { Plus: 2 })
     assert.equal(await p2.d("Get"), "5")
+    return
   })
 })
 

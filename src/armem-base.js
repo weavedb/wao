@@ -1,12 +1,25 @@
 import _Arweave from "arweave"
 const Arweave = _Arweave.default ?? _Arweave
-import init, { Compressor, Decompressor } from "./waosm/waosm.js"
-import { last } from "ramda"
+import { compress, decompress } from "./compress.js"
+import { last, assoc, is } from "ramda"
 import { buildTags, tags } from "./utils.js"
 
 export default class ArMemBase {
-  constructor({ MU_URL, CU_URL, SU_URL, GATEWAY_URL, scheduler, cache } = {}) {
+  constructor({
+    MU_URL,
+    CU_URL,
+    SU_URL,
+    GATEWAY_URL,
+    scheduler,
+    cache,
+    init,
+    Compressor,
+    Decompressor,
+  } = {}) {
     this.__type__ = "mem"
+    this._init = init
+    this.Compressor = Compressor
+    this.Decompressor = Decompressor
     this.isInit = false
     this.keyInit = false
     this.keys = {}
@@ -34,7 +47,22 @@ export default class ArMemBase {
     } else {
       this[key] ??= {}
       this[key][field] = val
-      if (this.db) await this.db.put(`${key}.${field}`, this[key][field])
+      if (this.db) {
+        if (key === "env") {
+          let memory = val.memory
+          try {
+            memory = Array.from(this.compressor.compress(val.memory))
+          } catch (e) {
+            memory = compress(val.memory)
+          }
+          await this.db.put(
+            `${key}.${field}`,
+            assoc("memory", memory, this[key][field]),
+          )
+        } else {
+          await this.db.put(`${key}.${field}`, this[key][field])
+        }
+      }
     }
   }
   initSync() {
@@ -118,9 +146,9 @@ export default class ArMemBase {
   async init() {
     if (this.isInit) return
     this.isInit = true
-    await init()
-    this.compressor = new Compressor()
-    this.decompressor = new Decompressor()
+    if (typeof this._init === "function") await this._init()
+    this.compressor = new this.Compressor()
+    this.decompressor = new this.Decompressor()
     if (this.db) {
       for (const v of ["height", "blocks"]) this[v] = await this.get(v)
       for (const v of [
@@ -139,7 +167,21 @@ export default class ArMemBase {
         for (const v2 of items || []) {
           const key = v2.split(".")[0]
           const field = v2.split(".")[1]
-          if (key === v) this[v][field] = await this.db.get(v2)
+          if (key === v) {
+            if (key.match(/^env/)) {
+              let v3 = await this.db.get(v2)
+              if (is(Array, v3.memory)) {
+                try {
+                  v3.memory = this.decompressor.decompress(v3.memory)
+                } catch (e) {
+                  v3.memory = decompress(v3.memory)
+                }
+              }
+              this[v][field] = v3
+            } else {
+              this[v][field] = await this.db.get(v2)
+            }
+          }
         }
       }
     } else {
@@ -166,9 +208,7 @@ export default class ArMemBase {
           format = tags(tx.tags)["Module-Format"]
         }
       }
-    } else {
-      format = _wasm.format
-    }
+    } else format = _wasm.format
     format ??= "wasm64-unknown-emscripten-draft_2024_02_15"
     return { format, mod, wasm }
   }
