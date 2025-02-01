@@ -2,51 +2,82 @@ use wasm_bindgen::prelude::*;
 use js_sys::Uint8Array;
 
 #[wasm_bindgen]
-pub struct Compressor {
-    arr: Vec<u8>,
-    arr2: Vec<u8>,
-    mode: u8,
-    prev: Option<u8>,
-    elm_arr: Vec<u8>,
-}
+pub struct Compressor {}
 
 #[wasm_bindgen]
 impl Compressor {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self {
-            arr: Vec::new(),
-            arr2: Vec::new(),
-            mode: 1,
-            prev: None,
-            elm_arr: Vec::new(),
-        }
+        Self {}
     }
 
-    fn to_base_256(n: usize) -> Vec<u8> {
+    fn to_base_256(mut n: usize) -> Vec<u8> {
         let mut result = Vec::new();
-        let mut n = n;
         while n > 0 {
             result.insert(0, (n % 256) as u8);
             n /= 256;
+        }
+        if result.is_empty() {
+            result.push(0);
         }
         let mut final_result = vec![result.len() as u8];
         final_result.extend(result);
         final_result
     }
 
-    fn comp(&mut self) {
-        let mut nums: Option<Vec<u8>> = None;
-        let mut elms: Option<Vec<u8>> = None;
-        let len = self.elm_arr.len();
+    #[wasm_bindgen]
+    pub fn compress(&self, data: &[u8]) -> Uint8Array {
+        let mut arr = Vec::new();
+        let mut _arr = Vec::new();
+        let mut mode = 1;
+        let mut prev: Option<u8> = None;
+
+        for &v in data {
+            if prev.is_none() {
+                _arr.push(v);
+            } else if _arr.len() == 1 {
+                mode = if prev.unwrap() != v { 2 } else { 1 };
+                _arr.push(v);
+            } else {
+                if prev.unwrap() != v && mode == 1 {
+                    Self::_comp(&mut arr, &_arr, mode);
+                    _arr.clear();
+                    _arr.push(v);
+                    mode = 2;
+                } else if prev.unwrap() == v && mode == 2 {
+                    let last = _arr.pop().unwrap();
+                    Self::_comp(&mut arr, &_arr, mode);
+                    _arr.clear();
+                    _arr.extend_from_slice(&[last, v]);
+                    mode = 1;
+                } else {
+                    _arr.push(v);
+                }
+            }
+            prev = Some(v);
+        }
+
+        if !_arr.is_empty() {
+            Self::_comp(&mut arr, &_arr, mode);
+        }
+
+        let result = Uint8Array::new_with_length(arr.len() as u32);
+        result.copy_from(&arr);
+        result
+    }
+
+    fn _comp(arr: &mut Vec<u8>, _arr: &[u8], mode: u8) {
+        let mut _nums: Option<Vec<u8>> = None;
+        let mut _elms: Option<Vec<u8>> = None;
+        let len = _arr.len();
         let mut flag: u8 = 0;
 
-        if self.mode == 1 && self.elm_arr[0] != 0 {
+        if mode == 1 && _arr[0] != 0 {
             flag += 100;
-            elms = Some(vec![self.elm_arr[0]]);
-        } else if self.mode == 2 {
+            _elms = Some(vec![_arr[0]]);
+        } else if mode == 2 {
             flag += 200;
-            elms = Some(self.elm_arr.clone());
+            _elms = Some(_arr.to_vec());
         }
 
         if len < 10 {
@@ -54,97 +85,37 @@ impl Compressor {
         } else if len != 10 {
             let base256 = Self::to_base_256(len);
             let (elm, nums_slice) = base256.split_at(1);
-            nums = Some(nums_slice.to_vec());
+            _nums = Some(nums_slice.to_vec());
             flag += elm[0] * 10;
-            if let Some(ref nums_vec) = nums {
+            if let Some(ref mut nums_vec) = _nums {
                 if !nums_vec.is_empty() && nums_vec[0] < 10 {
-                    flag += nums_vec[0];
-                    nums = Some(nums_vec[1..].to_vec());
+                    flag += nums_vec.remove(0);
                 }
             }
         }
 
-        self.arr2.push(flag);
-        if let Some(nums_vec) = nums {
-            self.arr2.extend(nums_vec);
+        arr.push(flag);
+        if let Some(nums_vec) = _nums {
+            arr.extend(nums_vec);
         }
-        if let Some(elms_vec) = elms {
-            self.arr2.extend(elms_vec);
-        }
-    }
-
-    #[wasm_bindgen]
-    pub fn compress(&mut self, data: &[u8]) -> Uint8Array {
-        self.arr2.clear();
-        self.elm_arr.clear();
-        self.mode = 1;
-        self.prev = None;
-
-        for &v in data {
-            if self.prev.is_none() {
-                self.elm_arr.push(v);
-            } else if self.elm_arr.len() == 1 {
-                self.mode = if self.prev.unwrap() != v { 2 } else { 1 };
-                self.elm_arr.push(v);
-            } else {
-                if self.prev.unwrap() != v && self.mode == 1 {
-                    self.comp();
-                    self.elm_arr.clear();
-                    self.elm_arr.push(v);
-                    self.mode = 2;
-                } else if self.prev.unwrap() == v && self.mode == 2 {
-                    let last = self.elm_arr.pop().unwrap();
-                    self.comp();
-                    self.elm_arr.clear();
-                    self.elm_arr.extend_from_slice(&[last, v]);
-                    self.mode = 1;
-                } else {
-                    self.elm_arr.push(v);
-                }
-            }
-            self.prev = Some(v);
-        }
-
-        if !self.elm_arr.is_empty() {
-            self.mode = if self.elm_arr.len() == 1 { 2 } else { 1 };
-            self.comp();
-        }
-
-        unsafe {
-            Uint8Array::view(&self.arr2)
+        if let Some(elms_vec) = _elms {
+            arr.extend(elms_vec);
         }
     }
 }
+
 #[wasm_bindgen]
-pub struct Decompressor {
-    arr: Vec<u8>,
-    nums: Vec<u8>,
-    flag: Option<u8>,
-    elm: i32,
-    sum: i32,
-    first: Option<u8>,
-    second: Option<u8>,
-    third: Option<u8>,
-}
+pub struct Decompressor {}
 
 #[wasm_bindgen]
 impl Decompressor {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self {
-            arr: Vec::with_capacity(1024),
-            nums: Vec::new(),
-            flag: None,
-            elm: 0,
-            sum: 0,
-            first: None,
-            second: None,
-            third: None,
-        }
+        Self {}
     }
 
     fn to_10(arr: &[u8]) -> usize {
-        let mut num: usize = 0;
+        let mut num = 0;
         for &v in arr {
             num = num * 256 + v as usize;
         }
@@ -152,66 +123,69 @@ impl Decompressor {
     }
 
     #[wasm_bindgen]
-    pub fn decompress(&mut self, data: &[u8]) -> Uint8Array {
-        self.arr.clear();
-        self.nums.clear();
-        self.flag = None;
-        self.elm = 0;
-        self.sum = 0;
+    pub fn decompress(&self, data: &[u8]) -> Uint8Array {
+        let mut arr = Vec::new();
+        let mut flag: Option<u8> = None;
+        let mut elm: i32 = 0;
+        let mut sum: i32 = 0;
+        let mut nums: Vec<u8> = Vec::new();
+        let mut first: Option<u8> = None;
+        let mut second: Option<u8> = None;
+        let mut third: Option<u8> = None;
 
         for &v in data {
-            if self.flag.is_none() {
-                self.flag = Some(v);
+            if flag.is_none() {
+                flag = Some(v);
                 let flag = v as i32;
-                self.first = Some((flag / 100) as u8);
-                self.second = Some(((flag - (flag / 100) * 100) / 10) as u8);
-                self.third = Some((flag - (flag / 100) * 100 - ((flag - (flag / 100) * 100) / 10) * 10) as u8);
-                self.nums.clear();
+                first = Some((flag / 100) as u8);
+                second = Some(((flag - (flag / 100) * 100) / 10) as u8);
+                third = Some((flag - (flag / 100) * 100 - ((flag - (flag / 100) * 100) / 10) * 10) as u8);
+                nums.clear();
 
-                if self.second.unwrap() == 0 {
-                    self.nums.push(if self.third.unwrap() == 0 { 10 } else { self.third.unwrap() });
-                    self.elm = 0;
-                } else if self.third.unwrap() != 0 {
-                    self.nums.push(self.third.unwrap());
-                    self.elm = self.second.unwrap() as i32 - 1;
+                if second.unwrap() == 0 {
+                    nums.push(if third.unwrap() == 0 { 10 } else { third.unwrap() });
+                    elm = 0;
+                } else if third.unwrap() != 0 {
+                    nums.push(third.unwrap());
+                    elm = second.unwrap() as i32 - 1;
                 } else {
-                    self.elm = self.second.unwrap() as i32;
+                    elm = second.unwrap() as i32;
                 }
-            } else if self.sum == 0 {
-                self.elm -= 1;
-                self.nums.push(v);
+            } else if sum == 0 {
+                elm -= 1;
+                nums.push(v);
             }
 
-            if self.sum > 0 {
-                if self.first.unwrap() == 2 {
-                    self.arr.push(v);
-                } else if self.first.unwrap() == 1 {
-                    let count = Self::to_10(&self.nums);
+            if sum > 0 {
+                if first.unwrap() == 2 {
+                    arr.push(v);
+                } else if first.unwrap() == 1 {
+                    let count = Self::to_10(&nums);
                     for _ in 0..count {
-                        self.arr.push(v);
+                        arr.push(v);
                     }
                 }
-                self.sum -= 1;
-                if self.sum == 0 {
-                    self.flag = None;
+                sum -= 1;
+                if sum == 0 {
+                    flag = None;
                 }
-            } else if self.elm == 0 {
-                if self.first.unwrap() == 0 {
-                    let count = Self::to_10(&self.nums);
+            } else if elm == 0 {
+                if first.unwrap() == 0 {
+                    let count = Self::to_10(&nums);
                     for _ in 0..count {
-                        self.arr.push(0);
+                        arr.push(0);
                     }
-                    self.flag = None;
-                } else if self.first.unwrap() == 2 {
-                    self.sum = Self::to_10(&self.nums) as i32;
+                    flag = None;
+                } else if first.unwrap() == 2 {
+                    sum = Self::to_10(&nums) as i32;
                 } else {
-                    self.sum = 1;
+                    sum = 1;
                 }
             }
         }
 
-        unsafe {
-            Uint8Array::view(&self.arr)
-        }
+        let result = Uint8Array::new_with_length(arr.len() as u32);
+        result.copy_from(&arr);
+        result
     }
 }
