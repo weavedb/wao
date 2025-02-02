@@ -1,13 +1,13 @@
 {
   "name": "wao",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "bin": "./src/cli.js",
   "type": "module",
   "main": "dist/cjs/index.js",
   "module": "dist/src/index.js",
   "scripts": {
     "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs",
-    "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/ && cp src/lua dist/cjs/lua -rf",
+    "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/ && cp src/lua/* dist/cjs/lua -rf",
     "test": "node --experimental-wasm-memory64",
     "test-only": "node --experimental-wasm-memory64 --test-only",
     "server": "node cli-esm.js"
