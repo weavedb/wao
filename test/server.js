@@ -1,4 +1,9 @@
-import { connect as _connect, createDataItemSigner } from "@permaweb/aoconnect"
+import {
+  results as r,
+  connect as _connect,
+  createDataItemSigner,
+} from "@permaweb/aoconnect"
+import base64url from "base64url"
 import assert from "assert"
 import { resolve } from "path"
 import { after, describe, it, before, beforeEach } from "node:test"
@@ -36,12 +41,29 @@ end)
 
 describe("SDK", function () {
   after(() => setTimeout(() => process.exit(), 100))
-
+  it("should work with aoconnect results", async () => {
+    let ao = await new AO(4000).init(acc[0])
+    const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
+    const { mid } = await p.msg("Add", { Plus: 3 })
+    assert.equal(await p.d("Get"), "3")
+    const { spawn, message, dryrun, assign, result, results } = _connect({
+      MU_URL: `http://localhost:4002`,
+      CU_URL: `http://localhost:4004`,
+      GATEWAY_URL: `http://localhost:4000`,
+    })
+    const { edges } = await results({ process: pid, limit: 2 })
+    const cursor = edges[1].node.cursor
+    const { edges: edges2 } = await results({
+      process: pid,
+      limit: 1,
+      start: cursor,
+    })
+    assert.equal(edges2[0].node.cursor, cursor)
+  })
   it("should run server", async () => {
-    let ao = await new AO({
-      ar: { port: 4000 },
-      aoconnect: optAO(4000),
-    }).init(acc[0])
+    let ao = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
+      acc[0],
+    )
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
     await p.m("Add", { Plus: 3 })
     assert.equal(await p.d("Get"), "3")
@@ -55,7 +77,7 @@ describe("SDK", function () {
     assert.equal(await p2.d("Get"), "5")
   })
 
-  it.only("should connect with aoconnect", async () => {
+  it("should connect with aoconnect", async () => {
     const { spawn, message, dryrun, assign, result } = _connect({
       MU_URL: `http://localhost:4002`,
       CU_URL: `http://localhost:4004`,
@@ -72,7 +94,6 @@ describe("SDK", function () {
       ],
       signer: createDataItemSigner(acc[0].jwk),
     })
-    console.log(pid)
     const src_data = `
 Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })
@@ -86,14 +107,13 @@ end)
       signer: createDataItemSigner(acc[0].jwk),
     })
 
-    console.log(await result({ process: pid, message: mid }))
+    await result({ process: pid, message: mid })
     const res = await dryrun({
       process: pid,
       data: "",
       tags: [{ name: "Action", value: "Hello" }],
       anchor: "1234",
     })
-    console.log(res)
     assert.equal(res.Messages[0].Data, "Hello, World!")
   })
 
