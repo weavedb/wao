@@ -3,7 +3,7 @@ import { buildTags, tags as t } from "./utils.js"
 import * as WarpArBundles from "warp-arbundles"
 const pkg = WarpArBundles.default ?? WarpArBundles
 const { DataItem } = pkg
-import { bundleAndSignData, ArweaveSigner } from "arbundles"
+import { Bundle, bundleAndSignData, ArweaveSigner } from "arbundles"
 import base64url from "base64url"
 import GQL from "./tgql.js"
 import { last, is, includes, isNil } from "ramda"
@@ -18,21 +18,16 @@ class AR extends MAR {
     this.arweave = this.mem.arweave
   }
   async owner(di) {
-    const raw_owner = di.rawOwner
-    const hashBuffer = Buffer.from(
-      await crypto.subtle.digest("SHA-256", raw_owner),
+    return base64url.encode(
+      Buffer.from(await crypto.subtle.digest("SHA-256", di.rawOwner)),
     )
-    return base64url.encode(hashBuffer)
   }
   async dataitem({ target = "", data = "1984", tags = {}, signer, item }) {
     let di = item
     if (!di) {
-      const _tags = buildTags(tags)
-      const _item = await signer({ data, tags: _tags, target })
+      const _item = await signer({ data, tags: buildTags(tags), target })
       di = new DataItem(_item.raw)
-    } else {
-      tags = t(di.tags)
-    }
+    } else tags = t(di.tags)
     const owner = await this.owner(di)
     return { id: await di.id, owner, item: di, tags }
   }
@@ -42,8 +37,7 @@ class AR extends MAR {
     ;({ err, jwk } = await this.checkWallet({ jwk }))
     if (err) return { err }
     let tx = await this.arweave.createTransaction({ data: data })
-    let _tags = buildTags(null, tags)
-    for (const v of _tags) tx.addTag(v.name, v.value)
+    for (const v of buildTags(null, tags)) tx.addTag(v.name, v.value)
     return await this.postTx(tx, jwk)
   }
 
@@ -129,7 +123,7 @@ class AR extends MAR {
         }
         block.txs.push(item.id)
         _txs.block = block.id
-        await this.mem.set(_txs, "txs", item.id)
+        await this.mem.set({ bundle: tx.id }, "txs", item.id)
       }
     }
     let _tags = []
@@ -179,7 +173,7 @@ class AR extends MAR {
   }
 
   async tx(id) {
-    return await this.mem.get("txs", id)
+    return await this.mem.getTx(id)
   }
 
   async data(id, _string, log) {
@@ -189,7 +183,7 @@ class AR extends MAR {
       if (!isNil(_string.decode)) decode = _string.decode
       if (!isNil(_string.string)) string = _string.string
     }
-    let tx = await this.mem.get("txs", id)
+    let tx = await this.mem.getTx(id)
     let _data = tx?.data ?? null
     if (tx?.format === 2 && _data) {
       _data = Buffer.from(_data, "base64")
