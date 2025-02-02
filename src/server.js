@@ -271,6 +271,18 @@ class Server {
       })
       res.json(res2)
     })
+    app.get("/state/:pid", async (req, res) => {
+      const pid = req.params.pid
+      const memory = (await this.mem.env[pid]?.memory) ?? null
+      if (!memory) {
+        res.status(404)
+        res.json({
+          error: `TransactionNotFound: Process ${pid} was not found on gateway`,
+        })
+      } else {
+        res.send(Buffer.from(memory))
+      }
+    })
     app.post("/dry-run", async (req, res) => {
       const process = req.query["process-id"]
       const { Id: id, Owner: owner, Tags: tags, Data: data } = req.body
