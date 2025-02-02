@@ -1,8 +1,10 @@
 import _Arweave from "arweave"
 const Arweave = _Arweave.default ?? _Arweave
+import { Bundle } from "arbundles"
 import { compress, decompress } from "./compress.js"
 import { last, assoc, is } from "ramda"
 import { buildTags, tags } from "./utils.js"
+import base64url from "base64url"
 
 export default class ArMemBase {
   constructor({
@@ -28,6 +30,11 @@ export default class ArMemBase {
     this.arweave.transactions.getPrice = () => 0
     this.scheduler = scheduler
     this.SU_URL = SU_URL
+  }
+  async owner(di) {
+    return base64url.encode(
+      Buffer.from(await crypto.subtle.digest("SHA-256", di.rawOwner)),
+    )
   }
   getAnchor() {
     return this.blocks.length === 0
@@ -66,9 +73,9 @@ export default class ArMemBase {
     }
   }
   initSync() {
+    this.items = {}
     this.addrmap = {}
     this.txs = {}
-    this.jwks = {}
     this.blocks = []
     this.blockmap = {}
     this.env = {}
@@ -152,8 +159,8 @@ export default class ArMemBase {
     if (this.db) {
       for (const v of ["height", "blocks"]) this[v] = await this.get(v)
       for (const v of [
+        "items",
         "txs",
-        "jwks",
         "env",
         "modules",
         "wasms",
@@ -191,6 +198,36 @@ export default class ArMemBase {
       }
     }
   }
+  async getTx(id) {
+    let tx = this.txs[id]
+    if (tx.bundle) {
+      try {
+        let bundle = new Bundle(this.txs[tx.bundle].data)
+        for (let di of bundle.items) {
+          if (id === di.id) {
+            const data = di.data
+            const data_size = Buffer.byteLength(di.rawData).toString()
+            let data_type = ""
+            for (const t of di.tags)
+              if (t.name === "Content-Type") data_type = t.value
+            const owner = await this.owner(di)
+            tx = {
+              _data: { size: data_size, type: data_type },
+              anchor: di.anchor,
+              signature: di.signature,
+              recipient: di.target,
+              id: await di.id,
+              item: di,
+              owner,
+              tags: di.tags,
+              data,
+            }
+          }
+        }
+      } catch (e) {}
+    }
+    return tx
+  }
   async getWasm(module) {
     let mod = module ?? this.modules.aos2_0_1
     if (!mod) throw Error("module not found")
@@ -202,7 +239,7 @@ export default class ArMemBase {
         wasm = await this._getWasm(this.wasms[mod].file)
         format = _wasm.format
       } else {
-        const tx = await this.get("txs", mod)
+        const tx = await this.getTx(mod)
         if (tx) {
           wasm = Buffer.from(tx.data, "base64")
           format = tags(tx.tags)["Module-Format"]
