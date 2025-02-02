@@ -6,7 +6,7 @@ import { tags, toGraphObj, optAO } from "./utils.js"
 import { connect } from "./aoconnect.js"
 import { GQL, cu, su, mu } from "./test.js"
 import bodyParser from "body-parser"
-import { keys, map, reverse } from "ramda"
+import { keys, map, isNil, reverse } from "ramda"
 
 class Server {
   constructor({
@@ -148,7 +148,9 @@ class Server {
         res.json({ id: req.body.id })
       }
     })
-
+    app.get("*", async (req, res) => {
+      console.log("what")
+    })
     const server = app.listen(this.ports.ar, () => {
       console.log(`AR on port ${this.ports.ar}`)
     })
@@ -246,6 +248,10 @@ class Server {
       })(reverse(this.mem.env[pid]?.results ?? [])) // need mod
       res.json({ page_info: { has_next_page: false }, edges })
     })
+    app.get("*", async (req, res) => {
+      console.log("what2")
+    })
+
     const server = app.listen(this.ports.su, () =>
       console.log(`SU on port ${this.ports.su}`),
     )
@@ -277,6 +283,28 @@ class Server {
         res.json(res2)
       }
     })
+    app.get("/results/:pid", async (req, res) => {
+      const pid = req.params.pid
+      const { from = null, to = null, sort = "ASC", limit = 25 } = req.query
+      let results = this.mem.env[pid]?.results ?? []
+      if (sort.toLowerCase() === "desc") results = reverse(results)
+      let _res = []
+      let i = 1
+      let count = 0
+      let started = isNil(from)
+      for (let v of results) {
+        if (started) {
+          _res.push({ cursor: v, node: this.mem.msgs[v]?.res })
+          count++
+          if (!isNil(to) && v === to) break
+          if (limit <= count) break
+        } else if (from === v) started = true
+
+        i++
+      }
+      res.json({ edges: _res })
+    })
+
     const server = app.listen(this.ports.cu, () =>
       console.log(`CU on port ${this.ports.cu}`),
     )
