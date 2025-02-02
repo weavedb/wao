@@ -216,13 +216,13 @@ class Server {
     )
     app.get("/:pid", (req, res) => {
       const pid = req.params.pid
-      const edges = map(v => {
-        const tx = this.mem.txs[v.id]
+      const edges = map(async v => {
+        const tx = await this.mem.getTx(v)
         const _tags = tags(v.tags)
         const mid = _tags.Message
-        const mtx = this.mem.txs[mid]
+        const mtx = await this.mem.getTx(mid)
         return {
-          cursor: v.id,
+          cursor: v,
           node: {
             message: {
               id: mtx.id,
@@ -243,7 +243,7 @@ class Server {
             },
           },
         }
-      })(reverse(this.mem.env[pid]?.txs ?? []))
+      })(reverse(this.mem.env[pid]?.results ?? [])) // need mod
       res.json({ page_info: { has_next_page: false }, edges })
     })
     const server = app.listen(this.ports.su, () =>
