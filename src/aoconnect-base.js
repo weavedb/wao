@@ -14,7 +14,7 @@ import {
   dirname,
 } from "./utils.js"
 import weavedrive from "./weavedrive.js"
-import { is, clone, fromPairs, map, mergeLeft, isNil } from "ramda"
+import { is, clone, fromPairs, map, mergeLeft, isNil, dissoc, o } from "ramda"
 
 export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
   return (mem, { cache, log = false, extensions = {} } = {}) => {
@@ -70,12 +70,12 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       return {
         Process: {
           Id: pid,
-          Tags: (await mem.get("txs", pid))?.tags ?? [],
+          Tags: (await mem.getTx(pid))?.tags ?? [],
           Owner: owner,
         },
         Module: {
           Id: module,
-          Tags: (await mem.get("txs", module))?.tags ?? [],
+          Tags: (await mem.getTx(module))?.tags ?? [],
         },
       }
     }
@@ -124,7 +124,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           format,
           WeaveDrive: wdrive,
           spawn: item,
-          module: await mem.get("txs", mod),
+          module: await mem.getTx(mod),
         })
       } catch (e) {}
       if (!handle) return null
@@ -136,7 +136,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       let memory = opt.memory ?? null
       let p = {
         extension: ext,
-        item: item?.binary,
         format,
         id: id,
         epochs: [],
@@ -146,10 +145,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         memory,
         owner,
         height: 0,
-        res: { [id]: res },
+        //res: { [id]: res },
         results: [id],
-        txs: [],
-        opt,
       }
       if (memory) {
         // forking...
@@ -166,11 +163,12 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         res = await _module.handle(null, msg, _env)
         p.memory = res.Memory
         delete res.Memory
-        p.res[id] = res
+        //p.res[id] = res
       } else {
         p.height += 1
       }
-      await mem.set(opt, "msgs", id)
+      const _msg = { ...o(dissoc("signer"), dissoc("memory"))(opt), res }
+      await mem.set(_msg, "msgs", id)
       if (_tags["Cron-Interval"]) {
         let [num, unit] = _tags["Cron-Interval"].split("-")
         let int = 0
@@ -221,7 +219,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
 
     const assign = async opt => {
       const p = await mem.get("env", opt.process)
-      if (!p) return null
+      if (!p || !opt.process) return null
       let _opt = await mem.get("msgs", opt.message)
       let hash = genHashChain(p.hash, opt.message)
       p.hash = hash
@@ -285,19 +283,19 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           p.handle = await AoLoader(wasm, {
             format,
             WeaveDrive: wdrive,
-            spawn: new DataItem(p.item),
-            module: await mem.get("txs", mod),
+            spawn: (await mem.getTx(p.id)).item,
+            module: await mem.getTx(mod),
           })
           mem.env[opt.process].handle = p.handle
         }
         const res = await p.handle(p.memory, msg, _env)
         p.memory = res.Memory
         delete res.Memory
-        p.res[opt.message] = res
+        //p.res[opt.message] = res
         p.results.push(opt.message)
-        p.txs.unshift({ id, ...opt })
         await mem.set(p, "env", opt.process)
-        await mem.set(_opt, "msgs", opt.message)
+        const _msg = { ...dissoc("signer", _opt), res }
+        await mem.set(_msg, "msgs", opt.message)
         for (const v of res.Messages ?? []) {
           if (await mem.get("env", v.Target)) {
             await message({
@@ -361,7 +359,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         if (opt.for) {
           opt.tags.push({ name: "Pushed-For", value: opt.for })
           opt.tags.push({ name: "From-Process", value: opt.from })
-          const pr = (await mem.get("txs", opt.from))?.tags ?? []
+          const pr = (await mem.getTx(opt.from))?.tags ?? []
           const module = tags(pr).Module
           if (module) opt.tags.push({ name: "From-Module", value: module })
         }
@@ -372,7 +370,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           target: opt.process,
         }))
       }
-      await mem.set(opt, "msgs", id)
+      const _msg = dissoc("signer", opt)
+      await mem.set(_msg, "msgs", id)
       await assign({
         message_item: item,
         message: id,
@@ -408,20 +407,22 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       spawn,
       assign,
       ar,
-      result: async opt =>
-        (await mem.get("env", opt.process))?.res[opt.message],
+      result: async opt => (await mem.get("msgs", opt.message))?.res,
       results: async opt => {
         const p = await mem.get("env", opt.process)
         let results = []
         const limit = opt.limit ?? 25
         if (opt.sort === "DESC") {
           for (let i = p.results.length - 1; 0 < i; i--) {
-            results.push({ cursor: p.results[i], node: p.res[p.results[i]] })
+            results.push({
+              cursor: p.results[i],
+              node: await this.result(p.results[i]),
+            })
             if (results.length >= limit) break
           }
         } else {
           for (let i = 0; i < p.results.length; i++) {
-            results.push({ node: p.res[p.results[i]] })
+            results.push({ node: await this.result(p.results[i]) })
             if (results.length >= limit) break
           }
         }
@@ -464,8 +465,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             p.handle = await AoLoader(wasm, {
               format,
               WeaveDrive: wdrive,
-              spawn: new DataItem(p.item),
-              module: await mem.get("txs", mod),
+              spawn: (await mem.getTx(p.id)).item,
+              module: await mem.getTx(mod),
             })
             mem.env[opt.process].handle = p.handle
           }

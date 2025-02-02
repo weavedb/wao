@@ -369,7 +369,6 @@ class AO {
         data: jsonToStr(data),
       })
     } catch (e) {
-      console.log(e)
       err = e
     }
     const p = pid ? this.p(pid) : null
@@ -405,8 +404,7 @@ class AO {
         }
       }
     }
-    const checkOut = async (get, _txs, _txmap) => {
-      let out = null
+    const checkOut = async (get, _txs, _txmap, out) => {
       for (let v of _txs) {
         if (isNil(_txmap[v.id].res)) {
           const res = await this.result({ process: pid, message: v.id })
@@ -414,8 +412,9 @@ class AO {
         }
         if (!isNil(_txmap[v.id].res) && _txmap[v.id].out !== true) {
           _txmap[v.id].out = true
-          out = getTagVal(get, _txmap[v.id].res, v.from)
-          if (out) break
+          const _out = getTagVal(get, _txmap[v.id].res, v.from)
+          out = mergeOut(out, _out, get)
+          if (isOutComplete(out, get)) break
         }
       }
       return out
@@ -455,14 +454,15 @@ class AO {
         await wait(1000)
         await getNewTxs(pid, _txs, _txmap)
       } while (Date.now() - start < timeout)
+
       if (!checked) {
         err = "something went wrong!"
       } else {
-        out = mergeOut(out, await checkOut(get, _txs, _txmap), get)
+        out = mergeOut(out, await checkOut(get, _txs, _txmap, out), get)
         if (!isOutComplete(out, get) && !isNil(get)) {
           while (Date.now() - start < timeout) {
             await getNewTxs(pid, _txs, _txmap)
-            out = mergeOut(out, await checkOut(get, _txs, _txmap), get)
+            out = mergeOut(out, await checkOut(get, _txs, _txmap, out), get)
             if (isOutComplete(out, get)) break
             await wait(1000)
           }

@@ -1,4 +1,4 @@
-import BAR from "./ar-base.js"
+import BAR from "./bar.js"
 import ArMem from "./armem.js"
 
 class AR extends BAR {

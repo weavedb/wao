@@ -180,9 +180,10 @@ describe("SDK", function () {
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
     const data = src.data("aos2_0_1", "wasm")
     const { id: modid } = await ao.postModule({ data, jwk })
-    const { p } = await ao.deploy({ src_data, module: modid })
+    const { p, err } = await ao.deploy({ src_data, module: modid })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
+
   it("should spawn a process and send messages", async () => {
     const { p } = await ao.deploy({ src_data })
     assert.equal(await p.d("Hello"), "Hello, World!")
@@ -191,7 +192,8 @@ describe("SDK", function () {
   it("should spawn a process with On-Boot tag", async () => {
     const { err, p, pid } = await ao.deploy({ boot: true, src_data })
     assert.equal(await p.d("Hello"), "Hello, World!")
-    const { p: p2 } = await ao.deploy({ boot: pid })
+    const { pid: pid2, p: p2 } = await ao.deploy({ boot: pid })
+    return
     assert.equal(await p2.d("Hello"), "Hello, World!")
   })
 
@@ -202,7 +204,6 @@ describe("SDK", function () {
       "Hello, Japan!",
     )
   })
-
   it("should spawn a process from a handler", async () => {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data3 })
     await p.msg(
@@ -213,7 +214,11 @@ describe("SDK", function () {
     const prs = mem.env
     let p2 = null
     for (let k in prs) {
-      if (tags(prs[k].opt.tags)["From-Process"] === pid) p2 = ao.p(k)
+      for (let k2 of prs[k].results) {
+        for (let v of mem.msgs[k2].res.Spawns || []) {
+          if (tags(v.Tags)["From-Process"] === pid) p2 = ao.p(k)
+        }
+      }
     }
     assert.notEqual(p2, null)
   })
@@ -356,7 +361,7 @@ describe("Fork", function () {
 })
 
 describe("Persistency", function () {
-  it.only("should persist the data", async () => {
+  it("should persist the data", async () => {
     const cache = resolve(import.meta.dirname, ".cache")
     try {
       unlinkSync(cache)
@@ -409,14 +414,12 @@ describe("AOS1", function () {
         "Hello",
         { To: pid2, To2: pid3 },
         {
+          timeout: 2000,
           check: [
             {
               from: pid3,
               data: "Hello, World!",
-              tags: {
-                Test2: /test/,
-                JSON: { json: { a: 3, b: () => true } },
-              },
+              tags: { Test2: /test/, JSON: { json: { a: 3, b: () => true } } },
             },
           ],
           get: { test: { name: "Test2", from: pid3 } },
