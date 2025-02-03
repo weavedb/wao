@@ -1521,6 +1521,11 @@
   resolved "https://registry.yarnpkg.com/@weavery/clarity/-/clarity-0.1.5.tgz#f06bbb0dac7c63c6e2ccd76cda3e8b32b57f82c2"
   integrity sha512-0ms2/sBx+uyW3EmXte5otIzNVAXpfJ3lBl6FS8JuLdWmPU6SxiAoGTMUT0N0SL3Ogiz2PZt6NV+mfApbSvYBaQ==
 
+"@wllama/wllama@^2.1.4":
+  version "2.1.4"
+  resolved "https://registry.yarnpkg.com/@wllama/wllama/-/wllama-2.1.4.tgz#8acbedb30b9e425b4adac11da202bcb6c86666a5"
+  integrity sha512-uB9yFxBkMrH6ZyH3boSx37NwN184NuM6cLCBHehI5PJ+blw1hBaut2f5pscJGDmIa5QrSYJk6eJ9VzfIJfha8g==
+
 JSONStream@^1.3.5:
   version "1.3.5"
   resolved "https://registry.npmjs.org/JSONStream/-/JSONStream-1.3.5.tgz#3208c1f08d3a4d99261ab64f92302bc15e111ca0"
