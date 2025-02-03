@@ -538,10 +538,14 @@ Send a message.
 
 
 ```js
-const { err, mid, res, out } = await ao.msg({ data, action, tags, check, get })
+const { err, mid, res, out } = await ao.msg({ 
+  data, action, tags, check, get, mode, limit
+})
 ```
 
 `check` determins if the message call is successful by checking through `Tags` in `Messages` in `res`.
+
+When using `from` either in `check` or `get`, `mode` needs to be set `gql`. `mode` defaults to `aoconnect` which uses the `aoconnect.results` function to track down results, which cannot tell where results come from. `gql` mode doesn't sometimes catch all results if used with AO/Arweave mainnet since there are lags due to the block finality time. `limit` specifies how many transactions or results to fetch for the `check`.
 
 ```js
 const check = { Status : "Success" } // succeeds if Status tag is "Success"

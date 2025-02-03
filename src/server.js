@@ -299,7 +299,7 @@ class Server {
       const pid = req.params.pid
       const { from = null, to = null, sort = "ASC", limit = 25 } = req.query
       let results = this.mem.env[pid]?.results ?? []
-      if (sort.toLowerCase() === "desc") results = reverse(results)
+      if (sort === "DESC") results = reverse(results)
       let _res = []
       let i = 1
       let count = 0
