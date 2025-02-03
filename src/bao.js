@@ -111,6 +111,7 @@ class AO extends MAO {
       "Memory-Limit": "1-gb",
       "Compute-Limit": "9000000000000",
     })
+    console.log(tags, t)
     const signer = createDataItemSigner(jwk)
     const { id, owner, item } = await this.ar.dataitem({
       tags: t,
