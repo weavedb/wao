@@ -182,6 +182,7 @@ export default class WeaveDrive {
             return 0
           }
         },
+
         async read(fd, raw_dst_ptr, raw_length) {
           // Note: The length and dst_ptr are 53 bit integers in JS, so this _should_ be ok into a large memspace.
           var to_read = Number(raw_length)
@@ -225,20 +226,20 @@ export default class WeaveDrive {
           // fetch(`/${stream.node.name}`)
           const data = await ar.data(stream.node.name, null, log)
           // Extract the Range header to determine the start and end of the requested chunk
-          const start = 0
-          const end = data.length
+          const start = stream.position
+          const end = to
 
           // Create a ReadableStream for the requested chunk
           const chunk = data.subarray(start, end)
           const response = new Response(
             new ReadableStream({
               start(controller) {
-                controller.enqueue(chunk) // Push the chunk to the stream
-                controller.close() // Close the stream when done
+                controller.enqueue(chunk)
+                controller.close()
               },
             }),
             {
-              headers: { "Content-Length": chunk.length.toString() },
+              headers: { "content-length": chunk.length.toString() },
             },
           )
           const reader = response.body.getReader()
