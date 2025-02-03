@@ -2,7 +2,7 @@ import * as WarpArBundles from "warp-arbundles"
 const pkg = WarpArBundles.default ?? WarpArBundles
 const { createData, ArweaveSigner } = pkg
 import AR from "./ar.js"
-
+import md5 from "md5"
 import {
   createDataItemSigner,
   connect,
@@ -17,6 +17,7 @@ import {
 } from "@permaweb/aoconnect"
 
 import {
+  dissoc,
   equals,
   concat,
   is,
@@ -27,6 +28,7 @@ import {
   isNil,
   includes,
   map,
+  reverse,
 } from "ramda"
 
 import {
@@ -56,10 +58,7 @@ function createDataItemSigner2(wallet) {
     const signer = new ArweaveSigner(wallet)
     const dataItem = createData(data, signer, { tags, target, anchor })
     const sig = dataItem.sign(signer).then(async () => {
-      return {
-        id: await dataItem.id,
-        raw: await dataItem.getRaw(),
-      }
+      return { id: await dataItem.id, raw: await dataItem.getRaw() }
     })
     return sig
   }
@@ -384,22 +383,46 @@ class AO {
     check = [],
     get,
     timeout = 0,
+    mode = "aoconnect",
+    limit = 25,
   }) {
     let err = null
     ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
     if (err) return { err }
+    let anchors = {}
+    let hash = null
+    let mid = null
     const getNewTxs = async (pid, _txs, _txmap) => {
-      const txs = await this.ar.gql.txs({
-        recipient: pid,
-        fields: ["id", "recipient", "tags", { owner: ["address"] }],
-      })
-      for (const v of txs) {
-        if (isNil(_txmap[v.id])) {
-          const t = ltags(v.tags)
-          if (t.type === "Message") {
-            v.from = t["from-process"] ?? v.owner?.address
-            _txs.unshift(v)
-            _txmap[v.id] = { checked: false, ref: t["x-reference"] }
+      let exists = false
+      if (mode === "gql") {
+        const txs = await this.ar.gql.txs({
+          recipient: pid,
+          limit,
+          fields: ["id", "recipient", "tags", { owner: ["address"] }],
+        })
+        for (const v of reverse(txs)) {
+          if (v.id === mid) exists = true
+          else if (exists) {
+            if (isNil(_txmap[v.id])) {
+              const t = ltags(v.tags)
+              if (t.type === "Message") {
+                v.from = t["from-process"] ?? v.owner?.address
+                _txs.unshift(v)
+                _txmap[v.id] = { checked: false, ref: t["x-reference"] }
+              }
+            }
+          }
+        }
+      } else {
+        for (let v of reverse(await this.res({ pid, limit }))) {
+          const hash2 = md5(JSON.stringify(dissoc("cursor", v)))
+          if (!exists) {
+            if (hash2 === hash) exists = true
+          } else {
+            if (isNil(_txmap[v.cursor + pid])) {
+              _txmap[v.cursor + pid] = { checked: false, res: v }
+              _txs.unshift({ id: v.cursor + pid })
+            }
           }
         }
       }
@@ -407,7 +430,8 @@ class AO {
     const checkOut = async (get, _txs, _txmap, out) => {
       for (let v of _txs) {
         if (isNil(_txmap[v.id].res)) {
-          const res = await this.result({ process: pid, message: v.id })
+          const res = await this.res({ pid, mid: v.id })
+          if (!hash) console.log(res)
           _txmap[v.id].res = res
         }
         if (!isNil(_txmap[v.id].res) && _txmap[v.id].out !== true) {
@@ -419,7 +443,7 @@ class AO {
       }
       return out
     }
-    let [res, out, mid, results] = [null, null, null, []]
+    let [res, out, results] = [null, null, []]
     let _tags = buildTags(act, tags)
     let start = Date.now()
     try {
@@ -431,22 +455,24 @@ class AO {
       })
       if (!is(Array, check)) check = [check]
       let _txs = [{ id: mid, from: await this.ar.toAddr(jwk) }]
-      let _txmap = {}
-      const t = ltags(_tags)
+      res = await this.res({ pid, mid })
+      hash = md5(JSON.stringify(res))
+      let _txmap = { [mid]: { checked: false, res } }
+      results.push({ mid, res })
       let checked = false
-      _txmap[mid] = { checked: false, ref: t["x-reference"] }
       do {
         for (let v of _txs) {
           if (!_txmap[v.id].checked) {
             _txmap[v.id].checked = true
-            const _res = await this.result({ process: pid, message: v.id })
-            if (isNil(res)) {
-              res = _res
-              mid = v.id
-              results.push({ mid, res })
+            if (isNil(_txmap[v.id].res)) {
+              const _res = await this.res({ pid, mid: v.id })
+              _txmap[v.id].res = _res
             }
-            _txmap[v.id].res = _res
-            checked = allChecked(check, _res, v.from)
+            if (!isNil(check) && check.length > 0) {
+              checked = allChecked(check, _txmap[v.id].res, v.from)
+            } else {
+              checked = true
+            }
             if (checked) break
           }
         }
@@ -486,7 +512,7 @@ class AO {
         message: mid,
         signer: this.toSigner(jwk),
       })
-      res = await this.result({ process: pid, message: mid })
+      res = await this.res({ pid, mid })
       if (!res) err = "something went wrong"
       if (res.Error) err = res.Error
       else {
@@ -523,7 +549,16 @@ class AO {
     }
     return { res, err, out }
   }
-
+  async res({ pid, mid, limit, asc, from, to }) {
+    if (!mid) {
+      let sort = asc ? "ASC" : "DESC"
+      const res = await this.results({ process: pid, limit, sort, from, to })
+      if (!res.edges) return null
+      return map(v => ({ cursor: v.cursor, ...v.node }))(res.edges)
+    } else {
+      return await this.result({ process: pid, message: mid })
+    }
+  }
   async eval({ pid, jwk, data }) {
     const fns = [
       {
