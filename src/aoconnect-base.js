@@ -14,7 +14,17 @@ import {
   dirname,
 } from "./utils.js"
 import weavedrive from "./weavedrive.js"
-import { is, clone, fromPairs, map, mergeLeft, isNil, dissoc, o } from "ramda"
+import {
+  is,
+  clone,
+  fromPairs,
+  map,
+  mergeLeft,
+  isNil,
+  dissoc,
+  o,
+  reverse,
+} from "ramda"
 
 export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
   return (mem, { cache, log = false, extensions = {} } = {}) => {
@@ -145,7 +155,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         memory,
         owner,
         height: 0,
-        //res: { [id]: res },
         results: [id],
       }
       if (memory) {
@@ -163,7 +172,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         res = await _module.handle(null, msg, _env)
         p.memory = res.Memory
         delete res.Memory
-        //p.res[id] = res
       } else {
         p.height += 1
       }
@@ -291,7 +299,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         const res = await p.handle(p.memory, msg, _env)
         p.memory = res.Memory
         delete res.Memory
-        //p.res[opt.message] = res
         p.results.push(opt.message)
         await mem.set(p, "env", opt.process)
         const _msg = { ...dissoc("signer", _opt), res }
@@ -381,7 +388,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       })
       return id
     }
-
+    const result = async opt => (await mem.get("msgs", opt.message))?.res
     return {
       message,
       unmonitor: async opt => {
@@ -407,26 +414,26 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       spawn,
       assign,
       ar,
-      result: async opt => (await mem.get("msgs", opt.message))?.res,
+      result,
       results: async opt => {
         const p = await mem.get("env", opt.process)
-        let results = []
-        const limit = opt.limit ?? 25
-        if (opt.sort === "DESC") {
-          for (let i = p.results.length - 1; 0 < i; i--) {
-            results.push({
-              cursor: p.results[i],
-              node: await this.result(p.results[i]),
-            })
-            if (results.length >= limit) break
-          }
-        } else {
-          for (let i = 0; i < p.results.length; i++) {
-            results.push({ node: await this.result(p.results[i]) })
-            if (results.length >= limit) break
-          }
+        if (!p) return { edges: [] }
+        let results = p?.results || []
+        const { from = null, to = null, sort = "ASC", limit = 25 } = opt || {}
+
+        if (sort === "DESC") results = reverse(results)
+        let _res = []
+        let count = 0
+        let started = isNil(from)
+        for (let v of results) {
+          if (started) {
+            _res.push({ cursor: v, node: await result({ message: v }) })
+            count++
+            if (!isNil(to) && v === to) break
+            if (limit <= count) break
+          } else if (from === v) started = true
         }
-        return { edges: results }
+        return { edges: _res }
       },
       dryrun: async opt => {
         const p = await mem.get("env", opt.process)
