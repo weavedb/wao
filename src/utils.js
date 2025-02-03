@@ -592,7 +592,6 @@ const allChecked = (check, res, from) => {
         }
         return false
       }
-
       if (typeof v === "object") {
         if (!isNil(v.json)) {
           const _from = v.from
@@ -606,9 +605,7 @@ const allChecked = (check, res, from) => {
           _checks = false
         } else {
           let ok = true
-          if (!isNil(v.data)) {
-            if (!checkVal(res, v.data)) ok = false
-          }
+          if (!isNil(v.data)) if (!checkVal(res, v.data)) ok = false
           for (const k in v.tags ?? {}) {
             if (!checkVal(res, v.tags[k], k)) ok = false
           }

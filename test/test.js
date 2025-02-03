@@ -415,6 +415,7 @@ describe("AOS1", function () {
         { To: pid2, To2: pid3 },
         {
           timeout: 2000,
+          mode: "gql",
           check: [
             {
               from: pid3,
@@ -422,7 +423,7 @@ describe("AOS1", function () {
               tags: { Test2: /test/, JSON: { json: { a: 3, b: () => true } } },
             },
           ],
-          get: { test: { name: "Test2", from: pid3 } },
+          get: { test: { from: pid3, name: "Test2" } },
         },
       ),
       { test: "test" },
