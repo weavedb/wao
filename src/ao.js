@@ -53,6 +53,15 @@ import {
   optAO,
 } from "./utils.js"
 
+const getHash = res =>
+  md5(
+    JSON.stringify({
+      Messages: res.Messages ?? [],
+      Spawns: res.Spawns ?? [],
+      Assignments: res.Assignments ?? [],
+    }),
+  )
+
 function createDataItemSigner2(wallet) {
   const signer = async ({ data, tags, target, anchor }) => {
     const signer = new ArweaveSigner(wallet)
@@ -415,7 +424,7 @@ class AO {
         }
       } else {
         for (let v of reverse(await this.res({ pid, limit }))) {
-          const hash2 = md5(JSON.stringify(dissoc("cursor", v)))
+          const hash2 = getHash(v)
           if (!exists) {
             if (hash2 === hash) exists = true
           } else {
@@ -456,7 +465,7 @@ class AO {
       if (!is(Array, check)) check = [check]
       let _txs = [{ id: mid, from: await this.ar.toAddr(jwk) }]
       res = await this.res({ pid, mid })
-      hash = md5(JSON.stringify(res))
+      hash = getHash(res)
       let _txmap = { [mid]: { checked: false, res } }
       results.push({ mid, res })
       let checked = false
