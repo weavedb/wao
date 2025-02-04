@@ -1,7 +1,9 @@
 import { Link, ssr } from "arnext"
+import { Image, Box, Flex, Textarea } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
+import { reverse, append, map } from "ramda"
 import wasm from "../lib/wasm"
-import { AO } from "../../src/web"
+import { AO, acc } from "../../src/web"
 //import { AO } from "wao/web"
 import client from "../lib/client"
 const getDate = async date => date ?? Date.now()
@@ -40,27 +42,164 @@ const genEnv = async ({ pid, owner = "", module = "" }) => {
   }
 }
 
-export default function Home({ _date = null }) {
-  const [date, setDate] = useState(_date)
-  useEffect(() => {}, [])
-  return (
-    <>
-      <div
-        onClick={async () => {
-          const _client = Buffer.from(client, "base64").toString()
+const src_data = `
+Llama = require(".Llama")
+Llama.logLevel = 4
 
-          const ao = new AO()
-          const { p, pid } = await ao.deploy({ src_data: _client })
-          console.log(
-            await p.m("Set", {
-              Query: JSON.stringify([{ name: "Bob" }, "ppl", "Bob"]),
-            }),
-          )
-          console.log(await p.d("Get", { Query: JSON.stringify(["ppl"]) }))
-        }}
-      >
-        Deploy WeaveDB Lite
-      </div>
-    </>
+Handlers.add("Hello", "Hello", function (msg)
+  io.stderr:write("Loaded! Setting prompt")
+  Llama.load("/data/" .. msg.ModelID)
+  msg.reply({ Data = true })
+end)
+
+Handlers.add("Ask", "Ask", function (msg)
+  Llama.setPrompt(msg.Q)
+  io.stderr:write("prompt set!")
+  local str = Llama.run(30)
+  msg.reply({ Data = str })
+end)
+`
+
+let llm = null
+let once = false
+export default function Home({ _date = null }) {
+  const [init, setInit] = useState(false)
+  const [deploying, setDeploying] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [msg, setMsg] = useState("")
+  const [reply, setReply] = useState([])
+  useEffect(() => {
+    ;(async () => {
+      if (once) return
+      once = true
+    })()
+  }, [])
+
+  return (
+    <Flex align="center" justify="center" p={6} h="100vh">
+      <Box w="100%" maxW="700px">
+        <Box
+          fontSize="30px"
+          fontWeight="bold"
+          textAlign="center"
+          color="#5137C5"
+        >
+          WaoLlama
+        </Box>
+        <Box fontSize="16px" p={4} textAlign="center" color="#5137C5">
+          <Box>
+            WaoLlama is a fully decentralized autonomous agent running on WAO.
+          </Box>
+          <Box>
+            AO units & LLMs are fully embedded in your browser. No external
+            dependencies.
+          </Box>
+        </Box>
+        {!init ? (
+          <Flex justify="center">
+            <Box
+              onClick={async () => {
+                if (deploying) return
+                setDeploying(true)
+                const ao = await new AO().init(acc[0])
+                const module = await fetch("/llama/llama.wasm").then(r =>
+                  r.arrayBuffer(),
+                )
+                const { id: modid } = await ao.postModule({
+                  data: Buffer.from(module),
+                })
+                console.log("module:", modid)
+                const model = await fetch("/llama/tinyllama.gguf").then(r =>
+                  r.arrayBuffer(),
+                )
+
+                const { id } = await ao.ar.post({ data: Buffer.from(model) })
+                console.log("model:", id)
+
+                const { p, pid, err } = await ao.deploy({
+                  tags: { Extension: "WeaveDrive", Attestor: ao.ar.addr },
+                  module: modid,
+                  src_data,
+                })
+                llm = p
+                console.log("pid", pid, err)
+                console.log(
+                  "attested........................",
+                  await ao.attest({ id }),
+                )
+                if (await p.m("Hello", { ModelID: id })) setInit(true)
+                setDeploying(false)
+              }}
+              px={6}
+              py={2}
+              color="#5137C5"
+              fontSize="24px"
+              mt={2}
+              css={{
+                border: "1px solid #5137C5",
+                borderRadius: "3px",
+                cursor: "pointer",
+                _hover: { opacity: 0.75 },
+              }}
+            >
+              {deploying ? "Initializing..." : "Deploy Agent on AO"}
+            </Box>
+          </Flex>
+        ) : (
+          <div>
+            <Textarea
+              css={{ border: "1px solid #5137C5" }}
+              value={msg}
+              onChange={e => setMsg(e.target.value)}
+            />
+            <Flex justify="flex-end">
+              <Box
+                my={2}
+                px={4}
+                py={1}
+                color="#5137C5"
+                css={{
+                  border: "1px solid #5137C5",
+                  borderRadius: "3px",
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  if (sending) return
+                  setSending(true)
+                  setMsg("")
+                  let _reply = append({ who: "you", msg }, reply)
+                  setReply(_reply)
+                  const rep = await llm.d("Ask", { Q: msg })
+                  console.log(rep)
+                  setReply(append({ who: "agent", msg: rep }, _reply))
+                  setSending(false)
+                }}
+              >
+                {sending ? "Sending..." : "Send"}
+              </Box>
+            </Flex>
+            <div>
+              {map(v => (
+                <Flex my={6}>
+                  <Image
+                    boxSize="50px"
+                    src={v.who === "you" ? `human.png` : "llama.png"}
+                  />
+                  <Box
+                    color="#5137C5"
+                    ml={4}
+                    p={4}
+                    css={{ borderRadius: "5px", border: "1px solid #5137C5" }}
+                  >
+                    {v.msg}
+                  </Box>
+                </Flex>
+              ))(reverse(reply))}
+            </div>
+          </div>
+        )}
+      </Box>
+    </Flex>
   )
 }

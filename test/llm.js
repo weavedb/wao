@@ -36,10 +36,9 @@ describe("LLM", function () {
   it("should wait reply from another process", async () => {
     const ao = await new AO().init(acc[0])
     const model = readFileSync(
-      resolve(import.meta.dirname, "../src/lua/gpt2-xl.llm"),
+      resolve(import.meta.dirname, "../../tinyllama.gguf"),
     )
     const { id } = await ao.ar.post({ data: model })
-    console.log("model:", id)
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
     const data = src.data("llama", "wasm")
     const { id: modid } = await ao.postModule({ data })
@@ -50,6 +49,6 @@ describe("LLM", function () {
     })
     await ao.attest({ id })
     await p.m("Hello", { ModelID: id })
-    console.log(await p.d("Ask", { Q: "what is your favorite blockchain?" }))
+    console.log(await p.d("Ask", { Q: "How are you?" }))
   })
 })

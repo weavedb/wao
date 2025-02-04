@@ -6,7 +6,7 @@ import init, { Compressor, Decompressor } from "./waosm/waosm.js"
 export default class ArMem extends Base {
   constructor(args = {}) {
     super({ ...args, init, Compressor, Decompressor })
-    this.db = db(this)
+    //this.db = db(this)
     this.initSync()
   }
   async _getWasm(file) {
