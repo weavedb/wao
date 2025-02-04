@@ -1,5 +1,9 @@
 import { ArNext } from "arnext"
-
+import { Provider } from "@/components/ui/provider"
 export default function App(props) {
-  return <ArNext {...props} />
+  return (
+    <Provider>
+      <ArNext {...props} />
+    </Provider>
+  )
 }
