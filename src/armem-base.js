@@ -60,6 +60,7 @@ export default class ArMemBase {
           try {
             memory = Array.from(this.compressor.compress(val.memory))
           } catch (e) {
+            console.log(e)
             memory = compress(val.memory)
           }
           await this.db.put(
@@ -181,6 +182,7 @@ export default class ArMemBase {
                 try {
                   v3.memory = this.decompressor.decompress(v3.memory)
                 } catch (e) {
+                  console.log(e)
                   v3.memory = decompress(v3.memory)
                 }
               }
