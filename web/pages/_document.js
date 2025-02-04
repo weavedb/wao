@@ -3,7 +3,7 @@ import { Head } from "arnext"
 
 export default function Document() {
   return (
-    <Html lang="en">
+    <Html lang="en" suppressHydrationWarning>
       <Head />
       <body>
         <Main />
