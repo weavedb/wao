@@ -23,7 +23,7 @@
     "react": "^18",
     "react-dom": "^18",
     "react-icons": "^5.4.0",
-    "wao": "^0.11.0"
+    "wao": "^0.11.2"
   },
   "devDependencies": {
     "@ardrive/turbo-sdk": "^1.19.0",
