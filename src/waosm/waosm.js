@@ -56,27 +56,27 @@ function passArray8ToWasm0(arg, malloc) {
     return ptr;
 }
 
-const CompressorFinalization = (typeof FinalizationRegistry === 'undefined')
+const WaosmFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_compressor_free(ptr >>> 0, 1));
+    : new FinalizationRegistry(ptr => wasm.__wbg_waosm_free(ptr >>> 0, 1));
 
-export class Compressor {
+export class Waosm {
 
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
-        CompressorFinalization.unregister(this);
+        WaosmFinalization.unregister(this);
         return ptr;
     }
 
     free() {
         const ptr = this.__destroy_into_raw();
-        wasm.__wbg_compressor_free(ptr, 0);
+        wasm.__wbg_waosm_free(ptr, 0);
     }
     constructor() {
-        const ret = wasm.compressor_new();
+        const ret = wasm.waosm_new();
         this.__wbg_ptr = ret >>> 0;
-        CompressorFinalization.register(this, this.__wbg_ptr, this);
+        WaosmFinalization.register(this, this.__wbg_ptr, this);
         return this;
     }
     /**
@@ -86,42 +86,18 @@ export class Compressor {
     compress(data) {
         const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.compressor_compress(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.waosm_compress(this.__wbg_ptr, ptr0, len0);
         return takeObject(ret);
-    }
-}
-
-const DecompressorFinalization = (typeof FinalizationRegistry === 'undefined')
-    ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_decompressor_free(ptr >>> 0, 1));
-
-export class Decompressor {
-
-    __destroy_into_raw() {
-        const ptr = this.__wbg_ptr;
-        this.__wbg_ptr = 0;
-        DecompressorFinalization.unregister(this);
-        return ptr;
-    }
-
-    free() {
-        const ptr = this.__destroy_into_raw();
-        wasm.__wbg_decompressor_free(ptr, 0);
-    }
-    constructor() {
-        const ret = wasm.compressor_new();
-        this.__wbg_ptr = ret >>> 0;
-        DecompressorFinalization.register(this, this.__wbg_ptr, this);
-        return this;
     }
     /**
      * @param {Uint8Array} data
+     * @param {number} decompressed_size
      * @returns {Uint8Array}
      */
-    decompress(data) {
+    decompress(data, decompressed_size) {
         const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.decompressor_decompress(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.waosm_decompress(this.__wbg_ptr, ptr0, len0, decompressed_size);
         return takeObject(ret);
     }
 }
