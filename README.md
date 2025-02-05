@@ -332,7 +332,7 @@ describe("WeaveDrive", () => {
 You can run a local WAO server with persistent storage, which enables connections with outside components such as frontend apps.
 
 ```bash
-npx wao
+npx wao-esm
 ```
 
 - `port` : Arweave port, the ports of AO units are based on this port (default to `4000`)
@@ -344,7 +344,7 @@ npx wao
 - `reset` : to reset the database
 
 ```bash
-npx wao --port 5000 --db .custom_cache_dir --reset
+npx wao-esm --port 5000 --db .custom_cache_dir --reset
 ```
 In this case, the ports will be, AR => `5000`, MU => `5002`, SU => `5003`, CU => `5004`.
 
@@ -380,7 +380,7 @@ import assert from "assert"
 import { connect, createDataItemSigner } from "@permaweb/aoconnect"
 const { spawn, message, dryrun, assign, result } = connect({
   MU_URL: `http://localhost:4002`,
-  CU_URL: `http://localhost:4003`,
+  CU_URL: `http://localhost:4004`,
   GATEWAY_URL: `http://localhost:4000`
 })
 
