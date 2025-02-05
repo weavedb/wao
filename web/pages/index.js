@@ -8,6 +8,8 @@ import { AO, acc } from "../../src/web"
 import client from "../lib/client"
 const getDate = async date => date ?? Date.now()
 
+import _init, { Waosm } from "../../src/waosm/waosm.js"
+
 export const getStaticProps = ssr(async ({}) => {
   return { props: { _date: Date.now() }, revalidate: 100 }
 })
@@ -102,32 +104,40 @@ export default function Home({ _date = null }) {
                 if (deploying) return
                 setDeploying(true)
                 const ao = await new AO().init(acc[0])
-                const module = await fetch("/llama/llama.wasm").then(r =>
-                  r.arrayBuffer(),
-                )
-                const { id: modid } = await ao.postModule({
-                  data: Buffer.from(module),
-                })
-                console.log("module:", modid)
-                const model = await fetch("/llama/tinyllama.gguf").then(r =>
-                  r.arrayBuffer(),
-                )
+                await ao.mem.init()
+                for (let k in ao.mem.env) {
+                  llm = ao.p(k)
+                  break
+                }
+                if (llm) setInit(true)
+                else {
+                  const _module = await fetch("/llama/llama.wasm").then(r =>
+                    r.arrayBuffer(),
+                  )
+                  const { id: modid } = await ao.postModule({
+                    data: Buffer.from(_module),
+                  })
+                  console.log("module:", modid)
+                  const model = await fetch("/llama/tinyllama.gguf").then(r =>
+                    r.arrayBuffer(),
+                  )
 
-                const { id } = await ao.ar.post({ data: Buffer.from(model) })
-                console.log("model:", id)
+                  const { id } = await ao.ar.post({ data: Buffer.from(model) })
+                  console.log("model:", id)
 
-                const { p, pid, err } = await ao.deploy({
-                  tags: { Extension: "WeaveDrive", Attestor: ao.ar.addr },
-                  module: modid,
-                  src_data,
-                })
-                llm = p
-                console.log("pid", pid, err)
-                console.log(
-                  "attested........................",
-                  await ao.attest({ id }),
-                )
-                if (await p.m("Hello", { ModelID: id })) setInit(true)
+                  const { p, pid, err } = await ao.deploy({
+                    tags: { Extension: "WeaveDrive", Attestor: ao.ar.addr },
+                    module: modid,
+                    src_data,
+                  })
+                  llm = p
+                  console.log("pid", pid, err)
+                  console.log(
+                    "attested........................",
+                    await ao.attest({ id }),
+                  )
+                  if (await p.m("Hello", { ModelID: id })) setInit(true)
+                }
                 setDeploying(false)
               }}
               px={6}

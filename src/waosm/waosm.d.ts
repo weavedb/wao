@@ -1,26 +1,20 @@
 /* tslint:disable */
 /* eslint-disable */
-export class Compressor {
+export class Waosm {
   free(): void;
   constructor();
   compress(data: Uint8Array): Uint8Array;
-}
-export class Decompressor {
-  free(): void;
-  constructor();
-  decompress(data: Uint8Array): Uint8Array;
+  decompress(data: Uint8Array, decompressed_size: number): Uint8Array;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly __wbg_compressor_free: (a: number, b: number) => void;
-  readonly compressor_new: () => number;
-  readonly compressor_compress: (a: number, b: number, c: number) => number;
-  readonly decompressor_decompress: (a: number, b: number, c: number) => number;
-  readonly __wbg_decompressor_free: (a: number, b: number) => void;
-  readonly decompressor_new: () => number;
+  readonly __wbg_waosm_free: (a: number, b: number) => void;
+  readonly waosm_new: () => number;
+  readonly waosm_compress: (a: number, b: number, c: number) => number;
+  readonly waosm_decompress: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
 }
 
