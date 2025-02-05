@@ -3,8 +3,8 @@ import { Image, Box, Flex, Textarea } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
 import { reverse, append, map } from "ramda"
 import wasm from "../lib/wasm"
-import { AO, acc } from "../../src/web"
-//import { AO } from "wao/web"
+//import { AO, acc } from "../../src/web"
+import { AO } from "wao/web"
 import client from "../lib/client"
 const getDate = async date => date ?? Date.now()
 
