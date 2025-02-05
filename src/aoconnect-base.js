@@ -467,7 +467,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             })
           }
           if (!p.handle) {
-            const { format, mod, wasm } = await mem.getWasm(p.modulea)
+            const { format, mod, wasm } = await mem.getWasm(p.module)
             const wdrive = extensions[p.extention]
             p.handle = await AoLoader(wasm, {
               format,

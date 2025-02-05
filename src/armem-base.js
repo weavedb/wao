@@ -6,6 +6,22 @@ import { last, assoc, is } from "ramda"
 import { buildTags, tags } from "./utils.js"
 import base64url from "base64url"
 
+function eq(buf1, buf2, chunkSize = 1024 * 1024) {
+  if (buf1.byteLength !== buf2.byteLength) return false
+
+  const view1 = new Uint8Array(buf1)
+  const view2 = new Uint8Array(buf2)
+
+  for (let i = 0; i < buf1.byteLength; i += chunkSize) {
+    const slice1 = view1.subarray(i, i + chunkSize)
+    const slice2 = view2.subarray(i, i + chunkSize)
+
+    if (!slice1.every((val, idx) => val === slice2[idx])) return false
+  }
+
+  return true
+}
+
 export default class ArMemBase {
   constructor({
     MU_URL,
@@ -15,13 +31,11 @@ export default class ArMemBase {
     scheduler,
     cache,
     init,
-    Compressor,
-    Decompressor,
+    Waosm,
   } = {}) {
     this.__type__ = "mem"
     this._init = init
-    this.Compressor = Compressor
-    this.Decompressor = Decompressor
+    this.Waosm = Waosm
     this.isInit = false
     this.keyInit = false
     this.keys = {}
@@ -58,11 +72,12 @@ export default class ArMemBase {
         if (key === "env") {
           let memory = val.memory
           try {
-            memory = Array.from(this.compressor.compress(val.memory))
+            memory = this.waosm.compress(val.memory)
           } catch (e) {
             console.log(e)
             memory = compress(val.memory)
           }
+          this[key][field].original_size = val.memory.length
           await this.db.put(
             `${key}.${field}`,
             assoc("memory", memory, this[key][field]),
@@ -155,8 +170,7 @@ export default class ArMemBase {
     if (this.isInit) return
     this.isInit = true
     if (typeof this._init === "function") await this._init()
-    this.compressor = new this.Compressor()
-    this.decompressor = new this.Decompressor()
+    this.waosm = new this.Waosm()
     if (this.db) {
       for (const v of ["height", "blocks"]) this[v] = await this.get(v)
       for (const v of [
@@ -178,9 +192,10 @@ export default class ArMemBase {
           if (key === v) {
             if (key.match(/^env/)) {
               let v3 = await this.db.get(v2)
-              if (is(Array, v3.memory)) {
+              if (is(Uint8Array, v3.memory)) {
                 try {
-                  v3.memory = this.decompressor.decompress(v3.memory)
+                  v3.memory = this.waosm.decompress(v3.memory, v3.original_size)
+                  console.log(v3)
                 } catch (e) {
                   console.log(e)
                   v3.memory = decompress(v3.memory)
