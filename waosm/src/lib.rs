@@ -1,11 +1,11 @@
 use wasm_bindgen::prelude::*;
-use js_sys::Uint8Array;
+use js_sys::{Uint8Array, SharedArrayBuffer};
 
 #[wasm_bindgen]
-pub struct Compressor {}
+pub struct Waosm {}
 
 #[wasm_bindgen]
-impl Compressor {
+impl Waosm {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self {}
@@ -23,6 +23,14 @@ impl Compressor {
         let mut final_result = vec![result.len() as u8];
         final_result.extend(result);
         final_result
+    }
+
+    fn to_10(arr: &[u8]) -> usize {
+        let mut num = 0;
+        for &v in arr {
+            num = num * 256 + v as usize;
+        }
+        num
     }
 
     #[wasm_bindgen]
@@ -102,29 +110,10 @@ impl Compressor {
             arr.extend(elms_vec);
         }
     }
-}
 
-#[wasm_bindgen]
-pub struct Decompressor {}
-
-#[wasm_bindgen]
-impl Decompressor {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    fn to_10(arr: &[u8]) -> usize {
-        let mut num = 0;
-        for &v in arr {
-            num = num * 256 + v as usize;
-        }
-        num
-    }
-
-    #[wasm_bindgen]
-    pub fn decompress(&self, data: &[u8]) -> Uint8Array {
-        let mut arr = Vec::new();
+ #[wasm_bindgen]
+    pub fn decompress(&self, data: &[u8], decompressed_size: usize) -> Uint8Array {
+        let mut arr: Vec<u8> = Vec::with_capacity(decompressed_size);
         let mut flag: Option<u8> = None;
         let mut elm: i32 = 0;
         let mut sum: i32 = 0;
