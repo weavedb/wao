@@ -111,3 +111,4 @@ tests
 .DS_Store
 cached.json
 cached-arlocal.json
+.vercel
