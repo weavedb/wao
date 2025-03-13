@@ -164,6 +164,8 @@ You often need to pick a specific piece of data from returned results with multi
 Consider the following Lua handlers.
 
 ```lua
+local json = require('json')
+
 Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = json.encode({ Name = "Bob" }) })
 end)
