@@ -44,7 +44,7 @@ By replacing `aoconnect` with WAO connect, everything runs in memory with zero l
 
 ```js
 //import { spawn, message, dryrun, assign, result } from "@permaweb/aoconnect"
-import { connect } from "wao/test"
+import { connect, acc } from "wao/test"
 const { spawn, message, dryrun, assign, result } = connect()
 ```
 
@@ -81,9 +81,8 @@ Write a simple test in `test.js`.
 ```js
 import assert from "assert"
 import { describe, it } from "node:test"
-import { connect } from "wao/test"
-const { acc, spawn, message, dryrun } = connect()
-// import { wait } from "wao/utils"
+import { connect, acc } from "wao/test"
+const { spawn, message, dryrun } = connect()
 const signer = acc[0].signer
 const src_data = `
 Handlers.add("Hello", "Hello", function (msg)
@@ -92,7 +91,11 @@ end)
 `
 describe("WAO", function () {
   it("should spawn a process and send messages", async () => {
-    const pid = await spawn({ signer })
+    const pid = await spawn({ 
+      signer,
+      module: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
+      scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
+    })
 
     // on mainnet, you need to wait here till the process becomes available.
     // WAO automatically handles it. No need with in-memory tests.
