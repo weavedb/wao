@@ -164,9 +164,40 @@ const modGet = get => {
 const _getTagVal = (get, res, from) => {
   let out = null
   const _get = modGet(get)
-  if (typeof _get === "object" && _get.obj) {
+
+  if (is(Object, get) && !isNil(get) && !get.obj) {
     out = {}
-    for (const k in _get.obj ?? {}) out[k] = _getTagVal(_get.obj[k], res, from)
+    let found = false
+
+    for (const k in get) {
+      const tagName = get[k]
+      for (const msg of res.Messages || []) {
+        const tagValue = getTag(msg.Tags || [], tagName)
+
+        if (tagValue) {
+          out[k] = tagValue
+          found = true
+          break
+        }
+      }
+    }
+
+    if (!found) out = null
+  }
+  else if (_get && _get.obj) {
+    out = {}
+    for (const k in _get.obj) {
+      const tagName = _get.obj[k]
+      for (const msg of res.Messages || []) {
+        const tagValue = getTag(msg.Tags || [], tagName)
+        if (tagValue) {
+          out[k] = tagValue
+          break
+        }
+      }
+    }
+
+    if (Object.keys(out).length === 0) out = null
   } else {
     for (const v of res.Messages ?? []) {
       if (typeof _get === "object" && isNil(_get.name) && isNil(_get.data)) {
