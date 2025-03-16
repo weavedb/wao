@@ -55,7 +55,6 @@ class AR extends MAR {
         if (t.name === "Content-Type") data_type = t.value
       const owner = await this.owner(di)
       await this.mem.set({ key: di.owner, address: owner }, "addrmap", owner)
-      let data = di.data
       let _item = {
         _data: { size: data_size, type: data_type },
         anchor: di.anchor,
@@ -65,7 +64,7 @@ class AR extends MAR {
         item: di,
         owner,
         tags: di.tags,
-        data,
+        data: di.data,
       }
       await this.mem.set(_item, "txs", await di.id)
       _items.push(_item)
@@ -188,7 +187,12 @@ class AR extends MAR {
     if (tx?.format === 2 && _data) {
       _data = Buffer.from(_data, "base64")
     } else if (_data) {
-      _data = Buffer.from(base64url.decode(_data))
+      // need to check production
+      if (tx._data.type === "") {
+        _data = tobuff(_data)
+      } else {
+        _data = Buffer.from(base64url.decode(_data))
+      }
     }
     let isBuf = is(Uint8Array, _data) || is(ArrayBuffer, _data)
     let isStr = is(String, _data)
@@ -204,6 +208,14 @@ class AR extends MAR {
     }
     return _data
   }
+}
+function tobuff(base64url) {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/")
+  const paddedBase64 = base64.padEnd(
+    base64.length + ((4 - (base64.length % 4)) % 4),
+    "=",
+  )
+  return Buffer.from(paddedBase64, "base64")
 }
 
 export default AR
