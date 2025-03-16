@@ -1,10 +1,11 @@
 local json = require("json")
+
 function rollup (id)
   local file = io.open("/rollup/" .. id)
   local data = nil
   if file then data = file:read(file:seek('end')) end
   file:close()
-  return data
+  return true
 end
 
 function get (col, doc)
@@ -27,7 +28,7 @@ Handlers.add(
   "Finalize",
   "Finalize",
   function (msg)
-    local data = json.decode(rollup(msg.TXID))
+    rollup(msg.TXID)
     msg.reply({ Data = "finalized!" })
   end
 )
