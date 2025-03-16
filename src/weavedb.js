@@ -7,6 +7,58 @@ const CHUNK_SZ = 128 * MB
 const NOTIFY_SZ = 512 * MB
 const log = console.log
 const rand = Math.floor(Math.random() * 1000000).toString()
+import {
+  encode,
+  Encoder,
+  decode,
+  Decoder,
+  Parser,
+} from "../../arjson/sdk/src/index.js"
+function tobits(arr, cursor = 0) {
+  let bitStr = ""
+  for (let i = 0; i < arr.length; i++) {
+    bitStr += arr[i].toString(2).padStart(8, "0")
+  }
+  let remaining = bitStr.slice(cursor)
+
+  let result = []
+  let offset = cursor % 8
+  if (offset !== 0) {
+    let firstChunkSize = 8 - offset
+    result.push(remaining.slice(0, firstChunkSize))
+    remaining = remaining.slice(firstChunkSize)
+  }
+  while (remaining.length >= 8) {
+    result.push(remaining.slice(0, 8))
+    remaining = remaining.slice(8)
+  }
+  if (remaining.length > 0) result.push(remaining)
+  return result
+}
+
+function frombits(bitArray) {
+  // Join all bit strings
+  const bitStr = bitArray.join("")
+
+  // Calculate how many bytes we need
+  const byteCount = Math.ceil(bitStr.length / 8)
+
+  // Create a new Uint8Array
+  const result = new Uint8Array(byteCount)
+
+  // Fill the Uint8Array
+  for (let i = 0; i < byteCount; i++) {
+    // Get the next 8 bits (or fewer for the last byte)
+    const start = i * 8
+    const end = Math.min(start + 8, bitStr.length)
+    const bits = bitStr.substring(start, end).padEnd(8, "0")
+
+    // Convert the bits to a byte
+    result[i] = parseInt(bits, 2)
+  }
+
+  return result
+}
 
 export default class WeaveDB {
   constructor(ar, dir) {
@@ -26,7 +78,7 @@ export default class WeaveDB {
           let node = FS.createFile("/", "rollup/" + id, properties, true, false)
 
           // Set initial parame
-          let data = await ar.data(id)
+          let data = await ar.data(id, null, log)
           const bytesLength = data?.length ?? 0
           node.total_size = Number(bytesLength)
           node.cache = new Uint8Array(0)
@@ -70,7 +122,11 @@ export default class WeaveDB {
 
           // Add a function that defers querying the file size until it is asked the first time.
           Object.defineProperties(node, {
-            usedBytes: { get: () => bytesLength },
+            usedBytes: {
+              get: function () {
+                return this.total_size
+              },
+            },
           })
 
           // Now we have created the file in the emscripten FS, we can open it as a stream
@@ -150,21 +206,45 @@ export default class WeaveDB {
                 readFileSync(resolve(col_dir, `${sp[3]}.json`), "utf8") ?? ""
               data = Buffer.from(_data, "utf8")
             } else {
-              data = await ar.data(stream.node.name)
+              data = await ar.data(stream.node.name, null, log)
+              let updates = []
+              const isNext = b => b.length > 1 || (b.length === 1 && b[0] !== 0)
               try {
-                const json = JSON.parse(Buffer.from(data).toString())
-                for (const v of json.diffs) {
-                  const val = Buffer.from(JSON.stringify(v.data))
-                  const _fd = await this.open(
-                    `/data/${v.collection}/${v.doc}`,
-                    val,
-                  )
-                  const col_dir = resolve(data_dir, v.collection)
+                while (isNext(data)) {
+                  let d = new Decoder()
+                  let { op, col, doc, json, left, len } = decode(data, d, true)
+                  data = frombits(left)
+                  if (op === 2) {
+                    const col_dir = resolve(data_dir, col.toString())
+                    const _data = JSON.parse(
+                      readFileSync(resolve(col_dir, `${doc}.json`), "utf8"),
+                    )
+                    let u = new Encoder()
+                    const e = encode(_data, u)
+                    let p = new Parser(d.cols())
+                    const res = p.update(e, data, len)
+                    json = res.json
+                    data = res.left
+                  } else if (op === 3) json = null
+                  updates.push({ col: col, doc: doc, json })
+                }
+
+                for (const v of updates) {
+                  const val = Buffer.from(JSON.stringify(v.json))
+                  const _fd = await this.open(`/data/${v.col}/${v.doc}`, val)
+                  const col_dir = resolve(data_dir, v.col.toString())
                   if (!existsSync(col_dir)) mkdirSync(col_dir)
                   writeFileSync(
                     resolve(col_dir, `${v.doc}.json`),
-                    JSON.stringify(v.data),
+                    JSON.stringify(v.json),
                   )
+
+                  for (let i = 0; i < FS.streams.length; i++) {
+                    if (FS.streams[i].fd === _fd) {
+                      FS.streams[i].node.total_size = val.length
+                      break
+                    }
+                  }
                   await this.read(_fd, _fd, val.length, val)
                 }
               } catch (e) {
