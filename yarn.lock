@@ -1468,6 +1468,14 @@ argparse@^2.0.1:
   resolved "https://registry.yarnpkg.com/argparse/-/argparse-2.0.1.tgz#246f50f3ca78a3240f6c997e8a9bd1eac49e4b38"
   integrity sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==
 
+arjson@^0.0.2:
+  version "0.0.2"
+  resolved "https://registry.yarnpkg.com/arjson/-/arjson-0.0.2.tgz#52a89750dcdfe357cc0d40d3b72b06f3540028fd"
+  integrity sha512-hMQcsgBZa+fvELtDSPCbH/7o8xj/EcUIYGKu4tv/HzZko9Gdx0RuwgyrRLF8USGwD+VaHzdgF1TY3S7xnPxs2Q==
+  dependencies:
+    "@babel/plugin-transform-modules-commonjs" "^7.24.8"
+    yargs "^17.7.2"
+
 array-flatten@1.1.1:
   version "1.1.1"
   resolved "https://registry.yarnpkg.com/array-flatten/-/array-flatten-1.1.1.tgz#9a5f699051b1e7073328f2a008968b64ea2955d2"
