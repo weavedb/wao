@@ -167,12 +167,17 @@ Consider the following Lua handlers.
 local json = require('json')
 
 Handlers.add("Hello", "Hello", function (msg)
-  msg.reply({ Data = json.encode({ Name = "Bob" }) })
+  msg.reply({ Data = json.encode({ Name = "Bob" })})
 end)
 
 Handlers.add("Hello2", "Hello2", function (msg)
   msg.reply({ Data = "Hello, World!", Name = "Bob", Age = "30" })
 end)
+
+Handlers.add("Hello3", "Hello3", function (msg)
+  msg.reply({ Profile = json.encode({ Name = "Bob", Age = "30" })})
+end)
+
 ```
 
 ```js
@@ -193,8 +198,19 @@ const out4 = await p.d("Hello2", { get: "Age" })
 assert.equal(out4, "30")
 
 // get multiple tags
-const out5 = await p.d("Hello2", { get: { name: "Name", age: "Age" } })
-assert.deepEqual(out5, { name: "Bob", age: "30" })
+const out5 = await p.d("Hello2", { get: { obj: { firstname: "Name", age: "Age" }}})
+assert.deepEqual(out5, { first_name: "Bob", age: "30" })
+
+// shortcut if keys don't include name, data, from, json
+const out6 = await p.d("Hello2", { get: { firstname: "Name", age: "Age" }})
+assert.deepEqual(out6, { firstname: "Bob", age: "30" })
+
+// await p.d("Hello2", { get: { name: "Name", age: "Age" } }) doesn't work
+
+// handle tag as json
+const out7 = await p.d("Hello3", { get: { prof: { name: "Profile", json: true }}})
+assert.deepEqual(out7, { prof: { Name: "Bob", Age: "30" }})
+
 ```
 
 ### Determining Message Success

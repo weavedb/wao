@@ -4,6 +4,7 @@ import { describe, it } from "node:test"
 import { AO, acc } from "../src/test.js"
 import { ok, fail, Src } from "../src/helpers.js"
 import weavedb from "../src/weavedb.js"
+import { encode, Encoder, Bundle } from "arjson"
 
 let attestor = acc[0]
 const { signer, jwk } = attestor
@@ -61,39 +62,55 @@ describe("WeaveDrive", function () {
 })
 
 describe("WeaveDB", function () {
-  it.only("should load Rollup queries", async () => {
-    const ao = new AO({ extensions: { WeaveDB: weavedb } })
+  it.only("should compact ARJSON", async () => {
+    const db = await new DB().init()
+    await db.q().c({ test: 1 }, 1, 123).c({ test: 2 }, 1, 120).send()
+    await db.get(1, 123, { test: 1 })
+    await db.get(1, 120, { test: 2 })
+    await db.q().u({ test: 2 }, 1, 123).u({ test: 20 }, 1, 123).d(1, 120).send()
+    await db.get(1, 123, { test: 20 })
+    await db.get(1, 120, null)
+  })
+})
+
+class DB {
+  constructor() {
+    this.ao = new AO({ extensions: { WeaveDB: weavedb } })
+    this.data = {}
+  }
+  q() {
+    const b = new Bundle(this.data, this)
+    return b
+  }
+  async init() {
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
     const data = src.data("weavedb_mock")
-    const { p } = await ao.deploy({
+    const { p } = await this.ao.deploy({
       tags: { Extension: "WeaveDB" },
       loads: [data],
     })
-    const { mid } = ok(
-      await p.msg("Rollup", {
-        check: "committed!",
-        data: JSON.stringify({
-          diffs: [
-            {
-              op: "set",
-              collection: "ppl",
-              doc: "bob",
-              data: { name: "Bob", age: 40 },
-            },
-          ],
-        }),
-      }),
-    )
-
+    this.p = p
+    return this
+  }
+  async get(col, doc, eq) {
+    const res = await this.p.d("Get", {
+      col: col.toString(),
+      doc: doc.toString(),
+    })
+    if (typeof eq !== "undefined") assert.deepEqual(res, eq)
+    return res
+  }
+  async query(b) {
+    const buf = Buffer.from(b.dump().buffer)
+    const { mid } = await this.p.msg("Rollup", {
+      check: "committed!",
+      data: buf,
+    })
     ok(
-      await p.msg("Finalize", {
+      await this.p.msg("Finalize", {
         check: "finalized!",
         tags: { TXID: mid },
       }),
     )
-    assert.deepEqual(await p.d("Get", { col: "ppl", doc: "bob" }), {
-      name: "Bob",
-      age: 40,
-    })
-  })
-})
+  }
+}
