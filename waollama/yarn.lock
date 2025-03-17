@@ -2708,6 +2708,14 @@ aria-query@~5.1.3:
   dependencies:
     deep-equal "^2.0.5"
 
+arjson@^0.0.2:
+  version "0.0.2"
+  resolved "https://registry.yarnpkg.com/arjson/-/arjson-0.0.2.tgz#52a89750dcdfe357cc0d40d3b72b06f3540028fd"
+  integrity sha512-hMQcsgBZa+fvELtDSPCbH/7o8xj/EcUIYGKu4tv/HzZko9Gdx0RuwgyrRLF8USGwD+VaHzdgF1TY3S7xnPxs2Q==
+  dependencies:
+    "@babel/plugin-transform-modules-commonjs" "^7.24.8"
+    yargs "^17.7.2"
+
 arnext-arkb@^0.0.1:
   version "0.0.1"
   resolved "https://registry.yarnpkg.com/arnext-arkb/-/arnext-arkb-0.0.1.tgz#af1a84a9ba03557ab57c19cda687c4e84c6f5e77"
@@ -8362,16 +8370,17 @@ vlq@^2.0.4:
   resolved "https://registry.npmjs.org/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.11.2:
-  version "0.11.2"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.11.2.tgz#380a5051af9a8432162a034b7eeaa862e3f23f93"
-  integrity sha512-eRLnsJXCCZQLlQEpmCpaYjX2neVWrDUOtL8ksLYaEnaTLbspf9DcdrOKH2Bjb3gW31wzJ+YUB2aQMLfo45hHCg==
+wao@^0.12.0:
+  version "0.12.0"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.12.0.tgz#1c2f68c710884ad6d0a8a42e26831ced64000092"
+  integrity sha512-h16NqLyyqri16KEHLBa7IfrZuPOWiI69mx1kq21lxXEwq5dPKzFa40hwTT2IEv/6qSEmKuTmFAMEPS8gzAB10Q==
   dependencies:
     "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"
     "@permaweb/ao-loader" "^0.0.44"
     "@permaweb/aoconnect" "^0.0.62"
     arbundles "^0.11.1"
+    arjson "^0.0.2"
     arweave "^1.15.1"
     base64url "^3.0.1"
     body-parser "^1.20.3"

@@ -11,11 +11,9 @@ yarn build
 Using Waosm in nodejs.
 
 ```js
-import { Compressor, Decompressor } from "../src/waosm-node.js"
-
+import { Waosm } from "../src/waosm-node.js"
 const main = async ()=>{
-  const compressor = new Compressor()
-  const decompressor = new Decompressor()
+  const waosm = new Waosm()
   const memory = new Uint8Array(
     [ 
 	  1, 2, 3, 4, 5, 5, 5, 6, 7, 8, 9, 0, 0, 0, 
@@ -23,9 +21,9 @@ const main = async ()=>{
     ]
   )
   console.log(memory)
-  const compressed = compressor.compress(memory)
+  const compressed = waosm.compress(memory)
   console.log(compressed)
-  const decompressed = decompressor.decompress(compressed)
+  const decompressed = waosm.decompress(compressed)
   console.log(decompressed)
 }
 main()
