@@ -199,7 +199,7 @@ assert.equal(out4, "30")
 
 // get multiple tags
 const out5 = await p.d("Hello2", { get: { obj: { firstname: "Name", age: "Age" }}})
-assert.deepEqual(out5, { first_name: "Bob", age: "30" })
+assert.deepEqual(out5, { firstname: "Bob", age: "30" })
 
 // shortcut if keys don't include name, data, from, json
 const out6 = await p.d("Hello2", { get: { firstname: "Name", age: "Age" }})
