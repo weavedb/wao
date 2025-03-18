@@ -1,0 +1,39 @@
+{
+  "name": "arnext-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "arweave": "npm run build:arweave && npx serve -s out",
+    "deploy": "node node_modules/arnext-arkb deploy out",
+    "deploy:turbo": "turbo upload-folder --folder-path out",
+    "build:arweave": "cross-env NEXT_PUBLIC_DEPLOY_TARGET='arweave' next build && node arweave.mjs",
+    "test": "mocha"
+  },
+  "dependencies": {
+    "@chakra-ui/react": "^3.6.0",
+    "@emotion/react": "^11.14.0",
+    "@permaweb/ao-loader": "^0.0.46",
+    "arnext": "^0.1.4",
+    "next": "14.2.13",
+    "next-themes": "^0.4.4",
+    "react": "^18",
+    "react-dom": "^18",
+    "react-icons": "^5.5.0",
+    "wao": "^0.12.0"
+  },
+  "devDependencies": {
+    "@ardrive/turbo-sdk": "^1.19.0",
+    "arnext-arkb": "^0.0.1",
+    "cheerio": "^1.0.0",
+    "cross-env": "^7.0.3",
+    "eslint": "8.57.1",
+    "eslint-config-next": "14.2.13",
+    "express": "^4.21.0",
+    "http-proxy-middleware": "^3.0.2",
+    "starknet": "^6.11.0"
+  }
+}
