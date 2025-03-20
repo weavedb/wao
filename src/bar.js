@@ -19,7 +19,7 @@ class AR extends MAR {
   }
   async owner(di) {
     return base64url.encode(
-      Buffer.from(await crypto.subtle.digest("SHA-256", di.rawOwner)),
+      Buffer.from(await crypto.subtle.digest("SHA-256", di.rawOwner))
     )
   }
   async dataitem({ target = "", data = "1984", tags = {}, signer, item }) {
@@ -72,7 +72,7 @@ class AR extends MAR {
     const bundle = await bundleAndSignData(items, new ArweaveSigner(jwk))
     const tx = await this.mem.arweave.createTransaction(
       { data: bundle.binary },
-      jwk,
+      jwk
     )
     tx.addTag("Bundle-Format", "binary")
     tx.addTag("Bundle-Version", "2.0.0")
@@ -140,7 +140,7 @@ class AR extends MAR {
           format: __tags["Module-Format"],
         },
         "wasms",
-        tx.id,
+        tx.id
       )
     }
     tx.tags = _tags
@@ -162,7 +162,7 @@ class AR extends MAR {
     if (this.log) {
       if (msg) {
         console.log(
-          `New ${msg.type}:\t${msg.id}${msg.pid ? ` > ${msg.pid}` : ""}`,
+          `New ${msg.type}:\t${msg.id}${msg.pid ? ` > ${msg.pid}` : ""}`
         )
       } else {
         console.log(`New Post:\t${tx.id}`)
@@ -213,7 +213,7 @@ function tobuff(base64url) {
   const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/")
   const paddedBase64 = base64.padEnd(
     base64.length + ((4 - (base64.length % 4)) % 4),
-    "=",
+    "="
   )
   return Buffer.from(paddedBase64, "base64")
 }

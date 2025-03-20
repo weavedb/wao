@@ -44,13 +44,13 @@ end)
 `
 
 describe("WeaveDrive", function () {
-  it("should load Arweave tx data", async () => {
+  it.only("should load Arweave tx data", async () => {
     const ao = await new AO().init(attestor)
     const { p, err, mid } = ok(
       await ao.deploy({
         tags: { Extension: "WeaveDrive", Attestor: attestor.addr },
         loads: [handler],
-      }),
+      })
     )
     const { id } = await ao.ar.post({ data: "Hello" })
     await ao.attest({ id })
@@ -62,7 +62,7 @@ describe("WeaveDrive", function () {
 })
 
 describe("WeaveDB", function () {
-  it.only("should compact ARJSON", async () => {
+  it("should compact ARJSON", async () => {
     const db = await new DB().init()
     await db.q().c({ test: 1 }, 1, 123).c({ test: 2 }, 1, 120).send()
     await db.get(1, 123, { test: 1 })
@@ -110,7 +110,7 @@ class DB {
       await this.p.msg("Finalize", {
         check: "finalized!",
         tags: { TXID: mid },
-      }),
+      })
     )
   }
 }

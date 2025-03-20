@@ -104,7 +104,7 @@ export default class WeaveDB {
             `data/${col}/${doc}`,
             properties,
             true,
-            false,
+            false
           )
 
           // Set initial parame
@@ -180,8 +180,8 @@ export default class WeaveDB {
           }
           // Satisfy what we can with the cache first
           let bytes_read = this.readFromCache(stream, dst_ptr, to_read)
-          stream.position += bytes_read
-          stream.lastReadPosition = stream.position
+          stream.node.position += bytes_read
+          stream.lastReadPosition = stream.node.position
           dst_ptr += bytes_read
           to_read -= bytes_read
 
@@ -195,7 +195,7 @@ export default class WeaveDB {
           const chunk_download_sz = Math.max(to_read, CACHE_SZ)
           const to = Math.min(
             stream.node.total_size,
-            stream.position + chunk_download_sz,
+            stream.node.position + chunk_download_sz
           )
           let data = val
           if (!data) {
@@ -217,7 +217,7 @@ export default class WeaveDB {
                   if (op === 2) {
                     const col_dir = resolve(data_dir, col.toString())
                     const _data = JSON.parse(
-                      readFileSync(resolve(col_dir, `${doc}.json`), "utf8"),
+                      readFileSync(resolve(col_dir, `${doc}.json`), "utf8")
                     )
                     let u = new Encoder()
                     const e = encode(_data, u)
@@ -236,7 +236,7 @@ export default class WeaveDB {
                   if (!existsSync(col_dir)) mkdirSync(col_dir)
                   writeFileSync(
                     resolve(col_dir, `${v.doc}.json`),
-                    JSON.stringify(v.json),
+                    JSON.stringify(v.json)
                   )
 
                   for (let i = 0; i < FS.streams.length; i++) {
@@ -266,7 +266,7 @@ export default class WeaveDB {
             }),
             {
               headers: { "Content-Length": chunk.length.toString() },
-            },
+            }
           )
           const reader = response.body.getReader()
           let bytes_until_cache = CHUNK_SZ
@@ -290,7 +290,7 @@ export default class WeaveDB {
                 mod.HEAP8.set(chunk_bytes.subarray(0, write_length), dst_ptr)
                 dst_ptr += write_length
                 bytes_read += write_length
-                stream.position += write_length
+                stream.node.position += write_length
                 to_read -= write_length
               }
 
@@ -304,7 +304,7 @@ export default class WeaveDB {
                 console.log("KV: Chunk size reached. Compressing cache...")
                 stream.node.cache = this.addChunksToCache(
                   stream.node.cache,
-                  cache_chunks,
+                  cache_chunks
                 )
                 cache_chunks = []
                 bytes_until_cache = CHUNK_SZ
@@ -314,7 +314,7 @@ export default class WeaveDB {
                 console.log(
                   "KV: Downloaded: ",
                   (downloaded_bytes / stream.node.total_size) * 100,
-                  "%",
+                  "%"
                 )
                 bytes_until_notify = NOTIFY_SZ
               }
@@ -328,11 +328,11 @@ export default class WeaveDB {
           // Rebuild the cache from the new cache chunks
           stream.node.cache = this.addChunksToCache(
             stream.node.cache,
-            cache_chunks,
+            cache_chunks
           )
 
           // Update the last read position
-          stream.lastReadPosition = stream.position
+          stream.lastReadPosition = stream.node.position
           return bytes_read
         },
         close(fd) {
@@ -345,8 +345,8 @@ export default class WeaveDB {
 
         readFromCache(stream, dst_ptr, length) {
           // Check if the cache has been invalidated by a seek
-          if (stream.lastReadPosition !== stream.position) {
-            //console.log("KV: Invalidating cache for fd: ", stream.fd, " Current pos: ", stream.position, " Last read pos: ", stream.lastReadPosition)
+          if (stream.lastReadPosition !== stream.node.position) {
+            //console.log("KV: Invalidating cache for fd: ", stream.fd, " Current pos: ", stream.node.position, " Last read pos: ", stream.lastReadPosition)
             stream.node.cache = new Uint8Array(0)
             return 0
           }
@@ -365,7 +365,7 @@ export default class WeaveDB {
           let new_cache_length = Math.min(
             old_cache.length +
               chunks.reduce((acc, chunk) => acc + chunk.length, 0),
-            CACHE_SZ,
+            CACHE_SZ
           )
           let new_cache = new Uint8Array(new_cache_length)
           // Copy the old cache to the new cache
@@ -376,7 +376,7 @@ export default class WeaveDB {
             if (current_offset < new_cache_length) {
               new_cache.set(
                 chunk.subarray(0, new_cache_length - current_offset),
-                current_offset,
+                current_offset
               )
               current_offset += chunk.length
             }
