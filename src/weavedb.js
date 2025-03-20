@@ -59,7 +59,7 @@ function frombits(bitArray) {
 
   return result
 }
-
+let init = {}
 export default class WeaveDB {
   constructor(ar, dir) {
     dir ??= resolve(import.meta.dirname, ".db")
@@ -178,10 +178,14 @@ export default class WeaveDB {
           for (let i = 0; i < FS.streams.length; i++) {
             if (FS.streams[i].fd === fd) stream = FS.streams[i]
           }
+          if (!stream) return 0
+          if (init[fd] === false) stream.position = 0
+          init[fd] = true
+
           // Satisfy what we can with the cache first
           let bytes_read = this.readFromCache(stream, dst_ptr, to_read)
-          stream.node.position += bytes_read
-          stream.lastReadPosition = stream.node.position
+          stream.position += bytes_read
+          stream.lastReadPosition = stream.position
           dst_ptr += bytes_read
           to_read -= bytes_read
 
@@ -195,7 +199,7 @@ export default class WeaveDB {
           const chunk_download_sz = Math.max(to_read, CACHE_SZ)
           const to = Math.min(
             stream.node.total_size,
-            stream.node.position + chunk_download_sz
+            stream.position + chunk_download_sz
           )
           let data = val
           if (!data) {
@@ -290,7 +294,7 @@ export default class WeaveDB {
                 mod.HEAP8.set(chunk_bytes.subarray(0, write_length), dst_ptr)
                 dst_ptr += write_length
                 bytes_read += write_length
-                stream.node.position += write_length
+                stream.position += write_length
                 to_read -= write_length
               }
 
@@ -332,7 +336,7 @@ export default class WeaveDB {
           )
 
           // Update the last read position
-          stream.lastReadPosition = stream.node.position
+          stream.lastReadPosition = stream.position
           return bytes_read
         },
         close(fd) {
@@ -345,8 +349,8 @@ export default class WeaveDB {
 
         readFromCache(stream, dst_ptr, length) {
           // Check if the cache has been invalidated by a seek
-          if (stream.lastReadPosition !== stream.node.position) {
-            //console.log("KV: Invalidating cache for fd: ", stream.fd, " Current pos: ", stream.node.position, " Last read pos: ", stream.lastReadPosition)
+          if (stream.lastReadPosition !== stream.position) {
+            //console.log("KV: Invalidating cache for fd: ", stream.fd, " Current pos: ", stream.position, " Last read pos: ", stream.lastReadPosition)
             stream.node.cache = new Uint8Array(0)
             return 0
           }
