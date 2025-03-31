@@ -41,6 +41,7 @@ end)
 
 describe("SDK", function () {
   after(() => setTimeout(() => process.exit(), 100))
+
   it("should dump wasm memory", async () => {
     let ao = await new AO(4000).init(acc[0])
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
@@ -51,6 +52,7 @@ describe("SDK", function () {
     )
     assert.notEqual(memory, null)
   })
+
   it("should work with aoconnect results", async () => {
     let ao = await new AO(4000).init(acc[0])
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
