@@ -507,7 +507,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         const p = await mem.get("env", opt.process)
         if (!p) return null
         let id = opt.id ?? ""
-        let owner = opt.owner ?? ""
+        let owner = opt.owner ?? mu.addr
         if (!opt.id && opt.signer) {
           ;({ id, owner } = await ar.dataitem({ ...opt, target: opt.process }))
         }
@@ -518,7 +518,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             opt.data ?? "",
             opt.tags,
             owner,
-            mu.addr,
+            owner,
             true
           )
           const _env = await genEnv({
