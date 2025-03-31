@@ -1,4 +1,5 @@
 import crypto from "crypto"
+import HB from "./hb.js"
 import express from "express"
 import cors from "cors"
 import base64url from "base64url"
@@ -8,9 +9,8 @@ import { connect } from "./aoconnect.js"
 import { GQL, cu, su, mu } from "./test.js"
 import bodyParser from "body-parser"
 import { keys, map, isNil, reverse, omit } from "ramda"
-import { Bundle } from "arbundles"
 import { httpbis, createVerifier } from "http-message-signatures"
-import { createPublicKey, randomBytes } from "node:crypto"
+import { createPublicKey } from "node:crypto"
 const { verifyMessage } = httpbis
 
 function toANS104Request(fields) {
@@ -77,6 +77,7 @@ class Server {
     mu = 4002,
     su = 4003,
     cu = 4004,
+    hb_url,
     aoconnect,
     log = false,
     db,
@@ -90,6 +91,8 @@ class Server {
       cu = port + 4
       aoconnect = optAO(5000)
     }
+    let hb = null
+    if (hb_url) hb = new HB({ url: hb_url })
     const {
       ar: _ar,
       message,
@@ -100,7 +103,8 @@ class Server {
       mem,
       monitor,
       unmonitor,
-    } = connect(aoconnect, { log, cache: db })
+      recover,
+    } = connect(aoconnect, { log, cache: db, hb })
     this.monitor = monitor
     this.unmonitor = unmonitor
     this.spawn = spawn
