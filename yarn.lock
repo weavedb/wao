@@ -822,6 +822,30 @@
   resolved "https://registry.yarnpkg.com/@bokuweb/zstd-wasm/-/zstd-wasm-0.0.22.tgz#32de23a65b293a68db76b5863addde4545ac75c2"
   integrity sha512-GT9gZCxWzVTclSipZZNbYRloSKLtPBxj4Avc/SLLQcnBJlJCHUllfePe8it9vNZBSMD6y9Ox0LxaubWT/nJ19Q==
 
+"@dha-team/arbundles@^1.0.1":
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/@dha-team/arbundles/-/arbundles-1.0.1.tgz#5e81039b74da241cf0e2b074ae77e489eec7887d"
+  integrity sha512-cgVxhZJLK1HG2+vcRBZ0CYGpxz7mA2QvLaspcw2gOzb2V/ZUxlifUu1aufBK3iz63Ww2OhgO0j9DstRJqrG1uA==
+  dependencies:
+    "@ethersproject/bytes" "^5.7.0"
+    "@ethersproject/hash" "^5.7.0"
+    "@ethersproject/providers" "^5.7.2"
+    "@ethersproject/signing-key" "^5.7.0"
+    "@ethersproject/transactions" "^5.7.0"
+    "@ethersproject/wallet" "^5.7.0"
+    "@noble/ed25519" "^1.6.1"
+    arweave "^1.15.1"
+    base64url "^3.0.1"
+    bs58 "^4.0.1"
+    keccak "^3.0.2"
+    secp256k1 "^5.0.0"
+  optionalDependencies:
+    "@randlabs/myalgo-connect" "^1.1.2"
+    algosdk "^1.13.1"
+    arweave-stream-tx "^1.1.0"
+    multistream "^4.1.0"
+    tmp-promise "^3.0.2"
+
 "@ethersproject/abstract-provider@^5.7.0":
   version "5.7.0"
   resolved "https://registry.yarnpkg.com/@ethersproject/abstract-provider/-/abstract-provider-5.7.0.tgz#b0a8550f88b6bf9d51f90e4795d48294630cb9ef"
@@ -1432,6 +1456,24 @@ anymatch@~3.1.2:
     normalize-path "^3.0.0"
     picomatch "^2.0.4"
 
+"aoconnect-wao@https://gitpkg.vercel.app/weavedb/ao/connect?wao&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build":
+  version "0.0.70"
+  resolved "https://gitpkg.vercel.app/weavedb/ao/connect?wao&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build#baa767c65906739287d905f00d944d0b8262b08e"
+  dependencies:
+    "@dha-team/arbundles" "^1.0.1"
+    "@permaweb/ao-scheduler-utils" "~0.0.25"
+    "@permaweb/protocol-tag-utils" "~0.0.2"
+    axios "^1.7.9"
+    base64url "^3.0.1"
+    buffer "^6.0.3"
+    debug "^4.4.0"
+    http-message-signatures "^1.0.4"
+    hyper-async "^1.1.2"
+    mnemonist "^0.39.8"
+    ramda "^0.30.1"
+    structured-headers "^2.0.0"
+    zod "^3.24.1"
+
 arbundles@^0.11.1:
   version "0.11.2"
   resolved "https://registry.yarnpkg.com/arbundles/-/arbundles-0.11.2.tgz#60375c0d5bda0eeecd9ce9a2aa42da7a89efa3f9"
@@ -1543,6 +1585,15 @@ axios@^1.4.0:
   version "1.7.7"
   resolved "https://registry.yarnpkg.com/axios/-/axios-1.7.7.tgz#2f554296f9892a72ac8d8e4c5b79c14a91d0a47f"
   integrity sha512-S4kL7XrjgBmvdGut0sN3yJxqYzrDOnivkBiN0OFs6hLiUam3UPvswUo0kqGyhqUZGEOytHyumEdXsAkgCOUf3Q==
+  dependencies:
+    follow-redirects "^1.15.6"
+    form-data "^4.0.0"
+    proxy-from-env "^1.1.0"
+
+axios@^1.7.9:
+  version "1.8.4"
+  resolved "https://registry.yarnpkg.com/axios/-/axios-1.8.4.tgz#78990bb4bc63d2cae072952d374835950a82f447"
+  integrity sha512-eBSYY4Y68NNlHbHBMdeDmKNtDgXWhQsJcGqzO3iLUM0GraQFSS9cVgPX5I9b3lbdFKyYoAEGAZF1DwhTaljNAw==
   dependencies:
     follow-redirects "^1.15.6"
     form-data "^4.0.0"
@@ -1930,7 +1981,7 @@ debug@2.6.9:
   dependencies:
     ms "2.0.0"
 
-debug@4, debug@^4.3.4, debug@^4.3.7:
+debug@4, debug@^4.3.4, debug@^4.3.7, debug@^4.4.0:
   version "4.4.0"
   resolved "https://registry.yarnpkg.com/debug/-/debug-4.4.0.tgz#2b3f2aea2ffeb776477460267377dc8710faba8a"
   integrity sha512-6WTZ/IxCY/T6BALoZHaE4ctp9xm+Z5kY/pzYaCHRFeyVhojxlrm+46y68HA6hr0TcwEssoxNiDEUJQjfPZ/RYA==
@@ -2381,6 +2432,13 @@ http-errors@2.0.0:
     setprototypeof "1.2.0"
     statuses "2.0.1"
     toidentifier "1.0.1"
+
+http-message-signatures@^1.0.4:
+  version "1.0.4"
+  resolved "https://registry.yarnpkg.com/http-message-signatures/-/http-message-signatures-1.0.4.tgz#3d1f614977d3a435af7c1d35a75e1e48d9094075"
+  integrity sha512-gavCQWnxHFg0BVlKs6CmYK7hNSH1o0x0mHTC68yBAHYOYuTVXPv52mEE7QuT5TenfiagTdOa/zPJzen4lEX7Rg==
+  dependencies:
+    structured-headers "^1.0.1"
 
 http-proxy-agent@^7.0.0:
   version "7.0.2"
@@ -3485,6 +3543,16 @@ strip-ansi@^6.0.0, strip-ansi@^6.0.1:
   dependencies:
     ansi-regex "^5.0.1"
 
+structured-headers@^1.0.1:
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/structured-headers/-/structured-headers-1.0.1.tgz#1821e434e0fe45bdd78f07c779b16519ab520415"
+  integrity sha512-QYBxdBtA4Tl5rFPuqmbmdrS9kbtren74RTJTcs0VSQNVV5iRhJD4QlYTLD0+81SBwUQctjEQzjTRI3WG4DzICA==
+
+structured-headers@^2.0.0:
+  version "2.0.0"
+  resolved "https://registry.yarnpkg.com/structured-headers/-/structured-headers-2.0.0.tgz#b8759de60a94cc9eb48716d1fde1b365fbfb0b75"
+  integrity sha512-qX9utDaDolZWTcAep0EZDSQASTu4mx16Jh5dBSpplfvK3ro1CF8mWqRByAwncRojnlaCCUZA2jPcCqKNnp7uCA==
+
 supports-color@^7.1.0:
   version "7.2.0"
   resolved "https://registry.yarnpkg.com/supports-color/-/supports-color-7.2.0.tgz#1b7dcdcb32b8138801b3e478ba6a51caa89648da"
@@ -3772,3 +3840,8 @@ zod@^3.23.5, zod@^3.23.8:
   version "3.23.8"
   resolved "https://registry.yarnpkg.com/zod/-/zod-3.23.8.tgz#e37b957b5d52079769fb8097099b592f0ef4067d"
   integrity sha512-XBx9AXhXktjUqnepgTiE5flcKIYWi/rme0Eaj+5Y0lftuGBq+jyRu/md4WnuxqgP1ubdpNCsYEYPxrzVHD8d6g==
+
+zod@^3.24.1:
+  version "3.24.2"
+  resolved "https://registry.yarnpkg.com/zod/-/zod-3.24.2.tgz#8efa74126287c675e92f46871cfc8d15c34372b3"
+  integrity sha512-lY7CDW43ECgW9u1TcT3IoXHflywfVqDYze4waEz812jR/bZ8FHDsl7pFQoSZTz5N+2NqRXs8GBwnAwo3ZNxqhQ==
