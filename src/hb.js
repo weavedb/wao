@@ -34,6 +34,22 @@ class HB {
     }
     return _metrics
   }
+  async info() {
+    const txt = await fetch(`${this.url}/~meta@1.0/info`).then(r => r.text())
+    const parts = txt.split(/\r?\n/)
+    let _info = null
+    let allinfo = []
+    for (const v of parts) {
+      if (/^--/.test(v)) {
+        if (_info !== null) allinfo.push(_info)
+        _info = {}
+      } else {
+        const [name, ...rest] = v.split(": ")
+        _info[name] = rest.join(": ")
+      }
+    }
+    return allinfo
+  }
 }
 
 export default HB
