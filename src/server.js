@@ -182,6 +182,7 @@ class Server {
       } catch (e) {
         console.log(e, req.originalUrl)
       }
+      console.log("bundler success [pid]", sigs.target, "[slot]", sigs.slot)
       return res.status(200).send("Success")
     })
     const server = app.listen(this.ports.bundler, () => {
@@ -392,18 +393,35 @@ class Server {
     app.get("/", (req, res) =>
       res.json({ timestamp: Date.now(), address: cu.addr })
     )
-    app.get("/result/:mid", async (req, res) => {
+    const result = async (req, res) => {
       let message = req.params.mid
       const process = req.query["process-id"]
+      if (isNil(this.mem.env[process])) {
+        console.log("process not found:", req.query["process-id"])
+        res.status(404)
+        res.json({ error: `not found` })
+        setTimeout(() => {
+          console.log(this.mem.env)
+        }, 1000)
+        return
+      }
       if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
-        message = this.mem.env[process].results[message]
+        message = this.mem.env[process]?.results?.[message]
+      }
+      if (isNil(message)) {
+        console.log("message not found", message, req.params)
+        res.status(404)
+        res.json({ error: `Not Found` })
+        return
       }
       const res2 = await this.result({
         message,
         process,
       })
       res.json(res2)
-    })
+    }
+    app.post("/result/:mid", result)
+    app.get("/result/:mid", result)
     app.get("/state/:pid", async (req, res) => {
       const pid = req.params.pid
       const memory = this.mem.env[pid]?.memory ?? null
