@@ -1,7 +1,7 @@
 import { connect, createSigner } from "aoconnect-wao"
 import { mergeLeft } from "ramda"
 import { randomBytes } from "node:crypto"
-
+import { buildTags } from "./utils.js"
 class HB {
   constructor({ url = "http://localhost:10000" } = {}) {
     this.url = url
@@ -90,13 +90,19 @@ class HB {
   }
 
   async compute({ tags = {}, process, slot } = {}) {
-    return await this.post({
-      tags: mergeLeft(tags, { target: process, "slot+integer": slot }),
+    return await this.request({
+      method: "GET",
       path: `/${process}/compute&slot+integer=${slot}/results/json`,
     })
   }
 
-  async get({ device, path = "/schedule" }) {
+  async dryrun({ tags = {}, process } = {}) {
+    return await fetch(
+      `${this.url}/~relay@1.0/call?relay-method=POST&relay-path=/dry-run?process-id=${process}/&content-type=application/json&body=${JSON.stringify({ Tags: buildTags(tags) })}`
+    ).then(r => r.json())
+  }
+
+  async get({ device, path = "~meta@1.0/info" }) {
     return (await this.request({ device, path, method: "GET" })).body
   }
 
