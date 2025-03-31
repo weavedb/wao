@@ -17,10 +17,15 @@ const URL = "http://localhost:10000"
 
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
-  it.only("should get metrics", async () => {
+  it("should get metrics", async () => {
     const hb = new HB()
     const met = await hb.metrics()
     assert.ok(met.process_uptime_seconds)
+  })
+  it.only("should get info", async () => {
+    const hb = new HB()
+    const info = await hb.info()
+    assert.ok(info.length > 0)
   })
 
   it("should deploy a process", async () => {
