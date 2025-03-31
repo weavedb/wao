@@ -2,6 +2,7 @@ import { connect, createSigner } from "aoconnect-wao"
 import { last, isNotNil, mergeLeft } from "ramda"
 import { randomBytes } from "node:crypto"
 import { buildTags } from "./utils.js"
+
 class HB {
   constructor({ url = "http://localhost:10000" } = {}) {
     this.url = url

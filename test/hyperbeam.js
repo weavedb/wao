@@ -1,6 +1,6 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
-import { acc, mu } from "../src/test.js"
+import { acc, mu, AO } from "../src/test.js"
 import HB from "../src/hb.js"
 import { isNotNil, filter } from "ramda"
 const [{ jwk, addr }] = acc
@@ -19,16 +19,7 @@ end)
 
 `
 const URL = "http://localhost:10000"
-const toParams = ({ processId, from, to, pageSize }) =>
-  new URLSearchParams(
-    filter(isNotNil, {
-      target: processId,
-      "from+Integer": from,
-      "to+Integer": to,
-      limit: pageSize,
-      accept: "application/aos-2",
-    })
-  )
+
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
   it.only("should get messages", async () => {
@@ -49,7 +40,15 @@ describe("Hyperbeam", function () {
     }
     const res4 = await hb.messages({ target: process, from: 0 })
     assert.equal(res4.edges.length, i + 2)
+
+    // recover process
+    const ao = await new AO({ hb_url: URL }).init(jwk)
+    assert.equal((await ao.recover(process)).recovered, 12)
+
+    const d4 = await ao.hb.dryrun({ process, action: "Get" })
+    assert.equal(d4.Messages[0].Data, `Count: ${i}`)
   })
+
   it("should get metrics", async () => {
     const hb = new HB()
     const met = await hb.metrics()
