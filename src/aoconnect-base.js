@@ -25,7 +25,7 @@ import {
   o,
   reverse,
 } from "ramda"
-
+let count = 0
 export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
   return (mem, { cache, log = false, extensions = {} } = {}) => {
     const isMem = mem?.__type__ === "mem"
@@ -62,6 +62,15 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
 
     const genMsg = async (Id, p, data, Tags, from, Owner, dry = false) => {
       if (!dry) p.height += 1
+      let __tags = Tags?.length ? Tags : []
+      let cap = {
+        authority: "Authority",
+        action: "Action",
+        "on-boot": "On-Boot",
+        scheduler: "Scheduler",
+        module: "Module",
+      }
+      for (let v of __tags) v.name = cap[v.name] ?? v.name
       return {
         Id,
         Target: p.id,
@@ -72,7 +81,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         Module: p.module,
         From: from,
         Cron: false,
-        Tags: Tags?.length ? Tags : [],
+        Tags: __tags,
       }
     }
 
@@ -89,41 +98,52 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         },
       }
     }
+
     const spawn = async (opt = {}) => {
       if (!opt.module) throw Error("module missing")
       if (!opt.scheduler) throw Error("scheduler missing")
       const { mod, wasm, format } = await mem.getWasm(opt.module, mem)
-      opt.tags = buildTags(
-        null,
-        mergeLeft(tags(opt.tags ?? []), {
-          "Data-Protocol": "ao",
-          Variant: "ao.TN.1",
-          Type: "Process",
-          SDK: "aoconnect",
-          Module: mod,
-          Scheduler: opt.scheduler,
-          "Content-Type": "text/plain",
-          Authority: mu.addr,
-        }),
-      )
-      let ex = false
-      for (let v of opt.tags) if (v.name === "Type") ex = true
-      if (!ex) opt.tags.push({ name: "Type", value: "Process" })
-      if (opt.for) opt.tags.push({ name: "Pushed-For", value: opt.for })
-      const {
-        id,
-        owner,
-        item,
-        tags: __tags,
-      } = await ar.dataitem({
-        item: opt.item,
-        data: opt.data,
-        signer: opt.signer,
-        tags: tags(opt.tags),
-      })
-      opt.tags = buildTags(null, __tags)
-      if (opt.item) opt.data = base64url.decode(item.data)
-      await ar.postItems(item, su.jwk)
+      let id, owner, item, __tags
+      let msg_owner = mu.addr
+      if (ar.isHttpMsg(opt.http_msg)) {
+        ;({ id, owner, item, tags: __tags } = await ar.httpmsg(opt.http_msg))
+        opt.tags = buildTags(null, __tags)
+        opt.data = opt.http_msg.data
+        msg_owner = owner
+      } else {
+        opt.tags = buildTags(
+          null,
+          mergeLeft(tags(opt.tags ?? []), {
+            "Data-Protocol": "ao",
+            Variant: "ao.TN.1",
+            Type: "Process",
+            SDK: "aoconnect",
+            Module: mod,
+            Scheduler: opt.scheduler,
+            "Content-Type": "text/plain",
+            Authority: mu.addr,
+          })
+        )
+        let ex = false
+        for (let v of opt.tags) if (v.name === "Type") ex = true
+        if (!ex) opt.tags.push({ name: "Type", value: "Process" })
+        if (opt.for) opt.tags.push({ name: "Pushed-For", value: opt.for })
+        ;({
+          id,
+          owner,
+          item,
+          tags: __tags,
+        } = await ar.dataitem({
+          item: opt.item,
+          data: opt.data,
+          signer: opt.signer,
+          tags: tags(opt.tags),
+        }))
+        opt.tags = buildTags(null, __tags)
+        if (opt.item) opt.data = base64url.decode(item.data)
+        await ar.postItems(item, su.jwk)
+      }
+
       const now = Date.now
       const t = tags(opt.tags)
       const ext = t.Extension || "WeaveDrive"
@@ -133,10 +153,12 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         handle = await AoLoader(wasm, {
           format,
           WeaveDrive: wdrive,
-          spawn: item,
-          module: await mem.getTx(mod),
+          spawn: item, // todo: httpmsg
+          module: await mem.getTx(mod), // todo: httpmsg
         })
-      } catch (e) {}
+      } catch (e) {
+        console.log(mod, e)
+      }
       if (!handle) return null
       let _module = null
       _module = { handle, id: mod }
@@ -163,7 +185,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         let data = ""
         if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
         else data = (await mem.get("msgs", _tags["On-Boot"]))?.data ?? ""
-        let msg = await genMsg(id, p, data, opt.tags, owner, mu.addr, true)
+        let msg = await genMsg(id, p, data, opt.tags, owner, msg_owner, true)
         const _env = await genEnv({
           pid: p.id,
           owner: p.owner,
@@ -245,7 +267,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           Process: opt.process,
           Message: opt.message,
           "Hash-Chain": hash,
-        }),
+        })
       )
       p.epochs.push([opt.message])
       const { id, owner, item } = await ar.dataitem({
@@ -270,7 +292,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             if (!from) {
               const raw_owner = _opt.item.rawOwner
               const hashBuffer = Buffer.from(
-                await crypto.subtle.digest("SHA-256", raw_owner),
+                await crypto.subtle.digest("SHA-256", raw_owner)
               )
               from = base64url.encode(hashBuffer)
             }
@@ -348,12 +370,17 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
     const message = async opt => {
       const p = await mem.get("env", opt.process)
       if (!p) return null
-      let ex = false
-      let id = opt?.item?.id ?? ""
-      let owner = opt.owner ?? ""
-      let item = opt.item
+      let id = ""
+      let owner = ""
+      let item = null
+      if (ar.isHttpMsg(opt.http_msg)) {
+        ;({ id, owner, item } = await ar.httpmsg(opt.http_msg))
+      } else {
+        let id = opt?.item?.id ?? ""
+        let owner = opt.owner ?? ""
+        let item = opt.item
+      }
       if (!opt.item && opt.signer) {
-        for (let v of opt.tags) if (v.name === "Type") ex = true
         opt.tags = buildTags(
           null,
           mergeLeft(tags(opt.tags ?? []), {
@@ -361,7 +388,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             Variant: "ao.TN.1",
             Type: "Message",
             SDK: "aoconnect",
-          }),
+          })
         )
         if (opt.for) {
           opt.tags.push({ name: "Pushed-For", value: opt.for })
@@ -379,13 +406,52 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       }
       const _msg = dissoc("signer", opt)
       await mem.set(_msg, "msgs", id)
-      await assign({
-        message_item: item,
-        message: id,
-        process: opt.process,
-        from: owner,
-        signer: mu.signer,
-      })
+      if (ar.isHttpMsg(opt.http_msg)) {
+        p.epochs.push([id])
+        let _opt = opt
+        try {
+          // todo: not sure if this is correct
+          let from = _opt.from ?? opt.from ?? owner
+          let data = opt.http_msg.data ?? ""
+          let _tags = _opt.http_msg.tags
+          // todo: check if owner=mu.addr right?
+          const msg = await genMsg(opt.http_msg, p, data, _tags, from, owner)
+          const _env = await genEnv({
+            pid: p.id,
+            owner: p.owner,
+            module: p.module,
+          })
+          if (!p.handle) {
+            const { format, mod, wasm } = await mem.getWasm(p.modulea)
+            const wdrive = extensions[p.extention]
+            p.handle = await AoLoader(wasm, {
+              format,
+              WeaveDrive: wdrive,
+              spawn: (await mem.getTx(p.id)).item,
+              module: await mem.getTx(mod),
+            })
+            mem.env[opt.process].handle = p.handle
+          }
+          const res = await p.handle(p.memory, msg, _env)
+          p.memory = res.Memory
+          delete res.Memory
+          p.results.push(id)
+          await mem.set(p, "env", opt.process)
+          const _msg = { ...dissoc("signer", _opt), res }
+          await mem.set(_msg, "msgs", id)
+          return id
+        } catch (e) {
+          console.log(e)
+        }
+      } else {
+        await assign({
+          message_item: item,
+          message: id,
+          process: opt.process,
+          from: owner,
+          signer: mu.signer,
+        })
+      }
       return id
     }
     const result = async opt => (await mem.get("msgs", opt.message))?.res
@@ -451,7 +517,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             opt.tags,
             owner,
             mu.addr,
-            true,
+            true
           )
           const _env = await genEnv({
             pid: p.id,

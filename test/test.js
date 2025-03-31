@@ -201,7 +201,7 @@ describe("SDK", function () {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data2 })
     assert.equal(
       await p.m("Hello2", { get: "Hello", timeout: 3000 }),
-      "Hello, Japan!",
+      "Hello, Japan!"
     )
   })
   it("should spawn a process from a handler", async () => {
@@ -209,7 +209,7 @@ describe("SDK", function () {
     await p.msg(
       "Hello3",
       { module: mem.modules.aos2_0_1, auth: mu.addr },
-      { data: src_data },
+      { data: src_data }
     )
     const prs = mem.env
     let p2 = null
@@ -424,9 +424,9 @@ describe("AOS1", function () {
             },
           ],
           get: { test: { from: pid3, name: "Test2" } },
-        },
+        }
       ),
-      { test: "test" },
+      { test: "test" }
     )
   })
 })

@@ -1,3 +1,4 @@
+import crypto from "crypto"
 import express from "express"
 import cors from "cors"
 import base64url from "base64url"
@@ -6,11 +7,73 @@ import { tags, toGraphObj, optAO } from "./utils.js"
 import { connect } from "./aoconnect.js"
 import { GQL, cu, su, mu } from "./test.js"
 import bodyParser from "body-parser"
-import { keys, map, isNil, reverse } from "ramda"
+import { keys, map, isNil, reverse, omit } from "ramda"
+import { Bundle } from "arbundles"
+import { httpbis, createVerifier } from "http-message-signatures"
+import { createPublicKey, randomBytes } from "node:crypto"
+const { verifyMessage } = httpbis
+
+function toANS104Request(fields) {
+  const dataItem = {
+    target: fields.target,
+    anchor: fields.anchor ?? "",
+    tags: keys(
+      omit(
+        [
+          "Target",
+          "target",
+          "Anchor",
+          "anchor",
+          "Data",
+          "data",
+          "data-protocol",
+          "Data-Protocol",
+          "variant",
+          "Variant",
+          "dryrun",
+          "Dryrun",
+          "Type",
+          "type",
+          "path",
+          "method",
+        ],
+        fields
+      )
+    )
+      .map(function (key) {
+        return { name: key, value: fields[key] }
+      }, fields)
+      .concat([
+        { name: "Data-Protocol", value: "ao" },
+        { name: "Type", value: fields.Type ?? "Message" },
+        { name: "Variant", value: fields.Variant ?? "ao.N.1" },
+      ]),
+    data: fields?.data || "",
+  }
+  return {
+    headers: {
+      "Content-Type": "application/ans104",
+      "codec-device": "ans104@1.0",
+    },
+    item: dataItem,
+  }
+}
+
+function parseSignatureInput(input) {
+  const match = input.match(
+    /^([^=]+)=\(([^)]+)\);alg="([^"]+)";keyid="([^"]+)"$/
+  )
+  if (!match) throw new Error("Invalid signature-input format")
+
+  const [, label, fieldsStr, alg, keyid] = match
+  const fields = fieldsStr.split('" "').map(f => f.replace(/"/g, ""))
+  return { label, fields, alg, keyid }
+}
 
 class Server {
   constructor({
     ar = 4000,
+    bundler = 4001,
     mu = 4002,
     su = 4003,
     cu = 4004,
@@ -21,6 +84,7 @@ class Server {
   } = {}) {
     if (port) {
       ar = port
+      bundler = port + 1
       mu = port + 2
       su = port + 3
       cu = port + 4
@@ -47,13 +111,85 @@ class Server {
     this.results = results
     this.mem = mem
     this.gql = new GQL({ mem })
-    this.ports = { ar, mu, su, cu }
+    this.ports = { ar, mu, su, cu, bundler }
     this.servers = []
     this.ar()
+    this.bundler()
     this.mu()
     this.su()
     this.cu()
   }
+
+  bundler() {
+    const app = express()
+    app.use(cors())
+    app.use("/tx", bodyParser.raw({ type: "*/*", limit: "100mb" }))
+    app.post("/tx", async (req, res) => {
+      if (!Buffer.isBuffer(req.body)) {
+        console.log("BD: Invalid body | expected raw Buffer")
+        return res.status(400).send("Invalid body: expected raw Buffer")
+      }
+      const lines = req.body.toString("utf8").split(/\r?\n/)
+      const sigs = {}
+      let currentKey = null
+
+      for (let line of lines) {
+        const trimmed = line.trim()
+        if (/^--[a-zA-Z0-9_\-=]+/.test(trimmed)) {
+          currentKey = null
+          continue
+        }
+        const headerMatch = trimmed.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/)
+        if (headerMatch && !headerMatch[2].includes(": ")) {
+          const key = headerMatch[1]
+          const value = headerMatch[2]
+          sigs[key] = value
+          currentKey = key
+        } else if (currentKey) sigs[currentKey] += "\n" + line
+      }
+      sigs.target = req.headers.process
+      sigs.slot = req.headers.slot
+
+      const input = parseSignatureInput(req.headers["signature-input"])
+      const key = { kty: "RSA", n: input.keyid, e: "AQAB" }
+      const verifier = createVerifier(
+        createPublicKey({ key, format: "jwk" }),
+        "rsa-pss-sha512"
+      )
+      try {
+        const isValid = await verifyMessage(
+          { keyLookup: params => ({ verify: verifier }) },
+          {
+            method: req.method,
+            headers: req.headers,
+            url: `http://ao.com${req.headers.path}`,
+          }
+        )
+        const item = toANS104Request(sigs).item
+        if (sigs.slot === "0" || sigs.type === "Process") {
+          for (let v of item.tags) if (v.name === "Type") v.value = "Process"
+          const res = await this.spawn({
+            http_msg: item,
+            module: sigs.module,
+            scheduler: sigs.scheduler,
+          })
+        } else if (sigs.type === "Message") {
+          const res = await this.message({
+            http_msg: item,
+            process: sigs.target,
+          })
+        }
+      } catch (e) {
+        console.log(e, req.originalUrl)
+      }
+      return res.status(200).send("Success")
+    })
+    const server = app.listen(this.ports.bundler, () => {
+      console.log(`BD on port ${this.ports.bundler}`)
+    })
+    this.servers.push(server)
+  }
+
   ar() {
     const app = express()
     app.use(cors())
@@ -65,7 +201,7 @@ class Server {
         height: this.mem.height,
         network: "wao.LN.1",
         current: this.mem.getAnchor(),
-      }),
+      })
     )
     app.get("/wallet/:id/balance", (req, res) => res.send("0"))
     app.get("/mint/:id/:amount", (req, res) => res.json({ id: "0" }))
@@ -142,14 +278,10 @@ class Server {
         if (req.body.data_root && req.body.data === "") {
           data[req.body.data_root] = req.body
         } else {
-          console.log("or here...", req.body)
           await this._ar.postTx(req.body)
         }
         res.json({ id: req.body.id })
       }
-    })
-    app.get("*", async (req, res) => {
-      console.log("what")
     })
     const server = app.listen(this.ports.ar, () => {
       console.log(`AR on port ${this.ports.ar}`)
@@ -197,7 +329,7 @@ class Server {
       }
     })
     const server = app.listen(this.ports.mu, () =>
-      console.log(`MU on port ${this.ports.mu}`),
+      console.log(`MU on port ${this.ports.mu}`)
     )
     this.servers.push(server)
   }
@@ -214,7 +346,7 @@ class Server {
       })
     })
     app.get("/timestamp", (req, res) =>
-      res.json({ timestamp: Date.now(), block_height: this.mem.height }),
+      res.json({ timestamp: Date.now(), block_height: this.mem.height })
     )
     app.get("/:pid", (req, res) => {
       const pid = req.params.pid
@@ -248,12 +380,8 @@ class Server {
       })(reverse(this.mem.env[pid]?.results ?? [])) // need mod
       res.json({ page_info: { has_next_page: false }, edges })
     })
-    app.get("*", async (req, res) => {
-      console.log("what2")
-    })
-
     const server = app.listen(this.ports.su, () =>
-      console.log(`SU on port ${this.ports.su}`),
+      console.log(`SU on port ${this.ports.su}`)
     )
     this.servers.push(server)
   }
@@ -262,18 +390,23 @@ class Server {
     app.use(cors())
     app.use(bodyParser.json())
     app.get("/", (req, res) =>
-      res.json({ timestamp: Date.now(), address: cu.addr }),
+      res.json({ timestamp: Date.now(), address: cu.addr })
     )
     app.get("/result/:mid", async (req, res) => {
+      let message = req.params.mid
+      const process = req.query["process-id"]
+      if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
+        message = this.mem.env[process].results[message]
+      }
       const res2 = await this.result({
-        message: req.params.mid,
-        process: req.query["process-id"],
+        message,
+        process,
       })
       res.json(res2)
     })
     app.get("/state/:pid", async (req, res) => {
       const pid = req.params.pid
-      const memory = (await this.mem.env[pid]?.memory) ?? null
+      const memory = this.mem.env[pid]?.memory ?? null
       if (!memory) {
         res.status(404)
         res.json({
@@ -318,7 +451,7 @@ class Server {
     })
 
     const server = app.listen(this.ports.cu, () =>
-      console.log(`CU on port ${this.ports.cu}`),
+      console.log(`CU on port ${this.ports.cu}`)
     )
     this.servers.push(server)
   }

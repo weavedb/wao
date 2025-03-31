@@ -2,7 +2,7 @@ import _Arweave from "arweave"
 const Arweave = _Arweave.default ?? _Arweave
 import { Bundle } from "arbundles"
 import { compress, decompress } from "./compress.js"
-import { last, assoc, is } from "ramda"
+import { last, assoc, is, isNil } from "ramda"
 import { buildTags, tags } from "./utils.js"
 import base64url from "base64url"
 
@@ -47,7 +47,7 @@ export default class ArMemBase {
   }
   async owner(di) {
     return base64url.encode(
-      Buffer.from(await crypto.subtle.digest("SHA-256", di.rawOwner)),
+      Buffer.from(await crypto.subtle.digest("SHA-256", di.rawOwner))
     )
   }
   getAnchor() {
@@ -80,7 +80,7 @@ export default class ArMemBase {
           this[key][field].original_size = val.memory.length
           await this.db.put(
             `${key}.${field}`,
-            assoc("memory", memory, this[key][field]),
+            assoc("memory", memory, this[key][field])
           )
         } else {
           await this.db.put(`${key}.${field}`, this[key][field])
@@ -99,6 +99,7 @@ export default class ArMemBase {
       aos2_0_1: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
       aos1: "cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo",
       sqlite: "ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw",
+      aos_mainnet: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
     }
     this.modmap = {}
     this.msgs = {}
@@ -113,6 +114,10 @@ export default class ArMemBase {
       },
       ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw: {
         file: "sqlite",
+        format: "wasm64-unknown-emscripten-draft_2024_02_15",
+      },
+      "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g": {
+        file: "aos_mainnet",
         format: "wasm64-unknown-emscripten-draft_2024_02_15",
       },
     }
@@ -195,7 +200,6 @@ export default class ArMemBase {
               if (is(Uint8Array, v3.memory)) {
                 try {
                   v3.memory = this.waosm.decompress(v3.memory, v3.original_size)
-                  console.log(v3)
                 } catch (e) {
                   console.log(e)
                   v3.memory = decompress(v3.memory)
@@ -217,6 +221,7 @@ export default class ArMemBase {
   }
   async getTx(id) {
     let tx = this.txs[id]
+    if (isNil(tx)) return null
     if (tx.bundle) {
       try {
         let bundle = new Bundle(this.txs[tx.bundle].data)

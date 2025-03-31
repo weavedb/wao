@@ -46,8 +46,8 @@ describe("SDK", function () {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
     const memory = new Uint8Array(
       await fetch(`http://localhost:4004/state/${pid}`).then(r =>
-        r.arrayBuffer(),
-      ),
+        r.arrayBuffer()
+      )
     )
     assert.notEqual(memory, null)
   })
@@ -70,11 +70,28 @@ describe("SDK", function () {
     })
     assert.equal(edges2[0].node.cursor, cursor)
   })
+  it.only("should run server", async () => {
+    let ao = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
+      acc[0]
+    )
+    const data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)
+`
+    const { p, pid } = await ao.spwn({
+      module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
+    })
+    console.log(await ao.eval({ pid, data }))
+    console.log(await p.m("Hello"))
+    return
+  })
   it("should run server", async () => {
     let ao = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
-      acc[0],
+      acc[0]
     )
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
+    console.log(await p.m("Get"))
     await p.m("Add", { Plus: 3 })
     assert.equal(await p.d("Get"), "3")
     let ao2 = await new AO({
