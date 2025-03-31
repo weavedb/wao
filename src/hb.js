@@ -96,7 +96,8 @@ class HB {
     })
   }
 
-  async dryrun({ tags = {}, process } = {}) {
+  async dryrun({ tags = {}, process, action } = {}) {
+    if (typeof action === "string") tags.Action = action
     return await fetch(
       `${this.url}/~relay@1.0/call?relay-method=POST&relay-path=/dry-run?process-id=${process}/&content-type=application/json&body=${JSON.stringify({ Tags: buildTags(tags) })}`
     ).then(r => r.json())

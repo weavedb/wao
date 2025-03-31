@@ -55,8 +55,7 @@ describe("Hyperbeam", function () {
     assert.equal(r4.Messages[0].Data, "Count: 2")
     const d4 = await hb.dryrun({
       process,
-      owner: mu.addr,
-      tags: { Action: "Get" },
+      action: "Get",
     })
     assert.equal(d4.Messages[0].Data, "Count: 2")
     return
