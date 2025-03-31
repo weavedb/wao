@@ -1,3 +1,5 @@
+.db/
+.cache/
 *.log
 npm-debug.log*
 
