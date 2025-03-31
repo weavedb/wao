@@ -37,8 +37,13 @@ class AR extends MAR {
   }
   async httpmsg(msg) {
     const tags = t(msg.tags)
-    const { keyid: n } = parseSignatureInput(tags["signature-input"])
-    const owner = await this.arweave.wallets.jwkToAddress({ n })
+    let owner = null
+    try {
+      const { keyid: n } = parseSignatureInput(tags["signature-input"])
+      owner = await this.arweave.wallets.jwkToAddress({ n })
+    } catch (e) {
+      owner = tags.Owner ?? null
+    }
     await this.mem.set(msg, "txs", msg.id)
     return { item: msg, id: tags.id, tags, owner }
   }
