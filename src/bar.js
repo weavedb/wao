@@ -8,6 +8,17 @@ import base64url from "base64url"
 import GQL from "./tgql.js"
 import { last, is, includes, isNil } from "ramda"
 
+function parseSignatureInput(input) {
+  const match = input.match(
+    /^([^=]+)=\(([^)]+)\);alg="([^"]+)";keyid="([^"]+)"$/
+  )
+  if (!match) throw new Error("Invalid signature-input format")
+
+  const [, label, fieldsStr, alg, keyid] = match
+  const fields = fieldsStr.split('" "').map(f => f.replace(/"/g, ""))
+  return { label, fields, alg, keyid }
+}
+
 class AR extends MAR {
   constructor(opt = {}) {
     super({ ...opt, in_memory: true })
@@ -16,6 +27,20 @@ class AR extends MAR {
     this.mem = opt.mem ?? new opt.ArMem()
     this.gql = new GQL({ mem: this.mem })
     this.arweave = this.mem.arweave
+  }
+  isHttpMsg(item) {
+    if (typeof item === "object" && item !== null) {
+      const tags = t(item.tags)
+      if (!isNil(tags["signature-input"])) return true
+    }
+    return false
+  }
+  async httpmsg(msg) {
+    const tags = t(msg.tags)
+    const { keyid: n } = parseSignatureInput(tags["signature-input"])
+    const owner = await this.arweave.wallets.jwkToAddress({ n })
+    await this.mem.set(msg, "txs", msg.id)
+    return { item: msg, id: tags.id, tags, owner }
   }
   async owner(di) {
     return base64url.encode(
@@ -40,7 +65,6 @@ class AR extends MAR {
     for (const v of buildTags(null, tags)) tx.addTag(v.name, v.value)
     return await this.postTx(tx, jwk)
   }
-
   async postItems(items, jwk) {
     let err = null
     ;({ err, jwk } = await this.checkWallet({ jwk }))
