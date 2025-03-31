@@ -1,6 +1,7 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc } from "../src/test.js"
+import HB from "../src/hb.js"
 const [{ signer, jwk }] = acc
 import { connect, createSigner } from "aoconnect-wao"
 import { randomBytes } from "node:crypto"
@@ -16,7 +17,13 @@ const URL = "http://localhost:10000"
 
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
-  it("should run server", async () => {
+  it.only("should get metrics", async () => {
+    const hb = new HB()
+    const met = await hb.metrics()
+    assert.ok(met.process_uptime_seconds)
+  })
+
+  it("should deploy a process", async () => {
     const signer = createSigner(jwk)
     const { request } = connect({
       MODE: "mainnet",
