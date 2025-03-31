@@ -1,5 +1,5 @@
 import { connect, createSigner } from "aoconnect-wao"
-import { mergeLeft } from "ramda"
+import { last, isNotNil, mergeLeft } from "ramda"
 import { randomBytes } from "node:crypto"
 import { buildTags } from "./utils.js"
 class HB {
@@ -57,6 +57,23 @@ class HB {
     })
     this._request = request
     return this
+  }
+
+  async messages({ target, from, to } = {}) {
+    let params = `target=${target}`
+    if (isNotNil(from)) params += `&from+Integer=${from}`
+    if (isNotNil(to)) params += `&from+Integer=${to}`
+    params += `&accept=application/aos-2`
+    let res = await fetch(`${this.url}/~scheduler@1.0/schedule?${params}`).then(
+      r => r.json()
+    )
+    if (res.page_info.has_next_page) {
+      res.next = async () => {
+        const from2 = last(res.edges).cursor + 1
+        return await this.message({ target, from2, to })
+      }
+    }
+    return res
   }
 
   async process({ tags = {}, data = "1984" } = {}) {
