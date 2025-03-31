@@ -106,7 +106,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       let id, owner, item, __tags
       let msg_owner = mu.addr
       if (ar.isHttpMsg(opt.http_msg)) {
-        ;({ id, owner, item, tags: __tags } = await ar.httpmsg(opt.http_msg))
+        ;({ owner, item, tags: __tags } = await ar.httpmsg(opt.http_msg))
+        id = opt.http_msg.target
         opt.tags = buildTags(null, __tags)
         opt.data = opt.http_msg.data
         msg_owner = owner
@@ -374,7 +375,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       let owner = ""
       let item = null
       if (ar.isHttpMsg(opt.http_msg)) {
-        ;({ id, owner, item } = await ar.httpmsg(opt.http_msg))
+        ;({ owner, item } = await ar.httpmsg(opt.http_msg))
+        id = opt.http_msg.target
       } else {
         let id = opt?.item?.id ?? ""
         let owner = opt.owner ?? ""

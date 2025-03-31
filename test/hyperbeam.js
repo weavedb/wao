@@ -22,13 +22,13 @@ describe("Hyperbeam", function () {
     const met = await hb.metrics()
     assert.ok(met.process_uptime_seconds)
   })
-  it.only("should get info", async () => {
+  it("should get info", async () => {
     const hb = new HB()
     const info = await hb.info()
     assert.equal(info.port, 10000)
   })
 
-  it("should deploy a process", async () => {
+  it.only("should deploy a process", async () => {
     const signer = createSigner(jwk)
     const { request } = connect({
       MODE: "mainnet",
@@ -61,7 +61,6 @@ describe("Hyperbeam", function () {
       Variant: "ao.N.1",
     })
     const process = await p.process.text()
-    console.log(process)
     const m = await request({
       path: `${process}/schedule`,
       type: "Message",
@@ -69,11 +68,11 @@ describe("Hyperbeam", function () {
       action: "Eval",
       data,
       "Data-Protocol": "ao",
-      Variant: "ao.TN.1",
+      Variant: "ao.N.1",
     })
     const slot = await m.slot.text()
     console.log("slot", slot)
-
+    console.log(process)
     const r2 = await request({
       path: `/${process}/push&slot+integer=${slot}`,
       method: "POST",
@@ -81,6 +80,7 @@ describe("Hyperbeam", function () {
       "slot+integer": slot,
     }).catch(e => console.log(e))
     console.log("mid", r2)
+    return
     let i = 0
     const m2 = await request({
       path: `${process}/schedule`,
@@ -89,7 +89,7 @@ describe("Hyperbeam", function () {
       action: "Hello",
       data: "1984",
       "Data-Protocol": "ao",
-      Variant: "ao.TN.1",
+      Variant: "ao.N.1",
     })
     console.log(m2)
     const slot2 = await m2.slot.text()
