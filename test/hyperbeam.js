@@ -1,9 +1,9 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
-import { acc } from "../src/test.js"
+import { acc, mu } from "../src/test.js"
 import HB from "../src/hb.js"
 
-const [{ jwk }] = acc
+const [{ jwk, addr }] = acc
 import { randomBytes } from "node:crypto"
 
 const data = `
@@ -12,6 +12,11 @@ Handlers.add("Inc", "Inc", function (msg)
   count = count + 1
   msg.reply({ Data = "Count: "..tostring(count) })
 end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)
+
 `
 const URL = "http://localhost:10000"
 
@@ -48,5 +53,12 @@ describe("Hyperbeam", function () {
     const slot3 = await hb.schedule({ process, action: "Inc" })
     const r4 = await hb.compute({ process, slot: slot3 })
     assert.equal(r4.Messages[0].Data, "Count: 2")
+    const d4 = await hb.dryrun({
+      process,
+      owner: mu.addr,
+      tags: { Action: "Get" },
+    })
+    assert.equal(d4.Messages[0].Data, "Count: 2")
+    return
   })
 })
