@@ -25,7 +25,7 @@ describe("Hyperbeam", function () {
   it.only("should get info", async () => {
     const hb = new HB()
     const info = await hb.info()
-    assert.ok(info.length > 0)
+    assert.equal(info.port, 10000)
   })
 
   it("should deploy a process", async () => {
