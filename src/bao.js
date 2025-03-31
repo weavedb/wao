@@ -51,6 +51,7 @@ class AO extends MAO {
     super({ ...opt, in_memory: true })
     this.in_memory = true
     this.createDataItemSigner = opt.createDataItemSigner ?? createDataItemSigner
+    this.hb = opt.hb
     const {
       modules,
       results,
@@ -61,12 +62,15 @@ class AO extends MAO {
       dryrun,
       monitor,
       unmonitor,
+      recover,
       mem,
     } = opt.connect(opt.mem, {
       extensions: opt.extensions,
       cache: opt.cache,
       reset: opt.reset,
+      hb: this.hb,
     })
+    this.recover = recover
     this.assign = assign
     this.result = async (...opt) => {
       const res = await result(...opt)
@@ -95,6 +99,7 @@ class AO extends MAO {
   async init(jwk) {
     if (!jwk && this.acc[0]) jwk = this.acc[0].jwk
     await this.ar.init(jwk)
+    if (this.hb) await this.hb.init(jwk)
     return this
   }
 
