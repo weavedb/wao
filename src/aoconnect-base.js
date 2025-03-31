@@ -27,7 +27,7 @@ import {
 } from "ramda"
 let count = 0
 export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
-  return (mem, { cache, log = false, extensions = {} } = {}) => {
+  return (mem, { cache, log = false, extensions = {}, hb } = {}) => {
     const isMem = mem?.__type__ === "mem"
     if (!isMem) {
       let args = { cache }
@@ -367,7 +367,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       }
       return null
     }
-
     const message = async opt => {
       const p = await mem.get("env", opt.process)
       if (!p) return null
@@ -456,6 +455,42 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       }
       return id
     }
+    const recover = async (pid, next) => {
+      let count = 0
+      if (hb) {
+        try {
+          const p = await mem.get("env", pid)
+          const msgs = next ? await next() : await hb.messages({ target: pid })
+          for (let v of msgs.edges) {
+            let item = {}
+            for (let k in v.node.message) {
+              item[k.toLowerCase()] = v.node.message[k]
+            }
+
+            item.tags.push({ name: "signature-input", value: "http-sig-" })
+            item.tags.push({ name: "siot", value: Number(v.cursor).toString() })
+            item.tags.push({ name: "Owner", value: v.node.message.Owner })
+            item.target = pid
+            let _tags = tags(item.tags)
+            if (_tags.Type === "Process") {
+              await spawn({
+                http_msg: item,
+                scheduler: _tags.Scheduler,
+                module: _tags.Module,
+              })
+            } else {
+              await message({ process: pid, http_msg: item })
+            }
+            count++
+          }
+          if (msgs.next) await recover(pid, msgs.next)
+        } catch (e) {
+          console.log(e)
+        }
+      }
+      return { recovered: count, pid }
+    }
+
     const result = async opt => (await mem.get("msgs", opt.message))?.res
     return {
       message,
@@ -552,6 +587,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         }
         return null
       },
+      recover,
       mem,
     }
   }
