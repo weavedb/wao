@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto"
 import { buildTags } from "./utils.js"
 
 class HB {
-  constructor({ url = "http://localhost:10000" } = {}) {
+  constructor({ url = "http://localhost:10001" } = {}) {
     this.url = url
   }
 
