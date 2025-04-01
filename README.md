@@ -472,7 +472,7 @@ git clone https://github.com/weavedb/wao.git && cd wao && yarn
 Run a WAO server with in-memory mode (the persistent-mode with HB is not well-tested yet).
 
 ```bash
-yarn server --memory --hb http://localhost:10000
+yarn server --memory --hb http://localhost:10001
 ```
 
 The CU should be running at [http://localhost:4004](http://localhost:4004).
@@ -487,7 +487,7 @@ Instead, start a Hyperbeam node with the following command from the WAO root dir
 yarn hb PATH_TO_HB_DIR
 ```
 
-The HyperBEAM should be running at [http://localhost:10000](http://localhost:10000).
+The HyperBEAM should be running at [http://localhost:10001](http://localhost:10001).
 
 You can test HyperBEAM requests with the WAO server as a local CU.
 
@@ -511,12 +511,10 @@ Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = "Count: "..tostring(count) })
 end)
 `
-const URL = "http://localhost:10000"
-
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
   it("should interact with a hyperbeam node", async () => {
-    const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
+    const hb = await new HB({ url: "http://localhost:10001" }).init(jwk)
     const metrics = await hb.metrics()
     const info = await hb.info()
     const process = await hb.process()
