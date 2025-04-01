@@ -5,7 +5,7 @@ import HB from "../src/hb.js"
 import { isNotNil, filter } from "ramda"
 const [{ jwk, addr }] = acc
 import { randomBytes } from "node:crypto"
-
+import { wait } from "../src/utils.js"
 const data = `
 local count = 0
 Handlers.add("Inc", "Inc", function (msg)
@@ -22,7 +22,7 @@ const URL = "http://localhost:10000"
 
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
-  it.only("should get messages", async () => {
+  it.only("should get messages and recover them", async () => {
     const hb = await new HB().init(jwk)
     const res = await hb.get({ path: "~meta@1.0/info/address" })
     const address = res
@@ -47,6 +47,18 @@ describe("Hyperbeam", function () {
 
     const d4 = await ao.hb.dryrun({ process, action: "Get" })
     assert.equal(d4.Messages[0].Data, `Count: ${i}`)
+
+    // skip recovery if messages already exists
+    assert.equal((await ao.recover(process)).recovered, 0)
+
+    // add 2 messages
+    while (i < 12) {
+      const slot2 = await hb.schedule({ process, action: "Inc" })
+      const r3 = await hb.compute({ process, slot: slot2 })
+      assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
+    }
+    // continue recovery from the last message
+    assert.equal((await ao.recover(process)).recovered, 2)
   })
 
   it("should get metrics", async () => {

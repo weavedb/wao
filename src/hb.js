@@ -60,10 +60,10 @@ class HB {
     return this
   }
 
-  async messages({ target, from, to } = {}) {
+  async messages({ target, from, to, limit } = {}) {
     let params = `target=${target}`
-    if (isNotNil(from)) params += `&from+Integer=${from}`
-    if (isNotNil(to)) params += `&from+Integer=${to}`
+    if (isNotNil(from)) params += `&from=${from}`
+    if (isNotNil(to)) params += `&to=${to}`
     params += `&accept=application/aos-2`
     let res = await fetch(`${this.url}/~scheduler@1.0/schedule?${params}`).then(
       r => r.json()
