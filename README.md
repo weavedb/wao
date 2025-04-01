@@ -27,7 +27,7 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing the te
   - [AR](#ar)
   - [GQL](#gql)
   - [ArMem](#armem)
-  - [HB](#hb}
+  - [HB](#hb)
 
 ## Quick Start
 
@@ -463,21 +463,31 @@ aos \
 
 HyperBEAM integration is highly experimental at this stage.
 
-Run a WAO server with in-memory mode.
+Clone WAO and install the dependencies.
+
+```bash
+git clone https://github.com/weavedb/wao.git && cd wao && yarn
+```
+
+Run a WAO server with in-memory mode (the persistent-mode with HB is not well-tested yet).
+
+```bash
+yarn server --memory --hb http://localhost:10000
+```
 
 The CU should be running at [http://localhost:4004](http://localhost:4004).
 
-```bash
-yarn server --memory # npx wao --memory
-```
+Make sure you followed [the Hyperbeam setup guide](https://permaweb.github.io/HyperBEAM/hyperbeam/) and successfully compiled the latest version.
 
-Start a Hyperbeam node with the following configuration.
+But don't run `rebar3 shell` just yet.
+
+Instead, start a Hyperbeam node with the following command from the WAO root directory.
+
+```bash
+yarn hb PATH_TO_HB_DIR
+```
 
 The HyperBEAM should be running at [http://localhost:10000](http://localhost:10000).
-
-```bash
-rebar3 shell --eval "hb:start_mainnet(#{ port => 10000, priv_key_location => <<\"wallet.json\">>, bundler_httpsig => <<\"http://localhost:4001\">>, routes => [ #{ <<\"template\">> => <<\"/result/.*\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/graphql\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } }, #{ <<\"template\">> => <<\"/raw\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } } ] })."
-```
 
 You can test HyperBEAM requests with the WAO server as a local CU.
 
@@ -500,49 +510,23 @@ end)
 Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = "Count: "..tostring(count) })
 end)
-
 `
 const URL = "http://localhost:10000"
 
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
-
-  it("should get metrics", async () => {
-    const hb = new HB()
-    const met = await hb.metrics()
-    assert.ok(met.process_uptime_seconds)
-  })
-
-  it("should get info", async () => {
-    const hb = new HB()
+  it("should interact with a hyperbeam node", async () => {
+    const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
+    const metrics = await hb.metrics()
     const info = await hb.info()
-    assert.equal(info.port, 10000)
-  })
-
-  it.only("should deploy a process", async () => {
-    const hb = await new HB().init(jwk)
-
-    const res = await hb.get({ path: "~meta@1.0/info/address" })
-    const address = res
-    assert.equal(address, hb._info.address)
-
-    const p = await hb.process()
-    const process = await p.process.text()
+    const process = await hb.process()
     const slot = await hb.schedule({ process, data })
     const r = await hb.compute({ process, slot })
-    assert.equal(r.Output.data, "")
     const slot2 = await hb.schedule({ process, action: "Inc" })
-    const r3 = await hb.compute({ process, slot: slot2 })
-    assert.equal(r3.Messages[0].Data, "Count: 1")
-    const slot3 = await hb.schedule({ process, action: "Inc" })
-    const r4 = await hb.compute({ process, slot: slot3 })
-    assert.equal(r4.Messages[0].Data, "Count: 2")
-    const d4 = await hb.dryrun({
-      process,
-      action: "Get",
-    })
-    assert.equal(d4.Messages[0].Data, "Count: 2")
-    return
+    const r2 = await hb.compute({ process, slot: slot2 })
+    console.log(r2.Messages[0].Data)
+    const r3 = await hb.dryrun({ process, action: "Get" })
+    console.log(r3.Messages[0].Data)
   })
 })
 ```
