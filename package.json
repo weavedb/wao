@@ -1,6 +1,6 @@
 {
   "name": "wao",
-  "version": "0.13.4",
+  "version": "0.13.5",
   "bin": "./src/cli.js",
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -32,7 +32,7 @@
     }
   },
   "dependencies": {
-    "aoconnect-wao": "https://gitpkg.vercel.app/weavedb/ao/connect?wao&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build",
+    "aoconnect-wao": "https://gitpkg.vercel.app/weavedb/ao/connect?abd2992689dc5983d5cd48b38fb997b0532f192a&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build",
     "@babel/plugin-transform-modules-commonjs": "^7.24.8",
     "@bokuweb/zstd-wasm": "^0.0.22",
     "@dha-team/arbundles": "^1.0.1",
