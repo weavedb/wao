@@ -9,7 +9,9 @@ class HB {
   }
 
   async metrics() {
-    const txt = await fetch(`${this.url}/metrics`).then(r => r.text())
+    const txt = await fetch(`${this.url}/~hyperbuddy@1.0/metrics`).then(r =>
+      r.text()
+    )
     const parts = txt.split(/\r?\n/)
     let index = 0
     let _metrics = {}
@@ -77,7 +79,7 @@ class HB {
     return res
   }
 
-  async process({ tags = {}, data = "1984" } = {}) {
+  async process({ tags = {}, data } = {}) {
     tags = mergeLeft(tags, {
       data,
       Type: "Process",
@@ -92,7 +94,8 @@ class HB {
       "scheduler-device": "scheduler@1.0",
       "execution-device": "genesis-wasm@1.0",
     })
-    return await this.post({ tags })
+    const res = await this.post({ tags })
+    return await res.process.text()
   }
 
   async schedule({ tags = {}, data, process, action = "Eval" } = {}) {
@@ -114,10 +117,12 @@ class HB {
     })
   }
 
-  async dryrun({ tags = {}, process, action } = {}) {
+  async dryrun({ tags = {}, process, action, data } = {}) {
     if (typeof action === "string") tags.Action = action
+    let json = { Tags: buildTags(tags) }
+    if (data) json.Data = data
     return await fetch(
-      `${this.url}/~relay@1.0/call?relay-method=POST&relay-path=/dry-run?process-id=${process}/&content-type=application/json&body=${JSON.stringify({ Tags: buildTags(tags) })}`
+      `${this.url}/~relay@1.0/call?relay-method=POST&relay-path=/dry-run?process-id=${process}/&content-type=application/json&body=${JSON.stringify(json)}`
     ).then(r => r.json())
   }
 
