@@ -493,12 +493,9 @@ You can test HyperBEAM requests with the WAO server as a local CU.
 
 ```js
 import assert from "assert"
-import { after, describe, it, before, beforeEach } from "node:test"
-import { acc, mu } from "wao/test"
-import HB from "wao"
-
-const [{ jwk, addr }] = acc
-import { randomBytes } from "node:crypto"
+import { after, describe, it } from "node:test"
+import { acc } from "wao/test"
+import { HB } from "wao"
 
 const data = `
 local count = 0
@@ -512,9 +509,8 @@ Handlers.add("Get", "Get", function (msg)
 end)
 `
 describe("Hyperbeam", function () {
-  after(() => setTimeout(() => process.exit(), 100))
   it("should interact with a hyperbeam node", async () => {
-    const hb = await new HB({ url: "http://localhost:10001" }).init(jwk)
+    const hb = await new HB({ url: "http://localhost:10001" }).init(acc[0].jwk)
     const metrics = await hb.metrics()
     const info = await hb.info()
     const process = await hb.process()
@@ -522,9 +518,9 @@ describe("Hyperbeam", function () {
     const r = await hb.compute({ process, slot })
     const slot2 = await hb.schedule({ process, action: "Inc" })
     const r2 = await hb.compute({ process, slot: slot2 })
-    console.log(r2.Messages[0].Data)
+    assert.equal(r2.Messages[0].Data, "Count: 1")
     const r3 = await hb.dryrun({ process, action: "Get" })
-    console.log(r3.Messages[0].Data)
+	assert.equal(r3.Messages[0].Data, "Count: 1")
   })
 })
 ```
