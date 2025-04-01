@@ -105,6 +105,7 @@ class Server {
       unmonitor,
       recover,
     } = connect(aoconnect, { log, cache: db, hb })
+    this.recover = recover
     this.monitor = monitor
     this.unmonitor = unmonitor
     this.spawn = spawn
@@ -185,6 +186,7 @@ class Server {
         } else if (sigs.type === "Message") {
           for (let v of item.tags) if (v.name === "id") id = v.value
           const res = await this.message({
+            slot: sigs.slot,
             http_msg: item,
             process: sigs.target,
           })
@@ -405,11 +407,15 @@ class Server {
     const result = async (req, res) => {
       let message = req.params.mid
       const process = req.query["process-id"]
+      // check if recovery is ongoing and
       if (isNil(this.mem.env[process])) {
-        console.log("process not found:", req.query["process-id"])
-        res.status(404)
-        res.json({ error: `not found` })
-        return
+        const { success } = await this.recover(process)
+        if (!success) {
+          console.log("process not found:", req.query["process-id"])
+          res.status(404)
+          res.json({ error: `not found` })
+          return
+        }
       }
       if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
         message = this.mem.env[process]?.results?.[message]
