@@ -1456,9 +1456,9 @@ anymatch@~3.1.2:
     normalize-path "^3.0.0"
     picomatch "^2.0.4"
 
-"aoconnect-wao@https://gitpkg.vercel.app/weavedb/ao/connect?wao&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build":
+"aoconnect-wao@https://gitpkg.vercel.app/weavedb/ao/connect?abd2992689dc5983d5cd48b38fb997b0532f192a&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build":
   version "0.0.70"
-  resolved "https://gitpkg.vercel.app/weavedb/ao/connect?wao&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build#baa767c65906739287d905f00d944d0b8262b08e"
+  resolved "https://gitpkg.vercel.app/weavedb/ao/connect?abd2992689dc5983d5cd48b38fb997b0532f192a&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build#0823276b1f589768ad8c428740d1c347b70e061a"
   dependencies:
     "@dha-team/arbundles" "^1.0.1"
     "@permaweb/ao-scheduler-utils" "~0.0.25"
