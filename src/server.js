@@ -160,6 +160,7 @@ class Server {
         createPublicKey({ key, format: "jwk" }),
         "rsa-pss-sha512"
       )
+      let id = null
       try {
         const isValid = await verifyMessage(
           { keyLookup: params => ({ verify: verifier }) },
@@ -170,14 +171,19 @@ class Server {
           }
         )
         const item = toANS104Request(sigs).item
+
         if (sigs.slot === "0" || sigs.type === "Process") {
-          for (let v of item.tags) if (v.name === "Type") v.value = "Process"
+          for (let v of item.tags) {
+            if (v.name === "Type") v.value = "Process"
+          }
+
           const res = await this.spawn({
             http_msg: item,
             module: sigs.module,
             scheduler: sigs.scheduler,
           })
         } else if (sigs.type === "Message") {
+          for (let v of item.tags) if (v.name === "id") id = v.value
           const res = await this.message({
             http_msg: item,
             process: sigs.target,
@@ -186,7 +192,6 @@ class Server {
       } catch (e) {
         console.log(e, req.originalUrl)
       }
-      console.log("bundler success [pid]", sigs.target, "[slot]", sigs.slot)
       return res.status(200).send("Success")
     })
     const server = app.listen(this.ports.bundler, () => {
@@ -404,9 +409,6 @@ class Server {
         console.log("process not found:", req.query["process-id"])
         res.status(404)
         res.json({ error: `not found` })
-        setTimeout(() => {
-          console.log(this.mem.env)
-        }, 1000)
         return
       }
       if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
