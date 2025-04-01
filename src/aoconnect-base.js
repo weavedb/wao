@@ -3,7 +3,7 @@ const pkg = WarpArBundles.default ?? WarpArBundles
 const { DataItem } = pkg
 import crypto from "crypto"
 import base64url from "base64url"
-
+import { wait } from "../src/utils.js"
 import {
   tags,
   action,
@@ -25,7 +25,8 @@ import {
   o,
   reverse,
 } from "ramda"
-let count = 0
+
+let onRecovery = {}
 export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
   return (mem, { cache, log = false, extensions = {}, hb } = {}) => {
     const isMem = mem?.__type__ === "mem"
@@ -368,19 +369,29 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       return null
     }
     const message = async opt => {
-      const p = await mem.get("env", opt.process)
-      if (!p) return null
       let id = ""
       let owner = ""
       let item = null
       if (ar.isHttpMsg(opt.http_msg)) {
         ;({ id, owner, item } = await ar.httpmsg(opt.http_msg))
-        //id = opt.http_msg.target
+        // check if process exists, and recover if necessary
+        const p = await mem.get("env", opt.process)
+        const new_slot = opt.slot * 1
+        const last_slot = !p ? -1 : p.results.length - 1
+        if (last_slot + 1 !== new_slot) {
+          console.log("need process recovery from HB:", opt.process)
+          if (!hb || opt.recovery) return null
+          await recover(opt.process)
+        }
       } else {
         let id = opt?.item?.id ?? ""
         let owner = opt.owner ?? ""
         let item = opt.item
       }
+
+      const p = await mem.get("env", opt.process)
+      if (!p) return null
+
       if (!opt.item && opt.signer) {
         opt.tags = buildTags(
           null,
@@ -457,44 +468,73 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
     }
     const recover = async (pid, next) => {
       let count = 0
+      let success = false
       if (hb) {
-        try {
-          const p = await mem.get("env", pid)
-          const from = p ? p.results.length : 0
-          const msgs = next
-            ? await next()
-            : await hb.messages({ target: pid, from })
-          for (let v of msgs.edges) {
-            let item = {}
-            for (let k in v.node.message) {
-              item[k.toLowerCase()] = v.node.message[k]
+        if (onRecovery[pid]) {
+          let success = false
+          let i = 0
+          while (true) {
+            await wait(1000)
+            if (!onRecovery[pid]) {
+              success = true
+              break
             }
-
-            item.tags.push({ name: "signature-input", value: "http-sig-" })
-            item.tags.push({ name: "siot", value: Number(v.cursor).toString() })
-            item.tags.push({ name: "Owner", value: v.node.message.Owner })
-            // todo:  why all the ids from Hyperbeam are the same?
-            item.tags.push({ name: "id", value: v.node.message.Id })
-            item.target = pid
-
-            let _tags = tags(item.tags)
-            if (_tags.Type === "Process") {
-              await spawn({
-                http_msg: item,
-                scheduler: _tags.Scheduler,
-                module: _tags.Module,
-              })
-            } else {
-              await message({ process: pid, http_msg: item })
-            }
-            count++
+            if (i > 10) break
+            i++
           }
-          if (msgs.next) await recover(pid, msgs.next)
-        } catch (e) {
-          console.log(e)
+          return { success }
+        } else {
+          onRecovery[pid] = true
+          try {
+            const p = await mem.get("env", pid)
+            const from = p ? p.results.length : 0
+            const msgs = next
+              ? await next()
+              : await hb.messages({ target: pid, from })
+            for (let v of msgs.edges) {
+              let item = {}
+              for (let k in v.node.message) {
+                item[k.toLowerCase()] = v.node.message[k]
+              }
+
+              item.tags.push({ name: "signature-input", value: "http-sig-" })
+              item.tags.push({
+                name: "siot",
+                value: Number(v.cursor).toString(),
+              })
+              item.tags.push({ name: "Owner", value: v.node.message.Owner })
+              // todo:  why all the ids from Hyperbeam are the same?
+              item.tags.push({ name: "id", value: v.node.message.Id })
+              item.target = pid
+
+              let _tags = tags(item.tags)
+              if (_tags.Type === "Process") {
+                await spawn({
+                  http_msg: item,
+                  scheduler: _tags.Scheduler,
+                  module: _tags.Module,
+                  slot: v.cursor,
+                  recovery: true,
+                })
+              } else {
+                await message({
+                  process: pid,
+                  http_msg: item,
+                  slot: v.cursor,
+                  recovery: true,
+                })
+              }
+              count++
+            }
+            if (msgs.next) await recover(pid, msgs.next)
+          } catch (e) {
+            console.log(e)
+          }
+          delete onRecovery[pid]
         }
+        success = true
       }
-      return { recovered: count, pid }
+      return { recovered: count, pid, success }
     }
 
     const result = async opt => (await mem.get("msgs", opt.message))?.res

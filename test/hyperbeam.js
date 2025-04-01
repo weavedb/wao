@@ -6,6 +6,7 @@ import { isNotNil, filter } from "ramda"
 const [{ jwk, addr }] = acc
 import { randomBytes } from "node:crypto"
 import { wait } from "../src/utils.js"
+import Server from "../src/server.js"
 const data = `
 local count = 0
 Handlers.add("Inc", "Inc", function (msg)
@@ -23,6 +24,7 @@ const URL = "http://localhost:10000"
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
   it.only("should get messages and recover them", async () => {
+    const server = new Server({ port: 4000, log: true, hb_url: URL })
     const hb = await new HB().init(jwk)
     const res = await hb.get({ path: "~meta@1.0/info/address" })
     const address = res
@@ -59,6 +61,14 @@ describe("Hyperbeam", function () {
     }
     // continue recovery from the last message
     assert.equal((await ao.recover(process)).recovered, 2)
+
+    await server.end()
+
+    // restart a new server and check recovery
+    const server2 = new Server({ port: 4000, log: true, hb_url: URL })
+    const slot2 = await hb.schedule({ process, action: "Inc" })
+    const r3 = await hb.compute({ process, slot: slot2 })
+    assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
   })
 
   it("should get metrics", async () => {
