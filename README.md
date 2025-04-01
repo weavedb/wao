@@ -27,7 +27,7 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing the te
   - [AR](#ar)
   - [GQL](#gql)
   - [ArMem](#armem)
-
+  - [HB](#hb}
 
 ## Quick Start
 
@@ -484,8 +484,8 @@ You can test HyperBEAM requests with the WAO server as a local CU.
 ```js
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
-import { acc, mu } from "../src/test.js"
-import HB from "../src/hb.js"
+import { acc, mu } from "wao/test"
+import HB from "wao"
 
 const [{ jwk, addr }] = acc
 import { randomBytes } from "node:crypto"
@@ -1464,7 +1464,7 @@ const block_fields = `{ id timestamp height previous }`
 
 `ArMem` stands for Arweave in memory and is a class to emulate an Arweave node and AO units in memory, which is internally used in the WAO testing framework. You can instantiate `ArMem` and control multiple emulators by passing it between other classes.
 
-- [Instantiate](#instantiate-3)
+- [Instantiate](#instantiate-4)
 
 #### Instantiate
 
@@ -1509,4 +1509,111 @@ const ao2 = new AO({ mem: ao.mem })
 
 This will connect the two.
 
+### HB
 
+`HB` handles interactions with a [Hyperbeam](https://permaweb.github.io/HyperBEAM/) node.
+
+- [Instantiate](#instantiate-5)
+- [metrics](#metrics)
+- [info](#info)
+- [messages](#messages)
+- [process](#process)
+- [schedule](#schedule)
+- [compute](#compute)
+- [dryrun](#dryrun)
+- [get](#get)
+- [post](#post)
+- [request](#request)
+
+#### Instantiate
+
+```js
+import { HB } = "wao"
+const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
+```
+
+#### metrics
+
+Get node metrics.
+
+```js
+const metrics = await hb.metrics()
+```
+
+#### info
+
+Get node info.
+
+```js
+const info = await hb.info()
+const operator = info.address
+```
+#### messages
+
+Get messages on a process. You can get next messages by `message.next`. 
+
+```js
+const msgs = await hb.messages({ target, from, to })
+for(const item of msgs.edges){
+  const { cursor: slot, node: { assignment, message } } = item
+}
+if(msgs.next) const msgs2 = await msg.next()
+```
+
+- `target` : a process id
+- `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawed the process. `to` is inclusive. Both are optional. 
+
+#### process
+
+Equivalent to spawning a process.
+
+```js
+const pid = await hb.process({ tags, data })
+```
+
+#### schedule
+
+Equivalent to sending a message.
+
+```js
+const slot = await hb.schedule({ tags, data, process: pid, action })
+```
+
+#### compute
+
+Equivalent to getting a result.
+
+```js
+const res = await hb.compute({ process: pid, slot })
+const { Messages, Spawns, Assignments, Output } = res
+```
+#### dryrun
+
+```js
+const res = await hb.dryrun({ tags, data, process: pid, action })
+const { Messages, Spawns, Assignments, Output } = res
+```
+
+#### get
+
+Sending a signed http request with `GET` method to HyperBEAM.
+
+```js
+const res = await hb.get({ device, path })
+```
+
+#### post
+
+Sending a signed http request with `POST` method to HyperBEAM.
+
+```js
+const res = await hb.post({ device, path, tags })
+```
+
+#### request
+
+Sending a signed http request to HyperBEAM.
+
+```js
+const res = await hb.request({ device, path, tags, method })
+```
