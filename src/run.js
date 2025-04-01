@@ -8,6 +8,7 @@ let {
   memory = false,
   port = 4000,
   db = ".cache",
+  hb,
 } = yargs(process.argv.slice(2)).argv
 db = memory ? null : resolve(process.cwd(), db)
 if (reset) {
@@ -15,6 +16,6 @@ if (reset) {
     unlinkSync(db)
   } catch (e) {}
 }
-const main = async () => new Server({ log: true, port, db })
+const main = async () => new Server({ log: true, port, db, hb_url: hb })
 
 main()
