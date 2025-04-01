@@ -374,8 +374,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       let owner = ""
       let item = null
       if (ar.isHttpMsg(opt.http_msg)) {
-        ;({ owner, item } = await ar.httpmsg(opt.http_msg))
-        id = opt.http_msg.target
+        ;({ id, owner, item } = await ar.httpmsg(opt.http_msg))
+        //id = opt.http_msg.target
       } else {
         let id = opt?.item?.id ?? ""
         let owner = opt.owner ?? ""
@@ -460,7 +460,10 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       if (hb) {
         try {
           const p = await mem.get("env", pid)
-          const msgs = next ? await next() : await hb.messages({ target: pid })
+          const from = p ? p.results.length : 0
+          const msgs = next
+            ? await next()
+            : await hb.messages({ target: pid, from })
           for (let v of msgs.edges) {
             let item = {}
             for (let k in v.node.message) {
@@ -470,7 +473,10 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             item.tags.push({ name: "signature-input", value: "http-sig-" })
             item.tags.push({ name: "siot", value: Number(v.cursor).toString() })
             item.tags.push({ name: "Owner", value: v.node.message.Owner })
+            // todo:  why all the ids from Hyperbeam are the same?
+            item.tags.push({ name: "id", value: v.node.message.Id })
             item.target = pid
+
             let _tags = tags(item.tags)
             if (_tags.Type === "Process") {
               await spawn({

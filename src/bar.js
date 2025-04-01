@@ -70,6 +70,7 @@ class AR extends MAR {
     for (const v of buildTags(null, tags)) tx.addTag(v.name, v.value)
     return await this.postTx(tx, jwk)
   }
+
   async postItems(items, jwk) {
     let err = null
     ;({ err, jwk } = await this.checkWallet({ jwk }))
