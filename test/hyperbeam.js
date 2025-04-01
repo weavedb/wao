@@ -23,14 +23,27 @@ const URL = "http://localhost:10000"
 
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
-  it.only("should get messages and recover them", async () => {
+  it.only("should interact with a hyperbeam node", async () => {
+    const server = new Server({ port: 4000, log: true, hb_url: URL })
+    const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
+    const metrics = await hb.metrics()
+    const info = await hb.info()
+    const process = await hb.process()
+    const slot = await hb.schedule({ process, data })
+    const r = await hb.compute({ process, slot })
+    const slot2 = await hb.schedule({ process, action: "Inc" })
+    const r2 = await hb.compute({ process, slot: slot2 })
+    console.log(r2.Messages[0].Data)
+    const r3 = await hb.dryrun({ process, action: "Get" })
+    console.log(r3.Messages[0].Data)
+  })
+  it("should get messages and recover them", async () => {
     const server = new Server({ port: 4000, log: true, hb_url: URL })
     const hb = await new HB().init(jwk)
     const res = await hb.get({ path: "~meta@1.0/info/address" })
     const address = res
     assert.equal(address, hb._info.address)
-    const p = await hb.process()
-    const process = await p.process.text()
+    const process = await hb.process()
     const slot = await hb.schedule({ process, data })
     const r = await hb.compute({ process, slot })
     assert.equal(r.Output.data, "")
@@ -85,8 +98,7 @@ describe("Hyperbeam", function () {
 
   it("should deploy a process", async () => {
     const hb = await new HB().init(jwk)
-    const res = await hb.get({ path: "~meta@1.0/info/address" })
-    const address = res
+    const address = await hb.get({ path: "~meta@1.0/info/address" })
     assert.equal(address, hb._info.address)
     const p = await hb.process()
     const process = await p.process.text()
