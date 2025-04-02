@@ -20,11 +20,12 @@ export default class Hub {
       console.log("Connected to signaling server")
       if (this.onOpen) this.onOpen()
     }
-
     this.socket.onmessage = event => {
       const message = JSON.parse(event.data)
-
       switch (message.type) {
+        case "msg":
+          if (this.onMsg) this.onMsg(message)
+          break
         case "registered":
           this.clientId = message.id
           console.log("Received client ID:", this.clientId)

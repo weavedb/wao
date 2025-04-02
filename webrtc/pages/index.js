@@ -1,8 +1,18 @@
 import { Link, ssr } from "arnext"
 import { Image, Box, Flex, Textarea } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
-import { keys, prepend, reverse, append, map, without } from "ramda"
+import {
+  isNil,
+  keys,
+  prepend,
+  reverse,
+  append,
+  map,
+  without,
+  fromPairs,
+} from "ramda"
 import { AO, acc } from "wao/web"
+import { HB } from "wao"
 import Hub from "../lib/hub"
 import WebRTC from "../lib/webrtc"
 
@@ -12,6 +22,7 @@ let peer2 = {}
 let hub1 = null
 let hub2 = null
 let ao = null
+
 export default function Home({}) {
   const [clients, setClients] = useState([])
   const [processes, setProcesses] = useState([])
@@ -192,6 +203,79 @@ end)
                         console.log(await p.d("Hello"))
                       }
                       hub1 = new Hub("ws://localhost:8080")
+                      hub1.onMsg = async obj => {
+                        if (obj.subtype === "dryrun") {
+                          const res2 = await ao.dryrun(obj.message)
+                          delete res2.Memory
+                          hub1.socket.send(
+                            JSON.stringify({
+                              id: obj.id,
+                              status: 200,
+                              type: "msg",
+                              msg: JSON.stringify(res2),
+                            })
+                          )
+                        } else if (obj.subtype === "result") {
+                          let { process, message } = obj
+                          // check if recovery is ongoing and
+                          if (isNil(ao.mem.env[process])) {
+                            const { success } = await ao.recover(process)
+                            if (!success) {
+                              hub1.socket.send(
+                                JSON.stringify({
+                                  id: obj.id,
+                                  status: 404,
+                                  type: "msg",
+                                  error: `not found`,
+                                })
+                              )
+                              return
+                            }
+                          }
+                          if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
+                            message = ao.mem.env[process]?.results?.[message]
+                          }
+                          if (isNil(message)) {
+                            hub1.socket.send(
+                              JSON.stringify({
+                                id: obj.id,
+                                status: 404,
+                                type: "msg",
+                                error: `not found`,
+                              })
+                            )
+                          }
+                          const res2 = await ao.result({
+                            message,
+                            process,
+                          })
+                          hub1.socket.send(
+                            JSON.stringify({
+                              id: obj.id,
+                              status: 200,
+                              type: "msg",
+                              msg: JSON.stringify(res2),
+                            })
+                          )
+                        } else {
+                          const tags = tags =>
+                            fromPairs(map(v => [v.name, v.value])(tags))
+                          const t = tags(obj.message.http_msg.tags)
+                          if (t.Type === "Process") {
+                            const pid = await ao.spawn(obj.message)
+                          } else {
+                            const m = await ao.message(obj.message)
+                          }
+                          hub1.socket.send(
+                            JSON.stringify({
+                              id: obj.id,
+                              status: 200,
+                              type: "msg",
+                              msg: "success",
+                            })
+                          )
+                        }
+                      }
                       hub1.onRegister = id => {
                         hub1.registerSU()
                         setSUID(id)

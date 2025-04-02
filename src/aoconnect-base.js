@@ -3,7 +3,7 @@ const pkg = WarpArBundles.default ?? WarpArBundles
 const { DataItem } = pkg
 import crypto from "crypto"
 import base64url from "base64url"
-import { wait } from "../src/utils.js"
+import { wait } from "./utils.js"
 import {
   tags,
   action,
@@ -60,10 +60,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
 
       return output
     }
-
-    const genMsg = async (Id, p, data, Tags, from, Owner, dry = false) => {
-      if (!dry) p.height += 1
-      let __tags = Tags?.length ? Tags : []
+    const capitalize = __tags => {
       let cap = {
         authority: "Authority",
         action: "Action",
@@ -72,6 +69,12 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         module: "Module",
       }
       for (let v of __tags) v.name = cap[v.name] ?? v.name
+      return __tags
+    }
+
+    const genMsg = async (Id, p, data, Tags, from, Owner, dry = false) => {
+      if (!dry) p.height += 1
+      let __tags = Tags?.length ? Tags : []
       return {
         Id,
         Target: p.id,
@@ -82,7 +85,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         Module: p.module,
         From: from,
         Cron: false,
-        Tags: __tags,
+        Tags: capitalize(__tags),
       }
     }
 
@@ -90,12 +93,12 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       return {
         Process: {
           Id: pid,
-          Tags: (await mem.getTx(pid))?.tags ?? [],
+          Tags: capitalize((await mem.getTx(pid))?.tags ?? []),
           Owner: owner,
         },
         Module: {
           Id: module,
-          Tags: (await mem.getTx(module))?.tags ?? [],
+          Tags: capitalize((await mem.getTx(module))?.tags ?? []),
         },
       }
     }
@@ -107,8 +110,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       let id, owner, item, __tags
       let msg_owner = mu.addr
       if (ar.isHttpMsg(opt.http_msg)) {
-        ;({ owner, item, tags: __tags } = await ar.httpmsg(opt.http_msg))
         id = opt.http_msg.target
+        ;({ owner, item, tags: __tags } = await ar.httpmsg(opt.http_msg, id))
         opt.tags = buildTags(null, __tags)
         opt.data = opt.http_msg.data
         msg_owner = owner
@@ -373,13 +376,13 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       let owner = ""
       let item = null
       if (ar.isHttpMsg(opt.http_msg)) {
-        ;({ id, owner, item } = await ar.httpmsg(opt.http_msg))
+        id = opt.http_msg.target
+        ;({ owner, item } = await ar.httpmsg(opt.http_msg, id))
         // check if process exists, and recover if necessary
         const p = await mem.get("env", opt.process)
         const new_slot = opt.slot * 1
         const last_slot = !p ? -1 : p.results.length - 1
         if (last_slot + 1 !== new_slot) {
-          console.log("need process recovery from HB:", opt.process)
           if (!hb || opt.recovery) return null
           await recover(opt.process)
         }
@@ -538,6 +541,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
     }
 
     const result = async opt => (await mem.get("msgs", opt.message))?.res
+
     return {
       message,
       unmonitor: async opt => {
@@ -627,6 +631,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             mem.env[opt.process].handle = p.handle
           }
           const res = await p.handle(p.memory, msg, _env)
+          delete res.Memory
           return res
         } catch (e) {
           console.log(e)
