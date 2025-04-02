@@ -1,7 +1,11 @@
 import { connect, createSigner } from "aoconnect-wao"
 import { last, isNotNil, mergeLeft } from "ramda"
-import { randomBytes } from "node:crypto"
 import { buildTags } from "./utils.js"
+
+const randomBytes = num => {
+  const array = new Uint8Array(num)
+  return crypto.getRandomValues(array)
+}
 
 class HB {
   constructor({ url = "http://localhost:10001" } = {}) {

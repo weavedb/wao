@@ -2,5 +2,11 @@
   "name": "wao-hub",
   "version": "1.0.0",
   "main": "index.js",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "body-parser": "^2.2.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "ramda": "^0.30.1"
+  }
 }
