@@ -139,6 +139,7 @@ export default function Home({}) {
                     onClick={async () => {
                       ao = await new AO().init(acc[0])
                       await ao.mem.init()
+                      console.log(ao.mem)
                       const src_data = `
 -- Initialize a table to store messages
 local messages = {}
