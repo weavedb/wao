@@ -174,17 +174,14 @@ class Server {
         const item = toANS104Request(sigs).item
 
         if (sigs.slot === "0" || sigs.type === "Process") {
-          for (let v of item.tags) {
-            if (v.name === "Type") v.value = "Process"
-          }
-
+          for (let v of item.tags) if (v.name === "Type") v.value = "Process"
           const res = await this.spawn({
             http_msg: item,
             module: sigs.module,
             scheduler: sigs.scheduler,
           })
         } else if (sigs.type === "Message") {
-          for (let v of item.tags) if (v.name === "id") id = v.value
+          for (let v of item.tags) if (v.name === "id") item.target = v.value
           const res = await this.message({
             slot: sigs.slot,
             http_msg: item,
