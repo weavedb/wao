@@ -3,6 +3,7 @@ import { createDataItemSigner } from "@permaweb/aoconnect"
 import { srcs, buildTags } from "./utils.js"
 import { mergeLeft, is, map } from "ramda"
 
+const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 let log = `
 local json = require("json")
 ao = ao or {}
@@ -73,8 +74,11 @@ class AO extends MAO {
     this.recover = recover
     this.assign = assign
     this.result = async (...opt) => {
-      const res = await result(...opt)
-      renderLogs(res.Output)
+      let res = await result(...opt)
+      if (!res) {
+        await wait(100) // todo: why do we need to wait?
+        res = await result(...opt)
+      }
       return res
     }
 
@@ -82,14 +86,13 @@ class AO extends MAO {
     this.message = message
     this.spawn = async (...opt) => {
       const res = await spawn(...opt)
-      await this.load({ data: log, pid: res })
+      if (!opt[0].http_msg) {
+        await this.load({ data: log, pid: res })
+      }
       return res
     }
-    this.dryrun = async (...opt) => {
-      const res = await dryrun(...opt)
-      renderLogs(res.Output)
-      return res
-    }
+    this.dryrun = async (...opt) => await dryrun(...opt)
+
     this.monitor = monitor
     this.unmonitor = unmonitor
     this.mem = mem
