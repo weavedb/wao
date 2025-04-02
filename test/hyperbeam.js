@@ -29,6 +29,7 @@ describe("Hyperbeam", function () {
     const metrics = await hb.metrics()
     const info = await hb.info()
     const process = await hb.process({ tags: { authority: mu.addr } })
+    console.log(process)
     const slot = await hb.schedule({ process, data })
     const r = await hb.compute({ process, slot })
     console.log(r)
