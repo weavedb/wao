@@ -16,6 +16,7 @@
   "dependencies": {
     "@chakra-ui/react": "^3.6.0",
     "@emotion/react": "^11.14.0",
+    "@monaco-editor/react": "^4.7.0",
     "@permaweb/ao-loader": "^0.0.46",
     "arnext": "^0.1.4",
     "dayjs": "^1.11.13",
