@@ -1,11 +1,15 @@
 import { Link, ssr } from "arnext"
+import { Icon } from "@chakra-ui/react"
 import { Image, Box, Flex, Textarea } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
+import { FaAngleRight } from "react-icons/fa6"
 dayjs.extend(relativeTime)
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 import {
+  prop,
+  indexBy,
   includes,
   clone,
   isNil,
@@ -102,7 +106,7 @@ export default function Home({}) {
   const [suid, setSUID] = useState(null)
   const [cid, setCID] = useState(null)
   const [client, setClient] = useState(null)
-  const [tab, setTab] = useState("Connections")
+  const [tab, setTab] = useState("Networks")
   const [init, setInit] = useState(false)
   const [modules, setModules] = useState([])
   const [module, setModule] = useState(null)
@@ -113,7 +117,7 @@ export default function Home({}) {
   const [ctype, setCtype] = useState("hb")
 
   const tabs = [
-    "Connections",
+    "Networks",
     "Modules",
     "Processes",
     "Messages",
@@ -169,6 +173,7 @@ export default function Home({}) {
       desc: "Websocket connections to WAO hubs",
     },
   ]
+  const modmap = indexBy(prop("txid"))(modules ?? [])
   return (
     <>
       <Flex
@@ -429,7 +434,7 @@ export default function Home({}) {
       </Flex>
       <Flex h="100vh" css={{ zIndex: 0 }} pt="50px">
         {!init ? null : (
-          <Flex w="250px" bg="#eee" direction="column">
+          <Flex w="200px" bg="#eee" direction="column">
             {map(v => {
               return (
                 <Flex
@@ -465,310 +470,214 @@ export default function Home({}) {
             })(tabs)}{" "}
           </Flex>
         )}
-
-        <Flex flex={1}>
-          {!init ? (
-            <Flex
-              w="100%"
-              h="100%"
-              align="center"
-              justify="center"
-              fontSize="40px"
-              bg="#5137C5"
-              pb="60px"
-              color="#9C89F6"
-            >
-              Booting Up...
-            </Flex>
-          ) : tab === "Messages" ? (
-            <Flex>
-              <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
-                {map(v => {
-                  const tags = tags =>
-                    fromPairs(map(v => [v.name, v.value])(tags))
-                  const t = tags(v.http_msg?.tags ?? [])
-                  return (
-                    <Flex
-                      h="50px"
-                      bg={v.id === message?.id ? "#5137C5" : "white"}
-                      fontSize="12px"
-                      p={4}
-                      direction="column"
-                      justify="center"
-                      onClick={() => {
-                        let _msg = clone(ao.mem.msgs[v.id])
-                        _msg.id = v.id
-                        setMessage(_msg)
-                      }}
-                      css={{
-                        borderBottom: "1px solid #ddd",
-                        cursor: "pointer",
-                        _hover: { opacity: 0.75 },
-                      }}
+        <Flex direction="column" flex={1}>
+          <Flex
+            h="50px"
+            align="center"
+            p={4}
+            fontSize="12px"
+            css={{ borderBottom: "1px solid #ddd" }}
+          >
+            {!module ? null : (
+              <Flex
+                align="center"
+                css={{
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={() => setTab("Modules")}
+              >
+                <Box mr={2}>{modmap[module.id].name}</Box>
+              </Flex>
+            )}
+            {!proc ? null : (
+              <>
+                <Icon size="md" color="#5137C5">
+                  <FaAngleRight />
+                </Icon>
+                <Flex
+                  align="center"
+                  ml={2}
+                  css={{
+                    cursor: "pointer",
+                    _hover: { opacity: 0.75 },
+                  }}
+                  onClick={() => setTab("Processes")}
+                >
+                  <Box mr={2}>{proc?.id}</Box>
+                </Flex>
+              </>
+            )}
+            {!message ? null : (
+              <>
+                <Icon size="md" color="#5137C5">
+                  <FaAngleRight />
+                </Icon>
+                <Flex
+                  align="center"
+                  ml={2}
+                  css={{
+                    cursor: "pointer",
+                    _hover: { opacity: 0.75 },
+                  }}
+                  onClick={() => setTab("Messages")}
+                >
+                  <Flex mr={4}>
+                    <Box
+                      py={1}
+                      px={2}
+                      bg="#bbb"
+                      css={{ borderRadius: "3px 0 0 3px" }}
                     >
+                      {message.slot}
+                    </Box>
+                    <Box
+                      py={1}
+                      px={2}
+                      bg="#ddd"
+                      css={{ borderRadius: "0 3px 3px 0" }}
+                    >
+                      Eval
+                    </Box>
+                  </Flex>
+                  <Box>{message.id}</Box>
+                </Flex>
+              </>
+            )}
+          </Flex>
+          <Flex flex={1}>
+            {!init ? (
+              <Flex
+                w="100%"
+                h="100%"
+                align="center"
+                justify="center"
+                fontSize="40px"
+                bg="#5137C5"
+                pb="60px"
+                color="#9C89F6"
+              >
+                Booting Up...
+              </Flex>
+            ) : tab === "Messages" ? (
+              <Flex>
+                <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+                  {map(v => {
+                    const tags = tags =>
+                      fromPairs(map(v => [v.name, v.value])(tags))
+                    const t = tags(v.http_msg?.tags ?? [])
+                    return (
                       <Flex
-                        fontWeight="bold"
-                        color={v.id !== message?.id ? "#5137C5" : "#ddd"}
+                        h="50px"
+                        bg={v.id === message?.id ? "#5137C5" : "white"}
+                        fontSize="12px"
+                        p={4}
+                        direction="column"
+                        justify="center"
+                        onClick={() => {
+                          let _msg = clone(ao.mem.msgs[v.id])
+                          _msg.id = v.id
+                          setMessage(_msg)
+                        }}
+                        css={{
+                          borderBottom: "1px solid #ddd",
+                          cursor: "pointer",
+                          _hover: { opacity: 0.75 },
+                        }}
                       >
-                        <Box w="20px" mr={2}>
-                          [{v.slot}]
-                        </Box>
-                        <Box>{t.Type === "Process" ? "Process" : t.Action}</Box>
-                      </Flex>
-                      <Box color={v.id !== message?.id ? "#222" : "#ddd"}>
-                        {v.id}
-                      </Box>
-                    </Flex>
-                  )
-                })(messages)}
-              </Box>
-              {!message ? null : (
-                <Box px={4} py={2} fontSize="12px">
-                  <Flex my={2} fontWeight="bold" color="#5137C5">
-                    Tags
-                  </Flex>
-                  {map(v => {
-                    if (includes(v.name, ["signature", "signature-input"])) {
-                      return null
-                    }
-                    return (
-                      <Flex my={2} align="center">
-                        <Box
-                          w="130px"
-                          color="white"
-                          bg="#5137C5"
-                          px={2}
-                          mr={4}
-                          css={{ borderRadius: "3px" }}
+                        <Flex
+                          fontWeight="bold"
+                          color={v.id !== message?.id ? "#5137C5" : "#ddd"}
                         >
-                          {v.name}
-                        </Box>
-                        <Box flex={1} css={{ wordBreak: "break-all" }}>
-                          {v.value}
+                          <Box w="20px" mr={2}>
+                            [{v.slot}]
+                          </Box>
+                          <Box>
+                            {t.Type === "Process" ? "Process" : t.Action}
+                          </Box>
+                        </Flex>
+                        <Box color={v.id !== message?.id ? "#222" : "#ddd"}>
+                          {v.id}
                         </Box>
                       </Flex>
                     )
-                  })(message.http_msg.tags)}
-                  <Flex mt={4} fontWeight="bold" mb={2} color="#5137C5">
-                    Data
-                  </Flex>
-                  <code>
-                    <Box as="pre" bg="#eee" p={4} css={{ borderRadius: "3px" }}>
-                      {message.http_msg?.data}
-                    </Box>
-                  </code>
-
-                  <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
-                    Result
-                  </Flex>
-                  <code>
-                    <Box as="pre" bg="#eee" p={4} css={{ borderRadius: "3px" }}>
-                      {JSON.stringify(message.res, undefined, 2)}
-                    </Box>
-                  </code>
+                  })(messages)}
                 </Box>
-              )}
-            </Flex>
-          ) : tab === "Processes" ? (
-            <Flex>
-              <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
-                {map(v => (
-                  <Flex
-                    h="50px"
-                    bg={v.txid === proc?.id ? "#5137C5" : "white"}
-                    fontSize="12px"
-                    p={4}
-                    direction="column"
-                    justify="center"
-                    onClick={() => {
-                      let _proc = clone(ao.mem.env[v.txid])
-                      delete _proc.memory
-                      _proc.tags = clone(ao.mem.msgs[v.txid]?.tags ?? [])
-                      _proc.id = v.txid
-                      setProc(_proc)
-                      setMessages(map(v => ao.mem.msgs[v])(_proc.results))
-                    }}
-                    css={{
-                      borderBottom: "1px solid #ddd",
-                      cursor: "pointer",
-                      _hover: { opacity: 0.75 },
-                    }}
-                  >
-                    <Box
-                      fontWeight="bold"
-                      color={v.txid !== proc?.id ? "#5137C5" : "#ddd"}
-                    >
-                      {v.module}
-                    </Box>
-                    <Box color={v.txid !== proc?.id ? "#222" : "#ddd"}>
-                      {v.txid}
-                    </Box>
-                  </Flex>
-                ))(procs)}
-              </Box>
-              {!proc ? null : (
-                <Box px={4} py={2} fontSize="12px">
-                  <Flex my={2} fontWeight="bold" color="#5137C5">
-                    Tags
-                  </Flex>
-                  {map(v => {
-                    if (includes(v.name, ["signature", "signature-input"])) {
-                      return null
-                    }
-                    return (
-                      <Flex my={2} align="center">
-                        <Box
-                          w="130px"
-                          color="white"
-                          bg="#5137C5"
-                          px={2}
-                          mr={4}
-                          css={{ borderRadius: "3px" }}
-                        >
-                          {v.name}
-                        </Box>
-                        <Box flex={1} css={{ wordBreak: "break-all" }}>
-                          {v.value}
-                        </Box>
-                      </Flex>
-                    )
-                  })(proc.tags)}
-                  <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
-                    Messages ( {proc.results.length} )
-                  </Flex>
-                  {map(v => (
-                    <Flex
-                      py={2}
-                      align="center"
-                      css={{
-                        borderBottom: "1px solid #ddd",
-                        cursor: "pointer",
-                        _hover: { opacity: 0.75 },
-                      }}
-                      onClick={() => {
-                        let _msg = clone(ao.mem.msgs[v.id])
-                        _msg.id = v.id
-                        setTab("Messages")
-                      }}
-                    >
-                      <Flex color="#222">
-                        <Box w="25px" mr={2}>
-                          [{v.slot}]
-                        </Box>
-                        <Box>{v.id}</Box>
-                      </Flex>
+                {!message ? null : (
+                  <Box px={4} py={2} fontSize="12px">
+                    <Flex my={2} fontWeight="bold" color="#5137C5">
+                      Tags
                     </Flex>
-                  ))(messages)}
-                </Box>
-              )}
-            </Flex>
-          ) : tab === "Modules" ? (
-            <Flex>
-              <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
-                {map(v => (
-                  <Flex
-                    h="50px"
-                    bg={v.txid === module?.id ? "#5137C5" : "white"}
-                    fontSize="12px"
-                    p={4}
-                    direction="column"
-                    justify="center"
-                    onClick={() => {
-                      let mod = clone(ao.mem.txs[v.txid])
-                      mod.processes = []
-                      for (let k in ao.mem.env) {
-                        for (let v of ao.mem.msgs[k]?.tags ?? []) {
-                          if (v.name === "Module" && v.value === mod.id) {
-                            mod.processes.push(k)
-                          }
-                        }
+                    {map(v => {
+                      if (includes(v.name, ["signature", "signature-input"])) {
+                        return null
                       }
-                      setModule(mod)
-                    }}
-                    css={{
-                      borderBottom: "1px solid #ddd",
-                      cursor: "pointer",
-                      _hover: { opacity: 0.75 },
-                    }}
-                  >
-                    <Box
-                      fontWeight="bold"
-                      color={v.txid !== module?.id ? "#5137C5" : "#ddd"}
-                    >
-                      {v.name}
-                    </Box>
-                    <Box color={v.txid !== module?.id ? "#222" : "#ddd"}>
-                      {v.txid}
-                    </Box>
-                  </Flex>
-                ))(modules)}
-              </Box>
-              {!module ? null : (
-                <Box px={4} py={2} fontSize="12px">
-                  <Flex my={2} fontWeight="bold" color="#5137C5">
-                    Tags
-                  </Flex>
-                  {map(v => (
-                    <Flex my={2} align="center">
+                      return (
+                        <Flex my={2} align="center">
+                          <Box
+                            w="130px"
+                            color="white"
+                            bg="#5137C5"
+                            px={2}
+                            mr={4}
+                            css={{ borderRadius: "3px" }}
+                          >
+                            {v.name}
+                          </Box>
+                          <Box flex={1} css={{ wordBreak: "break-all" }}>
+                            {v.value}
+                          </Box>
+                        </Flex>
+                      )
+                    })(message.http_msg.tags)}
+                    <Flex mt={4} fontWeight="bold" mb={2} color="#5137C5">
+                      Data
+                    </Flex>
+                    <code>
                       <Box
-                        w="130px"
-                        color="white"
-                        bg="#5137C5"
-                        px={2}
-                        mr={4}
+                        as="pre"
+                        bg="#eee"
+                        p={4}
                         css={{ borderRadius: "3px" }}
                       >
-                        {v.name}
+                        {message.http_msg?.data}
                       </Box>
-                      <Box>{v.value}</Box>
+                    </code>
+
+                    <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+                      Result
                     </Flex>
-                  ))(module.tags)}
-                  <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
-                    Processes ( {module.processes.length} )
-                  </Flex>
-                  {map(v => (
-                    <Flex
-                      py={1}
-                      align="center"
-                      css={{
-                        borderBottom: "1px solid #ddd",
-                        cursor: "pointer",
-                        _hover: { opacity: 0.75 },
-                      }}
-                      onClick={() => {
-                        let _proc = clone(ao.mem.env[v])
-                        delete _proc.memory
-                        _proc.tags = clone(ao.mem.msgs[v]?.tags ?? [])
-                        _proc.id = v
-                        setProc(_proc)
-                        setMessages(map(v => ao.mem.msgs[v])(_proc.results))
-                        setTab("Processes")
-                      }}
-                    >
-                      <Box color="#222">{v}</Box>
-                    </Flex>
-                  ))(module.processes)}
-                </Box>
-              )}
-            </Flex>
-          ) : (
-            <>
+                    <code>
+                      <Box
+                        as="pre"
+                        bg="#eee"
+                        p={4}
+                        css={{ borderRadius: "3px" }}
+                      >
+                        {JSON.stringify(message.res, undefined, 2)}
+                      </Box>
+                    </code>
+                  </Box>
+                )}
+              </Flex>
+            ) : tab === "Processes" ? (
               <Flex>
                 <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
                   {map(v => (
                     <Flex
                       h="50px"
-                      bg={v.key === ctype ? "#5137C5" : "white"}
+                      bg={v.txid === proc?.id ? "#5137C5" : "white"}
                       fontSize="12px"
                       p={4}
                       direction="column"
                       justify="center"
                       onClick={() => {
-                        if (!includes(v, ["hb"])) {
-                          return alert("Coming Soon!")
-                        }
-
-                        setCtype(v.key)
+                        let _proc = clone(ao.mem.env[v.txid])
+                        delete _proc.memory
+                        _proc.tags = clone(ao.mem.msgs[v.txid]?.tags ?? [])
+                        _proc.id = v.txid
+                        setProc(_proc)
+                        setMessages(map(v => ao.mem.msgs[v])(_proc.results))
                       }}
                       css={{
                         borderBottom: "1px solid #ddd",
@@ -778,296 +687,391 @@ export default function Home({}) {
                     >
                       <Box
                         fontWeight="bold"
-                        color={v.key !== ctype ? "#5137C5" : "#ddd"}
+                        color={v.txid !== proc?.id ? "#5137C5" : "#ddd"}
+                      >
+                        {v.module}
+                      </Box>
+                      <Box color={v.txid !== proc?.id ? "#222" : "#ddd"}>
+                        {v.txid}
+                      </Box>
+                    </Flex>
+                  ))(procs)}
+                </Box>
+                {!proc ? null : (
+                  <Box px={4} py={2} fontSize="12px">
+                    <Flex my={2} fontWeight="bold" color="#5137C5">
+                      Tags
+                    </Flex>
+                    {map(v => {
+                      if (includes(v.name, ["signature", "signature-input"])) {
+                        return null
+                      }
+                      return (
+                        <Flex my={2} align="center">
+                          <Box
+                            w="130px"
+                            color="white"
+                            bg="#5137C5"
+                            px={2}
+                            mr={4}
+                            css={{ borderRadius: "3px" }}
+                          >
+                            {v.name}
+                          </Box>
+                          <Box flex={1} css={{ wordBreak: "break-all" }}>
+                            {v.value}
+                          </Box>
+                        </Flex>
+                      )
+                    })(proc.tags)}
+                    <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+                      Messages ( {proc.results.length} )
+                    </Flex>
+                    {map(v => (
+                      <Flex
+                        py={2}
+                        align="center"
+                        css={{
+                          borderBottom: "1px solid #ddd",
+                          cursor: "pointer",
+                          _hover: { opacity: 0.75 },
+                        }}
+                        onClick={() => {
+                          let _msg = clone(ao.mem.msgs[v.id])
+                          _msg.id = v.id
+                          setMessage(_msg)
+                          setTab("Messages")
+                        }}
+                      >
+                        <Flex color="#222">
+                          <Box w="25px" mr={2}>
+                            [{v.slot}]
+                          </Box>
+                          <Box>{v.id}</Box>
+                        </Flex>
+                      </Flex>
+                    ))(messages)}
+                  </Box>
+                )}
+              </Flex>
+            ) : tab === "Modules" ? (
+              <Flex>
+                <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+                  {map(v => (
+                    <Flex
+                      h="50px"
+                      bg={v.txid === module?.id ? "#5137C5" : "white"}
+                      fontSize="12px"
+                      p={4}
+                      direction="column"
+                      justify="center"
+                      onClick={() => {
+                        let mmap = {}
+                        for (let k in ao.mem.modules) {
+                          mmap[ao.mem.modules[k]] = k
+                        }
+                        let _procs = []
+                        let mod = clone(ao.mem.txs[v.txid])
+                        mod.processes = []
+                        for (let k in ao.mem.env) {
+                          for (let v of ao.mem.msgs[k]?.tags ?? []) {
+                            if (v.name === "Module" && v.value === mod.id) {
+                              mod.processes.push(k)
+                              const val = ao.mem.env[k]
+                              _procs.push({ txid: k, module: mmap[val.module] })
+                            }
+                          }
+                        }
+                        setProcs(_procs)
+                        setModule(mod)
+                      }}
+                      css={{
+                        borderBottom: "1px solid #ddd",
+                        cursor: "pointer",
+                        _hover: { opacity: 0.75 },
+                      }}
+                    >
+                      <Box
+                        fontWeight="bold"
+                        color={v.txid !== module?.id ? "#5137C5" : "#ddd"}
                       >
                         {v.name}
                       </Box>
-                      <Box color={v.key !== ctype ? "#222" : "#ddd"}>
-                        {v.desc}
+                      <Box color={v.txid !== module?.id ? "#222" : "#ddd"}>
+                        {v.txid}
                       </Box>
                     </Flex>
-                  ))(ctypes)}
+                  ))(modules)}
                 </Box>
-
-                {ctype === "hb" ? (
-                  suid ? (
-                    <Box p={4}>
-                      <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
-                        HyperBEAM Nodes ( {hbs.length} )
+                {!module ? null : (
+                  <Box px={4} py={2} fontSize="12px">
+                    <Flex my={2} fontWeight="bold" color="#5137C5">
+                      Tags
+                    </Flex>
+                    {map(v => (
+                      <Flex my={2} align="center">
+                        <Box
+                          w="130px"
+                          color="white"
+                          bg="#5137C5"
+                          px={2}
+                          mr={4}
+                          css={{ borderRadius: "3px" }}
+                        >
+                          {v.name}
+                        </Box>
+                        <Box>{v.value}</Box>
                       </Flex>
-                      {map(v => {
-                        return (
-                          <Flex
-                            py={2}
-                            align="center"
-                            css={{
-                              borderBottom: "1px solid #ddd",
-                              cursor: "pointer",
-                              _hover: { opacity: 0.75 },
-                            }}
-                          >
-                            <Box color="#222">{v.address}</Box>
-                            <Box ml={4} color="#222">
-                              {dayjs().fromNow(v.update)}
-                            </Box>
-                            {subs?.hb?.[v.address]?.["*"] ? (
-                              <Flex
-                                fontSize="16px"
-                                bg="white"
-                                color="#5137C5"
-                                px={4}
-                                ml={4}
-                                css={{
-                                  border: "1px solid #5137C5",
-                                  borderRadius: "5px",
-                                  cursor: "pointer",
-                                  _hover: { opacity: 0.75 },
-                                }}
-                                onClick={() => {
-                                  hub1.socket.send(
-                                    JSON.stringify({
-                                      type: "subscribe",
-                                      accept: { hb: { [v.address]: false } },
-                                    })
-                                  )
-                                }}
-                              >
-                                Unsubscribe
-                              </Flex>
-                            ) : (
-                              <Flex
-                                fontSize="16px"
-                                bg="white"
-                                color="#5137C5"
-                                px={4}
-                                ml={4}
-                                css={{
-                                  border: "1px solid #5137C5",
-                                  borderRadius: "5px",
-                                  cursor: "pointer",
-                                  _hover: { opacity: 0.75 },
-                                }}
-                                onClick={() => {
-                                  hub1.socket.send(
-                                    JSON.stringify({
-                                      type: "subscribe",
-                                      accept: {
-                                        hb: { [v.address]: { "*": true } },
-                                      },
-                                    })
-                                  )
-                                }}
-                              >
-                                Subscribe
-                              </Flex>
-                            )}
-                          </Flex>
-                        )
-                      })(hbs)}
-                    </Box>
-                  ) : (
-                    <Box p={4}>Not Connected </Box>
-                  )
-                ) : (
-                  <>
-                    <Box flex={1} p={6}>
-                      <Box
-                        fontSize="20px"
-                        fontWeight="bold"
-                        color="#5137C5"
-                        css={{ textDecoration: "underline" }}
-                        mb={2}
+                    ))(module.tags)}
+                    <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+                      Processes ( {module.processes.length} )
+                    </Flex>
+                    {map(v => (
+                      <Flex
+                        py={1}
+                        align="center"
+                        css={{
+                          borderBottom: "1px solid #ddd",
+                          cursor: "pointer",
+                          _hover: { opacity: 0.75 },
+                        }}
+                        onClick={() => {
+                          let _proc = clone(ao.mem.env[v])
+                          delete _proc.memory
+                          _proc.tags = clone(ao.mem.msgs[v]?.tags ?? [])
+                          _proc.id = v
+                          setProc(_proc)
+                          setMessages(map(v => ao.mem.msgs[v])(_proc.results))
+                          setTab("Processes")
+                        }}
                       >
-                        Scheduler Unit (SU)
-                      </Box>
-                      <Box w="100%" maxW="700px">
-                        <Box>
-                          {suid ? (
-                            <>
-                              <Box>
-                                SUID: {suid} ({" "}
-                                <Box
-                                  as="span"
-                                  onClick={() => {}}
-                                  color="#5137C5"
-                                  css={{
-                                    textDecoration: "underline",
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  Disconnect
-                                </Box>{" "}
-                                )
-                              </Box>
-                              <Flex align="center" mt={2}>
-                                <Box mr={4}>
-                                  Connected Clients ( {clients.length} )
-                                </Box>
-                                {map(
-                                  v => (
-                                    <Box
-                                      mr={4}
-                                      px={2}
-                                      onClick={() => setClient(v)}
-                                      color="#5137C5"
-                                      css={{
-                                        borderRadius: "3px",
-                                        cursor: "pointer",
-                                        border: "1px solid #5137C5",
-                                        _hover: { opacity: 0.75 },
-                                      }}
-                                    >
-                                      {v}
-                                    </Box>
-                                  ),
-                                  clients
-                                )}
-                              </Flex>
-                              {client ? (
-                                <>
-                                  <Box
-                                    mt={4}
-                                    mb={2}
-                                    fontSize="16px"
-                                    fontWeight="bold"
-                                    color="#5137C5"
-                                  >
-                                    Send Message to Client ({client})
-                                  </Box>
-                                  <Textarea
-                                    value={msg2}
-                                    onChange={e => setMsg2(e.target.value)}
-                                    css={{ border: "1px solid #5137C5" }}
-                                  />
-                                  <Flex mt={2}>
-                                    <Box flex={1} />
-                                    <Box
-                                      onClick={async () => {
-                                        await peer2[client].sendMessage(
-                                          JSON.stringify({ msg: msg2 })
-                                        )
-                                        setMsg2("")
-                                      }}
-                                      fontSize="16px"
-                                      color="#5137C5"
-                                      px={2}
-                                      css={{
-                                        borderRadius: "3px",
-                                        cursor: "pointer",
-                                        border: "1px solid #5137C5",
-                                        _hover: { opacity: 0.75 },
-                                      }}
-                                    >
-                                      Send
-                                    </Box>
-                                  </Flex>
-                                </>
-                              ) : null}
-                            </>
-                          ) : (
-                            <>
-                              <Box
-                                onClick={async () => {}}
-                                fontSize="16px"
-                                color="#5137C5"
-                                px={2}
-                                py={1}
-                                css={{
-                                  borderRadius: "3px",
-                                  cursor: "pointer",
-                                  border: "1px solid #5137C5",
-                                  _hover: { opacity: 0.75 },
-                                }}
-                              >
-                                Launch SU
-                              </Box>
-                            </>
-                          )}
-                          <Box as="hr" my={4} />
-                          <Box
-                            fontSize="20px"
-                            fontWeight="bold"
-                            color="#5137C5"
-                            css={{ textDecoration: "underline" }}
-                            mb={2}
-                          >
-                            Client
-                          </Box>
-                          {!su && sus.length === 0 ? (
-                            <Box
-                              onClick={async () => {
-                                hub2 = new Hub("ws://localhost:8080")
-                                hub2.onRegister = id => {
-                                  hub2.getSUs()
-                                  setCID(id)
-                                }
+                        <Box color="#222">{v}</Box>
+                      </Flex>
+                    ))(module.processes)}
+                  </Box>
+                )}
+              </Flex>
+            ) : (
+              <>
+                <Flex>
+                  <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+                    {map(v => (
+                      <Flex
+                        h="50px"
+                        bg={v.key === ctype ? "#5137C5" : "white"}
+                        fontSize="12px"
+                        p={4}
+                        direction="column"
+                        justify="center"
+                        onClick={() => {
+                          if (!includes(v, ["hb"])) {
+                            return alert("Coming Soon!")
+                          }
 
-                                hub2.onSUs = ids => setSUs(ids)
+                          setCtype(v.key)
+                        }}
+                        css={{
+                          borderBottom: "1px solid #ddd",
+                          cursor: "pointer",
+                          _hover: { opacity: 0.75 },
+                        }}
+                      >
+                        <Box
+                          fontWeight="bold"
+                          color={v.key !== ctype ? "#5137C5" : "#ddd"}
+                        >
+                          {v.name}
+                        </Box>
+                        <Box color={v.key !== ctype ? "#222" : "#ddd"}>
+                          {v.desc}
+                        </Box>
+                      </Flex>
+                    ))(ctypes)}
+                  </Box>
 
-                                hub2.onAnswer = async (answer, id) => {
-                                  await peer1.setAnswer(answer)
-                                  hub2.disconnect()
-                                  setTimeout(() => {
-                                    peer1.sendMessage(
-                                      JSON.stringify({ type: "processes" })
-                                    )
-                                  }, 1000)
-                                }
-                                hub2.connect()
-                              }}
-                              fontSize="16px"
-                              color="#5137C5"
-                              py={1}
-                              px={2}
+                  {ctype === "hb" ? (
+                    suid ? (
+                      <Box p={4}>
+                        <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+                          HyperBEAM Nodes ( {hbs.length} )
+                        </Flex>
+                        {map(v => {
+                          return (
+                            <Flex
+                              py={2}
+                              align="center"
                               css={{
-                                borderRadius: "3px",
+                                borderBottom: "1px solid #ddd",
                                 cursor: "pointer",
-                                border: "1px solid #5137C5",
                                 _hover: { opacity: 0.75 },
                               }}
                             >
-                              List Available SUs
-                            </Box>
-                          ) : null}
-                          <Flex>
-                            {map(
-                              v => (
-                                <Box
-                                  mr={4}
-                                  px={2}
-                                  onClick={async () => {
-                                    peer1 = new WebRTC()
-                                    peer1.onDataChannelMessage = msg => {
-                                      const _msg = JSON.parse(msg)
-                                      if (_msg.type === "processes") {
-                                        setProcesses(_msg.processes)
-                                      } else {
-                                        setMsgs(m2 =>
-                                          prepend(
-                                            {
-                                              id: v,
-                                              msg: _msg.msg,
-                                              type: "SU",
-                                              date: Date.now(),
-                                            },
-                                            m2
-                                          )
-                                        )
-                                      }
-                                    }
-                                    peer1.onConnectionStateChange = status => {
-                                      if (status === "disconnected") {
-                                        peer1.close()
-                                        peer1 = null
-                                        setSU(null)
-                                      }
-                                    }
-
-                                    hub2.sendOffer(await peer1.createOffer(), v)
-                                    setSU(v)
-                                    setSUs([])
-                                  }}
+                              <Box color="#222">{v.address}</Box>
+                              <Box ml={4} color="#222">
+                                {dayjs().fromNow(v.update)}
+                              </Box>
+                              {subs?.hb?.[v.address]?.["*"] ? (
+                                <Flex
+                                  fontSize="16px"
+                                  bg="white"
                                   color="#5137C5"
+                                  px={4}
+                                  ml={4}
+                                  css={{
+                                    border: "1px solid #5137C5",
+                                    borderRadius: "5px",
+                                    cursor: "pointer",
+                                    _hover: { opacity: 0.75 },
+                                  }}
+                                  onClick={() => {
+                                    hub1.socket.send(
+                                      JSON.stringify({
+                                        type: "subscribe",
+                                        accept: { hb: { [v.address]: false } },
+                                      })
+                                    )
+                                  }}
+                                >
+                                  Unsubscribe
+                                </Flex>
+                              ) : (
+                                <Flex
+                                  fontSize="16px"
+                                  bg="white"
+                                  color="#5137C5"
+                                  px={4}
+                                  ml={4}
+                                  css={{
+                                    border: "1px solid #5137C5",
+                                    borderRadius: "5px",
+                                    cursor: "pointer",
+                                    _hover: { opacity: 0.75 },
+                                  }}
+                                  onClick={() => {
+                                    hub1.socket.send(
+                                      JSON.stringify({
+                                        type: "subscribe",
+                                        accept: {
+                                          hb: { [v.address]: { "*": true } },
+                                        },
+                                      })
+                                    )
+                                  }}
+                                >
+                                  Subscribe
+                                </Flex>
+                              )}
+                            </Flex>
+                          )
+                        })(hbs)}
+                      </Box>
+                    ) : (
+                      <Box p={4}>Not Connected </Box>
+                    )
+                  ) : (
+                    <>
+                      <Box flex={1} p={6}>
+                        <Box
+                          fontSize="20px"
+                          fontWeight="bold"
+                          color="#5137C5"
+                          css={{ textDecoration: "underline" }}
+                          mb={2}
+                        >
+                          Scheduler Unit (SU)
+                        </Box>
+                        <Box w="100%" maxW="700px">
+                          <Box>
+                            {suid ? (
+                              <>
+                                <Box>
+                                  SUID: {suid} ({" "}
+                                  <Box
+                                    as="span"
+                                    onClick={() => {}}
+                                    color="#5137C5"
+                                    css={{
+                                      textDecoration: "underline",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    Disconnect
+                                  </Box>{" "}
+                                  )
+                                </Box>
+                                <Flex align="center" mt={2}>
+                                  <Box mr={4}>
+                                    Connected Clients ( {clients.length} )
+                                  </Box>
+                                  {map(
+                                    v => (
+                                      <Box
+                                        mr={4}
+                                        px={2}
+                                        onClick={() => setClient(v)}
+                                        color="#5137C5"
+                                        css={{
+                                          borderRadius: "3px",
+                                          cursor: "pointer",
+                                          border: "1px solid #5137C5",
+                                          _hover: { opacity: 0.75 },
+                                        }}
+                                      >
+                                        {v}
+                                      </Box>
+                                    ),
+                                    clients
+                                  )}
+                                </Flex>
+                                {client ? (
+                                  <>
+                                    <Box
+                                      mt={4}
+                                      mb={2}
+                                      fontSize="16px"
+                                      fontWeight="bold"
+                                      color="#5137C5"
+                                    >
+                                      Send Message to Client ({client})
+                                    </Box>
+                                    <Textarea
+                                      value={msg2}
+                                      onChange={e => setMsg2(e.target.value)}
+                                      css={{ border: "1px solid #5137C5" }}
+                                    />
+                                    <Flex mt={2}>
+                                      <Box flex={1} />
+                                      <Box
+                                        onClick={async () => {
+                                          await peer2[client].sendMessage(
+                                            JSON.stringify({ msg: msg2 })
+                                          )
+                                          setMsg2("")
+                                        }}
+                                        fontSize="16px"
+                                        color="#5137C5"
+                                        px={2}
+                                        css={{
+                                          borderRadius: "3px",
+                                          cursor: "pointer",
+                                          border: "1px solid #5137C5",
+                                          _hover: { opacity: 0.75 },
+                                        }}
+                                      >
+                                        Send
+                                      </Box>
+                                    </Flex>
+                                  </>
+                                ) : null}
+                              </>
+                            ) : (
+                              <>
+                                <Box
+                                  onClick={async () => {}}
+                                  fontSize="16px"
+                                  color="#5137C5"
+                                  px={2}
+                                  py={1}
                                   css={{
                                     borderRadius: "3px",
                                     cursor: "pointer",
@@ -1075,135 +1079,236 @@ export default function Home({}) {
                                     _hover: { opacity: 0.75 },
                                   }}
                                 >
-                                  {v}
+                                  Launch SU
                                 </Box>
-                              ),
-                              sus
+                              </>
                             )}
-                          </Flex>
-                          {!su ? null : (
-                            <>
-                              <Flex align="center" mb={2}>
-                                <Box mr={4}>
-                                  Processes ( {processes.length} )
-                                </Box>
-                                {map(
-                                  v => (
-                                    <Box
-                                      mr={4}
-                                      px={2}
-                                      onClick={() => setPRC(v)}
-                                      color="#5137C5"
-                                      css={{
-                                        borderRadius: "3px",
-                                        cursor: "pointer",
-                                        border: "1px solid #5137C5",
-                                        _hover: { opacity: 0.75 },
-                                      }}
-                                    >
-                                      {v.slice(0, 5)}
-                                    </Box>
-                                  ),
-                                  processes
-                                )}
-                              </Flex>
-                              {prc ? (
-                                <>
-                                  <Flex mb={2}>
-                                    <Box
-                                      fontSize="16px"
-                                      fontWeight="bold"
-                                      color="#5137C5"
-                                    >
-                                      Send Message to SU ({su} :{" "}
-                                      {prc ? prc.slice(0, 5) : ""})
-                                    </Box>
-                                    <Box flex={1} />
-                                    <Box
-                                      onClick={() => {
-                                        setSU(null)
-                                        peer1.close()
-                                      }}
-                                      color="#5137C5"
-                                      css={{
-                                        textDecoration: "underline",
-                                        cursor: "pointer",
-                                      }}
-                                    >
-                                      Disconnect
-                                    </Box>
-                                  </Flex>
-                                  <Textarea
-                                    value={msg}
-                                    onChange={e => setMsg(e.target.value)}
-                                    css={{ border: "1px solid #5137C5" }}
-                                  />
+                            <Box as="hr" my={4} />
+                            <Box
+                              fontSize="20px"
+                              fontWeight="bold"
+                              color="#5137C5"
+                              css={{ textDecoration: "underline" }}
+                              mb={2}
+                            >
+                              Client
+                            </Box>
+                            {!su && sus.length === 0 ? (
+                              <Box
+                                onClick={async () => {
+                                  hub2 = new Hub("ws://localhost:8080")
+                                  hub2.onRegister = id => {
+                                    hub2.getSUs()
+                                    setCID(id)
+                                  }
 
-                                  <Flex mt={2}>
-                                    <Box flex={1} />
-                                    <Box
-                                      onClick={async () => {
-                                        await peer1.sendMessage(
-                                          JSON.stringify({
-                                            msg: msg,
-                                            pid: prc,
-                                            type: "msg",
-                                          })
-                                        )
-                                        setMsg("")
-                                      }}
-                                      fontSize="16px"
-                                      color="#5137C5"
-                                      px={2}
-                                      css={{
-                                        borderRadius: "3px",
-                                        cursor: "pointer",
-                                        border: "1px solid #5137C5",
-                                        _hover: { opacity: 0.75 },
-                                      }}
-                                    >
-                                      Send
-                                    </Box>
-                                  </Flex>
-                                </>
-                              ) : null}
-                            </>
-                          )}
+                                  hub2.onSUs = ids => setSUs(ids)
+
+                                  hub2.onAnswer = async (answer, id) => {
+                                    await peer1.setAnswer(answer)
+                                    hub2.disconnect()
+                                    setTimeout(() => {
+                                      peer1.sendMessage(
+                                        JSON.stringify({ type: "processes" })
+                                      )
+                                    }, 1000)
+                                  }
+                                  hub2.connect()
+                                }}
+                                fontSize="16px"
+                                color="#5137C5"
+                                py={1}
+                                px={2}
+                                css={{
+                                  borderRadius: "3px",
+                                  cursor: "pointer",
+                                  border: "1px solid #5137C5",
+                                  _hover: { opacity: 0.75 },
+                                }}
+                              >
+                                List Available SUs
+                              </Box>
+                            ) : null}
+                            <Flex>
+                              {map(
+                                v => (
+                                  <Box
+                                    mr={4}
+                                    px={2}
+                                    onClick={async () => {
+                                      peer1 = new WebRTC()
+                                      peer1.onDataChannelMessage = msg => {
+                                        const _msg = JSON.parse(msg)
+                                        if (_msg.type === "processes") {
+                                          setProcesses(_msg.processes)
+                                        } else {
+                                          setMsgs(m2 =>
+                                            prepend(
+                                              {
+                                                id: v,
+                                                msg: _msg.msg,
+                                                type: "SU",
+                                                date: Date.now(),
+                                              },
+                                              m2
+                                            )
+                                          )
+                                        }
+                                      }
+                                      peer1.onConnectionStateChange =
+                                        status => {
+                                          if (status === "disconnected") {
+                                            peer1.close()
+                                            peer1 = null
+                                            setSU(null)
+                                          }
+                                        }
+
+                                      hub2.sendOffer(
+                                        await peer1.createOffer(),
+                                        v
+                                      )
+                                      setSU(v)
+                                      setSUs([])
+                                    }}
+                                    color="#5137C5"
+                                    css={{
+                                      borderRadius: "3px",
+                                      cursor: "pointer",
+                                      border: "1px solid #5137C5",
+                                      _hover: { opacity: 0.75 },
+                                    }}
+                                  >
+                                    {v}
+                                  </Box>
+                                ),
+                                sus
+                              )}
+                            </Flex>
+                            {!su ? null : (
+                              <>
+                                <Flex align="center" mb={2}>
+                                  <Box mr={4}>
+                                    Processes ( {processes.length} )
+                                  </Box>
+                                  {map(
+                                    v => (
+                                      <Box
+                                        mr={4}
+                                        px={2}
+                                        onClick={() => setPRC(v)}
+                                        color="#5137C5"
+                                        css={{
+                                          borderRadius: "3px",
+                                          cursor: "pointer",
+                                          border: "1px solid #5137C5",
+                                          _hover: { opacity: 0.75 },
+                                        }}
+                                      >
+                                        {v.slice(0, 5)}
+                                      </Box>
+                                    ),
+                                    processes
+                                  )}
+                                </Flex>
+                                {prc ? (
+                                  <>
+                                    <Flex mb={2}>
+                                      <Box
+                                        fontSize="16px"
+                                        fontWeight="bold"
+                                        color="#5137C5"
+                                      >
+                                        Send Message to SU ({su} :{" "}
+                                        {prc ? prc.slice(0, 5) : ""})
+                                      </Box>
+                                      <Box flex={1} />
+                                      <Box
+                                        onClick={() => {
+                                          setSU(null)
+                                          peer1.close()
+                                        }}
+                                        color="#5137C5"
+                                        css={{
+                                          textDecoration: "underline",
+                                          cursor: "pointer",
+                                        }}
+                                      >
+                                        Disconnect
+                                      </Box>
+                                    </Flex>
+                                    <Textarea
+                                      value={msg}
+                                      onChange={e => setMsg(e.target.value)}
+                                      css={{ border: "1px solid #5137C5" }}
+                                    />
+
+                                    <Flex mt={2}>
+                                      <Box flex={1} />
+                                      <Box
+                                        onClick={async () => {
+                                          await peer1.sendMessage(
+                                            JSON.stringify({
+                                              msg: msg,
+                                              pid: prc,
+                                              type: "msg",
+                                            })
+                                          )
+                                          setMsg("")
+                                        }}
+                                        fontSize="16px"
+                                        color="#5137C5"
+                                        px={2}
+                                        css={{
+                                          borderRadius: "3px",
+                                          cursor: "pointer",
+                                          border: "1px solid #5137C5",
+                                          _hover: { opacity: 0.75 },
+                                        }}
+                                      >
+                                        Send
+                                      </Box>
+                                    </Flex>
+                                  </>
+                                ) : null}
+                              </>
+                            )}
+                          </Box>
                         </Box>
                       </Box>
-                    </Box>
-                    <Box
-                      flex={1}
-                      p={6}
-                      css={{ borderLeft: "1px solid  #5137C5" }}
-                    >
                       <Box
-                        fontSize="20px"
-                        fontWeight="bold"
-                        color="#5137C5"
-                        css={{ textDecoration: "underline" }}
-                        mb={2}
+                        flex={1}
+                        p={6}
+                        css={{ borderLeft: "1px solid  #5137C5" }}
                       >
-                        Received Messages
+                        <Box
+                          fontSize="20px"
+                          fontWeight="bold"
+                          color="#5137C5"
+                          css={{ textDecoration: "underline" }}
+                          mb={2}
+                        >
+                          Received Messages
+                        </Box>
+                        <Box>
+                          {map(m => {
+                            return (
+                              <Flex>
+                                <Box mr={4}>
+                                  [{m.type} : {m.id} : {m.date}]
+                                </Box>
+                                <Box>{m.msg}</Box>
+                              </Flex>
+                            )
+                          })(msgs)}
+                        </Box>
                       </Box>
-                      <Box>
-                        {map(m => {
-                          return (
-                            <Flex>
-                              <Box mr={4}>
-                                [{m.type} : {m.id} : {m.date}]
-                              </Box>
-                              <Box>{m.msg}</Box>
-                            </Flex>
-                          )
-                        })(msgs)}
-                      </Box>
-                    </Box>
-                  </>
-                )}
-              </Flex>
-            </>
-          )}
+                    </>
+                  )}
+                </Flex>
+              </>
+            )}
+          </Flex>
         </Flex>
       </Flex>
     </>
