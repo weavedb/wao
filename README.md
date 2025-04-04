@@ -626,8 +626,8 @@ Send a message.
 
 
 ```js
-const { err, mid, res, out } = await ao.msg({ 
-  data, action, tags, check, get, mode, limit
+const { err, mid, res, out } = await ao.msg({
+  data, act, tags, check, get, mode, limit
 })
 ```
 

@@ -1,6 +1,10 @@
 import { Link, ssr } from "arnext"
 import { Image, Box, Flex, Textarea } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
+import dayjs from "dayjs"
+import relativeTime from "dayjs/plugin/relativeTime"
+dayjs.extend(relativeTime)
+const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 import {
   includes,
   clone,
@@ -85,6 +89,7 @@ end)
 `
 
 export default function Home({}) {
+  const [subs, setSubs] = useState({})
   const [clients, setClients] = useState([])
   const [processes, setProcesses] = useState([])
   const [prc, setPRC] = useState(null)
@@ -92,6 +97,7 @@ export default function Home({}) {
   const [msgs, setMsgs] = useState([])
   const [msg2, setMsg2] = useState("")
   const [sus, setSUs] = useState([])
+  const [hbs, setHBs] = useState([])
   const [su, setSU] = useState(null)
   const [suid, setSUID] = useState(null)
   const [cid, setCID] = useState(null)
@@ -117,9 +123,8 @@ export default function Home({}) {
   ]
   useEffect(() => {
     ;(async () => {
-      ao = await new AO().init(acc[0])
+      ao = await new AO({ hb_url: "http://localhost:10001" }).init(acc[0])
       await ao.mem.init()
-      console.log(ao.mem)
       let _modules = []
       let mmap = {}
       for (let k in ao.mem.modules) {
@@ -140,7 +145,7 @@ export default function Home({}) {
     {
       key: "hb",
       name: "HyperBEAM Nodes",
-      desc: "WebSocket subscriptions to remote HyperBEAM nodes",
+      desc: "Websocket subscriptions to remote HyperBEAM nodes",
     },
     {
       key: "su",
@@ -205,6 +210,7 @@ export default function Home({}) {
               }}
               onClick={() => {
                 if (confirm("Disconnect from WAO Hub?")) {
+                  hub1.disconnect()
                   setSUID(null)
                   for (let k in peer2) peer2[k].close()
                   peer2 = {}
@@ -213,7 +219,7 @@ export default function Home({}) {
                 }
               }}
             >
-              Node ID : {suid}
+              WAO Hub : ws://localhost:8080
             </Flex>
           ) : (
             <Flex
@@ -237,7 +243,27 @@ export default function Home({}) {
                 }
                 hub1 = new Hub("ws://localhost:8080")
                 hub1.onMsg = async obj => {
+                  const recover = async (process, force) => {
+                    if (force || isNil(ao.mem.env[process])) {
+                      const { success } = await ao.recover(process)
+                      if (!success) {
+                        hub1.socket.send(
+                          JSON.stringify({
+                            id: obj.id,
+                            status: 404,
+                            type: "msg",
+                            error: `not found`,
+                          })
+                        )
+                      }
+                      return success
+                    }
+                    return true
+                  }
+                  console.log("New Msg:", obj)
                   if (obj.subtype === "dryrun") {
+                    let { process } = obj.message
+                    if (!(await recover(process))) return
                     const res2 = await ao.dryrun(obj.message)
                     delete res2.Memory
                     hub1.socket.send(
@@ -248,12 +274,29 @@ export default function Home({}) {
                         msg: JSON.stringify(res2),
                       })
                     )
+                    return
                   } else if (obj.subtype === "result") {
                     let { process, message } = obj
-                    // check if recovery is ongoing and
-                    if (isNil(ao.mem.env[process])) {
-                      const { success } = await ao.recover(process)
-                      if (!success) {
+                    // todo: check if recovery is ongoing and wait if so
+                    if (!(await recover(process))) return
+                    const slot = message
+                    if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
+                      let ok = false
+                      message = null
+                      let i = 0
+                      while (i < 3) {
+                        message = ao.mem.env[process]?.results?.[slot]
+                        if (message) break
+                        await wait(1000)
+                        i++
+                      }
+                    }
+                    if (isNil(message)) {
+                      // it's likely that hb is directly asking for a result without bundling
+                      await recover(process, true) // force recovery
+                      message = ao.mem.env[process]?.results?.[slot]
+                      console.log(message)
+                      if (isNil(message)) {
                         hub1.socket.send(
                           JSON.stringify({
                             id: obj.id,
@@ -265,10 +308,15 @@ export default function Home({}) {
                         return
                       }
                     }
-                    if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
-                      message = ao.mem.env[process]?.results?.[message]
+                    let res2
+                    let i = 0
+                    while (i < 3) {
+                      res2 = await ao.result({ message, process })
+                      if (res2) break
+                      await wait(1000)
+                      i++
                     }
-                    if (isNil(message)) {
+                    if (typeof res2 === "undefined") {
                       hub1.socket.send(
                         JSON.stringify({
                           id: obj.id,
@@ -277,11 +325,8 @@ export default function Home({}) {
                           error: `not found`,
                         })
                       )
+                      return
                     }
-                    const res2 = await ao.result({
-                      message,
-                      process,
-                    })
                     hub1.socket.send(
                       JSON.stringify({
                         id: obj.id,
@@ -290,14 +335,24 @@ export default function Home({}) {
                         msg: JSON.stringify(res2),
                       })
                     )
+                    return
                   } else {
                     const tags = tags =>
                       fromPairs(map(v => [v.name, v.value])(tags))
                     const t = tags(obj.message.http_msg.tags)
                     if (t.Type === "Process") {
                       const pid = await ao.spawn(obj.message)
+                      const val = ao.mem.env[pid]
+                      let mmap = {}
+                      for (let k in ao.mem.modules) mmap[ao.mem.modules[k]] = k
+                      setProcs(
+                        append({ txid: pid, module: [mmap[val.module]] }, procs)
+                      )
                     } else {
-                      const m = await ao.message(obj.message)
+                      let { process } = obj.message
+                      if (!(await recover(process))) return
+
+                      await ao.message(obj.message)
                     }
                     hub1.socket.send(
                       JSON.stringify({
@@ -307,9 +362,26 @@ export default function Home({}) {
                         msg: "success",
                       })
                     )
+
+                    return
                   }
                 }
+
+                hub1.onList = res => {
+                  setHBs(res.hb)
+                }
+                hub1.onSubscribe = res => {
+                  setSubs(res.accept)
+                }
+                hub1.onClose = () => {
+                  setSUID(null)
+                  setSubs({})
+                  setHBs([])
+                }
                 hub1.onRegister = id => {
+                  hub1.socket.send(
+                    JSON.stringify({ type: "list", target: "hb" })
+                  )
                   hub1.registerSU()
                   setSUID(id)
                 }
@@ -319,6 +391,7 @@ export default function Home({}) {
                   peer2[id].onDataChannelMessage = async msg => {
                     const _msg = JSON.parse(msg)
                     if (_msg.type === "msg") {
+                      console.log("New Message:", msg)
                       const p = ao.p(_msg.pid)
                       const res = await p.msg("Post", {
                         content: _msg.msg,
@@ -690,12 +763,86 @@ export default function Home({}) {
                     </Flex>
                   ))(ctypes)}
                 </Box>
+
                 {ctype === "hb" ? (
-                  <Box p={6}>
-                    {suid
-                      ? "Connected to O74OhzD1O_zE0uaKbaTQD1rfgTZEGMeXQ6M6M60TW_o"
-                      : "Not Connected"}
-                  </Box>
+                  suid ? (
+                    <Box p={4}>
+                      <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+                        HyperBEAM Nodes ( {hbs.length} )
+                      </Flex>
+                      {map(v => {
+                        return (
+                          <Flex
+                            py={2}
+                            align="center"
+                            css={{
+                              borderBottom: "1px solid #ddd",
+                              cursor: "pointer",
+                              _hover: { opacity: 0.75 },
+                            }}
+                          >
+                            <Box color="#222">{v.address}</Box>
+                            <Box ml={4} color="#222">
+                              {dayjs().fromNow(v.update)}
+                            </Box>
+                            {subs?.hb?.[v.address]?.["*"] ? (
+                              <Flex
+                                fontSize="16px"
+                                bg="white"
+                                color="#5137C5"
+                                px={4}
+                                ml={4}
+                                css={{
+                                  border: "1px solid #5137C5",
+                                  borderRadius: "5px",
+                                  cursor: "pointer",
+                                  _hover: { opacity: 0.75 },
+                                }}
+                                onClick={() => {
+                                  hub1.socket.send(
+                                    JSON.stringify({
+                                      type: "subscribe",
+                                      accept: { hb: { [v.address]: false } },
+                                    })
+                                  )
+                                }}
+                              >
+                                Unsubscribe
+                              </Flex>
+                            ) : (
+                              <Flex
+                                fontSize="16px"
+                                bg="white"
+                                color="#5137C5"
+                                px={4}
+                                ml={4}
+                                css={{
+                                  border: "1px solid #5137C5",
+                                  borderRadius: "5px",
+                                  cursor: "pointer",
+                                  _hover: { opacity: 0.75 },
+                                }}
+                                onClick={() => {
+                                  hub1.socket.send(
+                                    JSON.stringify({
+                                      type: "subscribe",
+                                      accept: {
+                                        hb: { [v.address]: { "*": true } },
+                                      },
+                                    })
+                                  )
+                                }}
+                              >
+                                Subscribe
+                              </Flex>
+                            )}
+                          </Flex>
+                        )
+                      })(hbs)}
+                    </Box>
+                  ) : (
+                    <Box p={4}>Not Connected </Box>
+                  )
                 ) : (
                   <>
                     <Box flex={1} p={6}>
