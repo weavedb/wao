@@ -199,7 +199,8 @@ export default class ArMemBase {
               let v3 = await this.db.get(v2)
               if (is(Uint8Array, v3.memory)) {
                 try {
-                  v3.memory = this.waosm.decompress(v3.memory, v3.original_size)
+                  v3.compressed = true
+                  //v3.memory = this.waosm.decompress(v3.memory, v3.original_size)
                 } catch (e) {
                   console.log(e)
                   v3.memory = decompress(v3.memory)
