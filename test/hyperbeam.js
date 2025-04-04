@@ -24,7 +24,7 @@ const URL = "http://localhost:10001"
 describe("Hyperbeam", function () {
   after(() => setTimeout(() => process.exit(), 100))
   it.only("should interact with a hyperbeam node", async () => {
-    //const server = new Server({ port: 4000, log: true, hb_url: URL })
+    const server = new Server({ port: 4000, log: true, hb_url: URL })
     const hb = await new HB({ url: "http://localhost:10001" }).init(jwk)
     const metrics = await hb.metrics()
     const info = await hb.info()
