@@ -23,6 +23,13 @@ export default class Hub {
     this.socket.onmessage = event => {
       const message = JSON.parse(event.data)
       switch (message.type) {
+        case "subscribe":
+          if (this.onSubscribe) this.onSubscribe(message)
+          break
+
+        case "list":
+          if (this.onList) this.onList(message)
+          break
         case "msg":
           if (this.onMsg) this.onMsg(message)
           break

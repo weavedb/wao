@@ -1,7 +1,7 @@
 const express = require("express")
 const cors = require("cors")
 const bodyParser = require("body-parser")
-const { keys, omit, isNil } = require("ramda")
+const { keys, omit, isNil, mergeLeft } = require("ramda")
 const { generateId, toANS104Request, parseSignatureInput } = require("./utils")
 const bundler = require("./bundler")
 const cu = require("./cu")
@@ -11,8 +11,12 @@ const ws_server = new WebSocket.Server({ port: 8080 })
 
 let sus = {}
 let cbs = {}
-bundler(sus, cbs)
-cu(sus, cbs)
+let hbs = {
+  O74OhzD1O_zE0uaKbaTQD1rfgTZEGMeXQ6M6M60TW_o: { update: Date.now() },
+}
+
+bundler(sus, cbs, hbs)
+cu(sus, cbs, hbs)
 
 ws_server.on("connection", socket => {
   const clientId = generateId()
@@ -24,13 +28,28 @@ ws_server.on("connection", socket => {
     address: null,
     accept: {
       pid: {},
-      hb: { O74OhzD1O_zE0uaKbaTQD1rfgTZEGMeXQ6M6M60TW_o: { "*": true } },
+      hb: {},
     },
   }
   socket.send(JSON.stringify({ type: "registered", id: clientId }))
   socket.on("message", message => {
     const data = JSON.parse(message)
-    if (data.type === "msg") {
+    if (data.type === "list") {
+      if (data.target === "hb") {
+        let hb = []
+        for (const k in hbs) {
+          hb.push({ address: k, update: hbs[k].update })
+        }
+        socket.send(JSON.stringify({ hb, type: "list" }))
+      } else {
+        socket.send(JSON.stringify({ error: "unknown target" }))
+      }
+    } else if (data.type === "subscribe") {
+      sus[clientId].accept = mergeLeft(data.accept, sus[clientId].accept)
+      socket.send(
+        JSON.stringify({ type: "subscribe", accept: sus[clientId].accept })
+      )
+    } else if (data.type === "msg") {
       if (cbs[data.id]) {
         cbs[data.id].status(data.status).send(data.msg)
         delete cbs[data.id]
@@ -57,7 +76,7 @@ ws_server.on("connection", socket => {
   })
 
   socket.on("close", () => {
-    console.log("su disconnected", clientId)
+    console.log("ws disconnected", clientId)
     delete sus[clientId]
   })
 })
