@@ -1,7 +1,7 @@
 import { Link, ssr } from "arnext"
 import { Icon } from "@chakra-ui/react"
 import { Image, Box, Flex, Textarea } from "@chakra-ui/react"
-import { useEffect, useState } from "react"
+import { useRef, useEffect, useState } from "react"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import { FaAngleRight } from "react-icons/fa6"
@@ -25,7 +25,7 @@ import { AO, acc } from "wao/web"
 import { HB } from "wao"
 import Hub from "../lib/hub"
 import WebRTC from "../lib/webrtc"
-
+import Editor from "@monaco-editor/react"
 let peer1 = null
 let peer2 = {}
 
@@ -126,6 +126,26 @@ export default function Home({}) {
     "Storage",
     "Database",
   ]
+  const _setModule = id => {
+    let mmap = {}
+    for (let k in ao.mem.modules) {
+      mmap[ao.mem.modules[k]] = k
+    }
+    let _procs = []
+    let mod = clone(ao.mem.txs[id])
+    mod.processes = []
+    for (let k in ao.mem.env) {
+      for (let v of ao.mem.msgs[k]?.tags ?? []) {
+        if (v.name === "Module" && v.value === mod.id) {
+          mod.processes.push(k)
+          const val = ao.mem.env[k]
+          _procs.push({ txid: k, module: mmap[val.module] })
+        }
+      }
+    }
+    setProcs(_procs)
+    setModule(mod)
+  }
   useEffect(() => {
     ;(async () => {
       ao = await new AO({ hb_url: "http://localhost:10001" }).init(acc[0])
@@ -143,6 +163,7 @@ export default function Home({}) {
         _procs.push({ txid: k, module: mmap[val.module] })
       }
       setProcs(_procs)
+      _setModule("JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g")
       setInit(true)
     })()
   }, [])
@@ -174,6 +195,12 @@ export default function Home({}) {
     },
   ]
   const modmap = indexBy(prop("txid"))(modules ?? [])
+  const editorRef = useRef(null)
+
+  function handleEditorDidMount(editor, monaco) {
+    editorRef.current = editor
+  }
+
   return (
     <>
       <Flex
@@ -194,16 +221,15 @@ export default function Home({}) {
           <Flex
             fontWeight="bold"
             color="#5137C5"
-            fontSize="18px"
+            fontSize="14px"
             align="center"
-            mr={4}
           >
             WAO LOCALNET
           </Flex>
           <Flex flex={1} />
           {suid ? (
             <Flex
-              fontSize="16px"
+              fontSize="14px"
               bg="white"
               color="#5137C5"
               py={1}
@@ -229,7 +255,7 @@ export default function Home({}) {
             </Flex>
           ) : (
             <Flex
-              fontSize="16px"
+              fontSize="14px"
               color="white"
               bg="#5137C5"
               py={1}
@@ -343,7 +369,7 @@ export default function Home({}) {
                       let mmap = {}
                       for (let k in ao.mem.modules) mmap[ao.mem.modules[k]] = k
                       setProcs(
-                        append({ txid: pid, module: [mmap[val.module]] }, procs)
+                        append({ txid: pid, module: mmap[val.module] }, procs)
                       )
                     } else {
                       let { process } = obj.message
@@ -434,7 +460,7 @@ export default function Home({}) {
       </Flex>
       <Flex h="100vh" css={{ zIndex: 0 }} pt="50px">
         {!init ? null : (
-          <Flex w="200px" bg="#eee" direction="column">
+          <Flex w="150px" bg="#eee" direction="column">
             {map(v => {
               return (
                 <Flex
@@ -470,7 +496,7 @@ export default function Home({}) {
             })(tabs)}{" "}
           </Flex>
         )}
-        <Flex direction="column" flex={1}>
+        <Flex direction="column">
           <Flex
             h="50px"
             align="center"
@@ -545,7 +571,7 @@ export default function Home({}) {
               </>
             )}
           </Flex>
-          <Flex flex={1}>
+          <Flex flex={1} w={init ? "950px" : "100vw"}>
             {!init ? (
               <Flex
                 w="100%"
@@ -624,7 +650,10 @@ export default function Home({}) {
                           >
                             {v.name}
                           </Box>
-                          <Box flex={1} css={{ wordBreak: "break-all" }}>
+                          <Box
+                            flex={1}
+                            css={{ wordBreak: "break-all", whiteSpace: "wrap" }}
+                          >
                             {v.value}
                           </Box>
                         </Flex>
@@ -638,7 +667,11 @@ export default function Home({}) {
                         as="pre"
                         bg="#eee"
                         p={4}
-                        css={{ borderRadius: "3px" }}
+                        css={{
+                          borderRadius: "3px",
+                          wordBreak: "break-all",
+                          whiteSpace: "wrap",
+                        }}
                       >
                         {message.http_msg?.data}
                       </Box>
@@ -652,7 +685,11 @@ export default function Home({}) {
                         as="pre"
                         bg="#eee"
                         p={4}
-                        css={{ borderRadius: "3px" }}
+                        css={{
+                          borderRadius: "3px",
+                          wordBreak: "break-all",
+                          whiteSpace: "wrap",
+                        }}
                       >
                         {JSON.stringify(message.res, undefined, 2)}
                       </Box>
@@ -766,24 +803,7 @@ export default function Home({}) {
                       direction="column"
                       justify="center"
                       onClick={() => {
-                        let mmap = {}
-                        for (let k in ao.mem.modules) {
-                          mmap[ao.mem.modules[k]] = k
-                        }
-                        let _procs = []
-                        let mod = clone(ao.mem.txs[v.txid])
-                        mod.processes = []
-                        for (let k in ao.mem.env) {
-                          for (let v of ao.mem.msgs[k]?.tags ?? []) {
-                            if (v.name === "Module" && v.value === mod.id) {
-                              mod.processes.push(k)
-                              const val = ao.mem.env[k]
-                              _procs.push({ txid: k, module: mmap[val.module] })
-                            }
-                          }
-                        }
-                        setProcs(_procs)
-                        setModule(mod)
+                        _setModule(v.txid)
                       }}
                       css={{
                         borderBottom: "1px solid #ddd",
@@ -891,28 +911,34 @@ export default function Home({}) {
 
                   {ctype === "hb" ? (
                     suid ? (
-                      <Box p={4}>
-                        <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+                      <Box>
+                        <Flex
+                          px={4}
+                          fontWeight="bold"
+                          color="#5137C5"
+                          h="50px"
+                          align="center"
+                        >
                           HyperBEAM Nodes ( {hbs.length} )
                         </Flex>
                         {map(v => {
                           return (
                             <Flex
+                              h="50px"
+                              fontSize="14px"
                               py={2}
+                              px={4}
                               align="center"
                               css={{
-                                borderBottom: "1px solid #ddd",
+                                borderTop: "1px solid #ddd",
                                 cursor: "pointer",
                                 _hover: { opacity: 0.75 },
                               }}
                             >
                               <Box color="#222">{v.address}</Box>
-                              <Box ml={4} color="#222">
-                                {dayjs().fromNow(v.update)}
-                              </Box>
+                              <Box flex={1}></Box>
                               {subs?.hb?.[v.address]?.["*"] ? (
                                 <Flex
-                                  fontSize="16px"
                                   bg="white"
                                   color="#5137C5"
                                   px={4}
@@ -936,9 +962,8 @@ export default function Home({}) {
                                 </Flex>
                               ) : (
                                 <Flex
-                                  fontSize="16px"
-                                  bg="white"
-                                  color="#5137C5"
+                                  color="#ddd"
+                                  bg="#5137C5"
                                   px={4}
                                   ml={4}
                                   css={{
@@ -1310,6 +1335,112 @@ export default function Home({}) {
             )}
           </Flex>
         </Flex>
+        {!init ? null : (
+          <Flex
+            direction="column"
+            flex={1}
+            css={{ borderLeft: "1px solid #eee" }}
+          >
+            <Flex h="50px" align="center" px={4} color="#5137C5">
+              <Box>Lua Editor</Box>
+              <Box flex={1} />
+              <Flex
+                mx={4}
+                py={1}
+                px={4}
+                fontSize="12px"
+                color="#ddd"
+                bg="#5137C5"
+                css={{
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  border: "1px solid #5137C5",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  if (!proc) {
+                    alert("Select a processl")
+                  } else {
+                    const p = ao.p(proc.id)
+                    const lua = editorRef.current.getValue()
+                    const res = await p.msg("Eval", { data: lua })
+                    console.log(res)
+                  }
+                }}
+              >
+                Eval
+              </Flex>
+              <Flex
+                mr={4}
+                py={1}
+                px={4}
+                fontSize="12px"
+                color="#ddd"
+                bg="#5137C5"
+                css={{
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  border: "1px solid #5137C5",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  const lua = editorRef.current.getValue()
+                  let pid, p
+                  if (lua === "") {
+                    ;({ pid, p } = await ao.deploy({ module: module.id }))
+                  } else {
+                    ;({ pid, p } = await ao.deploy({
+                      src_data,
+                      module: module.id,
+                    }))
+                  }
+                  const v = pid
+                  let _proc = clone(ao.mem.env[v])
+                  delete _proc.memory
+                  _proc.tags = clone(ao.mem.msgs[v]?.tags ?? [])
+                  _proc.id = v
+                  setProc(_proc)
+                  setMessages(map(v => ao.mem.msgs[v])(_proc.results))
+
+                  let mmap = {}
+                  for (let k in ao.mem.modules) mmap[ao.mem.modules[k]] = k
+                  setProcs(
+                    append({ txid: pid, module: mmap[_proc.module] }, procs)
+                  )
+                  setTab("Processes")
+                }}
+              >
+                Spawn
+              </Flex>
+              <Flex
+                py={1}
+                px={4}
+                fontSize="12px"
+                color="#ddd"
+                bg="#5137C5"
+                css={{
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  border: "1px solid #5137C5",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  if (confirm("Would you like to clear the editor?")) {
+                    editorRef.current.setValue("")
+                  }
+                }}
+              >
+                Clear
+              </Flex>
+            </Flex>
+            <Editor
+              height="calc(100vh - 100px)"
+              theme="vs-dark"
+              defaultLanguage="lua"
+              onMount={handleEditorDidMount}
+            />
+          </Flex>
+        )}
       </Flex>
     </>
   )
