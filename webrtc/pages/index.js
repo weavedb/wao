@@ -486,7 +486,7 @@ export default function Home({}) {
                 {map(v => {
                   const tags = tags =>
                     fromPairs(map(v => [v.name, v.value])(tags))
-                  const t = tags(v.http_msg.tags ?? [])
+                  const t = tags(v.http_msg?.tags ?? [])
                   return (
                     <Flex
                       h="50px"
@@ -549,11 +549,22 @@ export default function Home({}) {
                       </Flex>
                     )
                   })(message.http_msg.tags)}
+                  <Flex mt={4} fontWeight="bold" mb={2} color="#5137C5">
+                    Data
+                  </Flex>
+                  <code>
+                    <Box as="pre" bg="#eee" p={4} css={{ borderRadius: "3px" }}>
+                      {message.http_msg?.data}
+                    </Box>
+                  </code>
+
                   <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
                     Result
                   </Flex>
                   <code>
-                    <pre>{JSON.stringify(message.res, undefined, 2)}</pre>
+                    <Box as="pre" bg="#eee" p={4} css={{ borderRadius: "3px" }}>
+                      {JSON.stringify(message.res, undefined, 2)}
+                    </Box>
                   </code>
                 </Box>
               )}
