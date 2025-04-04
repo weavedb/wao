@@ -4,7 +4,7 @@ import express from "express"
 import cors from "cors"
 import base64url from "base64url"
 import { DataItem } from "arbundles"
-import { tags, toGraphObj, optAO } from "./utils.js"
+import { tags, toGraphObj, optAO, wait } from "./utils.js"
 import { connect } from "./aoconnect.js"
 import { GQL, cu, su, mu } from "./test.js"
 import bodyParser from "body-parser"
@@ -130,6 +130,8 @@ class Server {
     app.use(cors())
     app.use("/tx", bodyParser.raw({ type: "*/*", limit: "100mb" }))
     app.post("/tx", async (req, res) => {
+      // todo: items from HB has wrong sigs and ids
+      return res.status(200).send("Success")
       if (!Buffer.isBuffer(req.body)) {
         console.log("BD: Invalid body | expected raw Buffer")
         return res.status(400).send("Invalid body: expected raw Buffer")
@@ -218,12 +220,8 @@ class Server {
       res.status(400)
       res.send(null)
     })
-    app.get("/tx_anchor", async (req, res) => {
-      res.send(this.mem.getAnchor())
-    })
-    app.get("/mine", async (req, res) => {
-      res.json(req.params)
-    })
+    app.get("/tx_anchor", async (req, res) => res.send(this.mem.getAnchor()))
+    app.get("/mine", async (req, res) => res.json(req.params))
     app.get("/:id", async (req, res) => {
       const _data = await this._ar.data(req.params.id)
       if (!_data) {
@@ -233,9 +231,7 @@ class Server {
         res.send(Buffer.from(_data, "base64"))
       }
     })
-    app.get("/price/:id", async (req, res) => {
-      res.send("0")
-    })
+    app.get("/price/:id", async (req, res) => res.send("0"))
     app.post("/graphql", async (req, res) => {
       try {
         const { query, variables } = req.body
@@ -414,14 +410,18 @@ class Server {
           return
         }
       }
+      const slot = message
       if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
-        message = this.mem.env[process]?.results?.[message]
+        message = this.mem.env[process]?.results?.[slot]
       }
       if (isNil(message)) {
-        console.log("message not found", message, req.params)
-        res.status(404)
-        res.json({ error: `Not Found` })
-        return
+        await this.recover(process)
+        message = this.mem.env[process]?.results?.[slot]
+        if (isNil(message)) {
+          res.status(404)
+          res.json({ error: `Not Found` })
+          return
+        }
       }
       const res2 = await this.result({
         message,

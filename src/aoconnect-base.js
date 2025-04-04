@@ -27,6 +27,8 @@ import {
 } from "ramda"
 
 let onRecovery = {}
+let ongoing = {}
+
 export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
   return (mem, { cache, log = false, extensions = {}, hb } = {}) => {
     const isMem = mem?.__type__ === "mem"
@@ -110,11 +112,21 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       let id, owner, item, __tags
       let msg_owner = mu.addr
       if (ar.isHttpMsg(opt.http_msg)) {
-        id = opt.http_msg.target
-        ;({ owner, item, tags: __tags } = await ar.httpmsg(opt.http_msg, id))
-        opt.tags = buildTags(null, __tags)
-        opt.data = opt.http_msg.data
-        msg_owner = owner
+        id = opt.id ?? opt.http_msg.target
+        if (ongoing[id]) {
+          let i = 0
+          while (i < 30 && ongoing[id]) {
+            await wait(100)
+            i++
+          }
+          return id
+        } else {
+          ongoing[id] = true
+          ;({ owner, item, tags: __tags } = await ar.httpmsg(opt.http_msg, id))
+          opt.tags = buildTags(null, __tags)
+          opt.data = opt.http_msg.data
+          msg_owner = owner
+        }
       } else {
         opt.tags = buildTags(
           null,
@@ -240,6 +252,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         p.span = int
       }
       await mem.set(p, "env", id)
+      delete ongoing[id]
       return id
     }
 
@@ -323,6 +336,11 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           })
           mem.env[opt.process].handle = p.handle
         }
+        if (p.compressed) {
+          const start = Date.now()
+          p.memory = mem.waosm.decompress(p.memory, p.original_size)
+          p.compressed = false
+        }
         const res = await p.handle(p.memory, msg, _env)
         p.memory = res.Memory
         delete res.Memory
@@ -364,7 +382,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             })
           }
         }
-
         return id
       } catch (e) {
         console.log(e)
@@ -376,15 +393,26 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       let owner = ""
       let item = null
       if (ar.isHttpMsg(opt.http_msg)) {
-        id = opt.http_msg.target
-        ;({ owner, item } = await ar.httpmsg(opt.http_msg, id))
-        // check if process exists, and recover if necessary
-        const p = await mem.get("env", opt.process)
-        const new_slot = opt.slot * 1
-        const last_slot = !p ? -1 : p.results.length - 1
-        if (last_slot + 1 < new_slot) {
-          if (!hb || opt.recovery) return null
-          await recover(opt.process)
+        id = opt.id ?? opt.http_msg.target
+        const key = `${opt.process}:${id}}`
+        if (ongoing[key]) {
+          let i = 0
+          while (i < 30 && ongoing[key]) {
+            await wait(100)
+            i++
+          }
+          return id
+        } else {
+          ongoing[key] = true
+          ;({ owner, item } = await ar.httpmsg(opt.http_msg, id))
+          // check if process exists, and recover if necessary
+          const p = await mem.get("env", opt.process)
+          const new_slot = opt.slot * 1
+          const last_slot = !p ? -1 : p.results.length - 1
+          if (last_slot + 1 < new_slot) {
+            if (!hb || opt.recovery) return null
+            await recover(opt.process)
+          }
         }
       } else {
         let id = opt?.item?.id ?? ""
@@ -446,6 +474,11 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             })
             mem.env[opt.process].handle = p.handle
           }
+          if (p.compressed) {
+            const start = Date.now()
+            p.memory = mem.waosm.decompress(p.memory, p.original_size)
+            p.compressed = false
+          }
           const res = await p.handle(p.memory, msg, _env)
           p.memory = res.Memory
           delete res.Memory
@@ -453,7 +486,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           await mem.set(p, "env", opt.process)
           const _msg = { ...dissoc("signer", _opt), res }
           await mem.set(_msg, "msgs", id)
-          return id
         } catch (e) {
           console.log(e)
         }
@@ -466,6 +498,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           signer: mu.signer,
         })
       }
+      const key = `${opt.process}:${id}}`
+      delete ongoing[key]
       return id
     }
     const recover = async (pid, next) => {
@@ -512,6 +546,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
               let _tags = tags(item.tags)
               if (_tags.Type === "Process") {
                 await spawn({
+                  id: v.node.message.Id,
                   http_msg: item,
                   scheduler: _tags.Scheduler,
                   module: _tags.Module,
@@ -520,6 +555,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
                 })
               } else {
                 await message({
+                  id: v.node.message.Id,
                   process: pid,
                   http_msg: item,
                   slot: v.cursor,
@@ -539,7 +575,9 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       return { recovered: count, pid, success }
     }
 
-    const result = async opt => (await mem.get("msgs", opt.message))?.res
+    const result = async opt => {
+      return (await mem.get("msgs", opt.message))?.res
+    }
 
     return {
       message,
@@ -628,6 +666,11 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
               module: await mem.getTx(mod),
             })
             mem.env[opt.process].handle = p.handle
+          }
+          if (p.compressed) {
+            const start = Date.now()
+            p.memory = mem.waosm.decompress(p.memory, p.original_size)
+            p.compressed = false
           }
           const res = await p.handle(p.memory, msg, _env)
           delete res.Memory

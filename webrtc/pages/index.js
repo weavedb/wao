@@ -281,21 +281,12 @@ export default function Home({}) {
                     if (!(await recover(process))) return
                     const slot = message
                     if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
-                      let ok = false
-                      message = null
-                      let i = 0
-                      while (i < 3) {
-                        message = ao.mem.env[process]?.results?.[slot]
-                        if (message) break
-                        await wait(1000)
-                        i++
-                      }
+                      message = ao.mem.env[process]?.results?.[slot]
                     }
                     if (isNil(message)) {
                       // it's likely that hb is directly asking for a result without bundling
                       await recover(process, true) // force recovery
                       message = ao.mem.env[process]?.results?.[slot]
-                      console.log(message)
                       if (isNil(message)) {
                         hub1.socket.send(
                           JSON.stringify({
@@ -310,10 +301,10 @@ export default function Home({}) {
                     }
                     let res2
                     let i = 0
-                    while (i < 3) {
+                    while (i < 30) {
                       res2 = await ao.result({ message, process })
                       if (res2) break
-                      await wait(1000)
+                      await wait(100)
                       i++
                     }
                     if (typeof res2 === "undefined") {
@@ -351,7 +342,6 @@ export default function Home({}) {
                     } else {
                       let { process } = obj.message
                       if (!(await recover(process))) return
-
                       await ao.message(obj.message)
                     }
                     hub1.socket.send(

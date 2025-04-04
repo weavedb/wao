@@ -6,6 +6,7 @@ const Arweave = _Arweave.default ?? _Arweave
 const arweave = Arweave.init()
 const { generateId, toANS104Request, parseSignatureInput } = require("./utils")
 
+// todo: bundler is unusable due to incorrect ids and signature
 const bundler = (sus, cbs, hbs) => {
   const app = express()
   app.use(cors())
@@ -18,7 +19,6 @@ const bundler = (sus, cbs, hbs) => {
     const lines = req.body.toString("utf8").split(/\r?\n/)
     const sigs = {}
     let currentKey = null
-
     for (let line of lines) {
       const trimmed = line.trim()
       if (/^--[a-zA-Z0-9_\-=]+/.test(trimmed)) {
@@ -54,7 +54,7 @@ const bundler = (sus, cbs, hbs) => {
         headers: req.headers,
         url: `http://ao.com${req.headers.path}`,
       }
-    )*/
+      )*/
       const item = toANS104Request(sigs).item
       if ((sigs.slot === "0" || sigs.type === "Process") && sigs.module) {
         for (let v of item.tags) if (v.name === "Type") v.value = "Process"
@@ -82,7 +82,6 @@ const bundler = (sus, cbs, hbs) => {
         return res.status(500).send("unknown error")
       }
     } catch (e) {
-      console.log(e, req.originalUrl)
       return res.status(500).send("unknown error")
     }
   })
@@ -97,11 +96,10 @@ const bundler = (sus, cbs, hbs) => {
       let p = sus[k].accept.pid[pid]
       if (hb?.["*"] || hb?.[pid] || p?.["*"] || p?.[opt.address]) {
         const socket = sus[k].socket
-        console.log("sending message to client:", k)
-        exists = true
+        /*exists = true
         socket.send(
           JSON.stringify({ type: "msg", subtype: "message", id, message: opt })
-        )
+        )*/
       }
     }
     res.status(200).send("success")
