@@ -3891,7 +3891,7 @@ data-view-byte-offset@^1.0.0:
     es-errors "^1.3.0"
     is-data-view "^1.0.1"
 
-dayjs@~1.11.5:
+dayjs@^1.11.13, dayjs@~1.11.5:
   version "1.11.13"
   resolved "https://registry.yarnpkg.com/dayjs/-/dayjs-1.11.13.tgz#92430b0139055c3ebb60150aa13e860a4b5a366c"
   integrity sha512-oaMBel6gjolK862uaPQOVTA7q3TZhuSvuMQAAglQDOWYO9A91IrAOUJEyKVlqJlHE0vq5p5UXxzdPfMH/x6xNg==
@@ -8414,10 +8414,10 @@ vlq@^2.0.4:
   resolved "https://registry.npmjs.org/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.14.0:
-  version "0.14.0"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.14.0.tgz#a3f958fab26318ddbda42256a6033eba08d64761"
-  integrity sha512-igJRIampwFwpqm65BDOm7gToW8mOaLBwJy/40JWqyAu5au/B8nDF1RnNK04mV6S2XhVtwxlcZwzqlTfCOfS1xg==
+wao@^0.14.1:
+  version "0.14.1"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.14.1.tgz#26468a9036c9a311db3ede911f750c1f3fb84b10"
+  integrity sha512-F9aLv6KFVetGdGD3Z6G619iCjz+ZV3vIkOkI3sGWCx3qc2P5hH4AL8OaKfVlrL6tMSpt3zuFMB6w8pRYO9n1qQ==
   dependencies:
     "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"

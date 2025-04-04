@@ -2,6 +2,7 @@ import MAO from "./ao.js"
 import { createDataItemSigner } from "@permaweb/aoconnect"
 import { srcs, buildTags } from "./utils.js"
 import { mergeLeft, is, map } from "ramda"
+import HB from "./hb.js"
 
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 let log = `
@@ -49,6 +50,7 @@ const renderLogs = logs => {
 
 class AO extends MAO {
   constructor(opt = {}) {
+    if (opt.hb_url) opt.hb = new HB({ url: opt.hb_url })
     super({ ...opt, in_memory: true })
     this.in_memory = true
     this.createDataItemSigner = opt.createDataItemSigner ?? createDataItemSigner
