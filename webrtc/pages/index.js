@@ -108,6 +108,7 @@ export default function Home({}) {
   const [module, setModule] = useState(null)
   const [procs, setProcs] = useState([])
   const [proc, setProc] = useState(null)
+  const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
   const [ctype, setCtype] = useState("hb")
 
@@ -482,28 +483,44 @@ export default function Home({}) {
           ) : tab === "Messages" ? (
             <Flex>
               <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
-                {map(v => (
-                  <Flex
-                    h="25px"
-                    bg={v === message?.id ? "#5137C5" : "white"}
-                    fontSize="12px"
-                    p={4}
-                    direction="column"
-                    justify="center"
-                    onClick={() => {
-                      let _msg = clone(ao.mem.msgs[v])
-                      _msg.id = v
-                      setMessage(_msg)
-                    }}
-                    css={{
-                      borderBottom: "1px solid #ddd",
-                      cursor: "pointer",
-                      _hover: { opacity: 0.75 },
-                    }}
-                  >
-                    <Box color={v !== message?.id ? "#222" : "#ddd"}>{v}</Box>
-                  </Flex>
-                ))(proc?.results || [])}
+                {map(v => {
+                  const tags = tags =>
+                    fromPairs(map(v => [v.name, v.value])(tags))
+                  const t = tags(v.http_msg.tags ?? [])
+                  return (
+                    <Flex
+                      h="50px"
+                      bg={v.id === message?.id ? "#5137C5" : "white"}
+                      fontSize="12px"
+                      p={4}
+                      direction="column"
+                      justify="center"
+                      onClick={() => {
+                        let _msg = clone(ao.mem.msgs[v.id])
+                        _msg.id = v.id
+                        setMessage(_msg)
+                      }}
+                      css={{
+                        borderBottom: "1px solid #ddd",
+                        cursor: "pointer",
+                        _hover: { opacity: 0.75 },
+                      }}
+                    >
+                      <Flex
+                        fontWeight="bold"
+                        color={v.id !== message?.id ? "#5137C5" : "#ddd"}
+                      >
+                        <Box w="20px" mr={2}>
+                          [{v.slot}]
+                        </Box>
+                        <Box>{t.Type === "Process" ? "Process" : t.Action}</Box>
+                      </Flex>
+                      <Box color={v.id !== message?.id ? "#222" : "#ddd"}>
+                        {v.id}
+                      </Box>
+                    </Flex>
+                  )
+                })(messages)}
               </Box>
               {!message ? null : (
                 <Box px={4} py={2} fontSize="12px">
@@ -558,6 +575,7 @@ export default function Home({}) {
                       _proc.tags = clone(ao.mem.msgs[v.txid]?.tags ?? [])
                       _proc.id = v.txid
                       setProc(_proc)
+                      setMessages(map(v => ao.mem.msgs[v])(_proc.results))
                     }}
                     css={{
                       borderBottom: "1px solid #ddd",
@@ -617,14 +635,19 @@ export default function Home({}) {
                         _hover: { opacity: 0.75 },
                       }}
                       onClick={() => {
-                        let _msg = clone(ao.mem.msgs[v])
-                        _msg.id = v
+                        let _msg = clone(ao.mem.msgs[v.id])
+                        _msg.id = v.id
                         setTab("Messages")
                       }}
                     >
-                      <Box color="#222">{v}</Box>
+                      <Flex color="#222">
+                        <Box w="25px" mr={2}>
+                          [{v.slot}]
+                        </Box>
+                        <Box>{v.id}</Box>
+                      </Flex>
                     </Flex>
-                  ))(proc.results)}
+                  ))(messages)}
                 </Box>
               )}
             </Flex>
@@ -707,6 +730,7 @@ export default function Home({}) {
                         _proc.tags = clone(ao.mem.msgs[v]?.tags ?? [])
                         _proc.id = v
                         setProc(_proc)
+                        setMessages(map(v => ao.mem.msgs[v])(_proc.results))
                         setTab("Processes")
                       }}
                     >
