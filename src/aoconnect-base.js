@@ -318,7 +318,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           p.handle = await AoLoader(wasm, {
             format,
             WeaveDrive: wdrive,
-            spawn: (await mem.getTx(p.id)).item,
+            spawn: (await mem.getTx(p.id))?.item,
             module: await mem.getTx(mod),
           })
           mem.env[opt.process].handle = p.handle
@@ -382,7 +382,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         const p = await mem.get("env", opt.process)
         const new_slot = opt.slot * 1
         const last_slot = !p ? -1 : p.results.length - 1
-        if (last_slot + 1 !== new_slot) {
+        if (last_slot + 1 < new_slot) {
           if (!hb || opt.recovery) return null
           await recover(opt.process)
         }
@@ -394,7 +394,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
 
       const p = await mem.get("env", opt.process)
       if (!p) return null
-
       if (!opt.item && opt.signer) {
         opt.tags = buildTags(
           null,
@@ -442,7 +441,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             p.handle = await AoLoader(wasm, {
               format,
               WeaveDrive: wdrive,
-              spawn: (await mem.getTx(p.id)).item,
+              spawn: (await mem.getTx(p.id))?.item,
               module: await mem.getTx(mod),
             })
             mem.env[opt.process].handle = p.handle
