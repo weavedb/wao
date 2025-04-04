@@ -6,7 +6,7 @@ const Arweave = _Arweave.default ?? _Arweave
 const arweave = Arweave.init()
 const { generateId, toANS104Request, parseSignatureInput } = require("./utils")
 
-const bundler = (sus, cbs) => {
+const bundler = (sus, cbs, hbs) => {
   const app = express()
   app.use(cors())
   app.use("/tx", bodyParser.raw({ type: "*/*", limit: "100mb" }))
@@ -39,6 +39,8 @@ const bundler = (sus, cbs) => {
     const input = parseSignatureInput(req.headers["signature-input"])
     const key = { kty: "RSA", n: input.keyid, e: "AQAB" }
     const address = await arweave.wallets.jwkToAddress(key)
+    hbs[address] ??= {}
+    hbs[address].update = Date.now()
     /*
       const verifier = createVerifier(
       createPublicKey({ key, format: "jwk" }),
@@ -54,7 +56,7 @@ const bundler = (sus, cbs) => {
       }
     )*/
       const item = toANS104Request(sigs).item
-      if (sigs.slot === "0" || sigs.type === "Process") {
+      if ((sigs.slot === "0" || sigs.type === "Process") && sigs.module) {
         for (let v of item.tags) if (v.name === "Type") v.value = "Process"
         await message(
           {
@@ -86,17 +88,36 @@ const bundler = (sus, cbs) => {
   })
 
   async function message(opt, res) {
+    const id = generateId()
+    cbs[id] = res
+    let exists = false
     for (let k in sus) {
       let hb = sus[k].accept.hb[opt.address]
       let pid = opt.process
       let p = sus[k].accept.pid[pid]
       if (hb?.["*"] || hb?.[pid] || p?.["*"] || p?.[opt.address]) {
         const socket = sus[k].socket
-        const id = generateId()
-        cbs[id] = res
-        socket.send(JSON.stringify({ type: "msg", id, message: opt }))
+        console.log("sending message to client:", k)
+        exists = true
+        socket.send(
+          JSON.stringify({ type: "msg", subtype: "message", id, message: opt })
+        )
       }
     }
+    res.status(200).send("success")
+    delete cbs[id]
+    /*
+    if (!exists) {
+      res.status(200).send("success")
+      delete cbs[id]
+    } else {
+      setTimeout(() => {
+        if (cbs[id]) {
+          res.status(200).send("success")
+          delete cbs[id]
+        }
+      }, 10000)
+    }*/
   }
 
   const server = app.listen(4001, () => console.log(`BD on port 4001`))
