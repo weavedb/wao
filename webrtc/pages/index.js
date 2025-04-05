@@ -5,6 +5,11 @@ import { useRef, useEffect, useState } from "react"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import { FaAngleRight } from "react-icons/fa6"
+import lf from "localforage"
+function generateId() {
+  return Math.random().toString(36).substring(2, 15)
+}
+
 dayjs.extend(relativeTime)
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 import {
@@ -33,8 +38,7 @@ let hub1 = null
 let hub2 = null
 let ao = null
 
-const src_data = `
--- Initialize a table to store messages
+const src_data = `-- Initialize a table to store messages
 local messages = {}
 local MAX_MESSAGES = 10
 local json = require("json")
@@ -89,8 +93,7 @@ Handlers.add("Get", "Get", function (msg)
       Total = #messages
     })
   })
-end)
-`
+end)`
 
 export default function Home({}) {
   const [subs, setSubs] = useState({})
@@ -115,9 +118,11 @@ export default function Home({}) {
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
   const [ctype, setCtype] = useState("hb")
-
+  const [files, setFiles] = useState([])
+  const [file, setFile] = useState(null)
   const tabs = [
     "Networks",
+    "Files",
     "Modules",
     "Processes",
     "Messages",
@@ -146,6 +151,12 @@ export default function Home({}) {
     setProcs(_procs)
     setModule(mod)
   }
+  useEffect(() => {
+    ;(async () => {
+      const files = (await lf.getItem("files")) ?? []
+      setFiles(files)
+    })()
+  }, [])
   useEffect(() => {
     ;(async () => {
       ao = await new AO({ hb_url: "http://localhost:10001" }).init(acc[0])
@@ -199,8 +210,35 @@ export default function Home({}) {
 
   function handleEditorDidMount(editor, monaco) {
     editorRef.current = editor
+    editorRef.current.setValue(src_data)
   }
 
+  const fileInputRef = useRef(null)
+
+  const handleImportClick = () => {
+    fileInputRef.current.click()
+  }
+
+  const handleFileChange = event => {
+    const file = event.target.files[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onload = async e => {
+        const txt = e.target.result
+        editorRef.current.setValue(txt)
+        const id = generateId()
+        const _file = { name: file.name, update: Date.now(), id }
+        const _files = append(_file, files)
+        await lf.setItem("files", _files)
+        await lf.setItem(`file-${id}`, txt)
+        setFiles(_files)
+        setFile(_file)
+        event.target.value = ""
+      }
+
+      reader.readAsText(file)
+    }
+  }
   return (
     <>
       <Flex
@@ -488,7 +526,7 @@ export default function Home({}) {
                         ? "white"
                         : ""
                   }
-                  px={4}
+                  justify="center"
                 >
                   {v.toUpperCase()}
                 </Flex>
@@ -571,7 +609,10 @@ export default function Home({}) {
               </>
             )}
           </Flex>
-          <Flex flex={1} w={init ? "950px" : "100vw"}>
+          <Flex
+            flex={1}
+            w={init ? (tab === "Files" ? "370px" : "950px") : "100vw"}
+          >
             {!init ? (
               <Flex
                 w="100%"
@@ -870,6 +911,41 @@ export default function Home({}) {
                     ))(module.processes)}
                   </Box>
                 )}
+              </Flex>
+            ) : tab === "Files" ? (
+              <Flex>
+                <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+                  {map(v => (
+                    <Flex
+                      h="50px"
+                      bg={v.id === file?.id ? "#5137C5" : "white"}
+                      fontSize="12px"
+                      p={4}
+                      direction="column"
+                      justify="center"
+                      onClick={async () => {
+                        const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
+                        setFile(v)
+                        setTimeout(() => editorRef.current.setValue(txt), 1)
+                      }}
+                      css={{
+                        borderBottom: "1px solid #ddd",
+                        cursor: "pointer",
+                        _hover: { opacity: 0.75 },
+                      }}
+                    >
+                      <Box
+                        fontWeight="bold"
+                        color={v.id !== file?.id ? "#5137C5" : "#ddd"}
+                      >
+                        {v.name}
+                      </Box>
+                      <Box color={v.id !== file?.id ? "#222" : "#ddd"}>
+                        {dayjs(v.update).fromNow()}
+                      </Box>
+                    </Flex>
+                  ))(files)}
+                </Box>
               </Flex>
             ) : (
               <>
@@ -1412,6 +1488,31 @@ export default function Home({}) {
               >
                 Spawn
               </Flex>
+
+              <Flex
+                mr={4}
+                py={1}
+                px={4}
+                fontSize="12px"
+                color="#ddd"
+                bg="#5137C5"
+                css={{
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  border: "1px solid #5137C5",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={handleImportClick}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept=".lua"
+                  style={{ display: "none" }}
+                />
+                Import
+              </Flex>
               <Flex
                 py={1}
                 px={4}
@@ -1433,12 +1534,27 @@ export default function Home({}) {
                 Clear
               </Flex>
             </Flex>
-            <Editor
-              height="calc(100vh - 100px)"
-              theme="vs-dark"
-              defaultLanguage="lua"
-              onMount={handleEditorDidMount}
-            />
+            <Flex w="100%" css={{ overflow: "hidden" }}>
+              <Editor
+                width={
+                  tab === "Files"
+                    ? "calc(100vw - 520px)"
+                    : "calc(100vw - 1100px)"
+                }
+                height="calc(100vh - 100px)"
+                theme="vs-dark"
+                defaultLanguage="lua"
+                onMount={handleEditorDidMount}
+                onChange={async () => {
+                  const lua = editorRef.current.getValue()
+                  await lf.setItem(`file-${file.id}`, lua)
+                  for (let v of files)
+                    if (v.id === file.id) v.update = Date.now()
+                  setFiles(files)
+                  await lf.setItem(`files`, files)
+                }}
+              />
+            </Flex>
           </Flex>
         )}
       </Flex>
