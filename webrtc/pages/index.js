@@ -13,6 +13,7 @@ function generateId() {
 dayjs.extend(relativeTime)
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 import {
+  addIndex,
   prop,
   indexBy,
   includes,
@@ -710,7 +711,13 @@ export default function Home({}) {
                         onClick={() => {
                           let _msg = clone(ao.mem.msgs[v.id])
                           _msg.id = v.id
-                          setMessage(_msg)
+                          if (_msg.http_msg) setMessage(_msg)
+                          else
+                            setMessage({
+                              http_msg: _msg,
+                              id: _msg.id,
+                              slot: v.slot,
+                            })
                         }}
                         css={{
                           borderBottom: "1px solid #ddd",
@@ -821,7 +828,19 @@ export default function Home({}) {
                         _proc.tags = clone(ao.mem.msgs[v.txid]?.tags ?? [])
                         _proc.id = v.txid
                         setProc(_proc)
-                        setMessages(map(v => ao.mem.msgs[v])(_proc.results))
+                        setMessages(
+                          addIndex(map)((v, i) => {
+                            if (!v.http_msg) {
+                              return {
+                                http_msg: ao.mem.msgs[v],
+                                id: v,
+                                slot: i,
+                              }
+                            } else {
+                              return ao.mem.msgs[v]
+                            }
+                          })(_proc.results)
+                        )
                       }}
                       css={{
                         borderBottom: "1px solid #ddd",
@@ -883,7 +902,13 @@ export default function Home({}) {
                         onClick={() => {
                           let _msg = clone(ao.mem.msgs[v.id])
                           _msg.id = v.id
-                          setMessage(_msg)
+                          if (_msg.http_msg) setMessage(_msg)
+                          else
+                            setMessage({
+                              http_msg: _msg,
+                              id: _msg.id,
+                              slot: v.slot,
+                            })
                           setTab("Messages")
                         }}
                       >
@@ -968,7 +993,19 @@ export default function Home({}) {
                           _proc.tags = clone(ao.mem.msgs[v]?.tags ?? [])
                           _proc.id = v
                           setProc(_proc)
-                          setMessages(map(v => ao.mem.msgs[v])(_proc.results))
+                          setMessages(
+                            addIndex(map)((v, i) => {
+                              if (!v.http_msg) {
+                                return {
+                                  http_msg: ao.mem.msgs[v],
+                                  id: v,
+                                  slot: i,
+                                }
+                              } else {
+                                return ao.mem.msgs[v]
+                              }
+                            })(_proc.results)
+                          )
                           setTab("Processes")
                         }}
                       >
