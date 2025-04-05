@@ -444,4 +444,10 @@ describe("Aoconnect", () => {
     assert.deepEqual(await p.v("Table.Array"), ["str", 3, true])
     assert.deepEqual(await p.v("Table.Array[2]"), 3)
   })
+
+  it.only("should get a variable state", async () => {
+    const ao = new MAO({})
+    const p = ao.p("m2qUBt5fO1INsvqzaYBdV4YGf8r4r2kKR1JyV1tiLm8")
+    console.log(await p.v("Balance"))
+  })
 })

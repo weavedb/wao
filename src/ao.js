@@ -707,14 +707,11 @@ class AO {
     if (result.pid) result.p = this.p(result.pid)
     return result
   }
+
   async var({ pid, data, json = true, pretty = false }) {
     if (json) {
       const _var = (
-        await this.dry({
-          act: "Eval",
-          data: `require("json").encode(${data})`,
-          pid,
-        })
+        await this.dry({ data: `require("json").encode(${data})`, pid })
       )?.res?.Output?.data
       if (_var) {
         try {
@@ -725,13 +722,7 @@ class AO {
       }
       return _var
     } else {
-      const _var = (
-        await this.dry({
-          act: "Eval",
-          data,
-          pid,
-        })
-      )?.res?.Output?.data
+      const _var = (await this.dry({ data, pid }))?.res?.Output?.data
       return pretty ? _var : strip(_var)
     }
   }
