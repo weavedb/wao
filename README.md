@@ -543,7 +543,7 @@ describe("Hyperbeam", function () {
 - [attest](#attest)
 - [avail](#avail)
 - [wait](#wait)
-- [var](#var]
+- [var](#var)
 
 #### Instantiate
 
