@@ -1,10 +1,17 @@
 import { Link, ssr } from "arnext"
 import { Icon } from "@chakra-ui/react"
-import { Image, Box, Flex, Textarea } from "@chakra-ui/react"
+import {
+  Input,
+  NativeSelect,
+  Image,
+  Box,
+  Flex,
+  Textarea,
+} from "@chakra-ui/react"
 import { useRef, useEffect, useState } from "react"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
-import { FaAngleRight } from "react-icons/fa6"
+import { FaAngleRight, FaX } from "react-icons/fa6"
 import lf from "localforage"
 function generateId() {
   return Math.random().toString(36).substring(2, 15)
@@ -98,6 +105,7 @@ Handlers.add("Get", "Get", function (msg)
 end)`
 
 export default function Home({}) {
+  const [modal, setModal] = useState(false)
   const [subs, setSubs] = useState({})
   const [clients, setClients] = useState([])
   const [processes, setProcesses] = useState([])
@@ -122,6 +130,9 @@ export default function Home({}) {
   const [ctype, setCtype] = useState("hb")
   const [files, setFiles] = useState([])
   const [file, setFile] = useState(null)
+  const [filename, setFilename] = useState("")
+  const [fileext, setFileext] = useState("js")
+  const [monaco, setMonaco] = useState(null)
   const tabs = [
     "Networks",
     "Files",
@@ -213,6 +224,7 @@ export default function Home({}) {
   function handleEditorDidMount(editor, monaco) {
     editorRef.current = editor
     editorRef.current.setValue(src_data)
+    setMonaco(monaco)
   }
 
   const fileInputRef = useRef(null)
@@ -228,14 +240,21 @@ export default function Home({}) {
       reader.onload = async e => {
         const txt = e.target.result
         const id = generateId()
+        const fileext = file.name.split(".").pop().toLowerCase()
         const _file = { name: file.name, update: Date.now(), id }
         const _files = prepend(_file, files)
         await lf.setItem("files", _files)
         await lf.setItem(`file-${id}`, txt)
+        console.log(file)
         setFiles(_files)
         setFile(_file)
         event.target.value = ""
-        setTimeout(() => editorRef.current.setValue(txt), 1)
+        monaco.editor.setModelLanguage(
+          editorRef.current.getModel(),
+          fileext === "js" ? "javascript" : fileext
+        )
+        // todo: handle this better
+        setTimeout(() => editorRef.current.setValue(txt), 100)
       }
 
       reader.readAsText(file)
@@ -254,7 +273,7 @@ export default function Home({}) {
           left: 0,
           position: "fixed",
           boxShadow: "0px 2px 10px 0px rgba(0,0,0,0.75);",
-          zIndex: 1,
+          zIndex: 6,
         }}
       >
         <Flex w="100%" mx={4}>
@@ -560,15 +579,7 @@ export default function Home({}) {
                     _hover: { opacity: 0.75 },
                   }}
                   onClick={async () => {
-                    const txt = ""
-                    const id = generateId()
-                    const _file = { name: `${id}.lua`, update: Date.now(), id }
-                    const _files = prepend(_file, files)
-                    await lf.setItem("files", _files)
-                    //await lf.setItem(`file-${id}`, txt)
-                    setFiles(_files)
-                    setFile(_file)
-                    setTimeout(() => editorRef.current.setValue(txt), 1)
+                    setModal(true)
                   }}
                 >
                   <input
@@ -599,7 +610,7 @@ export default function Home({}) {
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileChange}
-                    accept=".lua"
+                    accept=".lua, .js, .json"
                     style={{ display: "none" }}
                   />
                   Import
@@ -1029,7 +1040,12 @@ export default function Home({}) {
                       onClick={async () => {
                         const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
                         setFile(v)
-                        setTimeout(() => editorRef.current.setValue(txt), 1)
+                        monaco.editor.setModelLanguage(
+                          editorRef.current.getModel(),
+                          v.ext === "js" ? "javascript" : v.ext ? v.ext : "lua"
+                        )
+                        // todo: handle this better
+                        setTimeout(() => editorRef.current.setValue(txt), 100)
                       }}
                       css={{
                         borderBottom: "1px solid #ddd",
@@ -1521,10 +1537,44 @@ export default function Home({}) {
             css={{ borderLeft: "1px solid #eee" }}
           >
             <Flex h="50px" align="center" px={4} color="#5137C5">
-              <Box>{file ? file.name : "Lua Editor"}</Box>
+              <Box>{file ? file.name : "Editor"}</Box>
               <Box flex={1} />
               <Flex
-                mx={4}
+                mr={4}
+                py={1}
+                px={4}
+                fontSize="12px"
+                color="#ddd"
+                bg="#5137C5"
+                css={{
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  border: "1px solid #5137C5",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  const js = editorRef.current.getValue()
+                  const p = proc ? ao.p(proc.id) : null
+                  let tests = {}
+                  const src = async path => {
+                    for (let v of files) {
+                      if (v.name === path) {
+                        return await lf.getItem(`file-${v.id}`)
+                      }
+                    }
+                    return null
+                  }
+                  eval(js)
+                  for (let k in tests) {
+                    const success = await tests[k]({ p, ao, src })
+                    console.log(`${k}: ${success}`)
+                  }
+                }}
+              >
+                Test
+              </Flex>
+              <Flex
+                mr={4}
                 py={1}
                 px={4}
                 fontSize="12px"
@@ -1631,7 +1681,9 @@ export default function Home({}) {
                 }
                 height="calc(100vh - 100px)"
                 theme="vs-dark"
-                defaultLanguage="lua"
+                defaultLanguage={
+                  file?.ext === "js" ? "js" : file?.ext ? file.ext : "lua"
+                }
                 onMount={handleEditorDidMount}
                 onChange={async () => {
                   if (file) {
@@ -1650,6 +1702,109 @@ export default function Home({}) {
           </Flex>
         )}
       </Flex>
+      {!modal ? null : (
+        <Flex
+          align="center"
+          justify="center"
+          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
+          bg="rgba(1,1,1,0.5)"
+          w="100vw"
+          h="100vh"
+        >
+          <Box
+            mb="50px"
+            w="600px"
+            bg="white"
+            css={{ borderRadius: "10px", position: "relative" }}
+          >
+            <Flex
+              justify="flex-end"
+              w="100%"
+              p={2}
+              css={{ position: "absolute" }}
+            >
+              <Icon
+                size="md"
+                color="#999"
+                m={2}
+                css={{
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={() => setModal(false)}
+              >
+                <FaX />
+              </Icon>
+            </Flex>
+            <Box p={6}>
+              <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
+                Create a New File
+              </Box>
+              <Box fontSize="12px" color="#666" mb={2}>
+                File Name
+              </Box>
+              <Flex align="flex-end">
+                <Input
+                  flex={1}
+                  value={filename}
+                  onChange={e => setFilename(e.target.value)}
+                />
+                <Box mx={2}>.</Box>
+                <NativeSelect.Root w="80px">
+                  <NativeSelect.Field
+                    value={fileext}
+                    onChange={e => setFileext(e.target.value)}
+                  >
+                    <option value="lua">lua</option>
+                    <option value="js">js</option>
+                    <option value="json">json</option>
+                  </NativeSelect.Field>
+                  <NativeSelect.Indicator />
+                </NativeSelect.Root>
+              </Flex>
+              <Flex
+                align="center"
+                justify="center"
+                mt={4}
+                p={1}
+                mb={1}
+                color="#5137C5"
+                css={{
+                  borderRadius: "3px",
+                  border: "1px solid #5137C5",
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  if (/^\s*$/.test(filename)) return alert("Enter a filename.")
+                  const txt = ""
+                  const id = generateId()
+                  const _file = {
+                    name: `${filename}.${fileext}`,
+                    update: Date.now(),
+                    id,
+                    ext: fileext,
+                  }
+                  const _files = prepend(_file, files)
+                  await lf.setItem("files", _files)
+                  await lf.setItem(`file-${id}`, txt)
+                  setFiles(_files)
+                  setFile(_file)
+                  monaco.editor.setModelLanguage(
+                    editorRef.current.getModel(),
+                    fileext === "js" ? "javascript" : fileext
+                  )
+                  // todo: handle this better
+                  setTimeout(() => editorRef.current.setValue(txt), 100)
+                  setModal(false)
+                }}
+              >
+                Create
+              </Flex>
+            </Box>
+          </Box>
+        </Flex>
+      )}
     </>
   )
 }
