@@ -430,3 +430,18 @@ describe("AOS1", function () {
     )
   })
 })
+
+describe("Aoconnect", () => {
+  it("should get a variable state", async () => {
+    const ao = await new AO({}).init(acc[0])
+    const { p, pid } = await ao.deploy({
+      src_data: `Table = { String = "Hello", Array = { "str", 3, true } }`,
+    })
+    assert.deepEqual(await p.v("Table"), {
+      String: "Hello",
+      Array: ["str", 3, true],
+    })
+    assert.deepEqual(await p.v("Table.Array"), ["str", 3, true])
+    assert.deepEqual(await p.v("Table.Array[2]"), 3)
+  })
+})
