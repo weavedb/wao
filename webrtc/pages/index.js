@@ -25,6 +25,7 @@ import {
   map,
   without,
   fromPairs,
+  filter,
 } from "ramda"
 import { AO, acc } from "wao/web"
 import { HB } from "wao"
@@ -225,15 +226,15 @@ export default function Home({}) {
       const reader = new FileReader()
       reader.onload = async e => {
         const txt = e.target.result
-        editorRef.current.setValue(txt)
         const id = generateId()
         const _file = { name: file.name, update: Date.now(), id }
-        const _files = append(_file, files)
+        const _files = prepend(_file, files)
         await lf.setItem("files", _files)
         await lf.setItem(`file-${id}`, txt)
         setFiles(_files)
         setFile(_file)
         event.target.value = ""
+        setTimeout(() => editorRef.current.setValue(txt), 1)
       }
 
       reader.readAsText(file)
@@ -542,70 +543,135 @@ export default function Home({}) {
             fontSize="12px"
             css={{ borderBottom: "1px solid #ddd" }}
           >
-            {!module ? null : (
-              <Flex
-                align="center"
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={() => setTab("Modules")}
-              >
-                <Box mr={2}>{modmap[module.id].name}</Box>
-              </Flex>
-            )}
-            {!proc ? null : (
+            {tab === "Files" ? (
               <>
-                <Icon size="md" color="#5137C5">
-                  <FaAngleRight />
-                </Icon>
+                <Box flex={1} />
                 <Flex
-                  align="center"
-                  ml={2}
+                  py={1}
+                  px={4}
+                  fontSize="12px"
+                  color="#ddd"
+                  bg="#5137C5"
                   css={{
+                    borderRadius: "5px",
                     cursor: "pointer",
+                    border: "1px solid #5137C5",
                     _hover: { opacity: 0.75 },
                   }}
-                  onClick={() => setTab("Processes")}
+                  onClick={async () => {
+                    const txt = ""
+                    const id = generateId()
+                    const _file = { name: `${id}.lua`, update: Date.now(), id }
+                    const _files = prepend(_file, files)
+                    await lf.setItem("files", _files)
+                    //await lf.setItem(`file-${id}`, txt)
+                    setFiles(_files)
+                    setFile(_file)
+                    setTimeout(() => editorRef.current.setValue(txt), 1)
+                  }}
                 >
-                  <Box mr={2}>{proc?.id}</Box>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept=".lua"
+                    style={{ display: "none" }}
+                  />
+                  New
+                </Flex>
+                <Flex
+                  ml={4}
+                  py={1}
+                  px={4}
+                  fontSize="12px"
+                  color="#ddd"
+                  bg="#5137C5"
+                  css={{
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    border: "1px solid #5137C5",
+                    _hover: { opacity: 0.75 },
+                  }}
+                  onClick={handleImportClick}
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept=".lua"
+                    style={{ display: "none" }}
+                  />
+                  Import
                 </Flex>
               </>
-            )}
-            {!message ? null : (
+            ) : (
               <>
-                <Icon size="md" color="#5137C5">
-                  <FaAngleRight />
-                </Icon>
-                <Flex
-                  align="center"
-                  ml={2}
-                  css={{
-                    cursor: "pointer",
-                    _hover: { opacity: 0.75 },
-                  }}
-                  onClick={() => setTab("Messages")}
-                >
-                  <Flex mr={4}>
-                    <Box
-                      py={1}
-                      px={2}
-                      bg="#bbb"
-                      css={{ borderRadius: "3px 0 0 3px" }}
-                    >
-                      {message.slot}
-                    </Box>
-                    <Box
-                      py={1}
-                      px={2}
-                      bg="#ddd"
-                      css={{ borderRadius: "0 3px 3px 0" }}
-                    >
-                      Eval
-                    </Box>
+                {!module ? null : (
+                  <Flex
+                    align="center"
+                    css={{
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={() => setTab("Modules")}
+                  >
+                    <Box mr={2}>{modmap[module.id].name}</Box>
                   </Flex>
-                  <Box>{message.id}</Box>
-                </Flex>
+                )}
+                {!proc ? null : (
+                  <>
+                    <Icon size="md" color="#5137C5">
+                      <FaAngleRight />
+                    </Icon>
+                    <Flex
+                      align="center"
+                      ml={2}
+                      css={{
+                        cursor: "pointer",
+                        _hover: { opacity: 0.75 },
+                      }}
+                      onClick={() => setTab("Processes")}
+                    >
+                      <Box mr={2}>{proc?.id}</Box>
+                    </Flex>
+                  </>
+                )}
+                {!message ? null : (
+                  <>
+                    <Icon size="md" color="#5137C5">
+                      <FaAngleRight />
+                    </Icon>
+                    <Flex
+                      align="center"
+                      ml={2}
+                      css={{
+                        cursor: "pointer",
+                        _hover: { opacity: 0.75 },
+                      }}
+                      onClick={() => setTab("Messages")}
+                    >
+                      <Flex mr={4}>
+                        <Box
+                          py={1}
+                          px={2}
+                          bg="#bbb"
+                          css={{ borderRadius: "3px 0 0 3px" }}
+                        >
+                          {message.slot}
+                        </Box>
+                        <Box
+                          py={1}
+                          px={2}
+                          bg="#ddd"
+                          css={{ borderRadius: "0 3px 3px 0" }}
+                        >
+                          Eval
+                        </Box>
+                      </Flex>
+                      <Box>{message.id}</Box>
+                    </Flex>
+                  </>
+                )}
               </>
             )}
           </Flex>
@@ -1418,7 +1484,7 @@ export default function Home({}) {
             css={{ borderLeft: "1px solid #eee" }}
           >
             <Flex h="50px" align="center" px={4} color="#5137C5">
-              <Box>Lua Editor</Box>
+              <Box>{file ? file.name : "Lua Editor"}</Box>
               <Box flex={1} />
               <Flex
                 mx={4}
@@ -1488,37 +1554,11 @@ export default function Home({}) {
               >
                 Spawn
               </Flex>
-
-              <Flex
-                mr={4}
-                py={1}
-                px={4}
-                fontSize="12px"
-                color="#ddd"
-                bg="#5137C5"
-                css={{
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                  border: "1px solid #5137C5",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={handleImportClick}
-              >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  accept=".lua"
-                  style={{ display: "none" }}
-                />
-                Import
-              </Flex>
               <Flex
                 py={1}
                 px={4}
                 fontSize="12px"
-                color="#ddd"
-                bg="#5137C5"
+                color="#5137C5"
                 css={{
                   borderRadius: "5px",
                   cursor: "pointer",
@@ -1526,12 +1566,23 @@ export default function Home({}) {
                   _hover: { opacity: 0.75 },
                 }}
                 onClick={async () => {
-                  if (confirm("Would you like to clear the editor?")) {
+                  if (confirm("Would you like to delete the file?")) {
                     editorRef.current.setValue("")
+                    await lf.removeItem(`file-${file.id}`)
+                    const _files = filter(v => file.id !== v.id)(files)
+                    await lf.setItem(`files`, _files)
+                    setFiles(_files)
+                    for (let v of _files) {
+                      setFile(v)
+                      editorRef.current.setValue(
+                        (await lf.getItem(`file-${v.id}`)) ?? ""
+                      )
+                      break
+                    }
                   }
                 }}
               >
-                Clear
+                Delete
               </Flex>
             </Flex>
             <Flex w="100%" css={{ overflow: "hidden" }}>
@@ -1546,12 +1597,16 @@ export default function Home({}) {
                 defaultLanguage="lua"
                 onMount={handleEditorDidMount}
                 onChange={async () => {
-                  const lua = editorRef.current.getValue()
-                  await lf.setItem(`file-${file.id}`, lua)
+                  if (file) {
+                    const lua = editorRef.current.getValue()
+                    await lf.setItem(`file-${file.id}`, lua)
+                  }
+                  /*
                   for (let v of files)
                     if (v.id === file.id) v.update = Date.now()
                   setFiles(files)
                   await lf.setItem(`files`, files)
+                  */
                 }}
               />
             </Flex>
