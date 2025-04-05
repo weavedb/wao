@@ -59,7 +59,7 @@ const getHash = res =>
       Messages: res.Messages ?? [],
       Spawns: res.Spawns ?? [],
       Assignments: res.Assignments ?? [],
-    }),
+    })
   )
 
 function createDataItemSigner2(wallet) {
@@ -597,7 +597,7 @@ class AO {
         if (typeof text === "number") text = Number(text).toString()
         _data = _data.replace(
           new RegExp(`\<${k}\>`, "g"),
-          text.replace(/'/g, "\\'"),
+          text.replace(/'/g, "\\'")
         )
       }
       out = _data
@@ -707,9 +707,41 @@ class AO {
     if (result.pid) result.p = this.p(result.pid)
     return result
   }
+  async var({ pid, data, json = true, pretty = false }) {
+    if (json) {
+      const _var = (
+        await this.dry({
+          act: "Eval",
+          data: `require("json").encode(${data})`,
+          pid,
+        })
+      )?.res?.Output?.data
+      if (_var) {
+        try {
+          return JSON.parse(strip(_var))
+        } catch (e) {
+          return strip(_var)
+        }
+      }
+      return _var
+    } else {
+      const _var = (
+        await this.dry({
+          act: "Eval",
+          data,
+          pid,
+        })
+      )?.res?.Output?.data
+      return pretty ? _var : strip(_var)
+    }
+  }
   p(pid) {
     return new Process(pid, this)
   }
+}
+
+function strip(str) {
+  return str.replace(/\x1B\[[0-9;]*[JKmsu]/g, "")
 }
 
 const getParams = (tags, opts) => {
@@ -759,6 +791,9 @@ class Process {
     const res = await this.dry(...opt)
     if (res.err) throw Error(res.err)
     return res.out
+  }
+  async v(data, json = true, pretty = false) {
+    return await this.ao.var({ pid: this.pid, data, json, pretty })
   }
 }
 

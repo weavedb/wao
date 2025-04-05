@@ -543,6 +543,7 @@ describe("Hyperbeam", function () {
 - [attest](#attest)
 - [avail](#avail)
 - [wait](#wait)
+- [var](#var]
 
 #### Instantiate
 
@@ -787,6 +788,24 @@ const { err, res, id } = await ao.avail({ ids, tags, jwk })
 const { err } = await ao.wait({ pid })
 ```
 
+##### var
+
+`var` read a Lua variable from the current state with `dryrun`.
+
+```js
+const { pid } = await ao.deploy({
+  src_data: `Table = { String = "Hello", Array = { "str", 3, true } }`,
+})
+
+const table = await ao.var({ pid, data: "Table" })
+```
+
+It stripps off pretty tags from the output and auto-converts Lua tables to JSON, you can disable it with `json` and `pretty`.
+
+```js
+const table = await ao.var({ pid, data: "Table", json: false, pretty: true })
+```
+
 ### Process
 
 You can go for even more concise syntax with `Process` class.
@@ -796,6 +815,7 @@ You can go for even more concise syntax with `Process` class.
 - [m](#m)
 - [dry](#dry-1)
 - [d](#d)
+- [v](#v)
 
 #### Instantiate
 
@@ -870,6 +890,23 @@ const { mid, out } = await p.dry("Action", { Tag1: "value1", Tag2: "value2" })
 
 ```js
 const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+#### v
+
+`v` is a shortcut for [var](#var) to get a Lua variable with `dryrun`.
+
+```js
+const { p } = await ao.deploy({
+  src_data: `Table = { String = "Hello", Array = { "str", 3, true } }`,
+})
+const table = await p.v("Table") // { String: "Hello", Array: [ "str", 3, true ] }
+```
+
+To disable the auto JSON conversion and enable pretty print, use the 2nd and the 3rd arguments.
+
+```js
+const table = await p.v("Table", false, true)
 ```
 
 ### Function Piping
