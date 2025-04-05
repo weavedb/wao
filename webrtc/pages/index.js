@@ -1,5 +1,6 @@
 import { Link, ssr } from "arnext"
 import { Icon } from "@chakra-ui/react"
+import _assert from "assert"
 import {
   Input,
   NativeSelect,
@@ -1555,7 +1556,7 @@ export default function Home({}) {
                 onClick={async () => {
                   const js = editorRef.current.getValue()
                   const p = proc ? ao.p(proc.id) : null
-                  let tests = {}
+                  let descs = []
                   const src = async path => {
                     for (let v of files) {
                       if (v.name === path) {
@@ -1564,11 +1565,46 @@ export default function Home({}) {
                     }
                     return null
                   }
-                  eval(js)
-                  for (let k in tests) {
-                    const success = await tests[k]({ p, ao, src })
-                    console.log(`${k}: ${success}`)
+                  const assert = _assert
+                  const require = async name => {
+                    let module = { exports: null }
+                    const js = await src(name)
+                    eval(js)
+                    return module.exports
                   }
+                  let i = 0
+                  const it = (desc, fn) => {
+                    descs[i].tests.push({ desc, fn })
+                  }
+
+                  const describe = (desc2, fn) => {
+                    descs.push({ desc: desc2, fn, tests: [] })
+                  }
+                  eval(js)
+
+                  for (let v of descs) {
+                    await v.fn({ require })
+                    for (let v2 of v.tests) {
+                      const start = Date.now()
+                      try {
+                        const success = await v2.fn({
+                          ao,
+                          src,
+                          p,
+                          duration: Date.now() - start,
+                        })
+                        v2.res = { success, error: null }
+                      } catch (e) {
+                        v2.res = {
+                          success: false,
+                          error: e,
+                          duration: Date.now() - start,
+                        }
+                      }
+                    }
+                    i++
+                  }
+                  console.log(descs)
                 }}
               >
                 Test
