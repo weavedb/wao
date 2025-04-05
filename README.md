@@ -790,7 +790,7 @@ const { err } = await ao.wait({ pid })
 
 ##### var
 
-`var` read a Lua variable from the current state with `dryrun`.
+`var` reads a Lua variable from the current state with `dryrun`.
 
 ```js
 const { pid } = await ao.deploy({
@@ -800,7 +800,7 @@ const { pid } = await ao.deploy({
 const table = await ao.var({ pid, data: "Table" })
 ```
 
-It stripps off pretty tags from the output and auto-converts Lua tables to JSON, you can disable it with `json` and `pretty`.
+It strips off pretty tags from the output and auto-converts Lua tables to JSON, you can disable it with `json` and `pretty`.
 
 ```js
 const table = await ao.var({ pid, data: "Table", json: false, pretty: true })
