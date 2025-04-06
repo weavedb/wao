@@ -128,7 +128,7 @@ export default function Home({}) {
   const [suid, setSUID] = useState(null)
   const [cid, setCID] = useState(null)
   const [client, setClient] = useState(null)
-  const [tab, setTab] = useState("Networks")
+  const [tab, setTab] = useState("Modules")
   const [init, setInit] = useState(false)
   const [modules, setModules] = useState([])
   const [module, setModule] = useState(null)
@@ -143,8 +143,6 @@ export default function Home({}) {
   const [fileext, setFileext] = useState("js")
   const [monaco, setMonaco] = useState(null)
   const tabs = [
-    "Networks",
-    "Files",
     "Modules",
     "Processes",
     "Messages",
@@ -152,6 +150,8 @@ export default function Home({}) {
     "Tokens",
     "Storage",
     "Database",
+    "Files",
+    "Networks",
   ]
   const _setModule = id => {
     let mmap = {}
@@ -196,7 +196,7 @@ export default function Home({}) {
         _procs.push({ txid: k, module: mmap[val.module] })
       }
       setProcs(_procs)
-      _setModule("JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g")
+      _setModule("Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM")
       setInit(true)
     })()
   }, [])
@@ -582,6 +582,7 @@ export default function Home({}) {
                       flexShrink: 0,
                     }}
                     onClick={() => {
+                      if (v === "Messages" && proc === null) return
                       if (
                         includes(v, [
                           "Accounts",
@@ -596,7 +597,13 @@ export default function Home({}) {
                     }}
                     bg={v === tab ? "#5137C5" : ""}
                     color={
-                      includes(v, ["Accounts", "Tokens", "Storage", "Database"])
+                      includes(v, [
+                        "Accounts",
+                        "Tokens",
+                        "Storage",
+                        "Database",
+                      ]) ||
+                      (v === "Messages" && proc === null)
                         ? "#999"
                         : v === tab
                           ? "white"
@@ -735,7 +742,16 @@ export default function Home({}) {
                         _proc.tags = clone(ao.mem.msgs[v]?.tags ?? [])
                         _proc.id = v
                         setProc(_proc)
-                        setMessages(map(v => ao.mem.msgs[v])(_proc.results))
+                        setMessages(
+                          addIndex(map)((v, i) => {
+                            return {
+                              id: v,
+                              ...ao.mem.msgs[v],
+                              slot: i,
+                              http_msg: ao.mem.msgs[v],
+                            }
+                          })(_proc.results)
+                        )
 
                         let mmap = {}
                         for (let k in ao.mem.modules)
@@ -845,12 +861,12 @@ export default function Home({}) {
           </Flex>
           <Flex
             flex={1}
-            w={init ? (tab === "Files" ? "370px" : "950px") : "100vw"}
+            w={init ? (tab === "Files" ? "385px" : "965px") : "100vw"}
           >
             {!init ? null : tab === "Messages" ? (
               <Flex w="100%">
                 <Box
-                  w="370px"
+                  w="385px"
                   h="calc(100vh - 130px)"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
@@ -1012,7 +1028,7 @@ export default function Home({}) {
             ) : tab === "Processes" ? (
               <Flex w="100%">
                 <Box
-                  w="370px"
+                  w="385px"
                   h="calc(100vh - 130px)"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
@@ -1030,6 +1046,7 @@ export default function Home({}) {
                         _proc.tags = clone(ao.mem.msgs[v.txid]?.tags ?? [])
                         _proc.id = v.txid
                         setProc(_proc)
+                        setMessage(null)
                         setMessages(
                           addIndex(map)((v, i) => {
                             if (!v.http_msg) {
@@ -1144,7 +1161,7 @@ export default function Home({}) {
             ) : tab === "Modules" ? (
               <Flex w="100%">
                 <Box
-                  w="370px"
+                  w="385px"
                   h="calc(100vh - 130px)"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
@@ -1158,6 +1175,12 @@ export default function Home({}) {
                       justify="center"
                       onClick={() => {
                         _setModule(v.txid)
+                        let mmap = {}
+                        for (let k in ao.mem.modules)
+                          mmap[ao.mem.modules[k]] = k
+                        setProc(null)
+                        setMessages([])
+                        setMessage(null)
                       }}
                       css={{
                         borderBottom: "1px solid #ddd",
@@ -1247,7 +1270,7 @@ export default function Home({}) {
             ) : tab === "Files" ? (
               <Flex>
                 <Box
-                  w="370px"
+                  w="385px"
                   h="calc(100vh - 130px)"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
@@ -1292,7 +1315,7 @@ export default function Home({}) {
               <>
                 <Flex>
                   <Box
-                    w="370px"
+                    w="385px"
                     h="calc(100vh - 130px)"
                     css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                   >
