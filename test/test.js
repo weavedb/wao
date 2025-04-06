@@ -33,7 +33,7 @@ end)
 
 const src_data3 = `
 Handlers.add("Hello3", "Hello3", function (msg)
-   Spawn(msg.module, { Data = msg.Data, ["On-Boot"] = "Data" })
+   Spawn(msg.mod, { Data = msg.Data, ["On-Boot"] = "Data" })
 end)
 `
 
@@ -206,9 +206,9 @@ describe("SDK", function () {
   })
   it("should spawn a process from a handler", async () => {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data3 })
-    await p.msg(
+    const { res } = await p.msg(
       "Hello3",
-      { module: mem.modules.aos2_0_1, auth: mu.addr },
+      { mod: mem.modules.aos2_0_1, auth: mu.addr }, // todo: module tag not allowed?
       { data: src_data }
     )
     const prs = mem.env
@@ -402,32 +402,29 @@ end)
 `
 
 describe("AOS1", function () {
-  it("should wait reply from another process", async () => {
+  it.only("should wait reply from another process", async () => {
     const ao = await new AO({}).init(acc[0])
     const { p, pid } = await ao.deploy({ src_data: src_data_r1 })
     const ao2 = await new AO({ mem: ao.mem }).init(acc[0])
     const { pid: pid2 } = await ao2.deploy({ src_data: src_data_r2 })
     const ao3 = await new AO({ mem: ao.mem }).init(acc[0])
     const { pid: pid3 } = await ao3.deploy({ src_data: src_data_r3 })
-    assert.deepEqual(
-      await p.m(
-        "Hello",
-        { To: pid2, To2: pid3 },
+    const opt = {
+      timeout: 2000,
+      mode: "gql",
+      check: [
         {
-          timeout: 2000,
-          mode: "gql",
-          check: [
-            {
-              from: pid3,
-              data: "Hello, World!",
-              tags: { Test2: /test/, JSON: { json: { a: 3, b: () => true } } },
-            },
-          ],
-          get: { test: { from: pid3, name: "Test2" } },
-        }
-      ),
-      { test: "test" }
-    )
+          from: pid3,
+          data: "Hello, World!",
+          tags: { Test2: /test/, JSON: { json: { a: 3, b: () => true } } },
+        },
+      ],
+      get: { test: { from: pid3, name: "Test2" } },
+    }
+    const { mid, out } = await p.msg("Hello", { To: pid2, To2: pid3 }, opt)
+    assert.deepEqual(out, { test: "test" })
+    const out2 = await p.r({ mid, ...opt })
+    assert.deepEqual(out2, { test: "test" })
   })
 })
 
@@ -445,7 +442,7 @@ describe("Aoconnect", () => {
     assert.deepEqual(await p.v("Table.Array[2]"), 3)
   })
 
-  it.only("should get a variable state", async () => {
+  it("should get a variable state", async () => {
     const ao = new MAO({})
     const p = ao.p("m2qUBt5fO1INsvqzaYBdV4YGf8r4r2kKR1JyV1tiLm8")
     console.log(await p.v("Balance"))
