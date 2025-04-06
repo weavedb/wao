@@ -12,7 +12,14 @@ import {
 import { useRef, useEffect, useState } from "react"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
-import { FaAngleRight, FaX } from "react-icons/fa6"
+import {
+  FaBookOpen,
+  FaDiscord,
+  FaXTwitter,
+  FaGithub,
+  FaAngleRight,
+  FaX,
+} from "react-icons/fa6"
 import lf from "localforage"
 function generateId() {
   return Math.random().toString(36).substring(2, 15)
@@ -263,6 +270,31 @@ export default function Home({}) {
   }
   return (
     <>
+      <style jsx global>{`
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: #bbbbbb #f1f1f1;
+        }
+
+        *::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+
+        *::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 4px;
+        }
+
+        *::-webkit-scrollbar-thumb {
+          background: #bbbbbb;
+          border-radius: 4px;
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+          background: #999999;
+        }
+      `}</style>
       <Flex
         align="center"
         justify="center"
@@ -520,40 +552,48 @@ export default function Home({}) {
       </Flex>
       <Flex h="100vh" css={{ zIndex: 0 }} pt="50px">
         {!init ? null : (
-          <Flex w="150px" bg="#eee" direction="column">
-            {map(v => {
-              return (
-                <Flex
-                  h="50px"
-                  w="100%"
-                  fontSize="12px"
-                  align="center"
-                  css={{
-                    cursor: "pointer",
-                    _hover: { opacity: 0.75 },
-                  }}
-                  onClick={() => {
-                    if (
+          <Flex bg="#eee" css={{ overflowY: "auto" }}>
+            <Flex direction="column" w="150px">
+              {map(v => {
+                return (
+                  <Flex
+                    h="50px"
+                    w="100%"
+                    fontSize="12px"
+                    align="center"
+                    css={{
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                      flexShrink: 0,
+                    }}
+                    onClick={() => {
+                      if (
+                        includes(v, [
+                          "Accounts",
+                          "Tokens",
+                          "Storage",
+                          "Database",
+                        ])
+                      ) {
+                        return alert("Coming Soon!")
+                      }
+                      setTab(v)
+                    }}
+                    bg={v === tab ? "#5137C5" : ""}
+                    color={
                       includes(v, ["Accounts", "Tokens", "Storage", "Database"])
-                    ) {
-                      return alert("Coming Soon!")
+                        ? "#999"
+                        : v === tab
+                          ? "white"
+                          : ""
                     }
-                    setTab(v)
-                  }}
-                  bg={v === tab ? "#5137C5" : ""}
-                  color={
-                    includes(v, ["Accounts", "Tokens", "Storage", "Database"])
-                      ? "#999"
-                      : v === tab
-                        ? "white"
-                        : ""
-                  }
-                  justify="center"
-                >
-                  {v.toUpperCase()}
-                </Flex>
-              )
-            })(tabs)}{" "}
+                    justify="center"
+                  >
+                    {v.toUpperCase()}
+                  </Flex>
+                )
+              })(tabs)}
+            </Flex>
           </Flex>
         )}
         <Flex direction="column">
@@ -692,22 +732,13 @@ export default function Home({}) {
             flex={1}
             w={init ? (tab === "Files" ? "370px" : "950px") : "100vw"}
           >
-            {!init ? (
-              <Flex
-                w="100%"
-                h="100%"
-                align="center"
-                justify="center"
-                fontSize="40px"
-                bg="#5137C5"
-                pb="60px"
-                color="#9C89F6"
-              >
-                Booting Up...
-              </Flex>
-            ) : tab === "Messages" ? (
-              <Flex>
-                <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+            {!init ? null : tab === "Messages" ? (
+              <Flex w="100%">
+                <Box
+                  w="370px"
+                  h="calc(100vh - 130px)"
+                  css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
+                >
                   {map(v => {
                     const tags = tags =>
                       fromPairs(map(v => [v.name, v.value])(tags))
@@ -756,7 +787,14 @@ export default function Home({}) {
                   })(messages)}
                 </Box>
                 {!message ? null : (
-                  <Box px={4} py={2} fontSize="12px">
+                  <Box
+                    px={4}
+                    py={2}
+                    fontSize="12px"
+                    flex={1}
+                    h="calc(100vh - 130px)"
+                    css={{ overflowY: "auto" }}
+                  >
                     <Flex my={2} fontWeight="bold" color="#5137C5">
                       Tags
                     </Flex>
@@ -795,8 +833,9 @@ export default function Home({}) {
                         p={4}
                         css={{
                           borderRadius: "3px",
-                          wordBreak: "break-all",
-                          whiteSpace: "wrap",
+                          wordBreak: "break-word",
+                          whiteSpace: "pre-wrap",
+                          overflow: "auto",
                         }}
                       >
                         {message.http_msg?.data}
@@ -813,8 +852,9 @@ export default function Home({}) {
                         p={4}
                         css={{
                           borderRadius: "3px",
-                          wordBreak: "break-all",
-                          whiteSpace: "wrap",
+                          wordBreak: "break-word",
+                          whiteSpace: "pre-wrap",
+                          overflow: "auto",
                         }}
                       >
                         {JSON.stringify(message.res, undefined, 2)}
@@ -824,8 +864,12 @@ export default function Home({}) {
                 )}
               </Flex>
             ) : tab === "Processes" ? (
-              <Flex>
-                <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+              <Flex w="100%">
+                <Box
+                  w="370px"
+                  h="calc(100vh - 130px)"
+                  css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
+                >
                   {map(v => (
                     <Flex
                       h="50px"
@@ -873,7 +917,14 @@ export default function Home({}) {
                   ))(procs)}
                 </Box>
                 {!proc ? null : (
-                  <Box px={4} py={2} fontSize="12px">
+                  <Box
+                    px={4}
+                    py={2}
+                    fontSize="12px"
+                    flex={1}
+                    h="calc(100vh - 130px)"
+                    css={{ overflowY: "auto" }}
+                  >
                     <Flex my={2} fontWeight="bold" color="#5137C5">
                       Tags
                     </Flex>
@@ -936,8 +987,12 @@ export default function Home({}) {
                 )}
               </Flex>
             ) : tab === "Modules" ? (
-              <Flex>
-                <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+              <Flex w="100%">
+                <Box
+                  w="370px"
+                  h="calc(100vh - 130px)"
+                  css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
+                >
                   {map(v => (
                     <Flex
                       h="50px"
@@ -968,7 +1023,14 @@ export default function Home({}) {
                   ))(modules)}
                 </Box>
                 {!module ? null : (
-                  <Box px={4} py={2} fontSize="12px">
+                  <Box
+                    px={4}
+                    py={2}
+                    fontSize="12px"
+                    flex={1}
+                    h="calc(100vh - 130px)"
+                    css={{ overflowY: "auto" }}
+                  >
                     <Flex my={2} fontWeight="bold" color="#5137C5">
                       Tags
                     </Flex>
@@ -1029,7 +1091,11 @@ export default function Home({}) {
               </Flex>
             ) : tab === "Files" ? (
               <Flex>
-                <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+                <Box
+                  w="370px"
+                  h="calc(100vh - 130px)"
+                  css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
+                >
                   {map(v => (
                     <Flex
                       h="50px"
@@ -1070,7 +1136,11 @@ export default function Home({}) {
             ) : (
               <>
                 <Flex>
-                  <Box w="370px" css={{ borderRight: "1px solid #ddd" }}>
+                  <Box
+                    w="370px"
+                    h="calc(100vh - 130px)"
+                    css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
+                  >
                     {map(v => (
                       <Flex
                         h="50px"
@@ -1107,7 +1177,11 @@ export default function Home({}) {
 
                   {ctype === "hb" ? (
                     suid ? (
-                      <Box>
+                      <Box
+                        flex={1}
+                        h="calc(100vh - 130px)"
+                        css={{ overflowY: "auto" }}
+                      >
                         <Flex
                           px={4}
                           fontWeight="bold"
@@ -1604,7 +1678,6 @@ export default function Home({}) {
                     }
                     i++
                   }
-                  console.log(descs)
                 }}
               >
                 Test
@@ -1708,14 +1781,14 @@ export default function Home({}) {
                 Delete
               </Flex>
             </Flex>
-            <Flex w="100%" css={{ overflow: "hidden" }}>
+            <Flex w="100%">
               <Editor
                 width={
                   tab === "Files"
                     ? "calc(100vw - 520px)"
                     : "calc(100vw - 1100px)"
                 }
-                height="calc(100vh - 100px)"
+                height="calc(100vh - 130px)"
                 theme="vs-dark"
                 defaultLanguage={
                   file?.ext === "js" ? "js" : file?.ext ? file.ext : "lua"
@@ -1738,6 +1811,79 @@ export default function Home({}) {
           </Flex>
         )}
       </Flex>
+      <Flex
+        w="100%"
+        h="30px"
+        align="center"
+        justify="flex-end"
+        px={4}
+        bg="white"
+        color="#222"
+        css={{
+          borderTop: "1px solid #ddd",
+          position: "fixed",
+          left: 0,
+          bottom: 0,
+          zIndex: 50,
+        }}
+      >
+        <Box
+          mr={3}
+          as="a"
+          target="_blank"
+          href="https://github.com/weavedb/wao"
+        >
+          <Icon
+            size="md"
+            color="#666"
+            css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
+          >
+            <FaGithub />
+          </Icon>
+        </Box>
+
+        <Box mr={3} as="a" target="_blank" href="https://x.com/waoeco">
+          <Icon
+            size="md"
+            color="#666"
+            css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
+          >
+            <FaXTwitter />
+          </Icon>
+        </Box>
+        <Box mr={3} as="a" target="_blank" href="https://discord.gg/vCkuVhkugY">
+          <Icon
+            size="md"
+            color="#666"
+            css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
+          >
+            <FaDiscord />
+          </Icon>
+        </Box>
+        <Box as="a" target="_blank" href="https://docs.wao.eco">
+          <Icon
+            size="md"
+            color="#666"
+            css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
+          >
+            <FaBookOpen />
+          </Icon>
+        </Box>
+      </Flex>
+      {!init ? (
+        <Flex
+          w="100%"
+          h="100%"
+          align="center"
+          justify="center"
+          fontSize="40px"
+          bg="#5137C5"
+          color="#9C89F6"
+          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
+        >
+          Booting Up...
+        </Flex>
+      ) : null}
       {!modal ? null : (
         <Flex
           align="center"
