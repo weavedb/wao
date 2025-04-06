@@ -77,7 +77,7 @@ class HB {
     if (res.page_info.has_next_page) {
       res.next = async () => {
         const from2 = last(res.edges).cursor + 1
-        return await this.message({ target, from2, to })
+        return await this.message({ target, from: from2, to, limit })
       }
     }
     return res

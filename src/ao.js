@@ -29,6 +29,7 @@ import {
   includes,
   map,
   reverse,
+  last,
 } from "ramda"
 
 import {
@@ -383,12 +384,10 @@ class AO {
     return { err, pid, p }
   }
 
-  async msg({
-    pid,
+  async res({
     jwk,
-    data,
-    act = "Eval",
-    tags = {},
+    pid,
+    mid,
     check = [],
     get,
     timeout = 0,
@@ -396,11 +395,7 @@ class AO {
     limit = 25,
   }) {
     let err = null
-    ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
-    if (err) return { err }
-    let anchors = {}
     let hash = null
-    let mid = null
     const getNewTxs = async (pid, _txs, _txmap) => {
       let exists = false
       if (mode === "gql") {
@@ -423,7 +418,8 @@ class AO {
           }
         }
       } else {
-        for (let v of reverse(await this.res({ pid, limit }))) {
+        const { out } = await this.ress({ pid, limit })
+        for (let v of reverse(out)) {
           const hash2 = getHash(v)
           if (!exists) {
             if (hash2 === hash) exists = true
@@ -439,7 +435,7 @@ class AO {
     const checkOut = async (get, _txs, _txmap, out) => {
       for (let v of _txs) {
         if (isNil(_txmap[v.id].res)) {
-          const res = await this.res({ pid, mid: v.id })
+          const res = await this.result({ process: pid, message: v.id })
           if (!hash) console.log(res)
           _txmap[v.id].res = res
         }
@@ -453,18 +449,11 @@ class AO {
       return out
     }
     let [res, out, results] = [null, null, []]
-    let _tags = buildTags(act, tags)
     let start = Date.now()
     try {
-      mid = await this.message({
-        process: pid,
-        signer: this.toSigner(jwk),
-        tags: _tags,
-        data: jsonToStr(data),
-      })
       if (!is(Array, check)) check = [check]
       let _txs = [{ id: mid, from: await this.ar.toAddr(jwk) }]
-      res = await this.res({ pid, mid })
+      res = await this.result({ process: pid, message: mid })
       hash = getHash(res)
       let _txmap = { [mid]: { checked: false, res } }
       results.push({ mid, res })
@@ -474,7 +463,7 @@ class AO {
           if (!_txmap[v.id].checked) {
             _txmap[v.id].checked = true
             if (isNil(_txmap[v.id].res)) {
-              const _res = await this.res({ pid, mid: v.id })
+              const _res = await this.result({ process: pid, message: v.id })
               _txmap[v.id].res = _res
             }
             if (!isNil(check) && check.length > 0) {
@@ -509,6 +498,40 @@ class AO {
     return { mid, res, err, out, results }
   }
 
+  async msg({
+    pid,
+    jwk,
+    data,
+    act = "Eval",
+    tags = {},
+    check = [],
+    get,
+    timeout = 0,
+    mode = "aoconnect",
+    limit = 25,
+  }) {
+    let err
+    ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
+    if (err) return { err }
+    let _tags = buildTags(act, tags)
+    const mid = await this.message({
+      process: pid,
+      signer: this.toSigner(jwk),
+      tags: _tags,
+      data: jsonToStr(data),
+    })
+    return await this.res({
+      pid,
+      mid,
+      jwk,
+      check,
+      get,
+      timeout,
+      mode,
+      limit,
+    })
+  }
+
   async asgn({ pid, mid, jwk, check = [], get }) {
     let err = null
     ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
@@ -521,7 +544,7 @@ class AO {
         message: mid,
         signer: this.toSigner(jwk),
       })
-      res = await this.res({ pid, mid })
+      res = await this.result({ process: pid, message: mid })
       if (!res) err = "something went wrong"
       if (res.Error) err = res.Error
       else {
@@ -558,16 +581,33 @@ class AO {
     }
     return { res, err, out }
   }
-  async res({ pid, mid, limit, asc, from, to }) {
-    if (!mid) {
+
+  async ress({ pid, limit, asc, cursor }) {
+    let err = null
+    let msgs = null
+    let next = null
+    let res = null
+    try {
       let sort = asc ? "ASC" : "DESC"
-      const res = await this.results({ process: pid, limit, sort, from, to })
+      res = await this.results({ process: pid, limit, sort, cursor })
       if (!res.edges) return null
-      return map(v => ({ cursor: v.cursor, ...v.node }))(res.edges)
-    } else {
-      return await this.result({ process: pid, message: mid })
+      msgs = map(v => ({ cursor: v.cursor, ...v.node }))(res.edges)
+      if (res.page_info.has_next_page) {
+        next = async () => {
+          return await this.results({
+            process: pid,
+            limit,
+            sort,
+            cursor: last(res.edges).cursor,
+          })
+        }
+      }
+    } catch (e) {
+      err = e
     }
+    return { err, out: msgs, res }
   }
+
   async eval({ pid, jwk, data }) {
     const fns = [
       {
@@ -742,6 +782,7 @@ const getParams = (tags, opts) => {
   if (
     (!isNil(tags?.get) ||
       !isNil(tags?.check) ||
+      !isNil(tags?.jwk) ||
       !isNil(tags?.data) ||
       is(Boolean, tags) ||
       is(String, tags)) &&
@@ -773,18 +814,26 @@ class Process {
     const { _tags, _opts } = getParams(tags, opts)
     return await this.ao.dry({ pid: this.pid, act, tags: _tags, ..._opts })
   }
-  async m(...opt) {
-    const res = await this.msg(...opt)
+  async res(opts) {
+    const { _opts } = getParams(null, opts)
+    return await this.ao.res({ pid: this.pid, ..._opts })
+  }
+  async o(name, opt) {
+    const res = await this[name](...opt)
     if (res.err) throw Error(res.err)
     return res.out
   }
+  async m(...opt) {
+    return this.o("msg", opt)
+  }
   async d(...opt) {
-    const res = await this.dry(...opt)
-    if (res.err) throw Error(res.err)
-    return res.out
+    return this.o("dry", opt)
   }
   async v(data, json = true, pretty = false) {
     return await this.ao.var({ pid: this.pid, data, json, pretty })
+  }
+  async r(...opt) {
+    return this.o("res", opt)
   }
 }
 

@@ -533,6 +533,8 @@ describe("Hyperbeam", function () {
 - [deploy](#deploy)
 - [msg](#msg)
 - [dry](#dry)
+- [res](#res)
+- [ress](#ress)
 - [asgn](#asgn)
 - [load](#load)
 - [eval](#eval)
@@ -628,7 +630,7 @@ Send a message.
 
 ```js
 const { err, mid, res, out } = await ao.msg({
-  data, act, tags, check, get, mode, limit
+  pid, data, act, tags, check, get, mode, limit
 })
 ```
 
@@ -696,8 +698,34 @@ Dryrun a message without writing to Arweave.
 
 
 ```js
-const { err, res, out } = await ao.dry({ data, action, tags, check, get })
+const { err, res, out } = await ao.dry({ pid, data, action, tags, check, get })
 ```
+
+##### res
+
+`res` does the same thing as [msg](#msg) but for an existing result with `mid`.
+
+```js
+const { err, res, out } = await ao.res({ pid, mid, check, get })
+```
+
+##### ress
+
+`ress` gets multiple results from a process. 
+`next()` will be returned for pagenation if there are more messages.
+
+```js
+const { err, out: msgs, res, next } = await ao.ress({ pid, limit, asc, from })
+
+if(next){
+  const { out: msgs2 } = await next()
+}
+```
+
+- `pid` : process ID
+- `limit` : how many to get
+- `asc` : messages are sorted descendingly by default, set `asc=true` to reverse
+- `from` : cursor to get from
 
 ##### asgn
 
@@ -815,6 +843,8 @@ You can go for even more concise syntax with `Process` class.
 - [m](#m)
 - [dry](#dry-1)
 - [d](#d)
+- [res](#res-1)
+- [r](#r)
 - [v](#v)
 
 #### Instantiate
@@ -890,6 +920,18 @@ const { mid, out } = await p.dry("Action", { Tag1: "value1", Tag2: "value2" })
 
 ```js
 const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+#### res
+
+```js
+const { err, res, out } = await p.res({ mid, check, get })
+```
+
+#### r
+
+```js
+const out = await p.r({ mid, check, get })
 ```
 
 #### v
