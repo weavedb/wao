@@ -268,6 +268,7 @@ export default function Home({}) {
       reader.readAsText(file)
     }
   }
+  console.log(message)
   return (
     <>
       <style jsx global>{`
@@ -757,6 +758,7 @@ export default function Home({}) {
                           if (_msg.http_msg) setMessage(_msg)
                           else
                             setMessage({
+                              res: _msg.res,
                               http_msg: _msg,
                               id: _msg.id,
                               slot: v.slot,
@@ -857,7 +859,9 @@ export default function Home({}) {
                           overflow: "auto",
                         }}
                       >
-                        {JSON.stringify(message.res, undefined, 2)}
+                        {!message.res
+                          ? ""
+                          : JSON.stringify(message.res, undefined, 2)}
                       </Box>
                     </code>
                   </Box>
@@ -968,6 +972,7 @@ export default function Home({}) {
                           if (_msg.http_msg) setMessage(_msg)
                           else
                             setMessage({
+                              res: _msg.res,
                               http_msg: _msg,
                               id: _msg.id,
                               slot: v.slot,
