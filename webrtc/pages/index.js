@@ -54,6 +54,7 @@ let peer2 = {}
 let hub1 = null
 let hub2 = null
 let ao = null
+const tags = tags => fromPairs(map(v => [v.name, v.value])(tags))
 
 const src_data = `-- Initialize a table to store messages
 local messages = {}
@@ -253,7 +254,6 @@ export default function Home({}) {
         const _files = prepend(_file, files)
         await lf.setItem("files", _files)
         await lf.setItem(`file-${id}`, txt)
-        console.log(file)
         setFiles(_files)
         setFile(_file)
         event.target.value = ""
@@ -268,7 +268,23 @@ export default function Home({}) {
       reader.readAsText(file)
     }
   }
-  console.log(message)
+  let act = null
+  let meta = []
+  if (message) {
+    const t = tags(message.http_msg.tags)
+    act = t.Type === "Process" ? "Process" : t.Action
+    meta.push({ name: "ID", value: message.id })
+    meta.push({
+      name: "Process",
+      value: t.Type === "Process" ? message.id : message.http_msg.process,
+    })
+    meta.push({ name: "Slot", value: message.slot })
+    const tx = ao?.mem.txs[message.id]
+    if (tx?.bundle) {
+      const _tx = ao.mem.txs[tx.bundle]
+      meta.push({ name: "From", value: _tx.owner })
+    }
+  }
   return (
     <>
       <style jsx global>{`
@@ -453,8 +469,6 @@ export default function Home({}) {
                     )
                     return
                   } else {
-                    const tags = tags =>
-                      fromPairs(map(v => [v.name, v.value])(tags))
                     const t = tags(obj.message.http_msg.tags)
                     if (t.Type === "Process") {
                       const pid = await ao.spawn(obj.message)
@@ -658,9 +672,22 @@ export default function Home({}) {
                   Import
                 </Flex>
               </>
+            ) : tab === "Networks" ? (
+              <Flex align="center">
+                <Box
+                  bg="#ddd"
+                  mr={2}
+                  css={{ borderRadius: "3px" }}
+                  px={2}
+                  py={1}
+                >
+                  LOCANNET
+                </Box>
+              </Flex>
             ) : (
               <>
-                {!module ? null : (
+                {!module ||
+                !includes(tab, ["Modules", "Processes", "Messages"]) ? null : (
                   <Flex
                     align="center"
                     css={{
@@ -669,10 +696,64 @@ export default function Home({}) {
                     }}
                     onClick={() => setTab("Modules")}
                   >
-                    <Box mr={2}>{modmap[module.id].name}</Box>
+                    <Box
+                      bg="#ddd"
+                      mr={2}
+                      css={{ borderRadius: "3px" }}
+                      px={2}
+                      py={1}
+                    >
+                      {modmap[module.id].name}
+                    </Box>
+                    {includes(tab, ["Modules", "Processes"]) ? (
+                      <Box mx={2}>{module.id}</Box>
+                    ) : null}
                   </Flex>
                 )}
-                {!proc ? null : (
+                {tab !== "Modules" ? null : (
+                  <>
+                    <Box flex={1} />
+                    <Flex
+                      py={1}
+                      px={4}
+                      fontSize="12px"
+                      color="#ddd"
+                      bg="#5137C5"
+                      css={{
+                        borderRadius: "5px",
+                        cursor: "pointer",
+                        border: "1px solid #5137C5",
+                        _hover: { opacity: 0.75 },
+                      }}
+                      onClick={async () => {
+                        //const lua = editorRef.current.getValue()
+                        let pid, p
+                        ;({ pid, p } = await ao.deploy({ module: module.id }))
+                        const v = pid
+                        let _proc = clone(ao.mem.env[v])
+                        delete _proc.memory
+                        _proc.tags = clone(ao.mem.msgs[v]?.tags ?? [])
+                        _proc.id = v
+                        setProc(_proc)
+                        setMessages(map(v => ao.mem.msgs[v])(_proc.results))
+
+                        let mmap = {}
+                        for (let k in ao.mem.modules)
+                          mmap[ao.mem.modules[k]] = k
+                        setProcs(
+                          append(
+                            { txid: pid, module: mmap[_proc.module] },
+                            procs
+                          )
+                        )
+                        setTab("Processes")
+                      }}
+                    >
+                      Spawn
+                    </Flex>
+                  </>
+                )}
+                {!proc || !includes(tab, ["Processes", "Messages"]) ? null : (
                   <>
                     <Icon size="md" color="#5137C5">
                       <FaAngleRight />
@@ -690,7 +771,40 @@ export default function Home({}) {
                     </Flex>
                   </>
                 )}
-                {!message ? null : (
+                {tab !== "Processes" ||
+                !proc ||
+                !file ||
+                file.ext !== "lua" ? null : (
+                  <>
+                    <Box flex={1} />
+                    <Flex
+                      py={1}
+                      px={4}
+                      fontSize="12px"
+                      color="#ddd"
+                      bg="#5137C5"
+                      css={{
+                        borderRadius: "5px",
+                        cursor: "pointer",
+                        border: "1px solid #5137C5",
+                        _hover: { opacity: 0.75 },
+                      }}
+                      onClick={async () => {
+                        if (!proc) {
+                          alert("Select a processl")
+                        } else {
+                          const p = ao.p(proc.id)
+                          const lua = editorRef.current.getValue()
+                          const res = await p.msg("Eval", { data: lua })
+                          console.log(res)
+                        }
+                      }}
+                    >
+                      Eval
+                    </Flex>
+                  </>
+                )}
+                {!message || !includes(tab, ["Messages"]) ? null : (
                   <>
                     <Icon size="md" color="#5137C5">
                       <FaAngleRight />
@@ -719,7 +833,7 @@ export default function Home({}) {
                           bg="#ddd"
                           css={{ borderRadius: "0 3px 3px 0" }}
                         >
-                          Eval
+                          {act}
                         </Box>
                       </Flex>
                       <Box>{message.id}</Box>
@@ -774,9 +888,9 @@ export default function Home({}) {
                           fontWeight="bold"
                           color={v.id !== message?.id ? "#5137C5" : "#ddd"}
                         >
-                          <Box w="20px" mr={2}>
+                          <Flex w="20px" mr={2}>
                             [{v.slot}]
-                          </Box>
+                          </Flex>
                           <Box>
                             {t.Type === "Process" ? "Process" : t.Action}
                           </Box>
@@ -797,6 +911,34 @@ export default function Home({}) {
                     h="calc(100vh - 130px)"
                     css={{ overflowY: "auto" }}
                   >
+                    <Flex my={2} fontWeight="bold" color="#5137C5">
+                      Metadata
+                    </Flex>
+                    {map(v => {
+                      if (includes(v.name, ["signature", "signature-input"])) {
+                        return null
+                      }
+                      return (
+                        <Flex my={2} align="center">
+                          <Box
+                            w="130px"
+                            color="white"
+                            bg="#5137C5"
+                            px={2}
+                            mr={4}
+                            css={{ borderRadius: "3px" }}
+                          >
+                            {v.name}
+                          </Box>
+                          <Box
+                            flex={1}
+                            css={{ wordBreak: "break-all", whiteSpace: "wrap" }}
+                          >
+                            {v.value}
+                          </Box>
+                        </Flex>
+                      )
+                    })(meta ?? [])}
                     <Flex my={2} fontWeight="bold" color="#5137C5">
                       Tags
                     </Flex>
@@ -980,10 +1122,18 @@ export default function Home({}) {
                           setTab("Messages")
                         }}
                       >
-                        <Flex color="#222">
-                          <Box w="25px" mr={2}>
-                            [{v.slot}]
-                          </Box>
+                        <Flex color="#222" align="center">
+                          <Flex
+                            w="30px"
+                            mr={4}
+                            align="center"
+                            fontSize="10px"
+                            bg="#ddd"
+                            justify="center"
+                            css={{ borderRadius: "3px" }}
+                          >
+                            {v.slot}
+                          </Flex>
                           <Box>{v.id}</Box>
                         </Flex>
                       </Flex>
@@ -1619,142 +1769,76 @@ export default function Home({}) {
             <Flex h="50px" align="center" px={4} color="#5137C5">
               <Box>{file ? file.name : "Editor"}</Box>
               <Box flex={1} />
-              <Flex
-                mr={4}
-                py={1}
-                px={4}
-                fontSize="12px"
-                color="#ddd"
-                bg="#5137C5"
-                css={{
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                  border: "1px solid #5137C5",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={async () => {
-                  const js = editorRef.current.getValue()
-                  const p = proc ? ao.p(proc.id) : null
-                  let descs = []
-                  const src = async path => {
-                    for (let v of files) {
-                      if (v.name === path) {
-                        return await lf.getItem(`file-${v.id}`)
-                      }
-                    }
-                    return null
-                  }
-                  const assert = _assert
-                  const require = async name => {
-                    let module = { exports: null }
-                    const js = await src(name)
-                    eval(js)
-                    return module.exports
-                  }
-                  let i = 0
-                  const it = (desc, fn) => {
-                    descs[i].tests.push({ desc, fn })
-                  }
-
-                  const describe = (desc2, fn) => {
-                    descs.push({ desc: desc2, fn, tests: [] })
-                  }
-                  eval(js)
-
-                  for (let v of descs) {
-                    await v.fn({ require })
-                    for (let v2 of v.tests) {
-                      const start = Date.now()
-                      try {
-                        const success = await v2.fn({
-                          ao,
-                          src,
-                          p,
-                          duration: Date.now() - start,
-                        })
-                        v2.res = { success, error: null }
-                      } catch (e) {
-                        v2.res = {
-                          success: false,
-                          error: e,
-                          duration: Date.now() - start,
+              {!file || file.ext !== "js" ? null : (
+                <Flex
+                  mr={4}
+                  py={1}
+                  px={4}
+                  fontSize="12px"
+                  color="#ddd"
+                  bg="#5137C5"
+                  css={{
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    border: "1px solid #5137C5",
+                    _hover: { opacity: 0.75 },
+                  }}
+                  onClick={async () => {
+                    const js = editorRef.current.getValue()
+                    const p = proc ? ao.p(proc.id) : null
+                    let descs = []
+                    const src = async path => {
+                      for (let v of files) {
+                        if (v.name === path) {
+                          return await lf.getItem(`file-${v.id}`)
                         }
                       }
+                      return null
                     }
-                    i++
-                  }
-                }}
-              >
-                Test
-              </Flex>
-              <Flex
-                mr={4}
-                py={1}
-                px={4}
-                fontSize="12px"
-                color="#ddd"
-                bg="#5137C5"
-                css={{
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                  border: "1px solid #5137C5",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={async () => {
-                  if (!proc) {
-                    alert("Select a processl")
-                  } else {
-                    const p = ao.p(proc.id)
-                    const lua = editorRef.current.getValue()
-                    const res = await p.msg("Eval", { data: lua })
-                    console.log(res)
-                  }
-                }}
-              >
-                Eval
-              </Flex>
-              <Flex
-                mr={4}
-                py={1}
-                px={4}
-                fontSize="12px"
-                color="#ddd"
-                bg="#5137C5"
-                css={{
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                  border: "1px solid #5137C5",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={async () => {
-                  const lua = editorRef.current.getValue()
-                  let pid, p
-                  if (lua === "") {
-                    ;({ pid, p } = await ao.deploy({ module: module.id }))
-                  } else {
-                    ;({ pid, p } = await ao.deploy({
-                      src_data,
-                      module: module.id,
-                    }))
-                  }
-                  const v = pid
-                  let _proc = clone(ao.mem.env[v])
-                  delete _proc.memory
-                  _proc.tags = clone(ao.mem.msgs[v]?.tags ?? [])
-                  _proc.id = v
-                  setProc(_proc)
-                  setMessages(map(v => ao.mem.msgs[v])(_proc.results))
+                    const assert = _assert
+                    const require = async name => {
+                      let module = { exports: null }
+                      const js = await src(name)
+                      eval(js)
+                      return module.exports
+                    }
+                    let i = 0
+                    const it = (desc, fn) => {
+                      descs[i].tests.push({ desc, fn })
+                    }
 
-                  let mmap = {}
-                  for (let k in ao.mem.modules) mmap[ao.mem.modules[k]] = k
-                  setProcs(
-                    append({ txid: pid, module: mmap[_proc.module] }, procs)
-                  )
-                  setTab("Processes")
-                }}
-              >
-                Spawn
-              </Flex>
+                    const describe = (desc2, fn) => {
+                      descs.push({ desc: desc2, fn, tests: [] })
+                    }
+                    eval(js)
+
+                    for (let v of descs) {
+                      await v.fn({ require })
+                      for (let v2 of v.tests) {
+                        const start = Date.now()
+                        try {
+                          const success = await v2.fn({
+                            ao,
+                            src,
+                            p,
+                            duration: Date.now() - start,
+                          })
+                          v2.res = { success, error: null }
+                        } catch (e) {
+                          v2.res = {
+                            success: false,
+                            error: e,
+                            duration: Date.now() - start,
+                          }
+                        }
+                      }
+                      i++
+                    }
+                  }}
+                >
+                  Test
+                </Flex>
+              )}
               <Flex
                 py={1}
                 px={4}
