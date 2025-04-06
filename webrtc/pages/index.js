@@ -54,6 +54,7 @@ let peer2 = {}
 let hub1 = null
 let hub2 = null
 let ao = null
+const tags = tags => fromPairs(map(v => [v.name, v.value])(tags))
 
 const src_data = `-- Initialize a table to store messages
 local messages = {}
@@ -253,7 +254,6 @@ export default function Home({}) {
         const _files = prepend(_file, files)
         await lf.setItem("files", _files)
         await lf.setItem(`file-${id}`, txt)
-        console.log(file)
         setFiles(_files)
         setFile(_file)
         event.target.value = ""
@@ -268,7 +268,21 @@ export default function Home({}) {
       reader.readAsText(file)
     }
   }
-  console.log(message)
+  let meta = []
+  if (message) {
+    const t = tags(message.http_msg.tags)
+    meta.push({ name: "ID", value: message.id })
+    meta.push({
+      name: "Process",
+      value: t.Type === "Process" ? message.id : message.http_msg.process,
+    })
+    meta.push({ name: "Slot", value: message.slot })
+    const tx = ao?.mem.txs[message.id]
+    if (tx?.bundle) {
+      const _tx = ao.mem.txs[tx.bundle]
+      meta.push({ name: "From", value: _tx.owner })
+    }
+  }
   return (
     <>
       <style jsx global>{`
@@ -453,8 +467,6 @@ export default function Home({}) {
                     )
                     return
                   } else {
-                    const tags = tags =>
-                      fromPairs(map(v => [v.name, v.value])(tags))
                     const t = tags(obj.message.http_msg.tags)
                     if (t.Type === "Process") {
                       const pid = await ao.spawn(obj.message)
@@ -797,6 +809,34 @@ export default function Home({}) {
                     h="calc(100vh - 130px)"
                     css={{ overflowY: "auto" }}
                   >
+                    <Flex my={2} fontWeight="bold" color="#5137C5">
+                      Metadata
+                    </Flex>
+                    {map(v => {
+                      if (includes(v.name, ["signature", "signature-input"])) {
+                        return null
+                      }
+                      return (
+                        <Flex my={2} align="center">
+                          <Box
+                            w="130px"
+                            color="white"
+                            bg="#5137C5"
+                            px={2}
+                            mr={4}
+                            css={{ borderRadius: "3px" }}
+                          >
+                            {v.name}
+                          </Box>
+                          <Box
+                            flex={1}
+                            css={{ wordBreak: "break-all", whiteSpace: "wrap" }}
+                          >
+                            {v.value}
+                          </Box>
+                        </Flex>
+                      )
+                    })(meta ?? [])}
                     <Flex my={2} fontWeight="bold" color="#5137C5">
                       Tags
                     </Flex>
