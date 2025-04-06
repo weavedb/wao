@@ -19,6 +19,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@permaweb/ao-loader": "^0.0.46",
     "arnext": "^0.1.4",
+    "assert": "^2.1.0",
     "dayjs": "^1.11.13",
     "localforage": "^1.10.0",
     "next": "14.2.13",
