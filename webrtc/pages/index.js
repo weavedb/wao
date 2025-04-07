@@ -48,6 +48,14 @@ import { HB } from "wao"
 import Hub from "../lib/hub"
 import WebRTC from "../lib/webrtc"
 import Editor from "@monaco-editor/react"
+import dynamic from "next/dynamic"
+const Terminal = dynamic(
+  () =>
+    import("../lib/xterm").then(mod => {
+      return mod
+    }),
+  { ssr: false }
+)
 let peer1 = null
 let peer2 = {}
 
@@ -288,6 +296,7 @@ export default function Home({}) {
       meta.push({ name: "From", value: _tx.owner })
     }
   }
+
   return (
     <>
       <style jsx global>{`
@@ -325,7 +334,7 @@ export default function Home({}) {
           top: 0,
           left: 0,
           position: "fixed",
-          boxShadow: "0px 2px 10px 0px rgba(0,0,0,0.75);",
+          boxShadow: "0px 2px 4px 0px rgba(0,0,0,0.5);",
           zIndex: 6,
         }}
       >
@@ -1920,90 +1929,96 @@ export default function Home({}) {
                     _hover: { opacity: 0.75 },
                   }}
                   onClick={async () => {
-                    const js = editorRef.current.getValue()
-                    const p = proc ? ao.p(proc.id) : null
-                    let descs = []
-                    const src = async path => {
-                      for (let v of files) {
-                        if (v.name === path) {
-                          return await lf.getItem(`file-${v.id}`)
+                    try {
+                      const js = editorRef.current.getValue()
+                      const p = proc ? ao.p(proc.id) : null
+                      let descs = []
+                      const src = async path => {
+                        for (let v of files) {
+                          if (v.name === path) {
+                            return await lf.getItem(`file-${v.id}`)
+                          }
                         }
+                        return null
                       }
-                      return null
-                    }
-                    const assert = _assert
-                    const require = async name => {
-                      let module = { exports: null }
-                      const js = await src(name)
-                      eval(js)
-                      return module.exports
-                    }
-                    let i = 0
-                    const it = (desc, fn) => {
-                      descs[i].tests.push({ desc, fn })
-                    }
+                      const assert = _assert
+                      const require = async name => {
+                        let module = { exports: null }
+                        const js = await src(name)
+                        eval(js)
+                        return module.exports
+                      }
+                      let i = 0
+                      const it = (desc, fn) => {
+                        descs[i].tests.push({ desc, fn })
+                      }
 
-                    const describe = (desc2, fn) => {
-                      descs.push({ desc: desc2, fn, tests: [] })
-                    }
-                    eval(js)
-                    const ts = Date.now()
-                    let success = 0
-                    let fail = 0
-                    let res = []
-                    for (let v of descs) {
-                      let _res = []
-                      let _success = 0
-                      let _fail = 0
-                      await v.fn({ require })
-                      for (let v2 of v.tests) {
-                        const start = Date.now()
-                        try {
-                          await v2.fn({
-                            ao,
-                            src,
-                            p,
-                          })
-                          _res.push({
-                            description: v2.desc,
-                            success: true,
-                            error: null,
-                            duration: Date.now() - start,
-                          })
-                          _success++
-                          success++
-                        } catch (e) {
-                          _res.push({
-                            description: v2.desc,
-                            success: false,
-                            error: e.toString(),
-                            duration: Date.now() - start,
-                          })
-                          _fail++
-                          fail++
-                        }
-                        res.push({
-                          description: v.desc,
-                          cases: _res,
-                          success: _success,
-                          fail: _fail,
-                        })
+                      const describe = (desc2, fn) => {
+                        descs.push({ desc: desc2, fn, tests: [] })
                       }
-                      i++
+                      eval(js)
+                      const ts = Date.now()
+                      let success = 0
+                      let fail = 0
+                      let res = []
+                      for (let v of descs) {
+                        let _res = []
+                        let _success = 0
+                        let _fail = 0
+                        await v.fn({ require })
+                        for (let v2 of v.tests) {
+                          const start = Date.now()
+                          try {
+                            await v2.fn({
+                              ao,
+                              src,
+                              p,
+                            })
+                            _res.push({
+                              description: v2.desc,
+                              success: true,
+                              error: null,
+                              duration: Date.now() - start,
+                            })
+                            _success++
+                            success++
+                          } catch (e) {
+                            _res.push({
+                              description: v2.desc,
+                              success: false,
+                              error: e.toString(),
+                              duration: Date.now() - start,
+                            })
+                            _fail++
+                            fail++
+                          }
+                          res.push({
+                            description: v.desc,
+                            cases: _res,
+                            success: _success,
+                            fail: _fail,
+                          })
+                        }
+                        i++
+                      }
+                      const result = {
+                        file: file.name,
+                        id: generateId(),
+                        date: ts,
+                        duration: Date.now() - ts,
+                        tests: res,
+                        success,
+                        fail,
+                      }
+                      console.log(result)
+                      if (success > 0 || fail > 0) {
+                        setTab("Tests")
+                        setTest(result)
+                        setTests([result, ...tests])
+                      }
+                    } catch (e) {
+                      console.log(e)
                     }
-                    const result = {
-                      file: file.name,
-                      id: generateId(),
-                      date: ts,
-                      duration: Date.now() - ts,
-                      tests: res,
-                      success,
-                      fail,
-                    }
-                    console.log(result)
-                    setTab("Tests")
-                    setTest(result)
-                    setTests([result, ...tests])
                   }}
                 >
                   Test
@@ -2047,7 +2062,7 @@ export default function Home({}) {
                     ? "calc(100vw - 520px)"
                     : "calc(100vw - 1100px)"
                 }
-                height="calc(100vh - 130px)"
+                height="calc(100vh - 365px)"
                 theme="vs-dark"
                 defaultLanguage={
                   file?.ext === "js" ? "js" : file?.ext ? file.ext : "lua"
@@ -2067,9 +2082,49 @@ export default function Home({}) {
                 }}
               />
             </Flex>
+            <Flex
+              h="35px"
+              bg="#1E1E1E"
+              color="#999"
+              css={{ border: "1px solid #666" }}
+            >
+              <Flex
+                align="center"
+                css={{ borderRight: "1px solid #666" }}
+                px={6}
+                bg="#5137C5"
+                justify="center"
+                w="150px"
+                color="#ddd"
+              >
+                JS Terminal
+              </Flex>
+              <Flex
+                align="center"
+                css={{ borderRight: "1px solid #666" }}
+                px={6}
+                justify="center"
+                w="150px"
+                color="#999"
+              >
+                Lua Eval
+              </Flex>
+              <Flex
+                align="center"
+                css={{ borderRight: "1px solid #666" }}
+                px={6}
+                justify="center"
+                w="150px"
+                color="#999"
+              >
+                Logs
+              </Flex>
+            </Flex>
+            <Terminal />
           </Flex>
         )}
       </Flex>
+
       <Flex
         w="100%"
         h="30px"
@@ -2238,6 +2293,7 @@ export default function Home({}) {
                   // todo: handle this better
                   setTimeout(() => editorRef.current.setValue(txt), 100)
                   setModal(false)
+                  setFilename("")
                 }}
               >
                 Create
