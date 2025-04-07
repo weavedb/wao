@@ -99,24 +99,36 @@ export default function XTerm({ global, ao }) {
 
           if (command.trim()) {
             if (command === ".dryrun") {
-              dryrun = true
+              const on = !global.dryrun
+              global.setDryrun(on)
+              await global.prompt(
+                "toggling dryrun mode...... " + (on ? "on" : "off")
+              )
             } else {
-              const { res } = await ao[dryrun ? "dry" : "msg"]({
-                act: "Eval",
-                pid: global.proc.id,
-                data: command,
-              })
-              if (res?.Output?.data) {
-                const data = res.Output.data.output ?? res.Output.data
-                term.write(`${data}\r\n`)
+              try {
+                const { res } = await ao[global.dryrun ? "dry" : "msg"]({
+                  act: "Eval",
+                  pid: global.proc.id,
+                  data: command,
+                })
+                if (res?.Output?.data) {
+                  const data = res.Output.data.output ?? res.Output.data
+                  term.write(`${data}\r\n`)
+                }
+                if (res.Error) term.write(`${res.Error}\r\n`)
+                const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
+                if (prompt) {
+                  term.write(`${prompt}`)
+                } else {
+                  await global.prompt(false)
+                }
+              } catch (e) {
+                term.write(`${e.toString()}\r\n`)
+                await global.prompt(false)
               }
-              const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
-              if (prompt) term.write(`${prompt}`)
             }
           } else {
-            term.write(
-              `${global.proc.id.slice(0, 3)}...${global.proc.id.slice(-3)} $ `
-            )
+            await global.prompt(false)
           }
           processingCommand = false
         } else if (code === 127) {
