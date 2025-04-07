@@ -13,6 +13,8 @@ import { useRef, useEffect, useState } from "react"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import {
+  FaAnglesUp,
+  FaAnglesDown,
   FaBookOpen,
   FaDiscord,
   FaXTwitter,
@@ -156,6 +158,7 @@ export default function Home({}) {
   const [filename, setFilename] = useState("")
   const [fileext, setFileext] = useState("js")
   const [monaco, setMonaco] = useState(null)
+  const [bigTerminal, setBigTerminal] = useState(false)
   const tabs = [
     "Modules",
     "Processes",
@@ -189,6 +192,12 @@ export default function Home({}) {
     setModule(mod)
   }
   useEffect(() => {
+    if (global.terminalRef) {
+      global.terminalRef.current.resize(110, bigTerminal ? 29 : 11)
+    }
+  }, [bigTerminal])
+
+  useEffect(() => {
     global.dryrun = dryrun
   }, [dryrun])
   useEffect(() => {
@@ -208,7 +217,7 @@ export default function Home({}) {
             global.term.write("\u001b[2K\r")
             if (txt) {
               txt = `${txt}\n`
-            } else if (!txt) {
+            } else if (txt === false) {
               txt = ""
             } else {
               txt = `connecting to a process... ${proc.id}\n`
@@ -2111,7 +2120,9 @@ export default function Home({}) {
                     ? "calc(100vw - 520px)"
                     : "calc(100vw - 1100px)"
                 }
-                height="calc(100vh - 355px)"
+                height={
+                  bigTerminal ? "calc(100vh - 660px)" : "calc(100vh - 355px)"
+                }
                 theme="vs-dark"
                 defaultLanguage={
                   file?.ext === "js" ? "js" : file?.ext ? file.ext : "lua"
@@ -2169,9 +2180,38 @@ export default function Home({}) {
                   </Flex>
                 )
               })(ttabs)}
+              <Flex
+                w="50px"
+                align="center"
+                css={{
+                  borderRight: "1px solid #666",
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                color={"#999"}
+                justify="center"
+                onClick={() => setBigTerminal(!bigTerminal)}
+              >
+                <Icon
+                  size="sm"
+                  color="#666"
+                  css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
+                >
+                  {bigTerminal ? <FaAnglesDown /> : <FaAnglesUp />}
+                </Icon>
+              </Flex>
             </Flex>
             <Box visibility={ttab === "js" ? "block" : "none"}>
-              <Terminal {...{ ao, global }} />
+              <Box
+                w="100%"
+                h={bigTerminal ? "505px" : "200px"}
+                id="terminal"
+                bg="#1E1E1E"
+                borderRadius="0"
+                css={{ overflow: "hidden" }}
+              >
+                <Terminal {...{ ao, global }} />
+              </Box>
             </Box>
           </Flex>
         )}
