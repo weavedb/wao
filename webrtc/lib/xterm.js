@@ -3,11 +3,14 @@ import { Box } from "@chakra-ui/react"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 
-export default function XTerm() {
+let term = null
+let count = 0
+export default function XTerm({ global, ao }) {
   const terminalRef = useRef(null)
   const inputRef = useRef("")
-
   useEffect(() => {
+    global.inputRef = inputRef
+    let dryrun = false
     // Add scrollbar styles as a separate element to ensure they apply
     const styleElement = document.createElement("style")
     styleElement.textContent = `
@@ -44,13 +47,12 @@ export default function XTerm() {
       }
     `
     document.head.appendChild(styleElement)
-
     try {
       const terminalElement = document.getElementById("terminal")
       if (!terminalElement) return
 
       // Create terminal with more rows to fill the space
-      const term = new Terminal({
+      /*term = new Terminal({
         cursorBlink: true,
         fontSize: 14,
         fontFamily: "monospace",
@@ -58,22 +60,35 @@ export default function XTerm() {
           background: "#1E1E1E",
           foreground: "#f0f0f0",
         },
-        rows: 10, // More rows to fill the space
         cols: 80,
-      })
+        })*/
 
+      term = new Terminal({
+        cursorBlink: true,
+        fontSize: 12,
+        fontFamily: "monospace",
+        theme: {
+          background: "#242424",
+        },
+        convertEol: true,
+        cols: 110,
+        rows: 11,
+      })
+      global.term = term
       terminalRef.current = term
+      global.terminalRef = terminalRef
       term.open(terminalElement)
-      term.write("wao $ ")
+      term.write(`select a process...... `)
 
       let processingCommand = false
 
-      term.onData(data => {
+      term.onData(async data => {
         if (processingCommand) return
 
         const code = data.charCodeAt(0)
 
         if (code === 13) {
+          if (!global.proc) return
           // Enter key
           processingCommand = true
 
@@ -83,10 +98,26 @@ export default function XTerm() {
           term.write("\r\n")
 
           if (command.trim()) {
-            term.write(`Command not found: ${command}\r\n`)
+            if (command === ".dryrun") {
+              dryrun = true
+            } else {
+              const { res } = await ao[dryrun ? "dry" : "msg"]({
+                act: "Eval",
+                pid: global.proc.id,
+                data: command,
+              })
+              if (res?.Output?.data) {
+                const data = res.Output.data.output ?? res.Output.data
+                term.write(`${data}\r\n`)
+              }
+              const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
+              if (prompt) term.write(`${prompt}`)
+            }
+          } else {
+            term.write(
+              `${global.proc.id.slice(0, 3)}...${global.proc.id.slice(-3)} $ `
+            )
           }
-
-          term.write("wao $ ")
           processingCommand = false
         } else if (code === 127) {
           // Backspace
