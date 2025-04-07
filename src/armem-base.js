@@ -95,31 +95,18 @@ export default class ArMemBase {
     this.blocks = []
     this.blockmap = {}
     this.env = {}
-    this.modules = {
-      aos2_0_1: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
-      aos1: "cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo",
-      sqlite: "ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw",
-      aos_mainnet: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
-    }
+    this.modules = {}
     this.modmap = {}
     this.msgs = {}
+
     this.wasms = {
-      "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM": {
-        file: "aos2_0_1",
-        format: "wasm64-unknown-emscripten-draft_2024_02_15",
-      },
-      cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo: {
-        file: "aos_1",
-        format: "wasm64-unknown-emscripten-draft_2024_02_15",
-      },
-      ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw: {
-        file: "sqlite",
-        format: "wasm64-unknown-emscripten-draft_2024_02_15",
-      },
-      "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g": {
-        file: "aos_mainnet",
-        format: "wasm64-unknown-emscripten-draft_2024_02_15",
-      },
+      "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g": { file: "aos2_0_3" },
+      "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM": { file: "aos2_0_1" },
+      ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw: { file: "sqlite" },
+    }
+    for (const k in this.wasms) {
+      this.wasms[k].format ??= "wasm64-unknown-emscripten-draft_2024_02_15"
+      this.modules[this.wasms[k].file] = k
     }
     let txs = []
     for (const k in this.modules) {
