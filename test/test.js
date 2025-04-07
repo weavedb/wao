@@ -402,7 +402,7 @@ end)
 `
 
 describe("AOS1", function () {
-  it.only("should wait reply from another process", async () => {
+  it("should wait reply from another process", async () => {
     const ao = await new AO({}).init(acc[0])
     const { p, pid } = await ao.deploy({ src_data: src_data_r1 })
     const ao2 = await new AO({ mem: ao.mem }).init(acc[0])
@@ -446,5 +446,50 @@ describe("Aoconnect", () => {
     const ao = new MAO({})
     const p = ao.p("m2qUBt5fO1INsvqzaYBdV4YGf8r4r2kKR1JyV1tiLm8")
     console.log(await p.v("Balance"))
+  })
+})
+
+describe("get", function () {
+  it.only("should get with optional match", async () => {
+    const src_data = `
+local json = require("json")
+Handlers.add("Hello", "Hello", function (msg)
+  Send({Target = msg.To, Data = "Hello" })
+  Send({Target = msg.From, Data = json.encode({ Hello = "World", Age = 5 })})
+  Send({Target = msg.From, Tag = json.encode({ Hello = "AO" }), Data = json.encode({ Hello = "World!" })})
+end)
+`
+    const ao = await new AO({}).init(acc[0])
+    const { p, pid } = await ao.deploy({ src_data })
+    assert.deepEqual(
+      await p.d("Hello", {
+        get: {
+          json: true,
+          data: true,
+          match: (v, i, r) => v.Hello !== "World",
+        },
+      }),
+      { Hello: "World!" }
+    )
+    assert.deepEqual(
+      await p.d("Hello", {
+        get: {
+          name: "Tag",
+          json: true,
+          match: v => v.Hello === "AO",
+        },
+      }),
+      { Hello: "AO" }
+    )
+    assert.deepEqual(
+      await p.d("Hello", {
+        get: {
+          data: true,
+          json: true,
+          match: v => v.Age < 10,
+        },
+      }),
+      { Hello: "World", Age: 5 }
+    )
   })
 })

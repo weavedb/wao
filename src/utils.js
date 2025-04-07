@@ -168,6 +168,7 @@ const _getTagVal = (get, res, from) => {
     out = {}
     for (const k in _get.obj ?? {}) out[k] = _getTagVal(_get.obj[k], res, from)
   } else {
+    let i = 0
     for (const v of res.Messages ?? []) {
       if (typeof _get === "object" && isNil(_get.name) && isNil(_get.data)) {
         _get.data = true
@@ -182,7 +183,12 @@ const _getTagVal = (get, res, from) => {
         if (v.Data) out = v.Data
         try {
           if (_get.json || _get === true) out = JSON.parse(out)
-        } catch (e) {}
+        } catch (e) {
+          out = null
+        }
+        if (out !== null && typeof _get.match === "function") {
+          if (!_get.match(out, i, res)) out = null
+        }
       } else if (typeof _get === "object" && typeof _get.name === "string") {
         let _from = null
         if (is(Object, _get) && _get.from) _from = _get.from
@@ -190,9 +196,15 @@ const _getTagVal = (get, res, from) => {
         out = getTag(v.Tags ?? [], _get.name)
         try {
           if (_get.json) out = JSON.parse(out)
-        } catch (e) {}
+        } catch (e) {
+          out = null
+        }
+        if (out !== null && typeof _get.match === "function") {
+          if (!_get.match(out, i, res)) out = null
+        }
       } else out = getTag(v.Tags ?? [], _get)
       if (out) break
+      i++
     }
   }
   return out
