@@ -733,7 +733,6 @@ export default function Home({}) {
                         _hover: { opacity: 0.75 },
                       }}
                       onClick={async () => {
-                        //const lua = editorRef.current.getValue()
                         let pid, p
                         ;({ pid, p } = await ao.deploy({ module: module.id }))
                         const v = pid
