@@ -138,6 +138,8 @@ export default function Home({}) {
   const [message, setMessage] = useState(null)
   const [ctype, setCtype] = useState("hb")
   const [files, setFiles] = useState([])
+  const [tests, setTests] = useState([])
+  const [test, setTest] = useState(null)
   const [file, setFile] = useState(null)
   const [filename, setFilename] = useState("")
   const [fileext, setFileext] = useState("js")
@@ -151,6 +153,7 @@ export default function Home({}) {
     "Storage",
     "Database",
     "Files",
+    "Tests",
     "Networks",
   ]
   const _setModule = id => {
@@ -1310,6 +1313,117 @@ export default function Home({}) {
                   ))(files)}
                 </Box>
               </Flex>
+            ) : tab === "Tests" ? (
+              <Flex w="100%">
+                <Box
+                  w="385px"
+                  h="calc(100vh - 130px)"
+                  css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
+                >
+                  {map(v => (
+                    <Flex
+                      h="50px"
+                      bg={v.id === test?.id ? "#5137C5" : "white"}
+                      fontSize="12px"
+                      p={4}
+                      direction="column"
+                      justify="center"
+                      onClick={async () => {
+                        setTest(v)
+                      }}
+                      css={{
+                        borderBottom: "1px solid #ddd",
+                        cursor: "pointer",
+                        _hover: { opacity: 0.75 },
+                      }}
+                    >
+                      <Flex
+                        align="center"
+                        fontWeight="bold"
+                        color={v.id !== test?.id ? "#5137C5" : "#ddd"}
+                      >
+                        <Box
+                          mr={4}
+                          px={2}
+                          bg="#bbb"
+                          color="#222"
+                          fontWeight="normal"
+                          css={{ borderRadius: "3px" }}
+                        >
+                          {v.file}
+                        </Box>
+                        success {v.success} : fail {v.fail} : {v.duration} ms
+                      </Flex>
+                      <Box color={v.id !== test?.id ? "#222" : "#ddd"}>
+                        {dayjs(v.date).fromNow()}
+                      </Box>
+                    </Flex>
+                  ))(tests)}
+                </Box>
+                {!test ? null : (
+                  <Box
+                    px={4}
+                    py={2}
+                    fontSize="12px"
+                    flex={1}
+                    h="calc(100vh - 130px)"
+                    css={{ overflowY: "auto" }}
+                  >
+                    <Flex my={2} fontWeight="bold" color="#5137C5">
+                      Stats
+                    </Flex>
+                    {map(v => {
+                      if (includes(v.name, ["signature", "signature-input"])) {
+                        return null
+                      }
+                      return (
+                        <Flex my={2} align="center">
+                          <Box
+                            w="130px"
+                            color="white"
+                            bg="#5137C5"
+                            px={2}
+                            mr={4}
+                            css={{ borderRadius: "3px" }}
+                          >
+                            {v.name}
+                          </Box>
+                          <Box
+                            flex={1}
+                            css={{ wordBreak: "break-all", whiteSpace: "wrap" }}
+                          >
+                            {v.value}
+                          </Box>
+                        </Flex>
+                      )
+                    })([
+                      { name: "File", value: test.file },
+                      { name: "Duration", value: `${test.duration} ms` },
+                      { name: "Success", value: `${test.success}` },
+                      { name: "Fail", value: `${test.fail}` },
+                      { name: "Date", value: dayjs(test.date).fromNow() },
+                    ])}
+                    <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+                      Result
+                    </Flex>
+                    <code>
+                      <Box
+                        as="pre"
+                        bg="#eee"
+                        p={4}
+                        css={{
+                          borderRadius: "3px",
+                          wordBreak: "break-word",
+                          whiteSpace: "pre-wrap",
+                          overflow: "auto",
+                        }}
+                      >
+                        {JSON.stringify(test.tests, undefined, 2)}
+                      </Box>
+                    </code>
+                  </Box>
+                )}
+              </Flex>
             ) : (
               <>
                 <Flex>
@@ -1833,29 +1947,63 @@ export default function Home({}) {
                       descs.push({ desc: desc2, fn, tests: [] })
                     }
                     eval(js)
-
+                    const ts = Date.now()
+                    let success = 0
+                    let fail = 0
+                    let res = []
                     for (let v of descs) {
+                      let _res = []
+                      let _success = 0
+                      let _fail = 0
                       await v.fn({ require })
                       for (let v2 of v.tests) {
                         const start = Date.now()
                         try {
-                          const success = await v2.fn({
+                          await v2.fn({
                             ao,
                             src,
                             p,
+                          })
+                          _res.push({
+                            description: v2.desc,
+                            success: true,
+                            error: null,
                             duration: Date.now() - start,
                           })
-                          v2.res = { success, error: null }
+                          _success++
+                          success++
                         } catch (e) {
-                          v2.res = {
+                          _res.push({
+                            description: v2.desc,
                             success: false,
-                            error: e,
+                            error: e.toString(),
                             duration: Date.now() - start,
-                          }
+                          })
+                          _fail++
+                          fail++
                         }
+                        res.push({
+                          description: v.desc,
+                          cases: _res,
+                          success: _success,
+                          fail: _fail,
+                        })
                       }
                       i++
                     }
+                    const result = {
+                      file: file.name,
+                      id: generateId(),
+                      date: ts,
+                      duration: Date.now() - ts,
+                      tests: res,
+                      success,
+                      fail,
+                    }
+                    console.log(result)
+                    setTab("Tests")
+                    setTest(result)
+                    setTests([result, ...tests])
                   }}
                 >
                   Test
