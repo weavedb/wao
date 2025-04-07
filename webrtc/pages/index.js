@@ -56,6 +56,7 @@ const Terminal = dynamic(
     }),
   { ssr: false }
 )
+
 let peer1 = null
 let peer2 = {}
 
@@ -121,7 +122,9 @@ Handlers.add("Get", "Get", function (msg)
   })
 end)`
 
+let global = {}
 export default function Home({}) {
+  const [ttab, setTtab] = useState("lua")
   const [modal, setModal] = useState(false)
   const [subs, setSubs] = useState({})
   const [clients, setClients] = useState([])
@@ -184,6 +187,30 @@ export default function Home({}) {
     setProcs(_procs)
     setModule(mod)
   }
+  useEffect(() => {
+    ;(async () => {
+      if (proc && ao) {
+        global.proc = proc
+        global.ao = ao
+        const { res } = await ao.dry({
+          act: "Eval",
+          pid: proc.id,
+          data: "#Inbox",
+        })
+        const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
+        if (prompt) {
+          global.term.write("\u001b[2K\r")
+          global.term.write(`${prompt}`)
+          global.term.write(`${global.inputRef.current}`)
+        }
+      }
+      if (!proc && global.term) {
+        global.term.write("\u001b[2K\r")
+        global.term.write(`select a process...`)
+        global.term.write(`${global.inputRef.current}`)
+      }
+    })()
+  }, [proc])
   useEffect(() => {
     ;(async () => {
       const files = (await lf.getItem("files")) ?? []
@@ -296,6 +323,10 @@ export default function Home({}) {
       meta.push({ name: "From", value: _tx.owner })
     }
   }
+  const ttabs = [
+    { key: "lua", name: "Lua Eval" },
+    { key: "log", name: "Logs" },
+  ]
 
   return (
     <>
@@ -2062,7 +2093,7 @@ export default function Home({}) {
                     ? "calc(100vw - 520px)"
                     : "calc(100vw - 1100px)"
                 }
-                height="calc(100vh - 365px)"
+                height="calc(100vh - 355px)"
                 theme="vs-dark"
                 defaultLanguage={
                   file?.ext === "js" ? "js" : file?.ext ? file.ext : "lua"
@@ -2083,44 +2114,36 @@ export default function Home({}) {
               />
             </Flex>
             <Flex
-              h="35px"
+              fontSize="12px"
+              h="25px"
               bg="#1E1E1E"
               color="#999"
               css={{ border: "1px solid #666" }}
             >
-              <Flex
-                align="center"
-                css={{ borderRight: "1px solid #666" }}
-                px={6}
-                bg="#5137C5"
-                justify="center"
-                w="150px"
-                color="#ddd"
-              >
-                JS Terminal
-              </Flex>
-              <Flex
-                align="center"
-                css={{ borderRight: "1px solid #666" }}
-                px={6}
-                justify="center"
-                w="150px"
-                color="#999"
-              >
-                Lua Eval
-              </Flex>
-              <Flex
-                align="center"
-                css={{ borderRight: "1px solid #666" }}
-                px={6}
-                justify="center"
-                w="150px"
-                color="#999"
-              >
-                Logs
-              </Flex>
+              {map(v => {
+                return (
+                  <Flex
+                    flex={1}
+                    align="center"
+                    css={{
+                      borderRight: "1px solid #666",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    px={6}
+                    bg={ttab === v.key ? "#5137C5" : ""}
+                    color={ttab === v.key ? "#ddd" : "#999"}
+                    justify="center"
+                    onClick={() => setTtab(v.key)}
+                  >
+                    {v.name}
+                  </Flex>
+                )
+              })(ttabs)}
             </Flex>
-            <Terminal />
+            <Box visibility={ttab === "js" ? "block" : "none"}>
+              <Terminal {...{ ao, global }} />
+            </Box>
           </Flex>
         )}
       </Flex>
