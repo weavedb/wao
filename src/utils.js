@@ -186,9 +186,6 @@ const _getTagVal = (get, res, from) => {
         } catch (e) {
           out = null
         }
-        if (out !== null && typeof _get.match === "function") {
-          if (!_get.match(out, i, res)) out = null
-        }
       } else if (typeof _get === "object" && typeof _get.name === "string") {
         let _from = null
         if (is(Object, _get) && _get.from) _from = _get.from
@@ -199,10 +196,12 @@ const _getTagVal = (get, res, from) => {
         } catch (e) {
           out = null
         }
-        if (out !== null && typeof _get.match === "function") {
-          if (!_get.match(out, i, res)) out = null
-        }
-      } else out = getTag(v.Tags ?? [], _get)
+      } else {
+        out = getTag(v.Tags ?? [], _get)
+      }
+      if (out !== null && typeof _get.match === "function") {
+        if (!_get.match(out, i, res)) out = null
+      }
       if (out) break
       i++
     }
