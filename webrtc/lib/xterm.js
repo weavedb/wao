@@ -67,9 +67,7 @@ export default function XTerm({ global, ao }) {
         cursorBlink: true,
         fontSize: 12,
         fontFamily: "monospace",
-        theme: {
-          background: "#242424",
-        },
+        theme: { background: "#1E1E1E" },
         convertEol: true,
         cols: 110,
         rows: 11,
@@ -111,11 +109,12 @@ export default function XTerm({ global, ao }) {
                   pid: global.proc.id,
                   data: command,
                 })
+                console.log(res)
                 if (res?.Output?.data) {
                   const data = res.Output.data.output ?? res.Output.data
                   term.write(`${data}\r\n`)
                 }
-                if (res.Error) term.write(`${res.Error}\r\n`)
+                if (res?.Error) term.write(`${res.Error}\r\n`)
                 const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
                 if (prompt) {
                   term.write(`${prompt}`)
@@ -161,5 +160,5 @@ export default function XTerm({ global, ao }) {
     }
   }, [])
 
-  return <Box w="100%" h="200px" id="terminal" bg="#1E1E1E" borderRadius="0" />
+  return null
 }
