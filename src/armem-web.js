@@ -1,8 +1,10 @@
-import wdb from "./lua/weavedb-lite.js"
+import sqlite from "./lua/sqlite.js"
+import aos2_0_3 from "./lua/aos2_0_3.js"
+import aos2_0_1 from "./lua/aos2_0_1.js"
 import Base from "./armem-base.js"
 import db from "./lfdb.js"
 import init, { Waosm } from "./waosm/waosm.js"
-
+const wasm = { sqlite, aos2_0_3, aos2_0_1 }
 export default class ArMem extends Base {
   constructor(args = {}) {
     super({ ...args, init, Waosm })
@@ -10,6 +12,6 @@ export default class ArMem extends Base {
     this.initSync()
   }
   async _getWasm(file) {
-    return Buffer.from(wdb, "base64")
+    return Buffer.from(wasm[file], "base64")
   }
 }
