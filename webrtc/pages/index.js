@@ -122,8 +122,9 @@ Handlers.add("Get", "Get", function (msg)
   })
 end)`
 
-let global = {}
+let global = { dryrun: true }
 export default function Home({}) {
+  const [dryrun, setDryrun] = useState(true)
   const [ttab, setTtab] = useState("lua")
   const [modal, setModal] = useState(false)
   const [subs, setSubs] = useState({})
@@ -188,25 +189,39 @@ export default function Home({}) {
     setModule(mod)
   }
   useEffect(() => {
+    global.dryrun = dryrun
+  }, [dryrun])
+  useEffect(() => {
     ;(async () => {
+      global.setDryrun = setDryrun
       if (proc && ao) {
         global.proc = proc
         global.ao = ao
-        const { res } = await ao.dry({
-          act: "Eval",
-          pid: proc.id,
-          data: "#Inbox",
-        })
-        const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
-        if (prompt) {
-          global.term.write("\u001b[2K\r")
-          global.term.write(`${prompt}`)
-          global.term.write(`${global.inputRef.current}`)
+        global.prompt = async txt => {
+          const { res } = await ao.dry({
+            act: "Eval",
+            pid: proc.id,
+            data: "ao.id",
+          })
+          const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
+          if (prompt) {
+            global.term.write("\u001b[2K\r")
+            if (txt) {
+              txt = `${txt}\n`
+            } else if (!txt) {
+              txt = ""
+            } else {
+              txt = `connecting to a process... ${proc.id}\n`
+            }
+            global.term.write(`${txt}${prompt}`)
+            global.term.write(`${global.inputRef.current}`)
+          }
         }
+        await global.prompt()
       }
       if (!proc && global.term) {
         global.term.write("\u001b[2K\r")
-        global.term.write(`select a process...`)
+        global.term.write(`select a process......`)
         global.term.write(`${global.inputRef.current}`)
       }
     })()
@@ -324,7 +339,10 @@ export default function Home({}) {
     }
   }
   const ttabs = [
-    { key: "lua", name: "Lua Eval" },
+    {
+      key: "lua",
+      name: `Lua Eval${dryrun ? " ( dryrun )" : ""} ${!proc ? "" : " : " + proc.id.slice(0, 5) + "..." + proc.id.slice(-5)}`,
+    },
     { key: "log", name: "Logs" },
   ]
 
@@ -2134,7 +2152,18 @@ export default function Home({}) {
                     bg={ttab === v.key ? "#5137C5" : ""}
                     color={ttab === v.key ? "#ddd" : "#999"}
                     justify="center"
-                    onClick={() => setTtab(v.key)}
+                    onClick={async () => {
+                      if (ttab === v.key && v.key === "lua" && global.prompt) {
+                        setDryrun(!dryrun)
+                        const on = !global.dryrun
+                        global.setDryrun(on)
+                        await global.prompt(
+                          "toggling dryrun mode...... " + (on ? "on" : "off")
+                        )
+                      } else {
+                        setTtab(v.key)
+                      }
+                    }}
                   >
                     {v.name}
                   </Flex>
