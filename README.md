@@ -676,6 +676,7 @@ const get6 = { obj: { age: "Age", who: "Name" }} // => { age: 30, who: "Bob" }
 const get7 = { age: "Age", who: "Name" } // same as get6
 const get8 = { name: "Profile", json: true, from: PID } // specify sender process
 const get9 = { age: { name: "Age", from: PID }, who: "Name" } // another example
+const get10 = { data: true, json: true, match: (val, index, res)=> val.Age < 10 }
 ```
 
 `check` and `get` lazy-evaluate tags and data by tracking down async messages. As soon as the conditions are met, they won't track further messages. With `receive()` added with AOS 2.0, you can only get spawned messages up to the `receive()` function from `result`. But WAO automatically tracks down further messages and determines if check conditions are met beyond the `receive()` function. 
