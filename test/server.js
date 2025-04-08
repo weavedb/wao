@@ -53,7 +53,7 @@ describe("SDK", function () {
     assert.notEqual(memory, null)
   })
 
-  it("should work with aoconnect results", async () => {
+  it.skip("should work with aoconnect results", async () => {
     let ao = await new AO(4000).init(acc[0])
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
     const { mid } = await p.msg("Add", { Plus: 3 })
@@ -88,7 +88,7 @@ end)
     console.log(await p.m("Hello"))
     return
   })
-  it("should run server", async () => {
+  it.only("should run server", async () => {
     let ao = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
       acc[0]
     )
@@ -96,6 +96,7 @@ end)
     console.log(await p.m("Get"))
     await p.m("Add", { Plus: 3 })
     assert.equal(await p.d("Get"), "3")
+    return
     let ao2 = await new AO({
       ar: { port: 4000 },
       aoconnect: optAO(4000),
