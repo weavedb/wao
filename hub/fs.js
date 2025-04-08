@@ -4,7 +4,7 @@ const WebSocket = require("ws")
 const ws_server = new WebSocket.Server({ port: 9090 })
 const { keys, omit, isNil, mergeLeft } = require("ramda")
 const { resolve } = require("path")
-const { readFileSync } = require("fs")
+const { writeFileSync, readFileSync } = require("fs")
 const _dir = process.argv[2] ?? "./"
 let sus = {}
 let cbs = {}
@@ -23,7 +23,12 @@ ws_server.on("connection", socket => {
   socket.send(JSON.stringify({ type: "registered", id: clientId, dir }))
   socket.on("message", message => {
     const data = JSON.parse(message)
-    if (data.type === "data") {
+    if (data.type === "save") {
+      writeFileSync(
+        resolve(__dirname, _dir, data.path.replace(/^\//, "")),
+        data.content
+      )
+    } else if (data.type === "data") {
       const content = readFileSync(
         resolve(__dirname, _dir, data.path.replace(/^\//, "")),
         "utf8"
