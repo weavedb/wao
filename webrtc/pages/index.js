@@ -257,9 +257,18 @@ export default function Home({}) {
       setFiles(files)
     })()
   }, [])
+  const fileRef = useRef(null)
+
+  useEffect(() => {
+    fileRef.current = file
+  }, [file])
   useEffect(() => {
     ;(async () => {
-      ao = await new AO({ hb_url: "http://localhost:10001" }).init(acc[0])
+      try {
+        ao = await new AO({ hb_url: "http://localhost:10001" }).init(acc[0])
+      } catch (e) {
+        ao = await new AO({}).init(acc[0])
+      }
       await ao.mem.init()
       let _modules = []
       let mmap = {}
@@ -696,7 +705,6 @@ export default function Home({}) {
                   let lfs = null
                   let fsmap = {}
                   if (localFS) fsmap = indexBy(prop("path"))(localFS)
-                  console.log(fsmap)
                   if (_localFS) {
                     lfs = []
                     const listFiles = (fs, p = [], open = true) => {
@@ -741,7 +749,6 @@ export default function Home({}) {
                     }
                   }
                   //for (let v of lfs) setOpen(v.path, v.open)
-                  console.log(lfs)
                   setLocalFS(lfs)
                 }
                 hub1 = new Hub("ws://localhost:9090")
@@ -749,14 +756,16 @@ export default function Home({}) {
                   console.log("New FS Msg:", obj)
                   if (obj.subtype === "content") {
                     const ext = obj.path.split(".").pop()
-                    setFile(null)
-                    setTimeout(() => {
-                      monaco.editor.setModelLanguage(
-                        editorRef.current.getModel(),
-                        ext === "js" ? "javascript" : ext
-                      )
-                      editorRef.current.setValue(obj.content)
-                    }, 100)
+                    const file = fileRef.current
+                    if (file?.id === obj.path) {
+                      setTimeout(() => {
+                        monaco.editor.setModelLanguage(
+                          editorRef.current.getModel(),
+                          ext === "js" ? "javascript" : ext
+                        )
+                        editorRef.current.setValue(obj.content)
+                      }, 100)
+                    }
                   } else if (obj.subtype === "dir_change") {
                     console.log(obj)
                     updateDir(obj.dir)
@@ -767,7 +776,7 @@ export default function Home({}) {
                   setWSID(null)
                 }
                 hub1.onRegister = msg => {
-                  setWSID(msg.clientId)
+                  setWSID(msg.id)
                   let lfs = null
                   updateDir(msg.dir)
                 }
@@ -1536,6 +1545,16 @@ export default function Home({}) {
                                 }
                                 setLocalFS(lfs)
                               } else {
+                                const ext = v.name
+                                  .split(".")
+                                  .pop()
+                                  .toLowerCase()
+                                setFile({
+                                  name: v.name,
+                                  id: v.path,
+                                  ext,
+                                  local: true,
+                                })
                                 hub1.socket.send(
                                   JSON.stringify({ type: "data", path: v.path })
                                 )
@@ -2322,36 +2341,63 @@ export default function Home({}) {
                   Test
                 </Flex>
               )}
-              <Flex
-                py={1}
-                px={4}
-                fontSize="12px"
-                color="#5137C5"
-                css={{
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                  border: "1px solid #5137C5",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={async () => {
-                  if (confirm("Would you like to delete the file?")) {
-                    editorRef.current.setValue("")
-                    await lf.removeItem(`file-${file.id}`)
-                    const _files = filter(v => file.id !== v.id)(files)
-                    await lf.setItem(`files`, _files)
-                    setFiles(_files)
-                    for (let v of _files) {
-                      setFile(v)
-                      editorRef.current.setValue(
-                        (await lf.getItem(`file-${v.id}`)) ?? ""
-                      )
-                      break
+              {file?.local ? (
+                <Flex
+                  py={1}
+                  px={4}
+                  fontSize="12px"
+                  color="#5137C5"
+                  css={{
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    border: "1px solid #5137C5",
+                    _hover: { opacity: 0.75 },
+                  }}
+                  onClick={async () => {
+                    const content = editorRef.current.getValue()
+                    hub1.socket.send(
+                      JSON.stringify({
+                        type: "save",
+                        content,
+                        path: file.id,
+                      })
+                    )
+                  }}
+                >
+                  Save
+                </Flex>
+              ) : (
+                <Flex
+                  py={1}
+                  px={4}
+                  fontSize="12px"
+                  color="#5137C5"
+                  css={{
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    border: "1px solid #5137C5",
+                    _hover: { opacity: 0.75 },
+                  }}
+                  onClick={async () => {
+                    if (confirm("Would you like to delete the file?")) {
+                      editorRef.current.setValue("")
+                      await lf.removeItem(`file-${file.id}`)
+                      const _files = filter(v => file.id !== v.id)(files)
+                      await lf.setItem(`files`, _files)
+                      setFiles(_files)
+                      for (let v of _files) {
+                        setFile(v)
+                        editorRef.current.setValue(
+                          (await lf.getItem(`file-${v.id}`)) ?? ""
+                        )
+                        break
+                      }
                     }
-                  }
-                }}
-              >
-                Delete
-              </Flex>
+                  }}
+                >
+                  Delete
+                </Flex>
+              )}
             </Flex>
             <Flex w="100%">
               <Editor
