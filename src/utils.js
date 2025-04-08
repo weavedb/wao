@@ -209,7 +209,11 @@ const _getTagVal = (get, res, from) => {
       } else {
         out = getTag(v.Tags ?? [], _get)
       }
-      if (out !== null && typeof _get.match === "function") {
+      if (
+        out !== null &&
+        typeof _get !== "string" &&
+        typeof _get.match === "function"
+      ) {
         if (!_get.match(out, i, res)) out = null
       }
       if (out) break
