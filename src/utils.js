@@ -1,6 +1,16 @@
 import { graphql, parse, validate, buildSchema } from "graphql"
 
-import { clone, is, includes, fromPairs, map, isNil, equals } from "ramda"
+import {
+  clone,
+  is,
+  includes,
+  fromPairs,
+  map,
+  isNil,
+  equals,
+  keys,
+  omit,
+} from "ramda"
 
 const allows = [
   { key: "allowed", val: "Allowed" },
@@ -630,7 +640,66 @@ const allChecked = (check, res, from) => {
   return isCheckComplete(checks, check)
 }
 
+function toANS104Request(fields) {
+  const dataItem = {
+    target: fields.target,
+    anchor: fields.anchor ?? "",
+    tags: keys(
+      omit(
+        [
+          "Target",
+          "target",
+          "Anchor",
+          "anchor",
+          "Data",
+          "data",
+          "data-protocol",
+          "Data-Protocol",
+          "variant",
+          "Variant",
+          "dryrun",
+          "Dryrun",
+          "Type",
+          "type",
+          "path",
+          "method",
+        ],
+        fields
+      )
+    )
+      .map(function (key) {
+        return { name: key, value: fields[key] }
+      }, fields)
+      .concat([
+        { name: "Data-Protocol", value: "ao" },
+        { name: "Type", value: fields.Type ?? "Message" },
+        { name: "Variant", value: fields.Variant ?? "ao.N.1" },
+      ]),
+    data: fields?.data || "",
+  }
+  return {
+    headers: {
+      "Content-Type": "application/ans104",
+      "codec-device": "ans104@1.0",
+    },
+    item: dataItem,
+  }
+}
+
+function parseSignatureInput(input) {
+  const match = input.match(
+    /^([^=]+)=\(([^)]+)\);alg="([^"]+)";keyid="([^"]+)"$/
+  )
+  if (!match) throw new Error("Invalid signature-input format")
+
+  const [, label, fieldsStr, alg, keyid] = match
+  const fields = fieldsStr.split('" "').map(f => f.replace(/"/g, ""))
+  return { label, fields, alg, keyid }
+}
+
 export {
+  toANS104Request,
+  parseSignatureInput,
   allChecked,
   optAO,
   optServer,
