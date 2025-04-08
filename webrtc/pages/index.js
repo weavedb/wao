@@ -13,6 +13,10 @@ import { useRef, useEffect, useState } from "react"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import {
+  FaRegFloppyDisk,
+  FaRegFolder,
+  FaRegFolderOpen,
+  FaRegFileCode,
   FaAnglesUp,
   FaAnglesDown,
   FaBookOpen,
@@ -124,8 +128,19 @@ Handlers.add("Get", "Get", function (msg)
   })
 end)`
 
+const src_data_js = `describe("WAO", ()=>{
+  it("should run", async ({ ao, p, src })=> {
+    // write your test here
+  })
+})`
+
+const src_data_lua = `Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)`
+
 let global = { dryrun: true }
 export default function Home({}) {
+  const [localFS, setLocalFS] = useState(null)
   const [dryrun, setDryrun] = useState(true)
   const [ttab, setTtab] = useState("lua")
   const [modal, setModal] = useState(false)
@@ -140,9 +155,10 @@ export default function Home({}) {
   const [hbs, setHBs] = useState([])
   const [su, setSU] = useState(null)
   const [suid, setSUID] = useState(null)
+  const [wsid, setWSID] = useState(null)
   const [cid, setCID] = useState(null)
   const [client, setClient] = useState(null)
-  const [tab, setTab] = useState("Modules")
+  const [tab, setTab] = useState("Projects")
   const [init, setInit] = useState(false)
   const [modules, setModules] = useState([])
   const [module, setModule] = useState(null)
@@ -160,6 +176,8 @@ export default function Home({}) {
   const [monaco, setMonaco] = useState(null)
   const [bigTerminal, setBigTerminal] = useState(false)
   const tabs = [
+    "Projects",
+    "Tests",
     "Modules",
     "Processes",
     "Messages",
@@ -167,8 +185,6 @@ export default function Home({}) {
     "Tokens",
     "Storage",
     "Database",
-    "Files",
-    "Tests",
     "Networks",
   ]
   const _setModule = id => {
@@ -354,7 +370,6 @@ export default function Home({}) {
     },
     { key: "log", name: "Logs" },
   ]
-
   return (
     <>
       <style jsx global>{`
@@ -577,12 +592,12 @@ export default function Home({}) {
                   setSubs({})
                   setHBs([])
                 }
-                hub1.onRegister = id => {
+                hub1.onRegister = msg => {
                   hub1.socket.send(
                     JSON.stringify({ type: "list", target: "hb" })
                   )
                   hub1.registerSU()
-                  setSUID(id)
+                  setSUID(msg.clientId)
                 }
                 hub1.onOffer = async (offer, id) => {
                   setClients(c => append(id, c))
@@ -631,6 +646,135 @@ export default function Home({}) {
               }}
             >
               Connect to WAO Hub
+            </Flex>
+          )}
+          {wsid ? (
+            <Flex
+              ml={4}
+              fontSize="14px"
+              bg="white"
+              color="#5137C5"
+              py={1}
+              px={4}
+              css={{
+                border: "1px solid #5137C5",
+                borderRadius: "5px",
+                cursor: "pointer",
+                _hover: { opacity: 0.75 },
+              }}
+              onClick={() => {
+                if (confirm("Disconnect from WAO FS?")) {
+                  hub1.disconnect()
+                  setWSID(null)
+                }
+              }}
+            >
+              WAO FS : ws://localhost:9090
+            </Flex>
+          ) : (
+            <Flex
+              ml={4}
+              fontSize="14px"
+              color="white"
+              bg="#5137C5"
+              py={1}
+              px={4}
+              css={{
+                borderRadius: "5px",
+                cursor: "pointer",
+                _hover: { opacity: 0.75 },
+              }}
+              onClick={async () => {
+                const getP = v => {
+                  if (v.p.length === 0) {
+                    return "/" + v.name
+                  } else {
+                    return "/" + v.p.join("/") + "/" + v.name
+                  }
+                }
+                const updateDir = _localFS => {
+                  let lfs = null
+                  let fsmap = {}
+                  if (localFS) fsmap = indexBy(prop("path"))(localFS)
+                  console.log(fsmap)
+                  if (_localFS) {
+                    lfs = []
+                    const listFiles = (fs, p = [], open = true) => {
+                      for (let k in fs) {
+                        if (typeof fs[k] === "number") {
+                          let v = { name: k, updated: fs[k], p, show: open }
+                          v.path = getP(v)
+                          if (fsmap[v.path]) v.show = fsmap[v.path].show
+
+                          lfs.push(v)
+                        } else {
+                          let v = {
+                            name: k,
+                            show: open,
+                            open: false,
+                            dir: true,
+                            p,
+                          }
+                          v.path = getP(v)
+                          if (fsmap[v.path]) {
+                            v.open = fsmap[v.path].open
+                            v.show = fsmap[v.path].show
+                          }
+                          lfs.push(v)
+                          listFiles(fs[k], [...p, k], false)
+                        }
+                      }
+                    }
+                    listFiles(_localFS)
+                  }
+                  const setOpen = (_path, _open) => {
+                    for (let v2 of lfs) {
+                      let _path2 = "/" + v2.p.join("/")
+                      if (_path && _path2 === _path) {
+                        if (_open) {
+                          v2.show = true
+                        } else {
+                          v2.show = false
+                        }
+                        if (v2.dir) setOpen(_path2 + "/" + v2.name, _open)
+                      }
+                    }
+                  }
+                  //for (let v of lfs) setOpen(v.path, v.open)
+                  console.log(lfs)
+                  setLocalFS(lfs)
+                }
+                hub1 = new Hub("ws://localhost:9090")
+                hub1.onMsg = async obj => {
+                  console.log("New FS Msg:", obj)
+                  if (obj.subtype === "content") {
+                    const ext = obj.path.split(".").pop()
+                    setFile(null)
+                    setTimeout(() => {
+                      monaco.editor.setModelLanguage(
+                        editorRef.current.getModel(),
+                        ext === "js" ? "javascript" : ext
+                      )
+                      editorRef.current.setValue(obj.content)
+                    }, 100)
+                  } else if (obj.subtype === "dir_change") {
+                    console.log(obj)
+                    updateDir(obj.dir)
+                  }
+                }
+
+                hub1.onClose = () => {
+                  setWSID(null)
+                }
+                hub1.onRegister = msg => {
+                  setWSID(msg.clientId)
+                  let lfs = null
+                  updateDir(msg.dir)
+                }
+                hub1.connect()
+              }}
+            >
+              Connect to WAO FS
             </Flex>
           )}
         </Flex>
@@ -696,7 +840,7 @@ export default function Home({}) {
             fontSize="12px"
             css={{ borderBottom: "1px solid #ddd" }}
           >
-            {tab === "Files" ? (
+            {tab === "Projects" ? (
               <>
                 <Box flex={1} />
                 <Flex
@@ -930,7 +1074,7 @@ export default function Home({}) {
           </Flex>
           <Flex
             flex={1}
-            w={init ? (tab === "Files" ? "385px" : "965px") : "100vw"}
+            w={init ? (tab === "Projects" ? "385px" : "965px") : "100vw"}
           >
             {!init ? null : tab === "Messages" ? (
               <Flex w="100%">
@@ -1336,47 +1480,143 @@ export default function Home({}) {
                   </Box>
                 )}
               </Flex>
-            ) : tab === "Files" ? (
+            ) : tab === "Projects" ? (
               <Flex>
                 <Box
                   w="385px"
                   h="calc(100vh - 130px)"
+                  fontSize="12px"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
-                  {map(v => (
-                    <Flex
-                      h="50px"
-                      bg={v.id === file?.id ? "#5137C5" : "white"}
-                      fontSize="12px"
-                      p={4}
-                      direction="column"
-                      justify="center"
-                      onClick={async () => {
-                        const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
-                        setFile(v)
-                        monaco.editor.setModelLanguage(
-                          editorRef.current.getModel(),
-                          v.ext === "js" ? "javascript" : v.ext ? v.ext : "lua"
+                  {!localFS ? null : (
+                    <Box css={{ borderBottom: "1px solid #ddd" }}>
+                      <Flex h="25px" p={4} align="center" bg="#eee">
+                        <Icon size="md" color="#5137C5" mr={2}>
+                          <FaRegFloppyDisk />
+                        </Icon>
+                        <Box>Local Computer ( http://localhost:9090 )</Box>
+                      </Flex>
+                      {map(v => {
+                        return !v.show ? null : (
+                          <Flex
+                            h="25px"
+                            p={4}
+                            align="center"
+                            css={{
+                              cursor: "pointer",
+                              _hover: { opacity: 0.75 },
+                            }}
+                            onClick={() => {
+                              if (v.dir) {
+                                let lfs = clone(localFS)
+                                let i = 0
+                                let _path = null
+                                let _open = null
+                                const setOpen = (_path, _open) => {
+                                  for (let v2 of lfs) {
+                                    let _path2 = "/" + v2.p.join("/")
+                                    if (_path && _path2 === _path) {
+                                      if (_open) {
+                                        v2.show = true
+                                      } else {
+                                        v2.show = false
+                                      }
+                                      if (v2.dir)
+                                        setOpen(_path2 + "/" + v2.name, _open)
+                                    }
+                                  }
+                                }
+                                for (let v2 of lfs) {
+                                  if (v.path === v2.path) {
+                                    v2.open = !v2.open
+                                    _path = v.path
+                                    _open = v2.open
+                                  }
+                                  setOpen(_path, _open)
+                                }
+                                setLocalFS(lfs)
+                              } else {
+                                hub1.socket.send(
+                                  JSON.stringify({ type: "data", path: v.path })
+                                )
+                              }
+                            }}
+                          >
+                            <Box pl={20 * (v.p.length + 1) + "px"} />
+                            <Icon
+                              size="md"
+                              color="#5137C5"
+                              mr={2}
+                              key={v.path + "-icon"}
+                            >
+                              {v.dir ? (
+                                v.open ? (
+                                  <FaRegFolderOpen />
+                                ) : (
+                                  <FaRegFolder />
+                                )
+                              ) : (
+                                <FaRegFileCode />
+                              )}
+                            </Icon>
+                            <Box>{v.name}</Box>
+                          </Flex>
                         )
-                        // todo: handle this better
-                        setTimeout(() => editorRef.current.setValue(txt), 100)
-                      }}
-                      css={{
-                        borderBottom: "1px solid #ddd",
-                        cursor: "pointer",
-                        _hover: { opacity: 0.75 },
-                      }}
-                    >
-                      <Box
-                        fontWeight="bold"
-                        color={v.id !== file?.id ? "#5137C5" : "#ddd"}
+                      })(localFS)}
+                    </Box>
+                  )}
+                  <Flex h="25px" p={4} align="center" bg="#eee">
+                    <Icon size="md" color="#5137C5" mr={2}>
+                      <FaRegFloppyDisk />
+                    </Icon>
+                    <Box>Web Project</Box>
+                  </Flex>
+                  {map(v => (
+                    <>
+                      <Flex
+                        h="25px"
+                        p={4}
+                        align="center"
+                        bg={v.id === file?.id ? "#5137C5" : "white"}
+                        color={v.id === file?.id ? "#ddd" : "#222"}
+                        css={{
+                          cursor: "pointer",
+                          _hover: { opacity: 0.75 },
+                        }}
+                        onClick={async () => {
+                          const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
+                          setFile(v)
+                          monaco.editor.setModelLanguage(
+                            editorRef.current.getModel(),
+                            v.ext === "js"
+                              ? "javascript"
+                              : v.ext
+                                ? v.ext
+                                : "lua"
+                          )
+                          // todo: handle this better
+                          setTimeout(() => editorRef.current.setValue(txt), 100)
+                        }}
                       >
-                        {v.name}
-                      </Box>
-                      <Box color={v.id !== file?.id ? "#222" : "#ddd"}>
-                        {dayjs(v.update).fromNow()}
-                      </Box>
-                    </Flex>
+                        <Box pl={20 * 1 + "px"} />
+                        <Icon
+                          size="md"
+                          mr={2}
+                          color={v.id === file?.id ? "#ddd" : "#5137C5"}
+                        >
+                          {v.dir ? (
+                            v.open ? (
+                              <FaRegFolderOpen />
+                            ) : (
+                              <FaRegFolder />
+                            )
+                          ) : (
+                            <FaRegFileCode />
+                          )}
+                        </Icon>
+                        <Box>{v.name}</Box>
+                      </Flex>
+                    </>
                   ))(files)}
                 </Box>
               </Flex>
@@ -2116,7 +2356,7 @@ export default function Home({}) {
             <Flex w="100%">
               <Editor
                 width={
-                  tab === "Files"
+                  tab === "Projects"
                     ? "calc(100vw - 520px)"
                     : "calc(100vw - 1100px)"
                 }
@@ -2365,7 +2605,6 @@ export default function Home({}) {
                 }}
                 onClick={async () => {
                   if (/^\s*$/.test(filename)) return alert("Enter a filename.")
-                  const txt = ""
                   const id = generateId()
                   const _file = {
                     name: `${filename}.${fileext}`,
@@ -2373,6 +2612,12 @@ export default function Home({}) {
                     id,
                     ext: fileext,
                   }
+                  const txt =
+                    fileext === "js"
+                      ? src_data_js
+                      : fileext === "lua"
+                        ? src_data_lua
+                        : ""
                   const _files = prepend(_file, files)
                   await lf.setItem("files", _files)
                   await lf.setItem(`file-${id}`, txt)
