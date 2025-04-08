@@ -42,32 +42,32 @@ class Adaptor {
     this.mem = mem
     this.gql = new GQL({ mem })
   }
-  async get({ path = "/", type = "cu", req }) {
-    return await this[type]({ path, req })
+  async get(req) {
+    return await this[req.device](req)
   }
-  async bd({ path, req }) {
-    return await this[`bd_${req.method.toLowerCase()}`]({ path, req })
+  async bd(req) {
+    return await this[`bd_${req.method.toLowerCase()}`](req)
   }
-  async ar({ path, req }) {
-    return await this[`ar_${req.method.toLowerCase()}`]({ path, req })
+  async ar(req) {
+    return await this[`ar_${req.method.toLowerCase()}`](req)
   }
-  async su({ path, req }) {
-    return await this[`su_${req.method.toLowerCase()}`]({ path, req })
+  async su(req) {
+    return await this[`su_${req.method.toLowerCase()}`](req)
   }
-  async mu({ path, req }) {
-    return await this[`mu_${req.method.toLowerCase()}`]({ path, req })
+  async mu(req) {
+    return await this[`mu_${req.method.toLowerCase()}`](req)
   }
-  async cu({ path, req }) {
-    return await this[`cu_${req.method.toLowerCase()}`]({ path, req })
+  async cu(req) {
+    return await this[`cu_${req.method.toLowerCase()}`](req)
   }
-  async bd_get({ path, req }) {
-    switch (path) {
+  async bd_get(req) {
+    switch (req.path) {
       default:
     }
   }
 
-  async bd_post({ path, req }) {
-    switch (path) {
+  async bd_post(req) {
+    switch (req.path) {
       case "/tx":
         return await this.bd_post_tx(req)
       default:
@@ -75,8 +75,8 @@ class Adaptor {
     }
   }
 
-  async ar_get({ path, req }) {
-    switch (path) {
+  async ar_get(req) {
+    switch (req.path) {
       case "/":
         return await this.ar_get_root(req)
       case "/wallet/:id/balance":
@@ -98,8 +98,8 @@ class Adaptor {
     }
   }
 
-  async ar_post({ path, req }) {
-    switch (path) {
+  async ar_post(req) {
+    switch (req.path) {
       case "/graphql":
         return await this.ar_post_graphql(req)
       case "/:id":
@@ -109,8 +109,8 @@ class Adaptor {
     }
   }
 
-  async su_get({ path, req }) {
-    switch (path) {
+  async su_get(req) {
+    switch (req.path) {
       case "/":
         return await this.su_get_root(req)
       case "/timestamp":
@@ -122,15 +122,15 @@ class Adaptor {
     }
   }
 
-  async su_post({ path, req }) {
-    switch (path) {
+  async su_post(req) {
+    switch (req.path) {
       default:
         return await this.bad()
     }
   }
 
-  async mu_get({ path, req }) {
-    switch (path) {
+  async mu_get(req) {
+    switch (req.path) {
       case "/":
         return await this.mu_get_root(req)
       case "/monitor:pid":
@@ -140,8 +140,8 @@ class Adaptor {
     }
   }
 
-  async mu_delete({ path, req }) {
-    switch (path) {
+  async mu_delete(req) {
+    switch (req.path) {
       case "/monitor:pid":
         return await this.mu_delete_monitor(req)
       default:
@@ -149,8 +149,8 @@ class Adaptor {
     }
   }
 
-  async mu_post({ path, req }) {
-    switch (path) {
+  async mu_post(req) {
+    switch (req.path) {
       case "/":
         return await this.mu_post_root(req)
       case "/monitor:pid":
@@ -160,8 +160,8 @@ class Adaptor {
     }
   }
 
-  async cu_get({ path, req }) {
-    switch (path) {
+  async cu_get(req) {
+    switch (req.path) {
       case "/":
         return await this.cu_get_root(req)
       case "/result/:mid":
@@ -175,8 +175,8 @@ class Adaptor {
     }
   }
 
-  async cu_post({ path, req }) {
-    switch (path) {
+  async cu_post(req) {
+    switch (req.path) {
       case "/result/:mid": // not in the AO spec, but HyperBEAM queries it
         return await this.cu_post_result(req)
       case "/dry-run": // not in the AO spec
