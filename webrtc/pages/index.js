@@ -1508,6 +1508,8 @@ export default function Home({}) {
                       {map(v => {
                         return !v.show ? null : (
                           <Flex
+                            bg={file?.id === v.path ? "#5137C5" : "white"}
+                            color={file?.id === v.path ? "#ddd" : "#222"}
                             h="25px"
                             p={4}
                             align="center"
@@ -1564,7 +1566,7 @@ export default function Home({}) {
                             <Box pl={20 * (v.p.length + 1) + "px"} />
                             <Icon
                               size="md"
-                              color="#5137C5"
+                              color={file?.id !== v.path ? "#5137C5" : "#ddd"}
                               mr={2}
                               key={v.path + "-icon"}
                             >
