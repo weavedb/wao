@@ -180,24 +180,24 @@ describe("SDK", function () {
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
     const data = src.data("aos2_0_1", "wasm")
     const { id: modid } = await ao.postModule({ data, jwk })
-    const { p, err } = await ao.deploy({ src_data, module: modid })
-    assert.equal(await p.d("Hello"), "Hello, World!")
+    const { p, err, res } = await ao.deploy({ src_data, module: modid })
+    assert.equal(await p.d("Hello", false), "Hello, World!")
   })
 
   it("should spawn a process and send messages", async () => {
     const { p } = await ao.deploy({ src_data })
-    assert.equal(await p.d("Hello"), "Hello, World!")
+    assert.equal(await p.d("Hello", false), "Hello, World!")
   })
 
   it("should spawn a process with On-Boot tag", async () => {
     const { err, p, pid } = await ao.deploy({ boot: true, src_data })
-    assert.equal(await p.d("Hello"), "Hello, World!")
+    assert.equal(await p.d("Hello", false), "Hello, World!")
     const { pid: pid2, p: p2 } = await ao.deploy({ boot: pid })
     return
-    assert.equal(await p2.d("Hello"), "Hello, World!")
+    assert.equal(await p2.d("Hello", false), "Hello, World!")
   })
 
-  it("should spawn a message from a handler with receive", async () => {
+  it.only("should spawn a message from a handler with receive", async () => {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data2 })
     assert.equal(
       await p.m("Hello2", { get: "Hello", timeout: 3000 }),
@@ -236,7 +236,7 @@ describe("SDK", function () {
 
   it("should work with pre-loaded packages", async () => {
     const { p } = await ao.deploy({ src_data: src_data5 })
-    assert.equal(await p.d("Hello"), "Hello, World!")
+    assert.equal(await p.d("Hello", false), "Hello, World!")
   })
 
   it("should work with weavedrive: Assignments", async () => {
@@ -246,7 +246,7 @@ describe("SDK", function () {
       data: "Hello, World!",
     })
     await ao.attest({ id: pid })
-    assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
+    assert.equal(await p.d("Hello", { msg: pid }, false), "Hello, World!")
   })
 
   it("should work with weavedrive: Individual", async () => {
@@ -265,7 +265,7 @@ describe("SDK", function () {
       data: "Hello, World!",
     })
     await ao.avail({ ids: [pid] })
-    assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
+    assert.equal(await p.d("Hello", { msg: pid }, false), "Hello, World!")
   })
 
   it("should load apm mock", async () => {
@@ -279,7 +279,7 @@ describe("SDK", function () {
     })
     const { id } = await ao.ar.post({ data: "Hello, World!" })
     await ao.attest({ id })
-    assert.equal(await p.d("Get-Data", { id }), "Hello, World!")
+    assert.equal(await p.d("Get-Data", { id }, false), "Hello, World!")
     return
   })
 
@@ -305,7 +305,7 @@ describe("SDK", function () {
     await ao.monitor({ process: pid, signer })
     await wait(3000)
     await ao.unmonitor({ process: pid, signer })
-    assert.equal(await p.d("Get"), "6")
+    assert.equal(await p.d("Get", false), "6")
   })
 })
 
@@ -329,7 +329,7 @@ describe("WeaveDrive", () => {
     const { id } = await ao.ar.post({ data: "Hello" })
     await ao.attest({ id })
 
-    assert.equal(await p.d("Get", { id }), "Hello")
+    assert.equal(await p.d("Get", { id }, false), "Hello")
   })
 })
 
@@ -450,7 +450,7 @@ describe("Aoconnect", () => {
 })
 
 describe("get", function () {
-  it.only("should get with optional match", async () => {
+  it("should get with optional match", async () => {
     const src_data = `
 local json = require("json")
 Handlers.add("Hello", "Hello", function (msg)

@@ -17,6 +17,7 @@ class Server {
     log = false,
     db,
     port,
+    adaptor,
   } = {}) {
     if (port) {
       ar = port
@@ -26,8 +27,11 @@ class Server {
       cu = port + 4
       aoconnect = optAO(5000)
     }
-    const { mem } = connect(aoconnect, { log, cache: db })
-    this.adaptor = new Adaptor({ hb_url, aoconnect: mem, log, db })
+    if (!aoconnect) {
+      const { mem } = connect(aoconnect, { log, cache: db })
+      aoconnect = mem
+    }
+    this.adaptor = adaptor ?? new Adaptor({ hb_url, aoconnect, log, db })
     this.ports = { ar, mu, su, cu, bd }
     this.servers = []
     this.ar()
@@ -94,8 +98,10 @@ class Server {
       res.send(data.send)
     }
   }
-  req(req) {
+  req(req, device, path) {
     return {
+      path,
+      device,
       body: req.body,
       headers: req.headers,
       method: req.method,
@@ -112,11 +118,7 @@ class Server {
         app[method](path, async (req, res) =>
           this.send(
             res,
-            await this.adaptor.get({
-              type: name.toLowerCase(),
-              path,
-              req: this.req(req),
-            })
+            await this.adaptor.get(this.req(req, name.toLowerCase(), path))
           )
         )
       }
