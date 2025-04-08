@@ -36,7 +36,7 @@ export default class Hub {
         case "registered":
           this.clientId = message.id
           console.log("Received client ID:", this.clientId)
-          if (this.onRegister) this.onRegister(this.clientId)
+          if (this.onRegister) this.onRegister(message)
           break
         case "sus":
           if (this.onSUs) this.onSUs(message.ids)
