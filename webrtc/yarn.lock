@@ -384,6 +384,30 @@
     multistream "^4.1.0"
     tmp-promise "^3.0.2"
 
+"@dha-team/arbundles@^1.0.2":
+  version "1.0.2"
+  resolved "https://registry.yarnpkg.com/@dha-team/arbundles/-/arbundles-1.0.2.tgz#27f3b458731082e79106e21b8104bc944d38d1fe"
+  integrity sha512-rWdJywc+QTf5W+9QHbDd0J4PC1jEsdPYBiQW3FN7HzdEOjBbGtMNabgqOfW4+K4wywNPxe8ieduKhkVn2d487Q==
+  dependencies:
+    "@ethersproject/bytes" "^5.7.0"
+    "@ethersproject/hash" "^5.7.0"
+    "@ethersproject/providers" "^5.7.2"
+    "@ethersproject/signing-key" "^5.7.0"
+    "@ethersproject/transactions" "^5.7.0"
+    "@ethersproject/wallet" "^5.7.0"
+    "@noble/ed25519" "^1.6.1"
+    arweave "^1.15.7"
+    base64url "^3.0.1"
+    bs58 "^4.0.1"
+    keccak "^3.0.2"
+    secp256k1 "^5.0.0"
+  optionalDependencies:
+    "@randlabs/myalgo-connect" "^1.1.2"
+    algosdk "^1.13.1"
+    arweave-stream-tx "^1.1.0"
+    multistream "^4.1.0"
+    tmp-promise "^3.0.2"
+
 "@emotion/babel-plugin@^11.13.5":
   version "11.13.5"
   resolved "https://registry.yarnpkg.com/@emotion/babel-plugin/-/babel-plugin-11.13.5.tgz#eab8d65dbded74e0ecfd28dc218e75607c4e7bc0"
@@ -2625,7 +2649,7 @@ anymatch@~3.1.2:
     structured-headers "^2.0.0"
     zod "^3.24.1"
 
-arbundles@^0.11.1:
+arbundles@^0.11.1, arbundles@^0.11.2:
   version "0.11.2"
   resolved "https://registry.yarnpkg.com/arbundles/-/arbundles-0.11.2.tgz#60375c0d5bda0eeecd9ce9a2aa42da7a89efa3f9"
   integrity sha512-vyX7vY6S8B4RFhGSoCixbnR/Z7ckpJjK+b/H7zcgRWJqqXjZqQ+3DQIJ19vKl5AvzNSsj5ja9kQDoZhMiGpBFw==
@@ -2930,6 +2954,16 @@ arweave@^1.10.13, arweave@^1.10.15, arweave@^1.10.16, arweave@^1.11.4, arweave@^
   version "1.15.5"
   resolved "https://registry.yarnpkg.com/arweave/-/arweave-1.15.5.tgz#d0fb209de01bfc9dc97d5da70270928a83ecee83"
   integrity sha512-Zj3b8juz1ZtDaQDPQlzWyk2I4wZPx3RmcGq8pVJeZXl2Tjw0WRy5ueHPelxZtBLqCirGoZxZEAFRs6SZUSCBjg==
+  dependencies:
+    arconnect "^0.4.2"
+    asn1.js "^5.4.1"
+    base64-js "^1.5.1"
+    bignumber.js "^9.0.2"
+
+arweave@^1.15.7:
+  version "1.15.7"
+  resolved "https://registry.yarnpkg.com/arweave/-/arweave-1.15.7.tgz#d09265d128e93a471203649de083ba7fec52cb29"
+  integrity sha512-F+Y4iWU1qea9IsKQ/YNmLsY4DHQVsaJBuhEbFxQn9cfGHOmtXE+bwo14oY8xqymsqSNf/e1PeIfLk7G7qN/hVA==
   dependencies:
     arconnect "^0.4.2"
     asn1.js "^5.4.1"
@@ -8485,10 +8519,10 @@ vlq@^2.0.4:
   resolved "https://registry.npmjs.org/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.16.4:
-  version "0.16.4"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.16.4.tgz#928fcd53b02bc9dfe470fd4147b37821d8068ff6"
-  integrity sha512-a+LRKfDv9i3XE28Pcmc3+y/86h9C6oZmacNmbJAMNq7fCiIAgfGBZU8VoXI9GUxx9g0KjUQ0cU7dbUTuSUaBEA==
+wao@^0.16.5:
+  version "0.16.5"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.16.5.tgz#0500784a8b5d50ca47249345a670022391068009"
+  integrity sha512-FSeWXehyC98jehIrc9bj8O3fvpPoM/BL1N4Y6gvAza3lSzZSHl1PG/psbTkLcKO2IfCidzJDt8zE8L4mLyBFVw==
   dependencies:
     "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"
