@@ -338,7 +338,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         }
         if (p.compressed) {
           const start = Date.now()
-          p.memory = mem.waosm.decompress(p.memory, p.original_size)
+          p.memory = mem.decompress(p.memory, p.original_size)
           p.compressed = false
         }
         const res = await p.handle(p.memory, msg, _env)
@@ -476,7 +476,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           }
           if (p.compressed) {
             const start = Date.now()
-            p.memory = mem.waosm.decompress(p.memory, p.original_size)
+            p.memory = mem.decompress(p.memory, p.original_size)
             p.compressed = false
           }
           const res = await p.handle(p.memory, msg, _env)
@@ -669,7 +669,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           }
           if (p.compressed) {
             const start = Date.now()
-            p.memory = mem.waosm.decompress(p.memory, p.original_size)
+            p.memory = mem.decompress(p.memory, p.original_size)
             p.compressed = false
           }
           const res = await p.handle(p.memory, msg, _env)
