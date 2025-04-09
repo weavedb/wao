@@ -1,3 +1,6 @@
+import _Arweave from "arweave"
+const Arweave = _Arweave.default ?? _Arweave
+const arweave = Arweave.init()
 import * as WarpArBundles from "warp-arbundles"
 const pkg = WarpArBundles.default ?? WarpArBundles
 const { DataItem } = pkg
@@ -309,18 +312,14 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         let _tags = _opt.tags
         let from = _opt.from ?? opt.from ?? owner
         if (_opt.item) {
-          try {
-            data = base64url.decode(_opt.item.data)
-            _tags = _opt.item.tags
-            if (!from) {
-              const raw_owner = _opt.item.rawOwner
-              const hashBuffer = Buffer.from(
-                await crypto.subtle.digest("SHA-256", raw_owner)
-              )
-              from = base64url.encode(hashBuffer)
-            }
-          } catch (e) {
-            console.log(e)
+          data = base64url.decode(_opt.item.data)
+          _tags = _opt.item.tags
+          if (!from) {
+            from = await arweave.wallets.jwkToAddress({
+              kty: "RSA",
+              n: _opt.item.owner,
+              e: "AQAB",
+            })
           }
         }
         // check: is owner=mu.addr right?
