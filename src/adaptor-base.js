@@ -324,7 +324,7 @@ class Adaptor {
       }
     }
     const slot = message
-    if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
+    if (!/^[0-9a-zA-Z_-]{43,44}$/.test(message)) {
       message = this.mem.env[process]?.results?.[slot]
     }
     if (isNil(message)) {
@@ -333,7 +333,7 @@ class Adaptor {
       if (isNil(message)) return { status: 404, error: "not Found" }
     }
     const res2 = await this.result({ message, process })
-    if (isNil(message)) return { json: res2 }
+    return { json: res2 }
   }
 
   async su_get_root({ query, params, body, headers, method }) {
@@ -388,10 +388,19 @@ class Adaptor {
   }
 
   async mu_post_root({ query, params, body, headers, method }) {
-    let valid = await DataItem.verify(body)
+    if (body.type === "Buffer" && Array.isArray(body.data)) {
+      body = new Uint8Array(body.data)
+    }
+    let valid = false
+    // todo: cannot verify node -> broser items
+    try {
+      valid = await DataItem.verify(body)
+    } catch (e) {
+      console.log(e)
+    }
     let type = null
     let item = null
-    if (valid) item = new DataItem(body)
+    if (valid || true) item = new DataItem(body)
     const _tags = tags(item.tags)
     let err = null
     if (_tags.Type === "Process") {

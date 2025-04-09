@@ -7,7 +7,6 @@ const ws_server = new WebSocket.Server({ port: 7070 })
 const { keys, omit, isNil, mergeLeft } = require("ramda")
 const { resolve } = require("path")
 const { writeFileSync, readFileSync } = require("fs")
-
 let sus = {}
 let cbs = {}
 let _socket = null
@@ -43,12 +42,23 @@ console.log("WAO FS running on port 7070")
 class Adaptor {
   constructor({ hb_url, aoconnect, log = false, db } = {}) {}
   async get(req, res) {
-    if (_socket) {
-      const id = generateId()
-      cbs[id] = res
-      _socket.send(JSON.stringify({ type: "msg", req, id }))
-    } else {
-      return { status: 404, error: "connection not found" }
+    try {
+      const b = new Uint8Array(req.body)
+      if (_socket) {
+        const id = generateId()
+        cbs[id] = res
+        _socket.send(JSON.stringify({ type: "msg", req, id }))
+        setTimeout(() => {
+          if (cbs[id]) {
+            res.status(404).send("error")
+            delete cbs[id]
+          }
+        }, 3000)
+      } else {
+        res({ status: 404, error: "connection not found" })
+      }
+    } catch (e) {
+      res({ status: 404, error: "connection not found" })
     }
   }
 }

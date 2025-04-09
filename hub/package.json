@@ -4,6 +4,7 @@
   "main": "index.js",
   "license": "MIT",
   "dependencies": {
+    "arbundles": "^0.11.2",
     "body-parser": "^2.2.0",
     "chokidar": "^4.0.3",
     "cors": "^2.8.5",
