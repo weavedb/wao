@@ -190,8 +190,17 @@ describe("ArMem", () => {
     let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
       acc[0]
     )
-    //const p = ao.p("gBAPMm8vfHVjWsbXJkmllTs4sYK8ajDz4na0kASuQic")
-    //console.log(await p.msg("Hello", false))
+    const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)
+`
+    console.log(acc[0].addr)
+    console.log(await ao.postScheduler({ url: "http://localhost:7003" }))
+    ////console.log(await ao.spwn({ scheduler: acc[0].addr }))
+    const { p, pid } = await ao.deploy({ scheduler: acc[0].addr, src_data })
+    console.log(pid)
+    console.log(await p.msg("Hello", false))
     return
   })
 })
