@@ -1,6 +1,8 @@
 import { Link, ssr } from "arnext"
+import { Spinner } from "@chakra-ui/react"
 import { Icon } from "@chakra-ui/react"
 import { DataItem } from "arbundles"
+import { Tooltip } from "@/components/ui/tooltip"
 import _assert from "assert"
 import {
   Input,
@@ -14,6 +16,13 @@ import { useRef, useEffect, useState } from "react"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import {
+  FaCode,
+  FaBug,
+  FaWallet,
+  FaCoins,
+  FaCodeCompare,
+  FaEnvelopesBulk,
+  FaCubes,
   FaRegFloppyDisk,
   FaRegFolder,
   FaRegFolderOpen,
@@ -24,6 +33,9 @@ import {
   FaDiscord,
   FaXTwitter,
   FaGithub,
+  FaNetworkWired,
+  FaDatabase,
+  FaHardDrive,
   FaAngleRight,
   FaX,
 } from "react-icons/fa6"
@@ -146,6 +158,7 @@ export default function Home({}) {
   const [dryrun, setDryrun] = useState(true)
   const [ttab, setTtab] = useState("lua")
   const [modal, setModal] = useState(false)
+  console.log(modal)
   const [subs, setSubs] = useState({})
   const [clients, setClients] = useState([])
   const [processes, setProcesses] = useState([])
@@ -157,6 +170,7 @@ export default function Home({}) {
   const [hbs, setHBs] = useState([])
   const [su, setSU] = useState(null)
   const [suid, setSUID] = useState(null)
+  const [wallet, setWallet] = useState(null)
   const [wsid, setWSID] = useState(null)
   const [psid, setPSID] = useState(null)
   const [cid, setCID] = useState(null)
@@ -178,18 +192,20 @@ export default function Home({}) {
   const [fileext, setFileext] = useState("js")
   const [monaco, setMonaco] = useState(null)
   const [bigTerminal, setBigTerminal] = useState(false)
-  const tabs = [
-    "Projects",
-    "Tests",
-    "Modules",
-    "Processes",
-    "Messages",
-    "Accounts",
-    "Tokens",
-    "Storage",
-    "Database",
-    "Networks",
-  ]
+  const tabmap = {
+    Projects: { icon: <FaCode /> },
+    Tests: { icon: <FaBug /> },
+    Modules: { icon: <FaCubes /> },
+    Processes: { icon: <FaCodeCompare /> },
+    Messages: { icon: <FaEnvelopesBulk /> },
+    //    Accounts: { icon: <FaWallet /> },
+    //    Tokens: { icon: <FaCoins /> },
+    //    Storage: { icon: <FaHardDrive /> },
+    //    Database: { icon: <FaDatabase /> },
+    Networks: { icon: <FaNetworkWired /> },
+  }
+  const tabs = keys(tabmap)
+
   const _setModule = id => {
     let mmap = {}
     for (let k in ao.mem.modules) {
@@ -210,6 +226,14 @@ export default function Home({}) {
     setProcs(_procs)
     setModule(mod)
   }
+
+  useEffect(() => {
+    ;(async () => {
+      const _wallet = await lf.getItem("wallet")
+      if (_wallet) setWallet(_wallet)
+    })()
+  }, [])
+
   useEffect(() => {
     if (global.terminalRef) {
       global.terminalRef.current.resize(110, bigTerminal ? 29 : 11)
@@ -378,9 +402,9 @@ export default function Home({}) {
   const ttabs = [
     {
       key: "lua",
-      name: `Lua Eval${dryrun ? " ( dryrun )" : ""} ${!proc ? "" : " : " + proc.id.slice(0, 5) + "..." + proc.id.slice(-5)}`,
+      name: `LUA EVAL${dryrun ? " ( DRYRUN )" : ""} ${!proc ? "" : " > " + proc.id.slice(0, 7) + "..." + proc.id.slice(-7)}`,
     },
-    { key: "log", name: "Logs" },
+    { key: "log", name: "LOGS" },
   ]
   return (
     <>
@@ -412,493 +436,148 @@ export default function Home({}) {
       <Flex
         align="center"
         justify="center"
-        height="50px"
+        height="30px"
         w="100%"
         bg="white"
         css={{
           top: 0,
           left: 0,
           position: "fixed",
-          boxShadow: "0px 2px 4px 0px rgba(0,0,0,0.5);",
+          borderBottom: "1px solid #ddd",
           zIndex: 6,
         }}
       >
-        <Flex w="100%" mx={4}>
+        <Flex w="100%">
           <Flex
             fontWeight="bold"
             color="#5137C5"
-            fontSize="14px"
+            fontSize="12px"
             align="center"
+            justify="center"
+            w="50px"
           >
-            WAO LOCALNET
+            WAO
+          </Flex>
+          <Flex w="385px" justify="center">
+            <Input
+              fontSize="12px"
+              h="30px"
+              align="center"
+              w="385px"
+              css={{ border: "1px solid #5137C5", borderRadius: "0px" }}
+              placeholder="search modules / processes / messages"
+              onKeyDown={e => {
+                if (e.code === "Enter") alert("Search is coming!")
+              }}
+            />
           </Flex>
           <Flex flex={1} />
-          {suid ? (
+          {wallet ? (
             <Flex
+              justify="center"
               fontSize="14px"
-              bg="white"
               color="#5137C5"
-              py={1}
+              w="200px"
               px={4}
+              align="center"
               css={{
                 border: "1px solid #5137C5",
-                borderRadius: "5px",
-                cursor: "pointer",
-                _hover: { opacity: 0.75 },
-              }}
-              onClick={() => {
-                if (confirm("Disconnect from WAO Hub?")) {
-                  hub1.disconnect()
-                  setSUID(null)
-                  for (let k in peer2) peer2[k].close()
-                  peer2 = {}
-                  setClients([])
-                  setClient(null)
-                }
-              }}
-            >
-              WAO Hub : ws://localhost:8080
-            </Flex>
-          ) : (
-            <Flex
-              fontSize="14px"
-              color="white"
-              bg="#5137C5"
-              py={1}
-              px={4}
-              css={{
-                borderRadius: "5px",
                 cursor: "pointer",
                 _hover: { opacity: 0.75 },
               }}
               onClick={async () => {
-                const processes = keys(ao.mem.env)
-                if (processes.length === 0) {
-                  const { p, pid, err } = await ao.deploy({ src_data })
-                  console.log(await p.d("Hello"))
-                }
-                hub1 = new Hub("ws://localhost:8080")
-                hub1.onMsg = async obj => {
-                  const recover = async (process, force) => {
-                    if (force || isNil(ao.mem.env[process])) {
-                      const { success } = await ao.recover(process)
-                      if (!success) {
-                        hub1.socket.send(
-                          JSON.stringify({
-                            id: obj.id,
-                            status: 404,
-                            type: "msg",
-                            error: `not found`,
-                          })
-                        )
-                      }
-                      return success
-                    }
-                    return true
-                  }
-                  console.log("New Msg:", obj)
-                  if (obj.subtype === "dryrun") {
-                    let { process } = obj.message
-                    if (!(await recover(process))) return
-                    const res2 = await ao.dryrun(obj.message)
-                    delete res2.Memory
-                    hub1.socket.send(
-                      JSON.stringify({
-                        id: obj.id,
-                        status: 200,
-                        type: "msg",
-                        msg: JSON.stringify(res2),
-                      })
-                    )
-                    return
-                  } else if (obj.subtype === "result") {
-                    let { process, message } = obj
-                    // todo: check if recovery is ongoing and wait if so
-                    if (!(await recover(process))) return
-                    const slot = message
-                    if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
-                      message = ao.mem.env[process]?.results?.[slot]
-                    }
-                    if (isNil(message)) {
-                      // it's likely that hb is directly asking for a result without bundling
-                      await recover(process, true) // force recovery
-                      message = ao.mem.env[process]?.results?.[slot]
-                      if (isNil(message)) {
-                        hub1.socket.send(
-                          JSON.stringify({
-                            id: obj.id,
-                            status: 404,
-                            type: "msg",
-                            error: `not found`,
-                          })
-                        )
-                        return
-                      }
-                    }
-                    let res2
-                    let i = 0
-                    while (i < 30) {
-                      res2 = await ao.result({ message, process })
-                      if (res2) break
-                      await wait(100)
-                      i++
-                    }
-                    if (typeof res2 === "undefined") {
-                      hub1.socket.send(
-                        JSON.stringify({
-                          id: obj.id,
-                          status: 404,
-                          type: "msg",
-                          error: `not found`,
-                        })
-                      )
-                      return
-                    }
-                    hub1.socket.send(
-                      JSON.stringify({
-                        id: obj.id,
-                        status: 200,
-                        type: "msg",
-                        msg: JSON.stringify(res2),
-                      })
-                    )
-                    return
-                  } else {
-                    const t = tags(obj.message.http_msg.tags)
-                    if (t.Type === "Process") {
-                      const pid = await ao.spawn(obj.message)
-                      const val = ao.mem.env[pid]
-                      let mmap = {}
-                      for (let k in ao.mem.modules) mmap[ao.mem.modules[k]] = k
-                      setProcs(
-                        append({ txid: pid, module: mmap[val.module] }, procs)
-                      )
-                    } else {
-                      let { process } = obj.message
-                      if (!(await recover(process))) return
-                      await ao.message(obj.message)
-                    }
-                    hub1.socket.send(
-                      JSON.stringify({
-                        id: obj.id,
-                        status: 200,
-                        type: "msg",
-                        msg: "success",
-                      })
-                    )
-
-                    return
-                  }
-                }
-
-                hub1.onList = res => {
-                  setHBs(res.hb)
-                }
-                hub1.onSubscribe = res => {
-                  setSubs(res.accept)
-                }
-                hub1.onClose = () => {
-                  setSUID(null)
-                  setSubs({})
-                  setHBs([])
-                }
-                hub1.onRegister = msg => {
-                  hub1.socket.send(
-                    JSON.stringify({ type: "list", target: "hb" })
-                  )
-                  hub1.registerSU()
-                  setSUID(msg.clientId)
-                }
-                hub1.onOffer = async (offer, id) => {
-                  setClients(c => append(id, c))
-                  peer2[id] = new WebRTC()
-                  peer2[id].onDataChannelMessage = async msg => {
-                    const _msg = JSON.parse(msg)
-                    if (_msg.type === "msg") {
-                      console.log("New Message:", msg)
-                      const p = ao.p(_msg.pid)
-                      const res = await p.msg("Post", {
-                        content: _msg.msg,
-                      })
-                      console.log(await p.d("Get"))
-                    } else if (_msg.type === "processes") {
-                      const processes = keys(ao.mem.env)
-                      peer2[id].sendMessage(
-                        JSON.stringify({
-                          type: "processes",
-                          processes,
-                        })
-                      )
-                    } else {
-                      setMsgs(m =>
-                        prepend(
-                          {
-                            type: "Client",
-                            msg: _msg.msg,
-                            id,
-                            date: Date.now(),
-                          },
-                          m
-                        )
-                      )
-                    }
-                  }
-                  peer2[id].onConnectionStateChange = status => {
-                    if (status === "disconnected") {
-                      peer2[id].close()
-                      delete peer2[id]
-                      setClients(c => without([id], c))
-                    }
-                  }
-                  hub1.sendAnswer(await peer2[id].createAnswer(offer), id)
-                }
-                hub1.connect()
+                setWallet(null)
+                await lf.removeItem("wallet")
               }}
             >
-              Connect to WAO Hub
-            </Flex>
-          )}
-          {wsid ? (
-            <Flex
-              ml={4}
-              fontSize="14px"
-              bg="white"
-              color="#5137C5"
-              py={1}
-              px={4}
-              css={{
-                border: "1px solid #5137C5",
-                borderRadius: "5px",
-                cursor: "pointer",
-                _hover: { opacity: 0.75 },
-              }}
-              onClick={() => {
-                if (confirm("Disconnect from WAO FS?")) {
-                  hub1.disconnect()
-                  setWSID(null)
-                }
-              }}
-            >
-              WAO FS : ws://localhost:9090
+              {wallet.address.slice(0, 5) + "..." + wallet.address.slice(-5)}
             </Flex>
           ) : (
             <Flex
-              ml={4}
+              justify="center"
               fontSize="14px"
-              color="white"
               bg="#5137C5"
-              py={1}
+              color="#ddd"
+              w="200px"
               px={4}
+              align="center"
               css={{
-                borderRadius: "5px",
                 cursor: "pointer",
                 _hover: { opacity: 0.75 },
               }}
               onClick={async () => {
-                const getP = v => {
-                  if (v.p.length === 0) {
-                    return "/" + v.name
-                  } else {
-                    return "/" + v.p.join("/") + "/" + v.name
-                  }
-                }
-                const updateDir = _localFS => {
-                  let lfs = null
-                  let fsmap = {}
-                  if (localFS) fsmap = indexBy(prop("path"))(localFS)
-                  if (_localFS) {
-                    lfs = []
-                    const listFiles = (fs, p = [], open = true) => {
-                      for (let k in fs) {
-                        if (typeof fs[k] === "number") {
-                          let v = { name: k, updated: fs[k], p, show: open }
-                          v.path = getP(v)
-                          if (fsmap[v.path]) v.show = fsmap[v.path].show
-
-                          lfs.push(v)
-                        } else {
-                          let v = {
-                            name: k,
-                            show: open,
-                            open: false,
-                            dir: true,
-                            p,
-                          }
-                          v.path = getP(v)
-                          if (fsmap[v.path]) {
-                            v.open = fsmap[v.path].open
-                            v.show = fsmap[v.path].show
-                          }
-                          lfs.push(v)
-                          listFiles(fs[k], [...p, k], false)
-                        }
-                      }
-                    }
-                    listFiles(_localFS)
-                  }
-                  const setOpen = (_path, _open) => {
-                    for (let v2 of lfs) {
-                      let _path2 = "/" + v2.p.join("/")
-                      if (_path && _path2 === _path) {
-                        if (_open) {
-                          v2.show = true
-                        } else {
-                          v2.show = false
-                        }
-                        if (v2.dir) setOpen(_path2 + "/" + v2.name, _open)
-                      }
-                    }
-                  }
-                  //for (let v of lfs) setOpen(v.path, v.open)
-                  setLocalFS(lfs)
-                }
-                hub1 = new Hub("ws://localhost:9090")
-                hub1.onMsg = async obj => {
-                  console.log("New FS Msg:", obj)
-                  if (obj.subtype === "content") {
-                    const ext = obj.path.split(".").pop()
-                    const file = fileRef.current
-                    if (file?.id === obj.path) {
-                      setTimeout(() => {
-                        monaco.editor.setModelLanguage(
-                          editorRef.current.getModel(),
-                          ext === "js" ? "javascript" : ext
-                        )
-                        editorRef.current.setValue(obj.content)
-                      }, 100)
-                    }
-                  } else if (obj.subtype === "dir_change") {
-                    console.log(obj)
-                    updateDir(obj.dir)
-                  }
-                }
-
-                hub1.onClose = () => {
-                  setWSID(null)
-                }
-                hub1.onRegister = msg => {
-                  setWSID(msg.id)
-                  let lfs = null
-                  updateDir(msg.dir)
-                }
-                hub1.connect()
-              }}
-            >
-              Connect to WAO FS
-            </Flex>
-          )}
-          {psid ? (
-            <Flex
-              ml={4}
-              fontSize="14px"
-              bg="white"
-              color="#5137C5"
-              py={1}
-              px={4}
-              css={{
-                border: "1px solid #5137C5",
-                borderRadius: "5px",
-                cursor: "pointer",
-                _hover: { opacity: 0.75 },
-              }}
-              onClick={() => {
-                if (confirm("Disconnect from WAO Proxy?")) {
-                  hub1.disconnect()
-                  setPSID(null)
-                }
-              }}
-            >
-              WAO Proxy : ws://localhost:7070
-            </Flex>
-          ) : (
-            <Flex
-              ml={4}
-              fontSize="14px"
-              color="white"
-              bg="#5137C5"
-              py={1}
-              px={4}
-              css={{
-                borderRadius: "5px",
-                cursor: "pointer",
-                _hover: { opacity: 0.75 },
-              }}
-              onClick={async () => {
-                const adaptor = new Adaptor({ hb_url, aoconnect: ao.mem })
-                hub1 = new Hub("ws://localhost:7070")
-                hub1.onMsg = async obj => {
-                  console.log("New PX Msg:", obj)
-                  adaptor.get(obj.req, res => {
-                    hub1.socket.send(
-                      JSON.stringify({
-                        type: "msg",
-                        id: obj.id,
-                        res: res ?? { status: 404, error: "not found" },
-                      })
-                    )
+                try {
+                  arweaveWallet.connect(["ACCESS_ADDRESS"], {
+                    name: "WAO LOCALNET",
                   })
+                  const userAddress = await arweaveWallet.getActiveAddress()
+                  setWallet({ address: userAddress })
+                  await lf.setItem("wallet", { address: userAddress })
+                } catch (e) {
+                  alert("Arweave wallet not found")
                 }
-
-                hub1.onClose = () => {
-                  setPSID(null)
-                }
-                hub1.onRegister = msg => setPSID(msg.id)
-                hub1.connect()
               }}
             >
-              Connect to WAO Proxy
+              Connect Wallet
             </Flex>
           )}
         </Flex>
       </Flex>
-      <Flex h="100vh" css={{ zIndex: 0 }} pt="50px">
+      <Flex h="100vh" css={{ zIndex: 0 }} pt="30px">
         {!init ? null : (
-          <Flex bg="#eee" css={{ overflowY: "auto" }}>
-            <Flex direction="column" w="150px">
+          <Flex css={{ overflowY: "auto", borderRight: "1px solid #ddd" }}>
+            <Flex direction="column" w="50px">
               {map(v => {
                 return (
-                  <Flex
-                    h="50px"
-                    w="100%"
-                    fontSize="12px"
-                    align="center"
-                    css={{
-                      cursor: "pointer",
-                      _hover: { opacity: 0.75 },
-                      flexShrink: 0,
-                    }}
-                    onClick={() => {
-                      if (v === "Messages" && proc === null) return
-                      if (
+                  <Tooltip
+                    content={v.toUpperCase()}
+                    positioning={{ placement: "right-end" }}
+                    openDelay={0}
+                    closeDelay={0}
+                  >
+                    <Flex
+                      h="50px"
+                      w="100%"
+                      fontSize="12px"
+                      align="center"
+                      css={{
+                        cursor: "pointer",
+                        _hover: { opacity: 0.75 },
+                        flexShrink: 0,
+                      }}
+                      onClick={() => {
+                        if (v === "Messages" && proc === null) return
+                        if (
+                          includes(v, [
+                            "Accounts",
+                            "Tokens",
+                            "Storage",
+                            "Database",
+                          ])
+                        ) {
+                          return alert("Coming Soon!")
+                        }
+                        setTab(v)
+                      }}
+                      bg={v === tab ? "#5137C5" : ""}
+                      color={
                         includes(v, [
                           "Accounts",
                           "Tokens",
                           "Storage",
                           "Database",
-                        ])
-                      ) {
-                        return alert("Coming Soon!")
+                        ]) ||
+                        (v === "Messages" && proc === null)
+                          ? "#999"
+                          : v === tab
+                            ? "white"
+                            : ""
                       }
-                      setTab(v)
-                    }}
-                    bg={v === tab ? "#5137C5" : ""}
-                    color={
-                      includes(v, [
-                        "Accounts",
-                        "Tokens",
-                        "Storage",
-                        "Database",
-                      ]) ||
-                      (v === "Messages" && proc === null)
-                        ? "#999"
-                        : v === tab
-                          ? "white"
-                          : ""
-                    }
-                    justify="center"
-                  >
-                    {v.toUpperCase()}
-                  </Flex>
+                      justify="center"
+                    >
+                      <Icon size="lg">{tabmap[v].icon}</Icon>
+                    </Flex>
+                  </Tooltip>
                 )
               })(tabs)}
             </Flex>
@@ -914,7 +593,6 @@ export default function Home({}) {
           >
             {tab === "Projects" ? (
               <>
-                <Box flex={1} />
                 <Flex
                   py={1}
                   px={4}
@@ -931,13 +609,6 @@ export default function Home({}) {
                     setModal(true)
                   }}
                 >
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    accept=".lua"
-                    style={{ display: "none" }}
-                  />
                   New
                 </Flex>
                 <Flex
@@ -964,9 +635,144 @@ export default function Home({}) {
                   />
                   Import
                 </Flex>
+                <Box flex={1} />
+                {wsid ? (
+                  <Flex
+                    ml={4}
+                    fontSize="12px"
+                    bg="white"
+                    color="#5137C5"
+                    py={1}
+                    px={4}
+                    css={{
+                      border: "1px solid #5137C5",
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={() => {
+                      if (confirm("Disconnect from WAO FS?")) {
+                        hub1.disconnect()
+                        setWSID(null)
+                      }
+                    }}
+                  >
+                    FS : localhost:9090
+                  </Flex>
+                ) : (
+                  <Flex
+                    ml={4}
+                    fontSize="12px"
+                    color="#ddd"
+                    bg="#5137C5"
+                    py={1}
+                    px={4}
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      const getP = v => {
+                        if (v.p.length === 0) {
+                          return "/" + v.name
+                        } else {
+                          return "/" + v.p.join("/") + "/" + v.name
+                        }
+                      }
+                      const updateDir = _localFS => {
+                        let lfs = null
+                        let fsmap = {}
+                        if (localFS) fsmap = indexBy(prop("path"))(localFS)
+                        if (_localFS) {
+                          lfs = []
+                          const listFiles = (fs, p = [], open = true) => {
+                            for (let k in fs) {
+                              if (typeof fs[k] === "number") {
+                                let v = {
+                                  name: k,
+                                  updated: fs[k],
+                                  p,
+                                  show: open,
+                                }
+                                v.path = getP(v)
+                                if (fsmap[v.path]) v.show = fsmap[v.path].show
+
+                                lfs.push(v)
+                              } else {
+                                let v = {
+                                  name: k,
+                                  show: open,
+                                  open: false,
+                                  dir: true,
+                                  p,
+                                }
+                                v.path = getP(v)
+                                if (fsmap[v.path]) {
+                                  v.open = fsmap[v.path].open
+                                  v.show = fsmap[v.path].show
+                                }
+                                lfs.push(v)
+                                listFiles(fs[k], [...p, k], false)
+                              }
+                            }
+                          }
+                          listFiles(_localFS)
+                        }
+                        const setOpen = (_path, _open) => {
+                          for (let v2 of lfs) {
+                            let _path2 = "/" + v2.p.join("/")
+                            if (_path && _path2 === _path) {
+                              if (_open) {
+                                v2.show = true
+                              } else {
+                                v2.show = false
+                              }
+                              if (v2.dir) setOpen(_path2 + "/" + v2.name, _open)
+                            }
+                          }
+                        }
+                        //for (let v of lfs) setOpen(v.path, v.open)
+                        setLocalFS(lfs)
+                      }
+                      hub1 = new Hub("ws://localhost:9090")
+                      hub1.onMsg = async obj => {
+                        console.log("New FS Msg:", obj)
+                        if (obj.subtype === "content") {
+                          const ext = obj.path.split(".").pop()
+                          const file = fileRef.current
+                          if (file?.id === obj.path) {
+                            setTimeout(() => {
+                              monaco.editor.setModelLanguage(
+                                editorRef.current.getModel(),
+                                ext === "js" ? "javascript" : ext
+                              )
+                              editorRef.current.setValue(obj.content)
+                            }, 100)
+                          }
+                        } else if (obj.subtype === "dir_change") {
+                          console.log(obj)
+                          updateDir(obj.dir)
+                        }
+                      }
+
+                      hub1.onClose = () => {
+                        setWSID(null)
+                      }
+                      hub1.onRegister = msg => {
+                        setWSID(msg.id)
+                        let lfs = null
+                        updateDir(msg.dir)
+                      }
+                      hub1.connect()
+                    }}
+                  >
+                    Local FS
+                  </Flex>
+                )}
               </>
             ) : tab === "Networks" ? (
-              <Flex align="center">
+              <Flex align="center" w="100%">
                 <Box
                   bg="#ddd"
                   mr={2}
@@ -976,6 +782,299 @@ export default function Home({}) {
                 >
                   LOCANNET
                 </Box>
+                <Box flex={1} />
+                {suid ? (
+                  <Flex
+                    fontSize="14px"
+                    bg="white"
+                    color="#5137C5"
+                    py={1}
+                    px={4}
+                    css={{
+                      border: "1px solid #5137C5",
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={() => {
+                      if (confirm("Disconnect from WAO Hub?")) {
+                        hub1.disconnect()
+                        setSUID(null)
+                        for (let k in peer2) peer2[k].close()
+                        peer2 = {}
+                        setClients([])
+                        setClient(null)
+                      }
+                    }}
+                  >
+                    Hub : localhost:8080
+                  </Flex>
+                ) : (
+                  <Flex
+                    fontSize="14px"
+                    color="white"
+                    bg="#5137C5"
+                    py={1}
+                    px={4}
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      const processes = keys(ao.mem.env)
+                      if (processes.length === 0) {
+                        const { p, pid, err } = await ao.deploy({ src_data })
+                        console.log(await p.d("Hello"))
+                      }
+                      hub1 = new Hub("ws://localhost:8080")
+                      hub1.onMsg = async obj => {
+                        const recover = async (process, force) => {
+                          if (force || isNil(ao.mem.env[process])) {
+                            const { success } = await ao.recover(process)
+                            if (!success) {
+                              hub1.socket.send(
+                                JSON.stringify({
+                                  id: obj.id,
+                                  status: 404,
+                                  type: "msg",
+                                  error: `not found`,
+                                })
+                              )
+                            }
+                            return success
+                          }
+                          return true
+                        }
+                        console.log("New Msg:", obj)
+                        if (obj.subtype === "dryrun") {
+                          let { process } = obj.message
+                          if (!(await recover(process))) return
+                          const res2 = await ao.dryrun(obj.message)
+                          delete res2.Memory
+                          hub1.socket.send(
+                            JSON.stringify({
+                              id: obj.id,
+                              status: 200,
+                              type: "msg",
+                              msg: JSON.stringify(res2),
+                            })
+                          )
+                          return
+                        } else if (obj.subtype === "result") {
+                          let { process, message } = obj
+                          // todo: check if recovery is ongoing and wait if so
+                          if (!(await recover(process))) return
+                          const slot = message
+                          if (!/^--[0-9a-zA-Z_-]{43,44}$/.test(message)) {
+                            message = ao.mem.env[process]?.results?.[slot]
+                          }
+                          if (isNil(message)) {
+                            // it's likely that hb is directly asking for a result without bundling
+                            await recover(process, true) // force recovery
+                            message = ao.mem.env[process]?.results?.[slot]
+                            if (isNil(message)) {
+                              hub1.socket.send(
+                                JSON.stringify({
+                                  id: obj.id,
+                                  status: 404,
+                                  type: "msg",
+                                  error: `not found`,
+                                })
+                              )
+                              return
+                            }
+                          }
+                          let res2
+                          let i = 0
+                          while (i < 30) {
+                            res2 = await ao.result({ message, process })
+                            if (res2) break
+                            await wait(100)
+                            i++
+                          }
+                          if (typeof res2 === "undefined") {
+                            hub1.socket.send(
+                              JSON.stringify({
+                                id: obj.id,
+                                status: 404,
+                                type: "msg",
+                                error: `not found`,
+                              })
+                            )
+                            return
+                          }
+                          hub1.socket.send(
+                            JSON.stringify({
+                              id: obj.id,
+                              status: 200,
+                              type: "msg",
+                              msg: JSON.stringify(res2),
+                            })
+                          )
+                          return
+                        } else {
+                          const t = tags(obj.message.http_msg.tags)
+                          if (t.Type === "Process") {
+                            const pid = await ao.spawn(obj.message)
+                            const val = ao.mem.env[pid]
+                            let mmap = {}
+                            for (let k in ao.mem.modules)
+                              mmap[ao.mem.modules[k]] = k
+                            setProcs(
+                              append(
+                                { txid: pid, module: mmap[val.module] },
+                                procs
+                              )
+                            )
+                          } else {
+                            let { process } = obj.message
+                            if (!(await recover(process))) return
+                            await ao.message(obj.message)
+                          }
+                          hub1.socket.send(
+                            JSON.stringify({
+                              id: obj.id,
+                              status: 200,
+                              type: "msg",
+                              msg: "success",
+                            })
+                          )
+
+                          return
+                        }
+                      }
+
+                      hub1.onList = res => {
+                        setHBs(res.hb)
+                      }
+                      hub1.onSubscribe = res => {
+                        setSubs(res.accept)
+                      }
+                      hub1.onClose = () => {
+                        setSUID(null)
+                        setSubs({})
+                        setHBs([])
+                      }
+                      hub1.onRegister = msg => {
+                        hub1.socket.send(
+                          JSON.stringify({ type: "list", target: "hb" })
+                        )
+                        hub1.registerSU()
+                        setSUID(msg.clientId)
+                      }
+                      hub1.onOffer = async (offer, id) => {
+                        setClients(c => append(id, c))
+                        peer2[id] = new WebRTC()
+                        peer2[id].onDataChannelMessage = async msg => {
+                          const _msg = JSON.parse(msg)
+                          if (_msg.type === "msg") {
+                            console.log("New Message:", msg)
+                            const p = ao.p(_msg.pid)
+                            const res = await p.msg("Post", {
+                              content: _msg.msg,
+                            })
+                            console.log(await p.d("Get"))
+                          } else if (_msg.type === "processes") {
+                            const processes = keys(ao.mem.env)
+                            peer2[id].sendMessage(
+                              JSON.stringify({
+                                type: "processes",
+                                processes,
+                              })
+                            )
+                          } else {
+                            setMsgs(m =>
+                              prepend(
+                                {
+                                  type: "Client",
+                                  msg: _msg.msg,
+                                  id,
+                                  date: Date.now(),
+                                },
+                                m
+                              )
+                            )
+                          }
+                        }
+                        peer2[id].onConnectionStateChange = status => {
+                          if (status === "disconnected") {
+                            peer2[id].close()
+                            delete peer2[id]
+                            setClients(c => without([id], c))
+                          }
+                        }
+                        hub1.sendAnswer(await peer2[id].createAnswer(offer), id)
+                      }
+                      hub1.connect()
+                    }}
+                  >
+                    WAO Hub
+                  </Flex>
+                )}
+
+                {psid ? (
+                  <Flex
+                    ml={4}
+                    fontSize="14px"
+                    bg="white"
+                    color="#5137C5"
+                    py={1}
+                    px={4}
+                    css={{
+                      border: "1px solid #5137C5",
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={() => {
+                      if (confirm("Disconnect from WAO Proxy?")) {
+                        hub1.disconnect()
+                        setPSID(null)
+                      }
+                    }}
+                  >
+                    Proxy : localhost:7070
+                  </Flex>
+                ) : (
+                  <Flex
+                    ml={4}
+                    fontSize="14px"
+                    color="white"
+                    bg="#5137C5"
+                    py={1}
+                    px={4}
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      const adaptor = new Adaptor({ hb_url, aoconnect: ao.mem })
+                      hub1 = new Hub("ws://localhost:7070")
+                      hub1.onMsg = async obj => {
+                        console.log("New PX Msg:", obj)
+                        adaptor.get(obj.req, res => {
+                          hub1.socket.send(
+                            JSON.stringify({
+                              type: "msg",
+                              id: obj.id,
+                              res: res ?? { status: 404, error: "not found" },
+                            })
+                          )
+                        })
+                      }
+
+                      hub1.onClose = () => {
+                        setPSID(null)
+                      }
+                      hub1.onRegister = msg => setPSID(msg.id)
+                      hub1.connect()
+                    }}
+                  >
+                    WAO Proxy
+                  </Flex>
+                )}
               </Flex>
             ) : (
               <>
@@ -1152,7 +1251,7 @@ export default function Home({}) {
               <Flex w="100%">
                 <Box
                   w="385px"
-                  h="calc(100vh - 130px)"
+                  h="calc(100vh - 110px)"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
                   {map(v => {
@@ -1217,7 +1316,7 @@ export default function Home({}) {
                     py={2}
                     fontSize="12px"
                     flex={1}
-                    h="calc(100vh - 130px)"
+                    h="calc(100vh - 110px)"
                     css={{ overflowY: "auto" }}
                   >
                     <Flex my={2} fontWeight="bold" color="#5137C5">
@@ -1322,7 +1421,7 @@ export default function Home({}) {
               <Flex w="100%">
                 <Box
                   w="385px"
-                  h="calc(100vh - 130px)"
+                  h="calc(100vh - 110px)"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
                   {map(v => (
@@ -1378,7 +1477,7 @@ export default function Home({}) {
                     py={2}
                     fontSize="12px"
                     flex={1}
-                    h="calc(100vh - 130px)"
+                    h="calc(100vh - 110px)"
                     css={{ overflowY: "auto" }}
                   >
                     <Flex my={2} fontWeight="bold" color="#5137C5">
@@ -1459,7 +1558,7 @@ export default function Home({}) {
               <Flex w="100%">
                 <Box
                   w="385px"
-                  h="calc(100vh - 130px)"
+                  h="calc(100vh - 110px)"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
                   {map(v => (
@@ -1503,7 +1602,7 @@ export default function Home({}) {
                     py={2}
                     fontSize="12px"
                     flex={1}
-                    h="calc(100vh - 130px)"
+                    h="calc(100vh - 110px)"
                     css={{ overflowY: "auto" }}
                   >
                     <Flex my={2} fontWeight="bold" color="#5137C5">
@@ -1568,14 +1667,14 @@ export default function Home({}) {
               <Flex>
                 <Box
                   w="385px"
-                  h="calc(100vh - 130px)"
+                  h="calc(100vh - 110px)"
                   fontSize="12px"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
                   {!localFS ? null : (
                     <Box css={{ borderBottom: "1px solid #ddd" }}>
                       <Flex h="25px" p={4} align="center" bg="#eee">
-                        <Icon size="md" color="#5137C5" mr={2}>
+                        <Icon size="sm" color="#5137C5" mr={2}>
                           <FaRegFloppyDisk />
                         </Icon>
                         <Box>Local Computer ( http://localhost:9090 )</Box>
@@ -1586,7 +1685,7 @@ export default function Home({}) {
                             bg={file?.id === v.path ? "#5137C5" : "white"}
                             color={file?.id === v.path ? "#ddd" : "#222"}
                             h="25px"
-                            p={4}
+                            px={4}
                             align="center"
                             css={{
                               cursor: "pointer",
@@ -1640,7 +1739,7 @@ export default function Home({}) {
                           >
                             <Box pl={20 * (v.p.length + 1) + "px"} />
                             <Icon
-                              size="md"
+                              size="sm"
                               color={file?.id !== v.path ? "#5137C5" : "#ddd"}
                               mr={2}
                               key={v.path + "-icon"}
@@ -1661,8 +1760,8 @@ export default function Home({}) {
                       })(localFS)}
                     </Box>
                   )}
-                  <Flex h="25px" p={4} align="center" bg="#eee">
-                    <Icon size="md" color="#5137C5" mr={2}>
+                  <Flex h="25px" px={4} align="center" bg="#eee">
+                    <Icon size="sm" color="#5137C5" mr={2}>
                       <FaRegFloppyDisk />
                     </Icon>
                     <Box>Web Project</Box>
@@ -1671,7 +1770,7 @@ export default function Home({}) {
                     <>
                       <Flex
                         h="25px"
-                        p={4}
+                        px={4}
                         align="center"
                         bg={v.id === file?.id ? "#5137C5" : "white"}
                         color={v.id === file?.id ? "#ddd" : "#222"}
@@ -1696,7 +1795,7 @@ export default function Home({}) {
                       >
                         <Box pl={20 * 1 + "px"} />
                         <Icon
-                          size="md"
+                          size="sm"
                           mr={2}
                           color={v.id === file?.id ? "#ddd" : "#5137C5"}
                         >
@@ -1720,7 +1819,7 @@ export default function Home({}) {
               <Flex w="100%">
                 <Box
                   w="385px"
-                  h="calc(100vh - 130px)"
+                  h="calc(100vh - 110px)"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
                   {map(v => (
@@ -1769,7 +1868,7 @@ export default function Home({}) {
                     py={2}
                     fontSize="12px"
                     flex={1}
-                    h="calc(100vh - 130px)"
+                    h="calc(100vh - 110px)"
                     css={{ overflowY: "auto" }}
                   >
                     <Flex my={2} fontWeight="bold" color="#5137C5">
@@ -1832,7 +1931,7 @@ export default function Home({}) {
                 <Flex>
                   <Box
                     w="385px"
-                    h="calc(100vh - 130px)"
+                    h="calc(100vh - 110px)"
                     css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                   >
                     {map(v => (
@@ -1873,7 +1972,7 @@ export default function Home({}) {
                     suid ? (
                       <Box
                         flex={1}
-                        h="calc(100vh - 130px)"
+                        h="calc(100vh - 110px)"
                         css={{ overflowY: "auto" }}
                       >
                         <Flex
@@ -2480,11 +2579,11 @@ export default function Home({}) {
               <Editor
                 width={
                   tab === "Projects"
-                    ? "calc(100vw - 520px)"
-                    : "calc(100vw - 1100px)"
+                    ? "calc(100vw - 437px)"
+                    : "calc(100vw - 1017px)"
                 }
                 height={
-                  bigTerminal ? "calc(100vh - 660px)" : "calc(100vh - 355px)"
+                  bigTerminal ? "calc(100vh - 640px)" : "calc(100vh - 335px)"
                 }
                 theme="vs-dark"
                 defaultLanguage={
@@ -2584,7 +2683,6 @@ export default function Home({}) {
         w="100%"
         h="30px"
         align="center"
-        justify="flex-end"
         px={4}
         bg="white"
         color="#222"
@@ -2596,6 +2694,10 @@ export default function Home({}) {
           zIndex: 50,
         }}
       >
+        <Box fontSize="12px" color="#666">
+          LOCALNET v 0.1.0
+        </Box>
+        <Box flex={1} />
         <Box
           mr={3}
           as="a"
@@ -2645,12 +2747,21 @@ export default function Home({}) {
           h="100%"
           align="center"
           justify="center"
-          fontSize="40px"
+          fontSize="30px"
           bg="#5137C5"
           color="#9C89F6"
+          direction="column"
           css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
         >
-          Booting Up...
+          <Flex css={{ position: "relative" }} align="center" justify="center">
+            <Spinner
+              boxSize="350px"
+              css={{ position: "absolute" }}
+              borderWidth="5px"
+              animationDuration="1s"
+            />
+            <Image src="/logo.png" boxSize="300px" />
+          </Flex>
         </Flex>
       ) : null}
       {!modal ? null : (
