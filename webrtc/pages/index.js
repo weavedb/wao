@@ -1,5 +1,6 @@
 import { Link, ssr } from "arnext"
 import { Icon } from "@chakra-ui/react"
+import { DataItem } from "arbundles"
 import _assert from "assert"
 import {
   Input,
@@ -473,9 +474,7 @@ export default function Home({}) {
               onClick={async () => {
                 const processes = keys(ao.mem.env)
                 if (processes.length === 0) {
-                  const { p, pid, err } = await ao.deploy({
-                    src_data,
-                  })
+                  const { p, pid, err } = await ao.deploy({ src_data })
                   console.log(await p.d("Hello"))
                 }
                 hub1 = new Hub("ws://localhost:8080")
@@ -830,9 +829,12 @@ export default function Home({}) {
                 hub1.onMsg = async obj => {
                   console.log("New PX Msg:", obj)
                   adaptor.get(obj.req, res => {
-                    console.log(res)
                     hub1.socket.send(
-                      JSON.stringify({ type: "msg", id: obj.id, res })
+                      JSON.stringify({
+                        type: "msg",
+                        id: obj.id,
+                        res: res ?? { status: 404, error: "not found" },
+                      })
                     )
                   })
                 }
@@ -1154,8 +1156,11 @@ export default function Home({}) {
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
                   {map(v => {
-                    const tags = tags =>
-                      fromPairs(map(v => [v.name, v.value])(tags))
+                    if (!v.http_msg?.tags && v.http_msg?.item) {
+                      v.http_msg.tags = new DataItem(
+                        v.http_msg.item.binary
+                      ).tags
+                    }
                     const t = tags(v.http_msg?.tags ?? [])
                     return (
                       <Flex
@@ -1169,13 +1174,18 @@ export default function Home({}) {
                           let _msg = clone(ao.mem.msgs[v.id])
                           _msg.id = v.id
                           if (_msg.http_msg) setMessage(_msg)
-                          else
+                          else {
+                            if (!_msg.tags) {
+                              _msg.tags = new DataItem(_msg.item.binary).tags
+                            }
                             setMessage({
+                              item: v.item,
                               res: _msg.res,
                               http_msg: _msg,
                               id: _msg.id,
                               slot: v.slot,
                             })
+                          }
                         }}
                         css={{
                           borderBottom: "1px solid #ddd",
@@ -1412,13 +1422,17 @@ export default function Home({}) {
                           let _msg = clone(ao.mem.msgs[v.id])
                           _msg.id = v.id
                           if (_msg.http_msg) setMessage(_msg)
-                          else
+                          else {
+                            if (!_msg.tags) {
+                              _msg.tags = new DataItem(_msg.item.binary).tags
+                            }
                             setMessage({
                               res: _msg.res,
                               http_msg: _msg,
                               id: _msg.id,
                               slot: v.slot,
                             })
+                          }
                           setTab("Messages")
                         }}
                       >

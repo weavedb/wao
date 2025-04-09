@@ -86,7 +86,6 @@ end)
       module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
     })
     console.log(pid)
-    return
     console.log(await ao.eval({ pid, data }))
     console.log(await p.m("Hello"))
     return
@@ -191,8 +190,8 @@ describe("ArMem", () => {
     let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
       acc[0]
     )
-    const p = ao.p("FEJBc9TPN6XJPfhSYvAQbMncrdHlwKLBKPhDrf-07PY")
-    console.log(await p.m("Hello", false))
+    //const p = ao.p("gBAPMm8vfHVjWsbXJkmllTs4sYK8ajDz4na0kASuQic")
+    //console.log(await p.msg("Hello", false))
     return
   })
 })
