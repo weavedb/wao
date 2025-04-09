@@ -9,6 +9,7 @@ import ArMem from "./armem.js"
 import { dirname } from "./utils.js"
 import { Testnet, Src, setup, ok, fail } from "./helpers.js"
 import Server from "./server.js"
+import Adaptor from "./adaptor.js"
 
 const blueprint = async pkg => {
   return readFileSync(resolve(await dirname(), `lua/${pkg}.lua`), "utf8")
@@ -16,6 +17,7 @@ const blueprint = async pkg => {
 const scheduler = "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
 
 export {
+  Adaptor,
   Testnet,
   Server,
   GQL,

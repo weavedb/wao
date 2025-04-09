@@ -72,8 +72,9 @@ describe("SDK", function () {
     })
     assert.equal(edges2[0].node.cursor, cursor)
   })
-  it.only("should run server", async () => {
-    let ao = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
+  it("should run server", async () => {
+    const port = 4000
+    let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
       acc[0]
     )
     const data = `
@@ -84,11 +85,13 @@ end)
     const { p, pid } = await ao.spwn({
       module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
     })
+    console.log(pid)
+    return
     console.log(await ao.eval({ pid, data }))
     console.log(await p.m("Hello"))
     return
   })
-  it.only("should run server", async () => {
+  it("should run server", async () => {
     let ao = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
       acc[0]
     )
@@ -181,6 +184,15 @@ describe("ArMem", () => {
     const wasm_aos2 = await src.upload("aos2_0_1", "wasm")
     console.log(await ao.ar.data(wasm_aos2))
     await server.end()
+    return
+  })
+  it.only("should connect with web-proxy", async () => {
+    const port = 7000
+    let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
+      acc[0]
+    )
+    const p = ao.p("FEJBc9TPN6XJPfhSYvAQbMncrdHlwKLBKPhDrf-07PY")
+    console.log(await p.m("Hello", false))
     return
   })
 })

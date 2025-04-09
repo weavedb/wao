@@ -1,5 +1,6 @@
-import { connect } from "./aoconnect.js"
-import { GQL, cu, su, mu } from "./test.js"
+import { connect } from "./aoconnect-web.js"
+import { cu, su, mu } from "./accounts-web.js"
+import GQL from "./tgql.js"
 import Base from "./adaptor-base.js"
 
 class Adaptor extends Base {
