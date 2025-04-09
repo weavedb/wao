@@ -759,7 +759,7 @@ anymatch@~3.1.2:
     structured-headers "^2.0.0"
     zod "^3.24.1"
 
-arbundles@^0.11.1:
+arbundles@^0.11.1, arbundles@^0.11.2:
   version "0.11.2"
   resolved "https://registry.yarnpkg.com/arbundles/-/arbundles-0.11.2.tgz#60375c0d5bda0eeecd9ce9a2aa42da7a89efa3f9"
   integrity sha512-vyX7vY6S8B4RFhGSoCixbnR/Z7ckpJjK+b/H7zcgRWJqqXjZqQ+3DQIJ19vKl5AvzNSsj5ja9kQDoZhMiGpBFw==
