@@ -88,14 +88,16 @@ class Server {
     })
   }
 
-  send(res, data) {
-    if (data.status) res.status(data.status)
-    if (data.error) {
-      res.json({ error: data.error })
-    } else if (data.json) {
-      res.json(data.json)
-    } else {
-      res.send(data.send)
+  res(res) {
+    return data => {
+      if (data.status) res.status(data.status)
+      if (data.error) {
+        res.json({ error: data.error })
+      } else if (data.json) {
+        res.json(data.json)
+      } else {
+        res.send(data.send)
+      }
     }
   }
   req(req, device, path) {
@@ -115,11 +117,13 @@ class Server {
     const port = this.ports[name.toLowerCase()]
     for (const method in paths) {
       for (const path of paths[method]) {
-        app[method](path, async (req, res) =>
-          this.send(
-            res,
-            await this.adaptor.get(this.req(req, name.toLowerCase(), path))
-          )
+        app[method](
+          path,
+          async (req, res) =>
+            await this.adaptor.get(
+              this.req(req, name.toLowerCase(), path),
+              this.res(res)
+            )
         )
       }
     }

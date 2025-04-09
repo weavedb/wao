@@ -1,6 +1,6 @@
 {
   "name": "wao",
-  "version": "0.15.7",
+  "version": "0.16.3",
   "bin": "./src/cli.js",
   "type": "module",
   "main": "dist/cjs/index.js",

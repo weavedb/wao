@@ -33,6 +33,7 @@ function generateId() {
 
 dayjs.extend(relativeTime)
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
+const hb_url = "http://localhost:10001"
 import {
   addIndex,
   prop,
@@ -49,7 +50,7 @@ import {
   fromPairs,
   filter,
 } from "ramda"
-import { AO, acc } from "wao/web"
+import { AO, acc, Adaptor } from "wao/web"
 import { HB } from "wao"
 import Hub from "../lib/hub"
 import WebRTC from "../lib/webrtc"
@@ -156,6 +157,7 @@ export default function Home({}) {
   const [su, setSU] = useState(null)
   const [suid, setSUID] = useState(null)
   const [wsid, setWSID] = useState(null)
+  const [psid, setPSID] = useState(null)
   const [cid, setCID] = useState(null)
   const [client, setClient] = useState(null)
   const [tab, setTab] = useState("Projects")
@@ -265,7 +267,7 @@ export default function Home({}) {
   useEffect(() => {
     ;(async () => {
       try {
-        ao = await new AO({ hb_url: "http://localhost:10001" }).init(acc[0])
+        ao = await new AO({ hb_url }).init(acc[0])
       } catch (e) {
         ao = await new AO({}).init(acc[0])
       }
@@ -784,6 +786,65 @@ export default function Home({}) {
               }}
             >
               Connect to WAO FS
+            </Flex>
+          )}
+          {psid ? (
+            <Flex
+              ml={4}
+              fontSize="14px"
+              bg="white"
+              color="#5137C5"
+              py={1}
+              px={4}
+              css={{
+                border: "1px solid #5137C5",
+                borderRadius: "5px",
+                cursor: "pointer",
+                _hover: { opacity: 0.75 },
+              }}
+              onClick={() => {
+                if (confirm("Disconnect from WAO Proxy?")) {
+                  hub1.disconnect()
+                  setPSID(null)
+                }
+              }}
+            >
+              WAO Proxy : ws://localhost:7070
+            </Flex>
+          ) : (
+            <Flex
+              ml={4}
+              fontSize="14px"
+              color="white"
+              bg="#5137C5"
+              py={1}
+              px={4}
+              css={{
+                borderRadius: "5px",
+                cursor: "pointer",
+                _hover: { opacity: 0.75 },
+              }}
+              onClick={async () => {
+                const adaptor = new Adaptor({ hb_url, aoconnect: ao.mem })
+                hub1 = new Hub("ws://localhost:7070")
+                hub1.onMsg = async obj => {
+                  console.log("New PX Msg:", obj)
+                  adaptor.get(obj.req, res => {
+                    console.log(res)
+                    hub1.socket.send(
+                      JSON.stringify({ type: "msg", id: obj.id, res })
+                    )
+                  })
+                }
+
+                hub1.onClose = () => {
+                  setPSID(null)
+                }
+                hub1.onRegister = msg => setPSID(msg.id)
+                hub1.connect()
+              }}
+            >
+              Connect to WAO Proxy
             </Flex>
           )}
         </Flex>
