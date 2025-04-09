@@ -43,14 +43,13 @@ class Adaptor {
   constructor({ hb_url, aoconnect, log = false, db } = {}) {}
   async get(req, res) {
     try {
-      const b = new Uint8Array(req.body)
       if (_socket) {
         const id = generateId()
         cbs[id] = res
         _socket.send(JSON.stringify({ type: "msg", req, id }))
         setTimeout(() => {
           if (cbs[id]) {
-            res.status(404).send("error")
+            res({ status: 404, error: "error" })
             delete cbs[id]
           }
         }, 3000)
