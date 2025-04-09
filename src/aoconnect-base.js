@@ -269,7 +269,12 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       const p = await mem.get("env", opt.process)
       if (!p || !opt.process) return null
       let _opt = await mem.get("msgs", opt.message)
-      let hash = genHashChain(p.hash, opt.message)
+      let hash = p.hash
+      try {
+        hash = genHashChain(p.hash, opt.message)
+      } catch (e) {
+        console.log(e)
+      }
       p.hash = hash
       opt.tags = buildTags(
         null,
@@ -415,9 +420,9 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           }
         }
       } else {
-        let id = opt?.item?.id ?? ""
-        let owner = opt.owner ?? ""
-        let item = opt.item
+        id = opt?.item?.id ?? ""
+        owner = opt.owner ?? ""
+        item = opt.item
       }
 
       const p = await mem.get("env", opt.process)
