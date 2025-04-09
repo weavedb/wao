@@ -45,6 +45,15 @@ export default class ArMemBase {
     this.scheduler = scheduler
     this.SU_URL = SU_URL
   }
+  compress(memory) {
+    const waosm = new this.Waosm()
+    return waosm.compress(memory)
+  }
+  decompress(memory, size) {
+    const waosm = new this.Waosm()
+    return waosm.decompress(memory, size)
+  }
+
   async owner(di) {
     return base64url.encode(
       Buffer.from(await crypto.subtle.digest("SHA-256", di.rawOwner))
@@ -72,10 +81,9 @@ export default class ArMemBase {
         if (key === "env") {
           let memory = val.memory
           try {
-            memory = this.waosm.compress(val.memory)
+            memory = this.compress(val.memory)
           } catch (e) {
             console.log(e)
-            memory = compress(val.memory)
           }
           this[key][field].original_size = val.memory.length
           await this.db.put(
@@ -162,7 +170,6 @@ export default class ArMemBase {
     if (this.isInit) return
     this.isInit = true
     if (typeof this._init === "function") await this._init()
-    this.waosm = new this.Waosm()
     if (this.db) {
       for (const v of ["height", "blocks"]) this[v] = await this.get(v)
       for (const v of [
@@ -185,13 +192,7 @@ export default class ArMemBase {
             if (key.match(/^env/)) {
               let v3 = await this.db.get(v2)
               if (is(Uint8Array, v3.memory)) {
-                try {
-                  v3.compressed = true
-                  //v3.memory = this.waosm.decompress(v3.memory, v3.original_size)
-                } catch (e) {
-                  console.log(e)
-                  v3.memory = decompress(v3.memory)
-                }
+                v3.compressed = true
               }
               this[v][field] = v3
             } else {
