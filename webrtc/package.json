@@ -15,11 +15,13 @@
   },
   "dependencies": {
     "@chakra-ui/react": "^3.6.0",
+    "@dha-team/arbundles": "^1.0.2",
     "@emotion/react": "^11.14.0",
     "@monaco-editor/react": "^4.7.0",
     "@permaweb/ao-loader": "^0.0.46",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "arbundles": "^0.11.2",
     "arnext": "^0.1.4",
     "assert": "^2.1.0",
     "dayjs": "^1.11.13",
@@ -30,7 +32,7 @@
     "react-dom": "^18",
     "react-icons": "^5.5.0",
     "react-xtermjs": "^1.0.9",
-    "wao": "^0.16.4"
+    "wao": "^0.16.5"
   },
   "devDependencies": {
     "@ardrive/turbo-sdk": "^1.19.0",
