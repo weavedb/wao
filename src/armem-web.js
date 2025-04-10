@@ -8,7 +8,7 @@ const wasm = { sqlite, aos2_0_3, aos2_0_1 }
 export default class ArMem extends Base {
   constructor(args = {}) {
     super({ ...args, init, Waosm })
-    this.db = db(this)
+    this.db = db(this, args.cache)
     this.initSync()
   }
   async _getWasm(file) {

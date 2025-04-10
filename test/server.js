@@ -187,9 +187,11 @@ describe("ArMem", () => {
   })
   it.only("should connect with web-proxy", async () => {
     const port = 7000
-    let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
-      acc[0]
-    )
+    let ao = await new AO({
+      variant: "ao.WLN.1",
+      ar: { port: port },
+      aoconnect: optAO(port),
+    }).init(acc[0])
     const src_data = `
 Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })

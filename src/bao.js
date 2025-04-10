@@ -1,5 +1,5 @@
 import MAO from "./ao.js"
-import { createDataItemSigner } from "@permaweb/aoconnect"
+import { createDataItemSigner } from "aoconnect-wao"
 import { srcs, buildTags } from "./utils.js"
 import { mergeLeft, is, map } from "ramda"
 import HB from "./hb.js"
@@ -68,6 +68,7 @@ class AO extends MAO {
       recover,
       mem,
     } = opt.connect(opt.mem, {
+      variant: opt.variant,
       extensions: opt.extensions,
       cache: opt.cache,
       reset: opt.reset,
@@ -114,7 +115,7 @@ class AO extends MAO {
     if (err) return { err }
     const t = mergeLeft(tags, {
       "Data-Protocol": "ao",
-      Variant: "ao.TN.1",
+      Variant: this.variant ?? "ao.TN.1",
       Type: "Module",
       "Module-Format": "wasm64-unknown-emscripten-draft_2024_02_15",
       "Input-Encoding": "JSON-V1",

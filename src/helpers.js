@@ -1,6 +1,7 @@
 import { AR, AO } from "./index.js"
 import assert from "assert"
-import { createDataItemSigner, connect } from "@permaweb/aoconnect"
+
+import { createDataItemSigner, connect } from "aoconnect-wao"
 import { dirname as _dirname, resolve } from "path"
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from "fs"
 import { optAO } from "./utils.js"
@@ -33,7 +34,7 @@ export class Src {
   data(file, ext = "lua") {
     return readFileSync(
       `${this.dir}/${file}.${ext}`,
-      ext === "wasm" ? null : "utf8",
+      ext === "wasm" ? null : "utf8"
     )
   }
   async upload(file, ext = "lua") {
