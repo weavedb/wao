@@ -32,7 +32,9 @@ export default class ArMemBase {
     cache,
     init,
     Waosm,
+    variant,
   } = {}) {
+    this.variant = variant
     this.__type__ = "mem"
     this._init = init
     this.Waosm = Waosm
@@ -125,7 +127,7 @@ export default class ArMemBase {
         block: 0,
         tags: buildTags(null, {
           "Data-Protocol": "ao",
-          Variant: "ao.TN.1",
+          Variant: this.variant ?? "ao.TN.1",
           Type: "Module",
           "Module-Format": "wasm64-unknown-emscripten-draft_2024_02_15",
           "Input-Encoding": "JSON-V1",
@@ -146,7 +148,7 @@ export default class ArMemBase {
         owner: this.scheduler,
         tags: buildTags(null, {
           "Data-Protocol": "ao",
-          Variant: "ao.TN.1",
+          Variant: this.variant ?? "ao.TN.1",
           Type: "Scheduler-Location",
           Url: this.SU_URL,
           "Time-To-Live": 1000 * 60 * 60 * 24 * 365 * 10,

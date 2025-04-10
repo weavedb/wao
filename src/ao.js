@@ -14,7 +14,7 @@ import {
   dryrun,
   monitor,
   unmonitor,
-} from "@permaweb/aoconnect"
+} from "aoconnect-wao"
 
 import {
   dissoc,
@@ -96,6 +96,7 @@ class AO {
     if (!aoconnect && _port) aoconnect = optAO(_port)
     if (!ar && _port) ar = { port: _port }
     this.wao = opt.wao
+    this.variant = opt.variant
     if (isNil(this.wao)) this.wao = in_memory || !isNil(ar?.port)
     if (!module) {
       switch (module_type) {
@@ -311,8 +312,8 @@ class AO {
 
   async postModule({ data, jwk, tags = {}, overwrite = false }) {
     const _tags = mergeLeft(tags, {
-      "Data-Protocol": "ao",
-      Variant: "ao.TN.1",
+      "Data-Protocol": this.protocol ?? "ao",
+      Variant: this.variant ?? "ao.TN.1",
       Type: "Module",
       "Module-Format": "wasm64-unknown-emscripten-draft_2024_02_15",
       "Input-Encoding": "JSON-V1",
@@ -336,8 +337,8 @@ class AO {
 
   async postScheduler({ jwk, url, tags = {}, overwrite = false }) {
     const _tags = mergeLeft(tags, {
-      "Data-Protocol": "ao",
-      Variant: "ao.TN.1",
+      "Data-Protocol": this.protocol ?? "ao",
+      Variant: this.variant ?? "ao.TN.1",
       Type: "Scheduler-Location",
       Url: url,
       "Time-To-Live": "3600000",
@@ -370,6 +371,7 @@ class AO {
       if (!tags.Authority && this.authority) tags.Authority = this.authority
       let _tags = buildTags(null, tags)
       pid = await this.spawn({
+        variant: this.variant,
         memory,
         module,
         scheduler,
@@ -515,6 +517,7 @@ class AO {
     if (err) return { err }
     let _tags = buildTags(act, tags)
     const mid = await this.message({
+      variant: this.variant,
       process: pid,
       signer: this.toSigner(jwk),
       tags: _tags,
