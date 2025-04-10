@@ -33,13 +33,14 @@ let onRecovery = {}
 let ongoing = {}
 
 export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
-  return (mem, { cache, log = false, extensions = {}, hb } = {}) => {
+  return (mem, { cache, log = false, extensions = {}, hb, variant } = {}) => {
     const isMem = mem?.__type__ === "mem"
     if (!isMem) {
       let args = { cache }
       if (mem?.SU_URL) {
-        args = mergeLeft(mem, args)
         args.scheduler = scheduler
+        args.variant = variant
+        args = mergeLeft(mem, args)
       }
       mem = new ArMem(args)
     }
@@ -135,9 +136,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           null,
           mergeLeft(tags(opt.tags ?? []), {
             "Data-Protocol": "ao",
-            Variant: "ao.TN.1",
+            Variant: variant ?? "ao.TN.1",
             Type: "Process",
-            SDK: "aoconnect",
             Module: mod,
             Scheduler: opt.scheduler,
             "Content-Type": "text/plain",
@@ -286,8 +286,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           Epoch: p.epochs.length,
           Nonce: "0",
           "Data-Protocol": "ao",
-          Variant: "ao.TN.1",
-          SDK: "aoconnect",
+          Variant: variant ?? "ao.TN.1",
           Type: "Assignment",
           "Block-Height": await mem.get("height"),
           Process: opt.process,
@@ -431,9 +430,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           null,
           mergeLeft(tags(opt.tags ?? []), {
             "Data-Protocol": "ao",
-            Variant: "ao.TN.1",
+            Variant: variant ?? "ao.TN.1",
             Type: "Message",
-            SDK: "aoconnect",
           })
         )
         if (opt.for) {

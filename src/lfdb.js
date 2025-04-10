@@ -1,7 +1,8 @@
 import lf from "localforage"
 import { is, keys } from "ramda"
 
-export default _this => {
+export default (_this, prefix) => {
+  const k = key => (prefix ? `${prefix}-${key}` : key)
   return {
     put: async (key, val) => {
       let _val = null
@@ -44,14 +45,14 @@ export default _this => {
           }
         }
       } else _val = val
-      await lf.setItem(key, _val)
+      await lf.setItem(k(key), _val)
       _this.keys[key] = true
-      await lf.setItem("keys", keys(_this.keys))
+      await lf.setItem(k("keys"), keys(_this.keys))
     },
-    get: async key => await lf.getItem(key),
+    get: async key => await lf.getItem(k(key)),
     getKeys: async ({ start, end }) => {
       if (!_this.keyInit) {
-        const _keys = (await lf.getItem("keys")) ?? []
+        const _keys = (await lf.getItem(k("keys"))) ?? []
         _this.keys = {}
         for (const v of _keys) _this.keys[v] = true
       }
