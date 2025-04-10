@@ -242,8 +242,8 @@ export default function Home({}) {
   }, [])
 
   useEffect(() => {
-    if (global.terminalRef) {
-      global.terminalRef.current.resize(110, bigTerminal ? 29 : 11)
+    if (global.termRef) {
+      global.termRef.current.resize(110, bigTerminal ? 29 : 11)
     }
   }, [bigTerminal])
 
@@ -272,8 +272,19 @@ export default function Home({}) {
             } else {
               txt = `connecting to a process... ${proc.id}\n`
             }
-            global.term.write(`${txt}${prompt}`)
-            global.term.write(`${global.inputRef.current}`)
+            global.term.write(txt)
+            global.term.write(prompt)
+
+            // Reprint current input
+            global.term.write(global.inputRef.current)
+
+            // Restore cursor position
+            const tail = global.inputRef.current.slice(global.cur)
+            if (tail.length > 0) {
+              global.term.write(`\x1b[${tail.length}D`)
+            }
+            //global.term.write(`${txt}${prompt}`)
+            //global.term.write(`${global.inputRef.current}`)
           }
         }
         await global.prompt()
@@ -305,6 +316,7 @@ export default function Home({}) {
       } catch (e) {
         ao = await new AO({ variant: cache, cache }).init(acc[0])
       }
+      global.ao = ao
       await ao.mem.init()
       let _modules = []
       let mmap = {}
@@ -2868,7 +2880,7 @@ export default function Home({}) {
                 borderRadius="0"
                 css={{ overflow: "hidden" }}
               >
-                <Terminal {...{ ao, global }} />
+                <Terminal {...{ global }} />
               </Box>
             </Box>
           </Flex>
