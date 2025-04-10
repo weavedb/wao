@@ -3,162 +3,257 @@ import { Box } from "@chakra-ui/react"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 
-let term = null
-let count = 0
-export default function XTerm({ global, ao }) {
-  const terminalRef = useRef(null)
+const Style = () => (
+  <style jsx global>{`
+    /* Custom scrollbar for terminal */
+    #terminal .xterm-viewport::-webkit-scrollbar {
+      width: 10px;
+      background-color: #111;
+    }
+
+    #terminal .xterm-viewport::-webkit-scrollbar-thumb {
+      background-color: #444;
+      border-radius: 4px;
+    }
+
+    #terminal .xterm-viewport::-webkit-scrollbar-track {
+      background-color: #222;
+    }
+
+    #terminal .xterm-viewport {
+      scrollbar-width: thin;
+      scrollbar-color: #444 #222;
+    }
+
+    /* Make terminal use full available height */
+    #terminal .xterm {
+      height: 200px !important;
+    }
+
+    #terminal .xterm-screen {
+      height: 100% !important;
+    }
+    #terminal .xterm-rows {
+      padding: 5px 10px;
+    }
+  `}</style>
+)
+const config = {
+  cursorBlink: true,
+  fontSize: 12,
+  fontFamily: "monospace",
+  theme: { background: "#1E1E1E" },
+  convertEol: true,
+  cols: 110,
+  rows: 11,
+}
+
+const init = g => {
+  const elem = document.getElementById("terminal")
+  if (!elem) return
+  g.term = new Terminal(config)
+  g.termRef.current = g.term
+  g.term.open(elem)
+  g.term.write(`select a process...... `)
+}
+
+const toggle = async g => {
+  const on = !g.dryrun
+  g.setDryrun(on)
+  await g.prompt("toggling dryrun mode...... " + (on ? "on" : "off"))
+}
+
+const aoeval = async (cmd, g) => {
+  try {
+    const { res } = await g.ao[g.dryrun ? "dry" : "msg"]({
+      act: "Eval",
+      pid: g.proc.id,
+      data: cmd,
+    })
+    if (res?.Output?.data) {
+      const data = res.Output.data.output ?? res.Output.data
+      g.term.write(`${data}\r\n`)
+    }
+    if (res?.Error) g.term.write(`${res.Error}\r\n`)
+    const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
+    if (prompt) g.term.write(`${prompt}`)
+    else await g.prompt(false)
+  } catch (e) {
+    g.term.write(`${e.toString()}\r\n`)
+    await g.prompt(false)
+  }
+}
+
+const exec = async g => {
+  if (!g.proc) return
+  const cmd = g.inputRef.current.trim()
+  if (cmd) {
+    g.history.push(cmd)
+    g.historyIndex = g.history.length
+    g.savedInput = null
+    g.inputRef.current = ""
+    g.term.write("\r\n")
+    switch (cmd) {
+      case ".dryrun":
+        await toggle(g)
+        break
+      default:
+        await aoeval(cmd, g)
+    }
+    return true
+  }
+  return false
+}
+
+const updateInput = (g, newInput) => {
+  const oldLen = g.inputRef.current.length
+  const newLen = newInput.length
+  const cur = g.cur
+  if (cur > 0) g.term.write(`\x1b[${cur}D`)
+  g.term.write(" ".repeat(oldLen))
+  if (oldLen > 0) g.term.write(`\x1b[${oldLen}D`)
+  g.inputRef.current = newInput
+  g.cur = newLen
+  g.term.write(newInput)
+}
+const term = g => {
+  init(g)
+  let on = false
+  g.cur = 0
+  g.history = []
+  g.historyIndex = -1
+  g.savedInput = null
+
+  g.term.onData(async d => {
+    if (on) return
+    console.log("cur:", g.cur)
+    if (d === "\x01") {
+      if (g.cur > 0) {
+        g.term.write(`\x1b[${g.cur}D`)
+        g.cur = 0
+      }
+    } else if (d === "\x05") {
+      const move = g.inputRef.current.length - g.cur
+      if (move > 0) {
+        g.term.write(`\x1b[${move}C`)
+        g.cur = g.inputRef.current.length
+      }
+    } else if (d === "\x0b") {
+      const left = g.inputRef.current.slice(0, g.cur)
+      const right = g.inputRef.current.slice(g.cur)
+      g.inputRef.current = left
+
+      g.term.write(" ".repeat(right.length))
+      g.term.write(`\x1b[${right.length}D`)
+    } else if (d === "\x16") {
+      navigator.clipboard
+        .readText()
+        .then(paste => {
+          for (const ch of paste) {
+            const left = g.inputRef.current.slice(0, g.cur)
+            const right = g.inputRef.current.slice(g.cur)
+            g.inputRef.current = left + ch + right
+            g.term.write(ch)
+            g.cur++
+            g.term.write(right)
+            if (right.length > 0) g.term.write(`\x1b[${right.length}D`)
+          }
+        })
+        .catch(err => {
+          console.error("Clipboard read failed:", err)
+        })
+    } else if (d.startsWith("\x1b")) {
+      if (d === "\x1b[D") {
+        if (g.cur > 0) {
+          g.term.write("\x1b[D")
+          g.cur--
+        }
+      } else if (d === "\x1b[C") {
+        if (g.cur < g.inputRef.current.length) {
+          g.term.write("\x1b[C")
+          g.cur++
+        }
+      } else if (d === "\x1b[A") {
+        if (g.history.length > 0) {
+          if (g.historyIndex === g.history.length) {
+            g.savedInput = g.inputRef.current
+          }
+          if (g.historyIndex > 0) {
+            g.historyIndex--
+            updateInput(g, g.history[g.historyIndex])
+          }
+        }
+      } else if (d === "\x1b[B") {
+        if (g.historyIndex < g.history.length - 1) {
+          g.historyIndex++
+          updateInput(g, g.history[g.historyIndex])
+        } else if (g.historyIndex === g.history.length - 1) {
+          g.historyIndex++
+          updateInput(g, g.savedInput ?? "")
+          g.savedInput = null
+        }
+      } else if (d === "\x1b[3~") {
+        if (g.cur < g.inputRef.current.length) {
+          const left = g.inputRef.current.slice(0, g.cur)
+          const right = g.inputRef.current.slice(g.cur + 1)
+          g.inputRef.current = left + right
+          g.term.write(right + " ")
+          g.term.write(`\x1b[${right.length + 1}D`)
+        }
+      }
+      return
+    }
+
+    const code = d.charCodeAt(0)
+    if (code === 13) {
+      on = true
+      if (await exec(g)) g.cur = 0
+      on = false
+    } else if (code === 127) {
+      if (g.cur > 0) {
+        const left = g.inputRef.current.slice(0, g.cur - 1)
+        const right = g.inputRef.current.slice(g.cur)
+        g.inputRef.current = left + right
+        g.cur--
+        g.term.write("\b")
+        g.term.write(right + " ")
+        g.term.write(`\x1b[${right.length + 1}D`)
+      }
+    } else if (code < 32) {
+      // Ignore other control characters
+      return
+    } else {
+      for (const ch of d) {
+        const left = g.inputRef.current.slice(0, g.cur)
+        const right = g.inputRef.current.slice(g.cur)
+        g.inputRef.current = left + ch + right
+        g.term.write(ch)
+        g.cur++
+        g.term.write(right)
+        if (right.length > 0) g.term.write(`\x1b[${right.length}D`)
+      }
+    }
+  })
+}
+
+export default function XTerm({ global: g }) {
+  const termRef = useRef(null)
   const inputRef = useRef("")
   useEffect(() => {
-    global.inputRef = inputRef
-    let dryrun = false
-    // Add scrollbar styles as a separate element to ensure they apply
-    const styleElement = document.createElement("style")
-    styleElement.textContent = `
-      /* Custom scrollbar for terminal */
-      #terminal .xterm-viewport::-webkit-scrollbar {
-        width: 10px;
-        background-color: #111;
-      }
-      
-      #terminal .xterm-viewport::-webkit-scrollbar-thumb {
-        background-color: #444;
-        border-radius: 4px;
-      }
-      
-      #terminal .xterm-viewport::-webkit-scrollbar-track {
-        background-color: #222;
-      }
-      
-      #terminal .xterm-viewport {
-        scrollbar-width: thin;
-        scrollbar-color: #444 #222;
-      }
-      
-      /* Make terminal use full available height */
-      #terminal .xterm {
-        height: 200px !important;
-      }
-      
-      #terminal .xterm-screen {
-        height: 100% !important;
-      }
-      #terminal .xterm-rows{
-        padding: 5px 10px;
-      }
-    `
-    document.head.appendChild(styleElement)
+    g.inputRef = inputRef
+    g.termRef = termRef
     try {
-      const terminalElement = document.getElementById("terminal")
-      if (!terminalElement) return
-
-      // Create terminal with more rows to fill the space
-      /*term = new Terminal({
-        cursorBlink: true,
-        fontSize: 14,
-        fontFamily: "monospace",
-        theme: {
-          background: "#1E1E1E",
-          foreground: "#f0f0f0",
-        },
-        cols: 80,
-        })*/
-
-      term = new Terminal({
-        cursorBlink: true,
-        fontSize: 12,
-        fontFamily: "monospace",
-        theme: { background: "#1E1E1E" },
-        convertEol: true,
-        cols: 110,
-        rows: 11,
-      })
-      global.term = term
-      terminalRef.current = term
-      global.terminalRef = terminalRef
-      term.open(terminalElement)
-      term.write(`select a process...... `)
-
-      let processingCommand = false
-
-      term.onData(async data => {
-        if (processingCommand) return
-
-        const code = data.charCodeAt(0)
-
-        if (code === 13) {
-          if (!global.proc) return
-          // Enter key
-          processingCommand = true
-
-          const command = inputRef.current
-          inputRef.current = ""
-
-          term.write("\r\n")
-
-          if (command.trim()) {
-            if (command === ".dryrun") {
-              const on = !global.dryrun
-              global.setDryrun(on)
-              await global.prompt(
-                "toggling dryrun mode...... " + (on ? "on" : "off")
-              )
-            } else {
-              try {
-                const { res } = await ao[global.dryrun ? "dry" : "msg"]({
-                  act: "Eval",
-                  pid: global.proc.id,
-                  data: command,
-                })
-                console.log(res)
-                if (res?.Output?.data) {
-                  const data = res.Output.data.output ?? res.Output.data
-                  term.write(`${data}\r\n`)
-                }
-                if (res?.Error) term.write(`${res.Error}\r\n`)
-                const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
-                if (prompt) {
-                  term.write(`${prompt}`)
-                } else {
-                  await global.prompt(false)
-                }
-              } catch (e) {
-                term.write(`${e.toString()}\r\n`)
-                await global.prompt(false)
-              }
-            }
-          } else {
-            await global.prompt(false)
-          }
-          processingCommand = false
-        } else if (code === 127) {
-          // Backspace
-          if (inputRef.current.length > 0) {
-            term.write("\b \b")
-            inputRef.current = inputRef.current.substring(
-              0,
-              inputRef.current.length - 1
-            )
-          }
-        } else if (code < 32) {
-          // Ignore other control characters
-          return
-        } else {
-          term.write(data)
-          inputRef.current += data
-        }
-      })
+      term(g)
     } catch (error) {
       console.error("Terminal initialization error:", error)
     }
-
     return () => {
-      document.head.removeChild(styleElement)
-      if (terminalRef.current) {
-        terminalRef.current.dispose()
-        terminalRef.current = null
+      if (termRef.current) {
+        termRef.current.dispose()
+        termRef.current = null
       }
     }
   }, [])
 
-  return null
+  return <Style />
 }
