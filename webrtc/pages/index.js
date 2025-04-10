@@ -158,7 +158,7 @@ export default function Home({}) {
   const [dryrun, setDryrun] = useState(true)
   const [ttab, setTtab] = useState("lua")
   const [modal, setModal] = useState(false)
-  console.log(modal)
+  const [modal2, setModal2] = useState(false)
   const [subs, setSubs] = useState({})
   const [clients, setClients] = useState([])
   const [processes, setProcesses] = useState([])
@@ -183,7 +183,7 @@ export default function Home({}) {
   const [proc, setProc] = useState(null)
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
-  const [ctype, setCtype] = useState("hb")
+  const [ctype, setCtype] = useState("ao.WLN.1")
   const [files, setFiles] = useState([])
   const [tests, setTests] = useState([])
   const [test, setTest] = useState(null)
@@ -192,6 +192,13 @@ export default function Home({}) {
   const [fileext, setFileext] = useState("js")
   const [monaco, setMonaco] = useState(null)
   const [bigTerminal, setBigTerminal] = useState(false)
+  const [cache, setCache] = useState("ao.WLN.1")
+  const [ntag, setNtag] = useState("")
+  const [nver, setNver] = useState("")
+  const [ndesc, setNdesc] = useState("")
+  const [networks, setNetworks] = useState([
+    { tag: "ao.WLN.1", desc: "WAO LOCALNET 1" },
+  ])
   const tabmap = {
     Projects: { icon: <FaCode /> },
     Tests: { icon: <FaBug /> },
@@ -282,6 +289,8 @@ export default function Home({}) {
     ;(async () => {
       const files = (await lf.getItem("files")) ?? []
       setFiles(files)
+      const networks = await lf.getItem("networks")
+      if (networks) setNetworks(networks)
     })()
   }, [])
   const fileRef = useRef(null)
@@ -292,9 +301,9 @@ export default function Home({}) {
   useEffect(() => {
     ;(async () => {
       try {
-        ao = await new AO({ hb_url }).init(acc[0])
+        ao = await new AO({ variant: cache, cache, hb_url }).init(acc[0])
       } catch (e) {
-        ao = await new AO({}).init(acc[0])
+        ao = await new AO({ variant: cache, cache }).init(acc[0])
       }
       await ao.mem.init()
       let _modules = []
@@ -311,9 +320,12 @@ export default function Home({}) {
       }
       setProcs(_procs)
       _setModule("Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM")
+      setMessage(null)
+      setMessages([])
       setInit(true)
     })()
-  }, [])
+  }, [cache])
+
   const ctypes = [
     {
       key: "hb",
@@ -406,6 +418,10 @@ export default function Home({}) {
     },
     { key: "log", name: "LOGS" },
   ]
+  let selNetwork = null
+  for (let v of networks) {
+    if (v.tag === ctype) selNetwork = v
+  }
   return (
     <>
       <style jsx global>{`
@@ -773,15 +789,24 @@ export default function Home({}) {
               </>
             ) : tab === "Networks" ? (
               <Flex align="center" w="100%">
-                <Box
-                  bg="#ddd"
-                  mr={2}
-                  css={{ borderRadius: "3px" }}
-                  px={2}
+                <Flex
+                  mr={4}
+                  fontSize="14px"
+                  color="white"
+                  bg="#5137C5"
                   py={1}
+                  px={4}
+                  css={{
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    _hover: { opacity: 0.75 },
+                  }}
+                  onClick={() => {
+                    setModal2(true)
+                  }}
                 >
-                  LOCANNET
-                </Box>
+                  Launch New
+                </Flex>
                 <Box flex={1} />
                 {suid ? (
                   <Flex
@@ -1078,29 +1103,50 @@ export default function Home({}) {
               </Flex>
             ) : (
               <>
+                <Flex
+                  align="center"
+                  css={{
+                    cursor: "pointer",
+                    _hover: { opacity: 0.75 },
+                  }}
+                  onClick={() => setTab("Networks")}
+                >
+                  <Box
+                    bg="#ddd"
+                    mr={2}
+                    css={{ borderRadius: "3px" }}
+                    px={2}
+                    py={1}
+                  >
+                    {cache}
+                  </Box>
+                </Flex>
                 {!module ||
                 !includes(tab, ["Modules", "Processes", "Messages"]) ? null : (
-                  <Flex
-                    align="center"
-                    css={{
-                      cursor: "pointer",
-                      _hover: { opacity: 0.75 },
-                    }}
-                    onClick={() => setTab("Modules")}
-                  >
-                    <Box
-                      bg="#ddd"
-                      mr={2}
-                      css={{ borderRadius: "3px" }}
-                      px={2}
-                      py={1}
+                  <>
+                    <Icon size="md" color="#5137C5">
+                      <FaAngleRight />
+                    </Icon>
+                    <Flex
+                      ml={2}
+                      align="center"
+                      css={{
+                        cursor: "pointer",
+                        _hover: { opacity: 0.75 },
+                      }}
+                      onClick={() => setTab("Modules")}
                     >
-                      {modmap[module.id].name}
-                    </Box>
-                    {includes(tab, ["Modules", "Processes"]) ? (
-                      <Box mx={2}>{module.id}</Box>
-                    ) : null}
-                  </Flex>
+                      <Box
+                        bg="#ddd"
+                        mr={2}
+                        css={{ borderRadius: "3px" }}
+                        px={2}
+                        py={1}
+                      >
+                        {modmap[module.id].name}
+                      </Box>
+                    </Flex>
+                  </>
                 )}
                 {tab !== "Modules" ? null : (
                   <>
@@ -1236,7 +1282,6 @@ export default function Home({}) {
                           {act}
                         </Box>
                       </Flex>
-                      <Box>{message.id}</Box>
                     </Flex>
                   </>
                 )}
@@ -1928,12 +1973,72 @@ export default function Home({}) {
               </Flex>
             ) : (
               <>
-                <Flex>
+                <Flex w="100%">
                   <Box
                     w="385px"
                     h="calc(100vh - 110px)"
                     css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                   >
+                    <Flex
+                      h="25px"
+                      px={4}
+                      align="center"
+                      bg="#eee"
+                      fontSize="12px"
+                    >
+                      <Icon size="sm" color="#5137C5" mr={2}>
+                        <FaNetworkWired />
+                      </Icon>
+                      <Box>AO Networks</Box>
+                    </Flex>
+                    {map(v => {
+                      return (
+                        <Flex
+                          h="50px"
+                          bg={v.tag === ctype ? "#5137C5" : "white"}
+                          fontSize="12px"
+                          p={4}
+                          justify="center"
+                          onClick={() => setCtype(v.tag)}
+                          css={{
+                            borderBottom: "1px solid #ddd",
+                            cursor: "pointer",
+                            _hover: { opacity: 0.75 },
+                          }}
+                        >
+                          <Flex direction="column" justify="center">
+                            <Box
+                              fontWeight="bold"
+                              color={v.tag !== ctype ? "#5137C5" : "#ddd"}
+                            >
+                              {v.tag}
+                            </Box>
+                            <Box color={v.tag !== ctype ? "#222" : "#ddd"}>
+                              {v.desc}
+                            </Box>
+                          </Flex>
+                          <Box flex={1} />
+                          {cache === v.tag ? (
+                            <Spinner
+                              color={v.tag !== ctype ? "#5137C5" : "#ddd"}
+                              animationDuration="1s"
+                            />
+                          ) : null}
+                        </Flex>
+                      )
+                    })(networks)}
+                    <Flex
+                      h="25px"
+                      px={4}
+                      align="center"
+                      bg="#eee"
+                      fontSize="12px"
+                    >
+                      <Icon size="sm" color="#5137C5" mr={2}>
+                        <FaNetworkWired />
+                      </Icon>
+                      <Box>Connections</Box>
+                    </Flex>
                     {map(v => (
                       <Flex
                         h="50px"
@@ -1943,7 +2048,7 @@ export default function Home({}) {
                         direction="column"
                         justify="center"
                         onClick={() => {
-                          if (!includes(v, ["hb"])) {
+                          if (!includes(v.key, ["hb"])) {
                             return alert("Coming Soon!")
                           }
 
@@ -2056,6 +2161,97 @@ export default function Home({}) {
                     ) : (
                       <Box p={4}>Not Connected </Box>
                     )
+                  ) : selNetwork ? (
+                    <>
+                      <Box
+                        px={4}
+                        py={2}
+                        fontSize="12px"
+                        flex={1}
+                        h="calc(100vh - 110px)"
+                        css={{ overflowY: "auto" }}
+                      >
+                        <Flex my={2} fontWeight="bold" color="#5137C5">
+                          AO Network
+                        </Flex>
+                        {map(v => {
+                          if (
+                            includes(v.name, ["signature", "signature-input"])
+                          ) {
+                            return null
+                          }
+                          return (
+                            <Flex my={2} align="center">
+                              <Box
+                                w="130px"
+                                color="white"
+                                bg="#5137C5"
+                                px={2}
+                                mr={4}
+                                css={{ borderRadius: "3px" }}
+                              >
+                                {v.name}
+                              </Box>
+                              <Box
+                                flex={1}
+                                css={{
+                                  wordBreak: "break-all",
+                                  whiteSpace: "wrap",
+                                }}
+                              >
+                                {v.value}
+                              </Box>
+                            </Flex>
+                          )
+                        })([
+                          {
+                            name: "Data-Protocol",
+                            value: selNetwork.tag.split(".")[0],
+                          },
+                          { name: "Variant", value: selNetwork.tag },
+                          { name: "Description", value: selNetwork.desc },
+                        ])}
+                        {ctype === cache ? (
+                          <Flex
+                            mt={4}
+                            w="100%"
+                            py={2}
+                            align="center"
+                            color="#5137C5"
+                            justify="center"
+                            css={{
+                              border: "1px solid #5137C5",
+                              borderRadius: "5px",
+                            }}
+                          >
+                            Currently Running......
+                          </Flex>
+                        ) : (
+                          <Flex
+                            mt={4}
+                            w="100%"
+                            py={2}
+                            bg="#5137C5"
+                            color="#ddd"
+                            justify="center"
+                            css={{
+                              borderRadius: "5px",
+                              cursor: "pointer",
+                              _hover: { opacity: 0.75 },
+                            }}
+                            onClick={() => {
+                              if (
+                                confirm(`Would you like to switch to ${ctype}?`)
+                              ) {
+                                setCache(ctype)
+                              }
+                            }}
+                          >
+                            Switch Networks
+                          </Flex>
+                        )}
+                      </Box>
+                    </>
                   ) : (
                     <>
                       <Box flex={1} p={6}>
@@ -2695,7 +2891,7 @@ export default function Home({}) {
         }}
       >
         <Box fontSize="12px" color="#666">
-          LOCALNET v 0.1.0
+          LOCALNET v 1.0.0
         </Box>
         <Box flex={1} />
         <Box
@@ -2800,7 +2996,7 @@ export default function Home({}) {
             </Flex>
             <Box p={6}>
               <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-                Create a New File
+                Create New File
               </Box>
               <Box fontSize="12px" color="#666" mb={2}>
                 File Name
@@ -2868,6 +3064,118 @@ export default function Home({}) {
                 }}
               >
                 Create
+              </Flex>
+            </Box>
+          </Box>
+        </Flex>
+      )}
+      {!modal2 ? null : (
+        <Flex
+          align="center"
+          justify="center"
+          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
+          bg="rgba(1,1,1,0.5)"
+          w="100vw"
+          h="100vh"
+        >
+          <Box
+            mb="50px"
+            w="600px"
+            bg="white"
+            css={{ borderRadius: "10px", position: "relative" }}
+          >
+            <Flex
+              justify="flex-end"
+              w="100%"
+              p={2}
+              css={{ position: "absolute" }}
+            >
+              <Icon
+                size="md"
+                color="#999"
+                m={2}
+                css={{
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={() => setModal2(false)}
+              >
+                <FaX />
+              </Icon>
+            </Flex>
+            <Box p={6}>
+              <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
+                Launch New AO Network
+              </Box>
+
+              <Box>
+                <Box fontSize="12px" color="#666" mb={2}>
+                  Network Tag
+                </Box>
+                <Flex align="flex-end">
+                  <Input value="ao" disabled={true} w="100px" />
+                  <Box mx={2}>.</Box>
+                  <Input
+                    w="100px"
+                    placeholder="WLN"
+                    value={ntag}
+                    onChange={e => setNtag(e.target.value)}
+                  />
+                  <Box mx={2}>.</Box>
+                  <Input
+                    w="100px"
+                    placeholder="1"
+                    value={nver}
+                    onChange={e => setNver(e.target.value)}
+                  />
+                </Flex>
+              </Box>
+              <Box flex={1} mt={4}>
+                <Box fontSize="12px" color="#666" mb={2}>
+                  Description
+                </Box>
+                <Input
+                  placeholder=""
+                  value={ndesc}
+                  onChange={e => setNdesc(e.target.value)}
+                />
+              </Box>
+
+              <Flex
+                align="center"
+                justify="center"
+                mt={4}
+                p={1}
+                mb={1}
+                color="#5137C5"
+                css={{
+                  borderRadius: "3px",
+                  border: "1px solid #5137C5",
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  if (/^\s*$/.test(ntag.trim()))
+                    return alert("Enter a network name")
+                  if (/^\s*$/.test(nver.trim()))
+                    return alert("Enter a network version")
+                  const tag = `ao.${ntag}.${nver}`
+                  for (let v of networks) {
+                    if (tag === v.tag) return alert(`${ntag} already exists!`)
+                  }
+
+                  const _networks = append({ tag, desc: ndesc }, networks)
+                  setNetworks(_networks)
+                  setCache(tag)
+                  setCtype(tag)
+                  setNtag("")
+                  setNver("")
+                  setNdesc("")
+                  setModal2(false)
+                  await lf.setItem("networks", _networks)
+                }}
+              >
+                Launch
               </Flex>
             </Box>
           </Box>
