@@ -63,13 +63,12 @@ const toggle = async g => {
   await g.prompt("toggling dryrun mode...... " + (on ? "on" : "off"))
 }
 
-const aoeval = async (cmd, g) => {
+const aoeval = async (data, g) => {
   try {
-    const { res } = await g.ao[g.dryrun ? "dry" : "msg"]({
-      act: "Eval",
-      pid: g.proc.id,
-      data: cmd,
-    })
+    const jwk = await g.getWallet()
+    if (!jwk) return await g.prompt("wallet not found")
+    const fn = g.dryrun ? "dry" : "msg"
+    const { res } = await g.ao[fn]({ act: "Eval", pid: g.proc.id, data, jwk })
     if (res?.Output?.data) {
       const data = res.Output.data.output ?? res.Output.data
       g.term.write(`${data}\r\n`)
