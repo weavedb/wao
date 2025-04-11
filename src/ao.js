@@ -3,8 +3,9 @@ const pkg = WarpArBundles.default ?? WarpArBundles
 const { createData, ArweaveSigner } = pkg
 import AR from "./ar.js"
 import md5 from "md5"
+import { createDataItemSigner } from "@permaweb/aoconnect"
+
 import {
-  createDataItemSigner,
   connect,
   assign,
   result,
