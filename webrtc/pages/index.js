@@ -152,7 +152,19 @@ const src_data_lua = `Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })
 end)`
 
-let global = { dryrun: true }
+let global = {
+  dryrun: true,
+  getWallet: async () => {
+    arweaveWallet.connect(
+      ["ACCESS_ADDRESS", "SIGN_TRANSACTION", "ACCESS_PUBLIC_KEY"],
+      {
+        name: "WAO LOCALNET",
+      }
+    )
+    const userAddress = await arweaveWallet.getActiveAddress()
+    return userAddress ? arweaveWallet : null
+  },
+}
 export default function Home({}) {
   const [localFS, setLocalFS] = useState(null)
   const [dryrun, setDryrun] = useState(true)
@@ -535,9 +547,12 @@ export default function Home({}) {
               }}
               onClick={async () => {
                 try {
-                  arweaveWallet.connect(["ACCESS_ADDRESS"], {
-                    name: "WAO LOCALNET",
-                  })
+                  arweaveWallet.connect(
+                    ["ACCESS_ADDRESS", "SIGN_TRANSACTION", "ACCESS_PUBLIC_KEY"],
+                    {
+                      name: "WAO LOCALNET",
+                    }
+                  )
                   const userAddress = await arweaveWallet.getActiveAddress()
                   setWallet({ address: userAddress })
                   await lf.setItem("wallet", { address: userAddress })
@@ -1176,8 +1191,13 @@ export default function Home({}) {
                         _hover: { opacity: 0.75 },
                       }}
                       onClick={async () => {
+                        const jwk = await global.getWallet()
+                        if (!jwk) return alert("wallet not connected")
                         let pid, p
-                        ;({ pid, p } = await ao.deploy({ module: module.id }))
+                        ;({ pid, p } = await ao.deploy({
+                          module: module.id,
+                          jwk,
+                        }))
                         const v = pid
                         let _proc = clone(ao.mem.env[v])
                         delete _proc.memory
@@ -1253,7 +1273,9 @@ export default function Home({}) {
                         } else {
                           const p = ao.p(proc.id)
                           const lua = editorRef.current.getValue()
-                          const res = await p.msg("Eval", { data: lua })
+                          const jwk = await global.getWallet()
+                          if (!jwk) return alert("wallet not connected")
+                          const res = await p.msg("Eval", { data: lua, jwk })
                           console.log(res)
                         }
                       }}
