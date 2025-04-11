@@ -127,7 +127,45 @@ const term = g => {
   g.term.onData(async d => {
     if (on) return
     console.log("cur:", g.cur)
-    if (d === "\x01") {
+    if (d === "\x06") {
+      if (g.cur < g.inputRef.current.length) {
+        g.term.write("\x1b[C")
+        g.cur++
+      }
+    } else if (d === "\x1bd") {
+      // Alt-D
+      if (g.cur < g.inputRef.current.length) {
+        const isWordChar = c => /\w/.test(c)
+        const text = g.inputRef.current
+        let end = g.cur
+        while (end < text.length && text[end] === " ") end++ // skip spaces
+        const first = isWordChar(text[end])
+        while (
+          end < text.length &&
+          (isWordChar(text[end]) === first || (!first && text[end] === " "))
+        ) {
+          end++
+        }
+        const left = text.slice(0, g.cur)
+        const right = text.slice(end)
+        g.inputRef.current = left + right
+        g.term.write(right + " ".repeat(end - g.cur))
+        g.term.write(`\x1b[${right.length + (end - g.cur)}D`)
+      }
+    } else if (d === "\x04") {
+      if (g.cur < g.inputRef.current.length) {
+        const left = g.inputRef.current.slice(0, g.cur)
+        const right = g.inputRef.current.slice(g.cur + 1)
+        g.inputRef.current = left + right
+        g.term.write(right + " ")
+        g.term.write(`\x1b[${right.length + 1}D`)
+      }
+    } else if (d === "\x02") {
+      if (g.cur > 0) {
+        g.term.write("\x1b[D")
+        g.cur--
+      }
+    } else if (d === "\x01") {
       if (g.cur > 0) {
         g.term.write(`\x1b[${g.cur}D`)
         g.cur = 0
