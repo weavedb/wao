@@ -1,3 +1,7 @@
+import markdownIt from "markdown-it"
+import { toHtml } from "hast-util-to-html"
+//import GithubCSS from "../lib/GithubCSS.js"
+import { common, createStarryNight } from "@wooorm/starry-night"
 import { Link, ssr } from "arnext"
 import { Spinner } from "@chakra-ui/react"
 import { Icon } from "@chakra-ui/react"
@@ -110,6 +114,34 @@ let global = {
     return userAddress ? arweaveWallet : null
   },
 }
+const getPreview = async txt => {
+  const starryNight = await createStarryNight(common)
+  const markdownItInstance = markdownIt({
+    highlight(value, lang) {
+      const scope = starryNight.flagToScope(lang)
+      return toHtml({
+        type: "element",
+        tagName: "pre",
+        properties: {
+          className: scope
+            ? [
+                "highlight",
+                "highlight-" +
+                  scope.replace(/^source\./, "").replace(/\./g, "-"),
+              ]
+            : undefined,
+        },
+        children: scope
+          ? /** @type {Array<ElementContent>} */ (
+              starryNight.highlight(value, scope).children
+            )
+          : [{ type: "text", value }],
+      })
+    },
+  })
+  return markdownItInstance.render(txt)
+}
+const readme = { ext: "md", name: "README.md", nodel: true, id: "readme" }
 export default function Home({}) {
   const [localFS, setLocalFS] = useState(null)
   const [dryrun, setDryrun] = useState(true)
@@ -141,11 +173,13 @@ export default function Home({}) {
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
   const [ctype, setCtype] = useState("ao.WLN.1")
-  const [files, setFiles] = useState([{ ext: "md", name: "README.md" }])
-  const [openFiles, setOpenFiles] = useState([{ ext: "md", name: "README.md" }])
+  const [files, setFiles] = useState([readme])
+  const [openFiles, setOpenFiles] = useState([readme])
   const [tests, setTests] = useState([])
   const [test, setTest] = useState(null)
-  const [file, setFile] = useState(null)
+  const [file, setFile] = useState(readme)
+  const [preview, setPreview] = useState(true)
+  const [previewContent, setPreviewContent] = useState("")
   const [filename, setFilename] = useState("")
   const [fileext, setFileext] = useState("js")
   const [monaco, setMonaco] = useState(null)
@@ -170,7 +204,6 @@ export default function Home({}) {
     Networks: { icon: <FaNetworkWired /> },
   }
   const tabs = keys(tabmap)
-
   const _setModule = id => {
     let mmap = {}
     for (let k in ao.mem.modules) {
@@ -254,6 +287,19 @@ export default function Home({}) {
       }
     })()
   }, [proc])
+  const editorRef = useRef(null)
+  const setType = fileext =>
+    monaco.editor.setModelLanguage(
+      editorRef.current.getModel(),
+      fileext === "js"
+        ? "javascript"
+        : fileext === "ts"
+          ? "typescript"
+          : fileext === "md"
+            ? "markdown"
+            : fileext
+    )
+
   useEffect(() => {
     ;(async () => {
       const files = (await lf.getItem("files")) ?? []
@@ -324,12 +370,11 @@ export default function Home({}) {
     },
   ]
   const modmap = indexBy(prop("txid"))(modules ?? [])
-  const editorRef = useRef(null)
-
   function handleEditorDidMount(editor, monaco) {
     editorRef.current = editor
     editorRef.current.setValue(src_data)
     setMonaco(monaco)
+    getPreview(src_data).then(setPreviewContent)
   }
 
   const fileInputRef = useRef(null)
@@ -345,18 +390,16 @@ export default function Home({}) {
       reader.onload = async e => {
         const txt = e.target.result
         const id = generateId()
+        console.log(id)
         const fileext = file.name.split(".").pop().toLowerCase()
-        const _file = { name: file.name, update: Date.now(), id }
+        const _file = { name: file.name, update: Date.now(), id, ext: fileext }
         const _files = prepend(_file, files)
         await lf.setItem("files", _files)
         await lf.setItem(`file-${id}`, txt)
         setFiles(_files)
         setFile(_file)
         event.target.value = ""
-        monaco.editor.setModelLanguage(
-          editorRef.current.getModel(),
-          fileext === "js" ? "javascript" : fileext
-        )
+        setType(fileext.ext)
         // todo: handle this better
         setTimeout(() => editorRef.current.setValue(txt), 100)
       }
@@ -392,6 +435,7 @@ export default function Home({}) {
   for (let v of networks) {
     if (v.tag === ctype) selNetwork = v
   }
+  const isPreview = preview && file?.ext === "md"
   return (
     <>
       <style jsx global>{`
@@ -619,7 +663,7 @@ export default function Home({}) {
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileChange}
-                    accept=".lua, .js, .json"
+                    accept=".lua, .js, .json, .md, .ts"
                     style={{ display: "none" }}
                   />
                   Import
@@ -732,10 +776,7 @@ export default function Home({}) {
                           const file = fileRef.current
                           if (file?.id === obj.path) {
                             setTimeout(() => {
-                              monaco.editor.setModelLanguage(
-                                editorRef.current.getModel(),
-                                ext === "js" ? "javascript" : ext
-                              )
+                              setType(ext)
                               editorRef.current.setValue(obj.content)
                             }, 100)
                           }
@@ -1789,6 +1830,67 @@ export default function Home({}) {
                     <Icon size="sm" color="#5137C5" mr={2}>
                       <FaRegFloppyDisk />
                     </Icon>
+                    <Box>Quick Start Guide</Box>
+                  </Flex>
+                  {map(v => (
+                    <>
+                      <Flex
+                        h="25px"
+                        px={4}
+                        align="center"
+                        bg={v.id === file?.id ? "#5137C5" : "white"}
+                        color={v.id === file?.id ? "#ddd" : "#222"}
+                        css={{
+                          cursor: "pointer",
+                          _hover: { opacity: 0.75 },
+                        }}
+                        onClick={async () => {
+                          const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
+                          setFile(v)
+                          let opens = clone(openFiles)
+                          let exists = false
+                          for (let v2 of openFiles) {
+                            if (v2.id === v.id) {
+                              exists = true
+                              break
+                            }
+                          }
+                          if (!exists) {
+                            opens.push(v)
+                            setOpenFiles(opens)
+                          }
+                          setType(v.ext)
+                          // todo: handle this better
+                          setTimeout(() => editorRef.current.setValue(txt), 100)
+                          if (v.ext === "md" && preview) {
+                            setPreviewContent(await getPreview(txt))
+                          }
+                        }}
+                      >
+                        <Box pl={20 * 1 + "px"} />
+                        <Icon
+                          size="sm"
+                          mr={2}
+                          color={v.id === file?.id ? "#ddd" : "#5137C5"}
+                        >
+                          {v.dir ? (
+                            v.open ? (
+                              <FaRegFolderOpen />
+                            ) : (
+                              <FaRegFolder />
+                            )
+                          ) : (
+                            <FaRegFileCode />
+                          )}
+                        </Icon>
+                        <Box>{v.name}</Box>
+                      </Flex>
+                    </>
+                  ))([readme])}
+                  <Flex h="25px" px={4} align="center" bg="#eee">
+                    <Icon size="sm" color="#5137C5" mr={2}>
+                      <FaRegFloppyDisk />
+                    </Icon>
                     <Box>Web Project</Box>
                   </Flex>
                   {map(v => (
@@ -1818,16 +1920,12 @@ export default function Home({}) {
                             opens.push(v)
                             setOpenFiles(opens)
                           }
-                          monaco.editor.setModelLanguage(
-                            editorRef.current.getModel(),
-                            v.ext === "js"
-                              ? "javascript"
-                              : v.ext
-                                ? v.ext
-                                : "lua"
-                          )
+                          setType(v.ext)
                           // todo: handle this better
                           setTimeout(() => editorRef.current.setValue(txt), 100)
+                          if (v.ext === "md" && preview) {
+                            setPreviewContent(await getPreview(txt))
+                          }
                         }}
                       >
                         <Box pl={20 * 1 + "px"} />
@@ -2610,16 +2708,10 @@ export default function Home({}) {
                         onClick={async () => {
                           const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
                           setFile(v)
-                          monaco.editor.setModelLanguage(
-                            editorRef.current.getModel(),
-                            v.ext === "js"
-                              ? "javascript"
-                              : v.ext
-                                ? v.ext
-                                : "lua"
-                          )
+                          setType(v.ext)
                           // todo: handle this better
                           setTimeout(() => editorRef.current.setValue(txt), 100)
+                          setPreviewContent(await getPreview(txt))
                         }}
                         css={{
                           borderTop: `3px solid ${open ? "#5137C5" : "#444"}`,
@@ -2631,20 +2723,24 @@ export default function Home({}) {
                           color={
                             v.ext === "lua"
                               ? "#7FDBFF"
-                              : includes(v.ext, ["js", "ts"])
-                                ? "#FFDC00"
-                                : "#3d9977"
+                              : v.ext === "md"
+                                ? "#39CCCC"
+                                : includes(v.ext, ["js", "ts"])
+                                  ? "#FFDC00"
+                                  : "#3d9977"
                           }
                           mr={3}
                           fontWeight="bold"
                         >
                           {v.ext === "lua"
                             ? "Lua"
-                            : v.ext == "js"
-                              ? "JS"
-                              : v.ext === "ts"
-                                ? "TS"
-                                : "{ }"}
+                            : v.ext == "md"
+                              ? "MD"
+                              : v.ext == "js"
+                                ? "JS"
+                                : v.ext === "ts"
+                                  ? "TS"
+                                  : "{ }"}
                         </Flex>
                         <Box w="80px" css={{ overflow: "hidden" }}>
                           {v.name}
@@ -2664,12 +2760,27 @@ export default function Home({}) {
                               )
                               setOpenFiles(opens)
                               if (open) {
+                                let exists = false
                                 for (let v of opens) {
+                                  exists = true
                                   setFile(v)
-                                  editorRef.current.setValue(
+                                  const txt =
                                     (await lf.getItem(`file-${v.id}`)) ?? ""
-                                  )
+                                  setType(v.ext)
+                                  editorRef.current.setValue(txt)
+                                  if (v.ext === "md" && preview) {
+                                    setPreviewContent(await getPreview(txt))
+                                  }
+
                                   break
+                                }
+                                if (!exists) {
+                                  setFile(readme)
+                                  setOpenFiles([readme])
+                                  setType(readme.ext)
+                                  editorRef.current.setValue(src_data)
+                                  setPreview(true)
+                                  getPreview(src_data).then(setPreviewContent)
                                 }
                               }
                             }}
@@ -2792,6 +2903,28 @@ export default function Home({}) {
                     Test
                   </Flex>
                 )}
+                {file?.ext !== "md" ? null : (
+                  <Flex
+                    py={1}
+                    px={4}
+                    fontSize="12px"
+                    color="#5137C5"
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      if (!preview) {
+                        const txt = editorRef.current.getValue()
+                        setPreviewContent(await getPreview(txt))
+                      }
+                      setPreview(!preview)
+                    }}
+                  >
+                    {preview ? "Edit" : "Preview"}
+                  </Flex>
+                )}
                 {file?.local ? (
                   <Flex
                     py={1}
@@ -2816,7 +2949,7 @@ export default function Home({}) {
                   >
                     Save
                   </Flex>
-                ) : (
+                ) : file?.nodel ? null : (
                   <Flex
                     py={1}
                     px={4}
@@ -2832,14 +2965,29 @@ export default function Home({}) {
                         editorRef.current.setValue("")
                         await lf.removeItem(`file-${file.id}`)
                         const _files = filter(v => file.id !== v.id)(files)
+                        const _openFiles = filter(v => file.id !== v.id)(
+                          openFiles
+                        )
                         await lf.setItem(`files`, _files)
                         setFiles(_files)
-                        for (let v of _files) {
+                        setOpenFiles(_openFiles)
+                        let exists = false
+                        for (let v of _openFiles) {
+                          exists = true
                           setFile(v)
+                          setType(v.ext)
                           editorRef.current.setValue(
                             (await lf.getItem(`file-${v.id}`)) ?? ""
                           )
                           break
+                        }
+                        if (!exists) {
+                          setFile(readme)
+                          setOpenFiles([readme])
+                          setType(readme.ext)
+                          editorRef.current.setValue(src_data)
+                          setPreview(true)
+                          getPreview(src_data).then(setPreviewContent)
                         }
                       }
                     }}
@@ -2851,41 +2999,65 @@ export default function Home({}) {
             </Flex>
             <Flex
               bg="#1e1e1e"
-              px={4}
+              px={3}
               fontSize="11px"
               w="100%"
               h="20px"
-              color="#c6c6c6"
+              color="#999"
               align="center"
-            ></Flex>
+            >
+              <Box>Quick Start Guide</Box>
+              <Icon boxSize="11px" mx={2}>
+                <FaAngleRight />
+              </Icon>
+              <Box>{file?.name}</Box>
+              <Box flex={1} />
+            </Flex>
             <Flex w="100%">
-              <Editor
-                width={
-                  tab === "Projects"
-                    ? "calc(100vw - 437px)"
-                    : "calc(100vw - 1017px)"
-                }
-                height={
-                  bigTerminal ? "calc(100vh - 640px)" : "calc(100vh - 335px)"
-                }
-                theme="vs-dark"
-                defaultLanguage={
-                  file?.ext === "js" ? "js" : file?.ext ? file.ext : "lua"
-                }
-                onMount={handleEditorDidMount}
-                onChange={async () => {
-                  if (file) {
-                    const lua = editorRef.current.getValue()
-                    await lf.setItem(`file-${file.id}`, lua)
+              {isPreview ? (
+                <Flex
+                  justify="center"
+                  w={
+                    tab === "Projects"
+                      ? "calc(100vw - 437px)"
+                      : "calc(100vw - 1017px)"
                   }
-                  /*
-                  for (let v of files)
-                    if (v.id === file.id) v.update = Date.now()
-                  setFiles(files)
-                  await lf.setItem(`files`, files)
-                  */
-                }}
-              />
+                  h={
+                    bigTerminal ? "calc(100vh - 640px)" : "calc(100vh - 335px)"
+                  }
+                  css={{ overflowY: "auto" }}
+                >
+                  <Box
+                    p="32px"
+                    w="894px"
+                    className="markdown-body"
+                    dangerouslySetInnerHTML={{ __html: previewContent }}
+                  />
+                </Flex>
+              ) : null}
+              <Box display={isPreview ? "none" : "block"}>
+                <Editor
+                  width={
+                    tab === "Projects"
+                      ? "calc(100vw - 437px)"
+                      : "calc(100vw - 1017px)"
+                  }
+                  height={
+                    bigTerminal ? "calc(100vh - 640px)" : "calc(100vh - 335px)"
+                  }
+                  theme="vs-dark"
+                  defaultLanguage={
+                    file?.ext === "js" ? "js" : file?.ext ? file.ext : "lua"
+                  }
+                  onMount={handleEditorDidMount}
+                  onChange={async () => {
+                    if (file) {
+                      const lua = editorRef.current.getValue()
+                      await lf.setItem(`file-${file.id}`, lua)
+                    }
+                  }}
+                />
+              </Box>
             </Flex>
             <Flex
               fontSize="12px"
@@ -3103,6 +3275,7 @@ export default function Home({}) {
                     <option value="lua">lua</option>
                     <option value="js">js</option>
                     <option value="json">json</option>
+                    <option value="md">md</option>
                   </NativeSelect.Field>
                   <NativeSelect.Indicator />
                 </NativeSelect.Root>
@@ -3139,11 +3312,11 @@ export default function Home({}) {
                   await lf.setItem("files", _files)
                   await lf.setItem(`file-${id}`, txt)
                   setFiles(_files)
+                  console.log(_file)
+                  setOpenFiles([...openFiles, _file])
                   setFile(_file)
-                  monaco.editor.setModelLanguage(
-                    editorRef.current.getModel(),
-                    fileext === "js" ? "javascript" : fileext
-                  )
+                  setPreview(false)
+                  setType(fileext)
                   // todo: handle this better
                   setTimeout(() => editorRef.current.setValue(txt), 100)
                   setModal(false)
