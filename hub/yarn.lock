@@ -741,9 +741,9 @@ anymatch@~3.1.2:
     normalize-path "^3.0.0"
     picomatch "^2.0.4"
 
-"aoconnect-wao@https://gitpkg.vercel.app/weavedb/ao/connect?abd2992689dc5983d5cd48b38fb997b0532f192a&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build":
+"aoconnect-wao@https://gitpkg.vercel.app/weavedb/ao/connect?5cef9f0c1a4e8872308bbe0a7d004e44a7e008b6&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build":
   version "0.0.70"
-  resolved "https://gitpkg.vercel.app/weavedb/ao/connect?abd2992689dc5983d5cd48b38fb997b0532f192a&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build#0823276b1f589768ad8c428740d1c347b70e061a"
+  resolved "https://gitpkg.vercel.app/weavedb/ao/connect?5cef9f0c1a4e8872308bbe0a7d004e44a7e008b6&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build#a1f23010169353d1eea0ae8ba0739ba77d0026e0"
   dependencies:
     "@dha-team/arbundles" "^1.0.1"
     "@permaweb/ao-scheduler-utils" "~0.0.25"
@@ -2927,17 +2927,17 @@ vlq@^2.0.4:
   resolved "https://registry.yarnpkg.com/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.16.7:
-  version "0.16.7"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.16.7.tgz#f2bf26347c81e66110c3fff8e5b95c01aab8c8f5"
-  integrity sha512-TWHRMGPlehloXoojvmixVxsdO0ZQnmeqF8t4q2SI1/l8FTN9GPu3+qSFSG6pQO6Upo5em5u6JIJvs0OwJN/+MQ==
+wao@^0.18.0:
+  version "0.18.0"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.18.0.tgz#0ade78c5b1d739d0ef76124fe7a8c03b14d80771"
+  integrity sha512-RnjXwO/aqo3oSavUl96td+DP+hSDaLL3tXdVVP+IJxX71pxQMJWcSsHlQhBE62Exj4fLSMfFei9UAxtV0FitWA==
   dependencies:
     "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"
     "@dha-team/arbundles" "^1.0.1"
     "@permaweb/ao-loader" "^0.0.44"
     "@permaweb/aoconnect" "^0.0.62"
-    aoconnect-wao "https://gitpkg.vercel.app/weavedb/ao/connect?abd2992689dc5983d5cd48b38fb997b0532f192a&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build"
+    aoconnect-wao "https://gitpkg.vercel.app/weavedb/ao/connect?5cef9f0c1a4e8872308bbe0a7d004e44a7e008b6&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build"
     arbundles "^0.11.1"
     arjson "^0.0.2"
     arweave "^1.15.1"
