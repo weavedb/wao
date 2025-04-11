@@ -33,6 +33,8 @@ import {
   FaRegFileCode,
   FaAnglesUp,
   FaAnglesDown,
+  FaAngleUp,
+  FaAngleDown,
   FaBookOpen,
   FaDiscord,
   FaXTwitter,
@@ -63,9 +65,11 @@ import {
   reverse,
   append,
   map,
+  compose,
   without,
   fromPairs,
   filter,
+  propEq,
 } from "ramda"
 import { AO, acc, Adaptor } from "wao/web"
 import { HB } from "wao"
@@ -141,8 +145,18 @@ const getPreview = async txt => {
   })
   return markdownItInstance.render(txt)
 }
-const readme = { ext: "md", name: "README.md", nodel: true, id: "readme" }
+const readme = {
+  ext: "md",
+  name: "README.md",
+  nodel: true,
+  id: "readme",
+  pid: "0",
+}
 export default function Home({}) {
+  const [projects, setProjects] = useState([
+    { name: "Quick Start Guide", id: "0", open: true },
+    { name: "Default Project", id: "1", open: true },
+  ])
   const [localFS, setLocalFS] = useState(null)
   const [dryrun, setDryrun] = useState(true)
   const [ttab, setTtab] = useState("lua")
@@ -302,8 +316,8 @@ export default function Home({}) {
 
   useEffect(() => {
     ;(async () => {
-      const files = (await lf.getItem("files")) ?? []
-      setFiles(files)
+      const _files = (await lf.getItem("files")) ?? []
+      setFiles([[readme], ..._files])
       const networks = await lf.getItem("networks")
       if (networks) setNetworks(networks)
     })()
@@ -390,7 +404,6 @@ export default function Home({}) {
       reader.onload = async e => {
         const txt = e.target.result
         const id = generateId()
-        console.log(id)
         const fileext = file.name.split(".").pop().toLowerCase()
         const _file = { name: file.name, update: Date.now(), id, ext: fileext }
         const _files = prepend(_file, files)
@@ -1826,128 +1839,101 @@ export default function Home({}) {
                       })(localFS)}
                     </Box>
                   )}
-                  <Flex h="25px" px={4} align="center" bg="#eee">
-                    <Icon size="sm" color="#5137C5" mr={2}>
-                      <FaRegFloppyDisk />
-                    </Icon>
-                    <Box>Quick Start Guide</Box>
-                  </Flex>
-                  {map(v => (
-                    <>
-                      <Flex
-                        h="25px"
-                        px={4}
-                        align="center"
-                        bg={v.id === file?.id ? "#5137C5" : "white"}
-                        color={v.id === file?.id ? "#ddd" : "#222"}
-                        css={{
-                          cursor: "pointer",
-                          _hover: { opacity: 0.75 },
-                        }}
-                        onClick={async () => {
-                          const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
-                          setFile(v)
-                          let opens = clone(openFiles)
-                          let exists = false
-                          for (let v2 of openFiles) {
-                            if (v2.id === v.id) {
-                              exists = true
-                              break
+                  {map(v => {
+                    return (
+                      <>
+                        <Flex
+                          h="25px"
+                          px={4}
+                          align="center"
+                          bg="#eee"
+                          onClick={() => {
+                            const pr = clone(projects)
+                            for (let v2 of pr) {
+                              if (v.id === v2.id) v2.open = !v2.open
                             }
-                          }
-                          if (!exists) {
-                            opens.push(v)
-                            setOpenFiles(opens)
-                          }
-                          setType(v.ext)
-                          // todo: handle this better
-                          setTimeout(() => editorRef.current.setValue(txt), 100)
-                          if (v.ext === "md" && preview) {
-                            setPreviewContent(await getPreview(txt))
-                          }
-                        }}
-                      >
-                        <Box pl={20 * 1 + "px"} />
-                        <Icon
-                          size="sm"
-                          mr={2}
-                          color={v.id === file?.id ? "#ddd" : "#5137C5"}
+                            setProjects(pr)
+                          }}
+                          css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
                         >
-                          {v.dir ? (
-                            v.open ? (
-                              <FaRegFolderOpen />
-                            ) : (
-                              <FaRegFolder />
-                            )
-                          ) : (
-                            <FaRegFileCode />
-                          )}
-                        </Icon>
-                        <Box>{v.name}</Box>
-                      </Flex>
-                    </>
-                  ))([readme])}
-                  <Flex h="25px" px={4} align="center" bg="#eee">
-                    <Icon size="sm" color="#5137C5" mr={2}>
-                      <FaRegFloppyDisk />
-                    </Icon>
-                    <Box>Web Project</Box>
-                  </Flex>
-                  {map(v => (
-                    <>
-                      <Flex
-                        h="25px"
-                        px={4}
-                        align="center"
-                        bg={v.id === file?.id ? "#5137C5" : "white"}
-                        color={v.id === file?.id ? "#ddd" : "#222"}
-                        css={{
-                          cursor: "pointer",
-                          _hover: { opacity: 0.75 },
-                        }}
-                        onClick={async () => {
-                          const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
-                          setFile(v)
-                          let opens = clone(openFiles)
-                          let exists = false
-                          for (let v2 of openFiles) {
-                            if (v2.id === v.id) {
-                              exists = true
-                              break
-                            }
-                          }
-                          if (!exists) {
-                            opens.push(v)
-                            setOpenFiles(opens)
-                          }
-                          setType(v.ext)
-                          // todo: handle this better
-                          setTimeout(() => editorRef.current.setValue(txt), 100)
-                          if (v.ext === "md" && preview) {
-                            setPreviewContent(await getPreview(txt))
-                          }
-                        }}
-                      >
-                        <Box pl={20 * 1 + "px"} />
-                        <Icon
-                          size="sm"
-                          mr={2}
-                          color={v.id === file?.id ? "#ddd" : "#5137C5"}
-                        >
-                          {v.dir ? (
-                            v.open ? (
-                              <FaRegFolderOpen />
-                            ) : (
-                              <FaRegFolder />
-                            )
-                          ) : (
-                            <FaRegFileCode />
-                          )}
-                        </Icon>
-                        <Box>{v.name}</Box>
-                      </Flex>
-                    </>
-                  ))(files)}
+                          <Icon size="sm" color="#5137C5" mr={2}>
+                            <FaRegFloppyDisk />
+                          </Icon>
+                          <Box>{v.name}</Box>
+                          <Box flex={1} />
+                          <Icon size="sm" color="#5137C5" mr={2}>
+                            {!v.open ? <FaAngleDown /> : <FaAngleUp />}
+                          </Icon>
+                        </Flex>
+                        {!v.open
+                          ? null
+                          : compose(
+                              map(v => (
+                                <>
+                                  <Flex
+                                    h="25px"
+                                    px={4}
+                                    align="center"
+                                    bg={v.id === file?.id ? "#5137C5" : "white"}
+                                    color={v.id === file?.id ? "#ddd" : "#222"}
+                                    css={{
+                                      cursor: "pointer",
+                                      _hover: { opacity: 0.75 },
+                                    }}
+                                    onClick={async () => {
+                                      const txt =
+                                        (await lf.getItem(`file-${v.id}`)) ?? ""
+                                      setFile(v)
+                                      let opens = clone(openFiles)
+                                      let exists = false
+                                      for (let v2 of openFiles) {
+                                        if (v2.id === v.id) {
+                                          exists = true
+                                          break
+                                        }
+                                      }
+                                      if (!exists) {
+                                        opens.push(v)
+                                        setOpenFiles(opens)
+                                      }
+                                      setType(v.ext)
+                                      // todo: handle this better
+                                      setTimeout(
+                                        () => editorRef.current.setValue(txt),
+                                        100
+                                      )
+                                      if (v.ext === "md" && preview) {
+                                        setPreviewContent(await getPreview(txt))
+                                      }
+                                    }}
+                                  >
+                                    <Box pl={20 * 1 + "px"} />
+                                    <Icon
+                                      size="sm"
+                                      mr={2}
+                                      color={
+                                        v.id === file?.id ? "#ddd" : "#5137C5"
+                                      }
+                                    >
+                                      {v.dir ? (
+                                        v.open ? (
+                                          <FaRegFolderOpen />
+                                        ) : (
+                                          <FaRegFolder />
+                                        )
+                                      ) : (
+                                        <FaRegFileCode />
+                                      )}
+                                    </Icon>
+                                    <Box>{v.name}</Box>
+                                  </Flex>
+                                </>
+                              )),
+                              filter(v2 => v2.pid === v.id)
+                            )(files)}
+                      </>
+                    )
+                  })(projects)}
                 </Box>
               </Flex>
             ) : tab === "Tests" ? (
@@ -3301,6 +3287,7 @@ export default function Home({}) {
                     update: Date.now(),
                     id,
                     ext: fileext,
+                    pid: "1",
                   }
                   const txt =
                     fileext === "js"
@@ -3312,7 +3299,6 @@ export default function Home({}) {
                   await lf.setItem("files", _files)
                   await lf.setItem(`file-${id}`, txt)
                   setFiles(_files)
-                  console.log(_file)
                   setOpenFiles([...openFiles, _file])
                   setFile(_file)
                   setPreview(false)
