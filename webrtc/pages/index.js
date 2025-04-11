@@ -85,62 +85,7 @@ let hub2 = null
 let ao = null
 const tags = tags => fromPairs(map(v => [v.name, v.value])(tags))
 
-const src_data = `-- Initialize a table to store messages
-local messages = {}
-local MAX_MESSAGES = 10
-local json = require("json")
--- Handler for "Hello" (from your original code)
-Handlers.add("Hello", "Hello", function (msg)
-  msg.reply({ Data = true })
-end)
-
--- Handler for "Post" to prepend a new message
-Handlers.add("Post", "Post", function (msg)
-  -- Get the message content from the request
-  local content = msg.content
-  
-  -- Validate that content exists
-  if not content then
-    msg.reply({ Success = false, Error = "No message content provided" })
-    return
-  end
-  
-  -- Prepend the new message to the messages table
-  table.insert(messages, 1, {
-    id = #messages + 1,
-    content = content,
-    timestamp = os.time()
-  })
-  
-  -- We're keeping all messages in the table, no removal
-  
-  -- Reply with success
-  msg.reply({ Success = true, MessageId = messages[1].id })
-end)
-
--- Handler for "Get" to return recent messages
-Handlers.add("Get", "Get", function (msg)
-  -- Get the count parameter, default to MAX_MESSAGES
-  local count = tonumber(msg.count) or MAX_MESSAGES
-  
-  -- Ensure count doesn't exceed MAX_MESSAGES
-  count = math.min(count, MAX_MESSAGES)
-  
-  -- Get the most recent messages up to the count
-  local recent_messages = {}
-  for i = 1, math.min(count, #messages) do
-    table.insert(recent_messages, messages[i])
-  end
-  
-  -- Reply with the messages
-  msg.reply({ 
-    Data = json.encode({
-     Messages = recent_messages,
-      Count = #recent_messages,
-      Total = #messages
-    })
-  })
-end)`
+const src_data = `# WAO LOCALNET`
 
 const src_data_js = `describe("WAO", ()=>{
   it("should run", async ({ ao, p, src })=> {
@@ -196,7 +141,8 @@ export default function Home({}) {
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
   const [ctype, setCtype] = useState("ao.WLN.1")
-  const [files, setFiles] = useState([])
+  const [files, setFiles] = useState([{ ext: "md", name: "README.md" }])
+  const [openFiles, setOpenFiles] = useState([{ ext: "md", name: "README.md" }])
   const [tests, setTests] = useState([])
   const [test, setTest] = useState(null)
   const [file, setFile] = useState(null)
@@ -832,7 +778,7 @@ export default function Home({}) {
                     setModal2(true)
                   }}
                 >
-                  Launch New
+                  Launch Network
                 </Flex>
                 <Box flex={1} />
                 {suid ? (
@@ -1860,6 +1806,18 @@ export default function Home({}) {
                         onClick={async () => {
                           const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
                           setFile(v)
+                          let opens = clone(openFiles)
+                          let exists = false
+                          for (let v2 of openFiles) {
+                            if (v2.id === v.id) {
+                              exists = true
+                              break
+                            }
+                          }
+                          if (!exists) {
+                            opens.push(v)
+                            setOpenFiles(opens)
+                          }
                           monaco.editor.setModelLanguage(
                             editorRef.current.getModel(),
                             v.ext === "js"
@@ -2634,177 +2592,272 @@ export default function Home({}) {
             flex={1}
             css={{ borderLeft: "1px solid #eee" }}
           >
-            <Flex h="50px" align="center" px={4} color="#5137C5">
-              <Box>{file ? file.name : "Editor"}</Box>
-              <Box flex={1} />
-              {!file || file.ext !== "js" ? null : (
-                <Flex
-                  mr={4}
-                  py={1}
-                  px={4}
-                  fontSize="12px"
-                  color="#ddd"
-                  bg="#5137C5"
-                  css={{
-                    borderRadius: "5px",
-                    cursor: "pointer",
-                    border: "1px solid #5137C5",
-                    _hover: { opacity: 0.75 },
-                  }}
-                  onClick={async () => {
-                    try {
-                      const js = editorRef.current.getValue()
-                      const p = proc ? ao.p(proc.id) : null
-                      let descs = []
-                      const src = async path => {
-                        for (let v of files) {
-                          if (v.name === path) {
-                            return await lf.getItem(`file-${v.id}`)
+            <Flex h="30px" align="center" color="#5137C5">
+              <Flex direction="column" justify="flex-end" h="100%">
+                <Box flex={1} px={4}></Box>
+                <Flex>
+                  {map(v => {
+                    const open = v.id === file?.id
+                    return (
+                      <Flex
+                        fontSize="12px"
+                        w="150px"
+                        h="30px"
+                        bg={open ? "#1e1e1e" : "#444"}
+                        px={3}
+                        color="#c6c6c6"
+                        align="center"
+                        onClick={async () => {
+                          const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
+                          setFile(v)
+                          monaco.editor.setModelLanguage(
+                            editorRef.current.getModel(),
+                            v.ext === "js"
+                              ? "javascript"
+                              : v.ext
+                                ? v.ext
+                                : "lua"
+                          )
+                          // todo: handle this better
+                          setTimeout(() => editorRef.current.setValue(txt), 100)
+                        }}
+                        css={{
+                          borderTop: `3px solid ${open ? "#5137C5" : "#444"}`,
+                          cursor: open ? "default" : "pointer",
+                          _hover: { opacity: open ? 1 : 0.75 },
+                        }}
+                      >
+                        <Flex
+                          color={
+                            v.ext === "lua"
+                              ? "#7FDBFF"
+                              : includes(v.ext, ["js", "ts"])
+                                ? "#FFDC00"
+                                : "#3d9977"
                           }
-                        }
-                        return null
-                      }
-                      const assert = _assert
-                      const require = async name => {
-                        let module = { exports: null }
-                        const js = await src(name)
-                        eval(js)
-                        return module.exports
-                      }
-                      let i = 0
-                      const it = (desc, fn) => {
-                        descs[i].tests.push({ desc, fn })
-                      }
-
-                      const describe = (desc2, fn) => {
-                        descs.push({ desc: desc2, fn, tests: [] })
-                      }
-                      eval(js)
-                      const ts = Date.now()
-                      let success = 0
-                      let fail = 0
-                      let res = []
-                      for (let v of descs) {
-                        let _res = []
-                        let _success = 0
-                        let _fail = 0
-                        await v.fn({ require })
-                        for (let v2 of v.tests) {
-                          const start = Date.now()
-                          try {
-                            await v2.fn({
-                              ao,
-                              src,
-                              p,
-                            })
-                            _res.push({
-                              description: v2.desc,
-                              success: true,
-                              error: null,
-                              duration: Date.now() - start,
-                            })
-                            _success++
-                            success++
-                          } catch (e) {
-                            _res.push({
-                              description: v2.desc,
-                              success: false,
-                              error: e.toString(),
-                              duration: Date.now() - start,
-                            })
-                            _fail++
-                            fail++
-                          }
-                          res.push({
-                            description: v.desc,
-                            cases: _res,
-                            success: _success,
-                            fail: _fail,
-                          })
-                        }
-                        i++
-                      }
-                      const result = {
-                        file: file.name,
-                        id: generateId(),
-                        date: ts,
-                        duration: Date.now() - ts,
-                        tests: res,
-                        success,
-                        fail,
-                      }
-                      console.log(result)
-                      if (success > 0 || fail > 0) {
-                        setTab("Tests")
-                        setTest(result)
-                        setTests([result, ...tests])
-                      }
-                    } catch (e) {
-                      console.log(e)
-                    }
-                  }}
-                >
-                  Test
-                </Flex>
-              )}
-              {file?.local ? (
-                <Flex
-                  py={1}
-                  px={4}
-                  fontSize="12px"
-                  color="#5137C5"
-                  css={{
-                    borderRadius: "5px",
-                    cursor: "pointer",
-                    border: "1px solid #5137C5",
-                    _hover: { opacity: 0.75 },
-                  }}
-                  onClick={async () => {
-                    const content = editorRef.current.getValue()
-                    hub1.socket.send(
-                      JSON.stringify({
-                        type: "save",
-                        content,
-                        path: file.id,
-                      })
+                          mr={3}
+                          fontWeight="bold"
+                        >
+                          {v.ext === "lua"
+                            ? "Lua"
+                            : v.ext == "js"
+                              ? "JS"
+                              : v.ext === "ts"
+                                ? "TS"
+                                : "{ }"}
+                        </Flex>
+                        <Box w="80px" css={{ overflow: "hidden" }}>
+                          {v.name}
+                        </Box>
+                        <Box flex={1} />
+                        <Box>
+                          <Icon
+                            boxSize="10px"
+                            css={{
+                              cursor: "pointer",
+                              _hover: { opacity: 0.75, color: "#FFDC00" },
+                            }}
+                            onClick={async e => {
+                              e.stopPropagation()
+                              let opens = filter(v2 => v2.id !== v.id)(
+                                openFiles
+                              )
+                              setOpenFiles(opens)
+                              if (open) {
+                                for (let v of opens) {
+                                  setFile(v)
+                                  editorRef.current.setValue(
+                                    (await lf.getItem(`file-${v.id}`)) ?? ""
+                                  )
+                                  break
+                                }
+                              }
+                            }}
+                          >
+                            <FaX />
+                          </Icon>
+                        </Box>
+                      </Flex>
                     )
-                  }}
-                >
-                  Save
+                  })(openFiles)}
                 </Flex>
-              ) : (
-                <Flex
-                  py={1}
-                  px={4}
-                  fontSize="12px"
-                  color="#5137C5"
-                  css={{
-                    borderRadius: "5px",
-                    cursor: "pointer",
-                    border: "1px solid #5137C5",
-                    _hover: { opacity: 0.75 },
-                  }}
-                  onClick={async () => {
-                    if (confirm("Would you like to delete the file?")) {
-                      editorRef.current.setValue("")
-                      await lf.removeItem(`file-${file.id}`)
-                      const _files = filter(v => file.id !== v.id)(files)
-                      await lf.setItem(`files`, _files)
-                      setFiles(_files)
-                      for (let v of _files) {
-                        setFile(v)
-                        editorRef.current.setValue(
-                          (await lf.getItem(`file-${v.id}`)) ?? ""
-                        )
-                        break
+              </Flex>
+              <Box flex={1} />
+              <Flex px={4}>
+                {!file || file.ext !== "js" ? null : (
+                  <Flex
+                    mr={4}
+                    py={1}
+                    px={4}
+                    fontSize="12px"
+                    color="#5137C5"
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      try {
+                        const js = editorRef.current.getValue()
+                        const p = proc ? ao.p(proc.id) : null
+                        let descs = []
+                        const src = async path => {
+                          for (let v of files) {
+                            if (v.name === path) {
+                              return await lf.getItem(`file-${v.id}`)
+                            }
+                          }
+                          return null
+                        }
+                        const assert = _assert
+                        const require = async name => {
+                          let module = { exports: null }
+                          const js = await src(name)
+                          eval(js)
+                          return module.exports
+                        }
+                        let i = 0
+                        const it = (desc, fn) => {
+                          descs[i].tests.push({ desc, fn })
+                        }
+
+                        const describe = (desc2, fn) => {
+                          descs.push({ desc: desc2, fn, tests: [] })
+                        }
+                        eval(js)
+                        const ts = Date.now()
+                        let success = 0
+                        let fail = 0
+                        let res = []
+                        for (let v of descs) {
+                          let _res = []
+                          let _success = 0
+                          let _fail = 0
+                          await v.fn({ require })
+                          for (let v2 of v.tests) {
+                            const start = Date.now()
+                            try {
+                              await v2.fn({
+                                ao,
+                                src,
+                                p,
+                              })
+                              _res.push({
+                                description: v2.desc,
+                                success: true,
+                                error: null,
+                                duration: Date.now() - start,
+                              })
+                              _success++
+                              success++
+                            } catch (e) {
+                              _res.push({
+                                description: v2.desc,
+                                success: false,
+                                error: e.toString(),
+                                duration: Date.now() - start,
+                              })
+                              _fail++
+                              fail++
+                            }
+                            res.push({
+                              description: v.desc,
+                              cases: _res,
+                              success: _success,
+                              fail: _fail,
+                            })
+                          }
+                          i++
+                        }
+                        const result = {
+                          file: file.name,
+                          id: generateId(),
+                          date: ts,
+                          duration: Date.now() - ts,
+                          tests: res,
+                          success,
+                          fail,
+                        }
+                        console.log(result)
+                        if (success > 0 || fail > 0) {
+                          setTab("Tests")
+                          setTest(result)
+                          setTests([result, ...tests])
+                        }
+                      } catch (e) {
+                        console.log(e)
                       }
-                    }
-                  }}
-                >
-                  Delete
-                </Flex>
-              )}
+                    }}
+                  >
+                    Test
+                  </Flex>
+                )}
+                {file?.local ? (
+                  <Flex
+                    py={1}
+                    px={4}
+                    fontSize="12px"
+                    color="#5137C5"
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      const content = editorRef.current.getValue()
+                      hub1.socket.send(
+                        JSON.stringify({
+                          type: "save",
+                          content,
+                          path: file.id,
+                        })
+                      )
+                    }}
+                  >
+                    Save
+                  </Flex>
+                ) : (
+                  <Flex
+                    py={1}
+                    px={4}
+                    fontSize="12px"
+                    color="#5137C5"
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      if (confirm("Would you like to delete the file?")) {
+                        editorRef.current.setValue("")
+                        await lf.removeItem(`file-${file.id}`)
+                        const _files = filter(v => file.id !== v.id)(files)
+                        await lf.setItem(`files`, _files)
+                        setFiles(_files)
+                        for (let v of _files) {
+                          setFile(v)
+                          editorRef.current.setValue(
+                            (await lf.getItem(`file-${v.id}`)) ?? ""
+                          )
+                          break
+                        }
+                      }
+                    }}
+                  >
+                    Delete
+                  </Flex>
+                )}
+              </Flex>
             </Flex>
+            <Flex
+              bg="#1e1e1e"
+              px={4}
+              fontSize="11px"
+              w="100%"
+              h="20px"
+              color="#c6c6c6"
+              align="center"
+            ></Flex>
             <Flex w="100%">
               <Editor
                 width={
