@@ -98,8 +98,6 @@ let hub2 = null
 let ao = null
 const tags = tags => fromPairs(map(v => [v.name, v.value])(tags))
 
-const src_data = `# WAO LOCALNET`
-
 const src_data_js = `describe("WAO", ()=>{
   it("should run", async ({ ao, p, src })=> {
     // write your test here
@@ -158,19 +156,27 @@ const getPreview = async txt => {
       $(el).attr("data-href", href)
     }
   })
-  console.log(html)
-  console.log($("h1").length)
-  console.log($.html())
   return $.html()
 }
 const readme = {
   ext: "md",
-  name: "README.md",
+  name: "intro.md",
+  fetch: "/docs/intro.md",
   nodel: true,
   id: "readme",
   path: "/",
   pid: "0",
 }
+const get_started = {
+  ext: "md",
+  name: "get_started.md",
+  fetch: "/docs/get_started.md",
+  nodel: true,
+  id: "get_started",
+  path: "/",
+  pid: "0",
+}
+
 export default function Home({}) {
   const [projects, setProjects] = useState([
     { name: "Quick Start Guide", id: "0", open: true },
@@ -209,8 +215,8 @@ export default function Home({}) {
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
   const [ctype, setCtype] = useState("ao.WLN.1")
-  const [files, setFiles] = useState([readme])
-  const [openFiles, setOpenFiles] = useState([readme])
+  const [files, setFiles] = useState([readme, get_started])
+  const [openFiles, setOpenFiles] = useState([readme, get_started])
   const [tests, setTests] = useState([])
   const [test, setTest] = useState(null)
   const [file, setFile] = useState(readme)
@@ -300,7 +306,12 @@ export default function Home({}) {
         })
       )
     } else {
-      const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
+      let txt = ""
+      if (v.fetch) {
+        txt = await fetch(v.fetch).then(r => r.text())
+      } else {
+        txt = (await lf.getItem(`file-${v.id}`)) ?? ""
+      }
       setTimeout(() => editorRef.current.setValue(txt), 100)
       if (v.ext === "md" && preview) setPreviewContent(await getPreview(txt))
     }
@@ -421,7 +432,7 @@ export default function Home({}) {
       const _prs = await lf.getItem("projects")
       if (_prs) setProjects(_prs)
       const _files = (await lf.getItem("files")) ?? []
-      setFiles([...[readme], ..._files])
+      setFiles([...[readme, get_started], ..._files])
       const networks = await lf.getItem("networks")
       if (networks) setNetworks(networks)
     })()
@@ -504,9 +515,13 @@ export default function Home({}) {
   const modmap = indexBy(prop("txid"))(modules ?? [])
   function handleEditorDidMount(editor, monaco) {
     editorRef.current = editor
-    editorRef.current.setValue(src_data)
     setMonaco(monaco)
-    getPreview(src_data).then(setPreviewContent)
+    fetch("/docs/intro.md")
+      .then(r => r.text())
+      .then(txt => {
+        editorRef.current.setValue(txt)
+        getPreview(txt).then(setPreviewContent)
+      })
   }
 
   const fileInputRef = useRef(null)
@@ -1180,7 +1195,9 @@ export default function Home({}) {
                     onClick={async () => {
                       const processes = keys(ao.mem.env)
                       if (processes.length === 0) {
-                        const { p, pid, err } = await ao.deploy({ src_data })
+                        const { p, pid, err } = await ao.deploy({
+                          src_data: src_data_lua,
+                        })
                         console.log(await p.d("Hello"))
                       }
                       hub1 = new Hub("ws://localhost:8080")
@@ -2146,11 +2163,17 @@ export default function Home({}) {
                                               })
                                             )
                                           } else {
-                                            const txt =
-                                              (await lf.getItem(
-                                                `file-${v.id}`
-                                              )) ?? ""
-
+                                            let txt = ""
+                                            if (v.fetch) {
+                                              txt = await fetch(v.fetch).then(
+                                                r => r.text()
+                                              )
+                                            } else {
+                                              txt =
+                                                (await lf.getItem(
+                                                  `file-${v.id}`
+                                                )) ?? ""
+                                            }
                                             setTimeout(
                                               () =>
                                                 editorRef.current.setValue(txt),
@@ -2938,13 +2961,13 @@ export default function Home({}) {
             <Flex h="30px" align="center" color="#5137C5">
               <Flex direction="column" justify="flex-end" h="100%">
                 <Box flex={1} px={4}></Box>
-                <Flex>
+                <Flex css={{ overflow: "hidden" }}>
                   {map(v => {
                     const open = v.id === file?.id
                     return (
                       <Flex
-                        fontSize="12px"
-                        w="150px"
+                        fontSize="11px"
+                        w="140px"
                         h="30px"
                         bg={open ? "#1e1e1e" : "#444"}
                         px={3}
@@ -2988,8 +3011,9 @@ export default function Home({}) {
                                   : "{ }"}
                         </Flex>
                         <Box
+                          fontSize="11px"
                           title={v.name}
-                          w="80px"
+                          w="70px"
                           css={{
                             overflow: "hidden",
                             whiteSpace: "nowrap",
@@ -3017,8 +3041,15 @@ export default function Home({}) {
                                 for (let v of opens) {
                                   exists = true
                                   setFile(v)
-                                  const txt =
-                                    (await lf.getItem(`file-${v.id}`)) ?? ""
+                                  let txt = ""
+                                  if (v.fetch) {
+                                    txt = await fetch(v.fetch).then(r =>
+                                      r.text()
+                                    )
+                                  } else {
+                                    txt =
+                                      (await lf.getItem(`file-${v.id}`)) ?? ""
+                                  }
                                   setType(v.ext)
                                   editorRef.current.setValue(txt)
                                   if (v.ext === "md" && preview) {
@@ -3031,9 +3062,13 @@ export default function Home({}) {
                                   setFile(readme)
                                   setOpenFiles([readme])
                                   setType(readme.ext)
-                                  editorRef.current.setValue(src_data)
-                                  setPreview(true)
-                                  getPreview(src_data).then(setPreviewContent)
+                                  fetch("/docs/intro.md")
+                                    .then(r => r.text())
+                                    .then(txt => {
+                                      editorRef.current.setValue(txt)
+                                      setPreview(true)
+                                      getPreview(txt).then(setPreviewContent)
+                                    })
                                 }
                               }
                             }}
@@ -3237,9 +3272,13 @@ export default function Home({}) {
                           setFile(readme)
                           setOpenFiles([readme])
                           setType(readme.ext)
-                          editorRef.current.setValue(src_data)
-                          setPreview(true)
-                          getPreview(src_data).then(setPreviewContent)
+                          fetch("/docs/intro.md")
+                            .then(r => r.text())
+                            .then(txt => {
+                              editorRef.current.setValue(txt)
+                              setPreview(true)
+                              getPreview(txt).then(setPreviewContent)
+                            })
                         }
                       }
                     }}
