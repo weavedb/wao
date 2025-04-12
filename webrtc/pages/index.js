@@ -72,6 +72,7 @@ import {
   fromPairs,
   filter,
   propEq,
+  mergeLeft,
 } from "ramda"
 import { AO, acc, Adaptor } from "wao/web"
 import { HB } from "wao"
@@ -152,6 +153,7 @@ const readme = {
   name: "README.md",
   nodel: true,
   id: "readme",
+  path: "/",
   pid: "0",
 }
 export default function Home({}) {
@@ -326,7 +328,7 @@ export default function Home({}) {
       const _prs = await lf.getItem("projects")
       if (_prs) setProjects(_prs)
       const _files = (await lf.getItem("files")) ?? []
-      setFiles([[readme], ..._files])
+      setFiles([...[readme], ..._files])
       const networks = await lf.getItem("networks")
       if (networks) setNetworks(networks)
     })()
@@ -550,6 +552,53 @@ export default function Home({}) {
       )
     }, dirs)
   }
+  const pmap = indexBy(prop("id"), projects)
+  let dirmap = {}
+  for (let v of files) {
+    if (!v.dir) continue
+    dirmap[`${v.pid}${v.path}${v.id}/`] = v.open ?? false
+  }
+  const isShow = v => {
+    if (!pmap[v.pid]) return false
+    const path = `${v.pid}${v.path}`
+    return pmap[v.pid].open && (v.path === "/" || dirmap[path])
+  }
+  const getFiles = () => {
+    let dirs = []
+    let dmap = {}
+    const get = (pid, _path) => {
+      for (let v of files) {
+        if (v.pid !== pid) continue
+        let p = filter(v => v !== "")(v.path.split("/"))
+        dmap[v.pid] ??= {}
+        if (_path !== v.path) continue
+        dmap[v.pid][v.id] = mergeLeft(
+          {
+            p,
+            show: isShow(v),
+          },
+          v
+        )
+        get(pid, `${v.path}${v.id}/`)
+      }
+    }
+    let pdirs = {}
+    for (let v of projects) {
+      get(v.id, "/")
+      dirs.push({
+        project: true,
+        name: v.name,
+        id: v.id,
+        open: false,
+      })
+      pdirs[v.id] ??= []
+      for (let k in dmap[v.id] ?? {}) {
+        pdirs[v.id].push(dmap[v.id][k])
+      }
+    }
+    return pdirs
+  }
+  const pfiles = getFiles()
   return (
     <>
       <style jsx global>{`
@@ -2026,69 +2075,91 @@ export default function Home({}) {
                         {!v.open
                           ? null
                           : compose(
-                              map(v => (
-                                <>
-                                  <Flex
-                                    h="25px"
-                                    px={4}
-                                    align="center"
-                                    bg={v.id === file?.id ? "#5137C5" : "white"}
-                                    color={v.id === file?.id ? "#ddd" : "#222"}
-                                    css={{
-                                      cursor: "pointer",
-                                      _hover: { opacity: 0.75 },
-                                    }}
-                                    onClick={async () => {
-                                      const txt =
-                                        (await lf.getItem(`file-${v.id}`)) ?? ""
-                                      setFile(v)
-                                      let opens = clone(openFiles)
-                                      let exists = false
-                                      for (let v2 of openFiles) {
-                                        if (v2.id === v.id) {
-                                          exists = true
-                                          break
-                                        }
+                              map(v =>
+                                !v.show ? null : (
+                                  <>
+                                    <Flex
+                                      h="25px"
+                                      px={4}
+                                      align="center"
+                                      bg={
+                                        v.id === file?.id ? "#5137C5" : "white"
                                       }
-                                      if (!exists) {
-                                        opens.push(v)
-                                        setOpenFiles(opens)
-                                      }
-                                      setType(v.ext)
-                                      // todo: handle this better
-                                      setTimeout(
-                                        () => editorRef.current.setValue(txt),
-                                        100
-                                      )
-                                      if (v.ext === "md" && preview) {
-                                        setPreviewContent(await getPreview(txt))
-                                      }
-                                    }}
-                                  >
-                                    <Box pl={20 * 1 + "px"} />
-                                    <Icon
-                                      size="sm"
-                                      mr={2}
                                       color={
-                                        v.id === file?.id ? "#ddd" : "#5137C5"
+                                        v.id === file?.id ? "#ddd" : "#222"
                                       }
+                                      css={{
+                                        cursor: "pointer",
+                                        _hover: { opacity: 0.75 },
+                                      }}
+                                      onClick={async () => {
+                                        if (v.dir) {
+                                          let opens = clone(files)
+                                          for (let v2 of opens) {
+                                            if (v2.id === v.id) {
+                                              v2.open = !v2.open
+                                              break
+                                            }
+                                          }
+                                          setFiles(opens)
+                                        } else {
+                                          const txt =
+                                            (await lf.getItem(
+                                              `file-${v.id}`
+                                            )) ?? ""
+                                          setFile(v)
+                                          let opens = clone(openFiles)
+                                          let exists = false
+                                          for (let v2 of openFiles) {
+                                            if (v2.id === v.id) {
+                                              exists = true
+                                              break
+                                            }
+                                          }
+                                          if (!exists) {
+                                            opens.push(v)
+                                            setOpenFiles(opens)
+                                          }
+                                          setType(v.ext)
+                                          // todo: handle this better
+                                          setTimeout(
+                                            () =>
+                                              editorRef.current.setValue(txt),
+                                            100
+                                          )
+                                          if (v.ext === "md" && preview) {
+                                            setPreviewContent(
+                                              await getPreview(txt)
+                                            )
+                                          }
+                                        }
+                                      }}
                                     >
-                                      {v.dir ? (
-                                        v.open ? (
-                                          <FaRegFolderOpen />
+                                      <Box pl={20 * (v.p.length + 1) + "px"} />
+                                      <Icon
+                                        size="sm"
+                                        mr={2}
+                                        color={
+                                          v.id === file?.id ? "#ddd" : "#5137C5"
+                                        }
+                                      >
+                                        {v.dir ? (
+                                          v.open ? (
+                                            <FaRegFolderOpen />
+                                          ) : (
+                                            <FaRegFolder />
+                                          )
                                         ) : (
-                                          <FaRegFolder />
-                                        )
-                                      ) : (
-                                        <FaRegFileCode />
-                                      )}
-                                    </Icon>
-                                    <Box>{v.name}</Box>
-                                  </Flex>
-                                </>
-                              )),
+                                          <FaRegFileCode />
+                                        )}
+                                      </Icon>
+                                      <Box>{v.name}</Box>
+                                    </Flex>
+                                  </>
+                                )
+                              ),
                               filter(v2 => v2.pid === v.id)
-                            )(files)}
+                            )(pfiles[v.id] ?? [])}
                       </>
                     )
                   })(projects)}
@@ -3423,6 +3494,12 @@ export default function Home({}) {
                   <NativeSelect.Indicator />
                 </NativeSelect.Root>
               </Flex>
+              <Box fontSize="12px" color="#666" mb={2} mt={4}>
+                Location
+              </Box>
+              <Box fontSize="12px" mb={6}>
+                {getDirs()}
+              </Box>
               <Flex
                 align="center"
                 justify="center"
@@ -3439,12 +3516,24 @@ export default function Home({}) {
                 onClick={async () => {
                   if (/^\s*$/.test(filename)) return alert("Enter a filename.")
                   const id = generateId()
+                  const name = `${filename}.${fileext}`
+                  for (let f of files) {
+                    if (
+                      f.pid === selDir.pid &&
+                      f.name === name &&
+                      f.path === selDir.path
+                    ) {
+                      alert("File already exists!")
+                      return
+                    }
+                  }
                   const _file = {
-                    name: `${filename}.${fileext}`,
+                    name,
                     update: Date.now(),
                     id,
                     ext: fileext,
-                    pid: "1",
+                    pid: selDir.pid,
+                    path: selDir.path,
                   }
                   const txt =
                     fileext === "js"
@@ -3452,7 +3541,7 @@ export default function Home({}) {
                       : fileext === "lua"
                         ? src_data_lua
                         : ""
-                  const _files = prepend(_file, files)
+                  const _files = append(_file, files)
                   await lf.setItem("files", _files)
                   await lf.setItem(`file-${id}`, txt)
                   setFiles(_files)
