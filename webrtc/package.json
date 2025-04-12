@@ -28,6 +28,7 @@
     "hast-util-to-html": "^9.0.5",
     "localforage": "^1.10.0",
     "markdown-it": "^14.1.0",
+    "md5": "^2.3.0",
     "next": "14.2.13",
     "next-themes": "^0.4.4",
     "react": "^18",
