@@ -177,9 +177,32 @@ const get_started = {
   pid: "0",
 }
 
+const bps = map(v => {
+  return {
+    ext: "lua",
+    name: `${v}.lua`,
+    fetch: `/blueprints/${v}.lua`,
+    nodel: true,
+    id: v,
+    path: "/",
+    pid: "3",
+  }
+})([
+  "apm",
+  "arena",
+  "arns",
+  "chat",
+  "chatroom",
+  "patch-legacy-reply",
+  "staking",
+  "token",
+  "voting",
+])
+
 export default function Home({}) {
   const [projects, setProjects] = useState([
     { name: "Quick Start Guide", id: "0", open: true },
+    { name: "Blueprints", id: "3", open: true },
     { name: "Default Project", id: "1", open: true },
   ])
   const [localFS, setLocalFS] = useState(null)
@@ -215,8 +238,8 @@ export default function Home({}) {
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
   const [ctype, setCtype] = useState("ao.WLN.1")
-  const [files, setFiles] = useState([readme, get_started])
-  const [openFiles, setOpenFiles] = useState([readme, get_started])
+  const [files, setFiles] = useState([readme, get_started, ...bps])
+  const [openFiles, setOpenFiles] = useState([readme])
   const [tests, setTests] = useState([])
   const [test, setTest] = useState(null)
   const [file, setFile] = useState(readme)
@@ -432,7 +455,7 @@ export default function Home({}) {
       const _prs = await lf.getItem("projects")
       if (_prs) setProjects(_prs)
       const _files = (await lf.getItem("files")) ?? []
-      setFiles([...[readme, get_started], ..._files])
+      setFiles([...[readme, get_started, ...bps], ..._files])
       const networks = await lf.getItem("networks")
       if (networks) setNetworks(networks)
     })()
@@ -605,7 +628,7 @@ export default function Home({}) {
     }
     let pdirs = {}
     for (let v of projects) {
-      if (v.id === "0") continue
+      if (includes(v.id, ["0", "3"])) continue
       get(v.id, "/")
       dirs.push({
         project: true,
