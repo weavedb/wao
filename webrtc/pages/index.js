@@ -1,6 +1,5 @@
 import markdownIt from "markdown-it"
 import { toHtml } from "hast-util-to-html"
-//import GithubCSS from "../lib/GithubCSS.js"
 import { common, createStarryNight } from "@wooorm/starry-night"
 import { Link, ssr } from "arnext"
 import { Spinner } from "@chakra-ui/react"
@@ -44,6 +43,9 @@ import {
   FaHardDrive,
   FaAngleRight,
   FaX,
+  FaRegSquarePlus,
+  FaFileCirclePlus,
+  FaFolderPlus,
 } from "react-icons/fa6"
 import lf from "localforage"
 function generateId() {
@@ -162,6 +164,8 @@ export default function Home({}) {
   const [ttab, setTtab] = useState("lua")
   const [modal, setModal] = useState(false)
   const [modal2, setModal2] = useState(false)
+  const [modal3, setModal3] = useState(false)
+  const [modal4, setModal4] = useState(false)
   const [subs, setSubs] = useState({})
   const [clients, setClients] = useState([])
   const [processes, setProcesses] = useState([])
@@ -195,6 +199,9 @@ export default function Home({}) {
   const [preview, setPreview] = useState(true)
   const [previewContent, setPreviewContent] = useState("")
   const [filename, setFilename] = useState("")
+  const [selDir, setSelDir] = useState({ pid: "1", path: "/" })
+  const [projectname, setProjectname] = useState("")
+  const [dirname, setDirname] = useState("")
   const [fileext, setFileext] = useState("js")
   const [monaco, setMonaco] = useState(null)
   const [bigTerminal, setBigTerminal] = useState(false)
@@ -316,6 +323,8 @@ export default function Home({}) {
 
   useEffect(() => {
     ;(async () => {
+      const _prs = await lf.getItem("projects")
+      if (_prs) setProjects(_prs)
       const _files = (await lf.getItem("files")) ?? []
       setFiles([[readme], ..._files])
       const networks = await lf.getItem("networks")
@@ -449,6 +458,98 @@ export default function Home({}) {
     if (v.tag === ctype) selNetwork = v
   }
   const isPreview = preview && file?.ext === "md"
+  const getDirs = () => {
+    let dirs = []
+    let dmap = {}
+    const get = (pid, _path) => {
+      for (let v of files) {
+        if (v.dir !== true || v.pid !== pid) continue
+        let p = filter(v => v !== "")(v.path.split("/"))
+        dmap[v.pid] ??= {}
+        if (_path !== v.path) continue
+        dmap[v.pid][v.id] = {
+          p,
+          path: v.path,
+          name: v.name,
+          id: v.id,
+          open: new RegExp(`^${v.path}${v.id}`).test(selDir.path),
+          show:
+            v.pid === selDir.pid && new RegExp(`^${v.path}`).test(selDir.path),
+        }
+        get(pid, `${v.path}${v.id}/`)
+      }
+    }
+    let pdirs = {}
+    for (let v of projects) {
+      if (v.id === "0") continue
+      get(v.id, "/")
+      dirs.push({
+        project: true,
+        name: v.name,
+        id: v.id,
+        open: false,
+      })
+      pdirs[v.id] ??= []
+      for (let k in dmap[v.id] ?? {}) {
+        pdirs[v.id].push(dmap[v.id][k])
+      }
+    }
+    return map(v => {
+      const sel = v.id === selDir?.pid
+      return (
+        <>
+          <Flex
+            h="25px"
+            px={4}
+            align="center"
+            bg={sel ? "#5137c5" : "#eee"}
+            color={sel ? "#ddd" : "#222"}
+            onClick={() => setSelDir({ pid: v.id, path: "/" })}
+            css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
+          >
+            <Icon size="sm" color={sel ? "#ddd" : "#5137c5"} mr={2}>
+              {sel ? <FaAngleDown /> : <FaAngleRight />}
+            </Icon>
+            <Box>{v.name}</Box>
+            <Box flex={1} />
+          </Flex>
+          {map(v2 => {
+            return !v2.show ? null : (
+              <Flex
+                bg={v2.open ? "#5137C5" : "white"}
+                color={v2.open ? "#ddd" : "#222"}
+                h="25px"
+                px={4}
+                align="center"
+                css={{
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={() => {
+                  if (v2.open) {
+                    setSelDir({ pid: v.id, path: v2.path })
+                  } else {
+                    setSelDir({ pid: v.id, path: v2.path + `${v2.id}/` })
+                  }
+                }}
+              >
+                <Box pl={20 * (v2.p.length + 1) + "px"} />
+                <Icon
+                  size="sm"
+                  color={!v2.open ? "#5137C5" : "#ddd"}
+                  mr={2}
+                  key={v2.path + "-icon"}
+                >
+                  {v2.open ? <FaRegFolderOpen /> : <FaRegFolder />}
+                </Icon>
+                <Box>{v2.name}</Box>
+              </Flex>
+            )
+          })(pdirs[v.id] ?? [])}
+        </>
+      )
+    }, dirs)
+  }
   return (
     <>
       <style jsx global>{`
@@ -639,28 +740,87 @@ export default function Home({}) {
           >
             {tab === "Projects" ? (
               <>
-                <Flex
-                  py={1}
-                  px={4}
-                  fontSize="12px"
-                  color="#ddd"
-                  bg="#5137C5"
-                  css={{
-                    borderRadius: "5px",
-                    cursor: "pointer",
-                    border: "1px solid #5137C5",
-                    _hover: { opacity: 0.75 },
-                  }}
-                  onClick={async () => {
-                    setModal(true)
-                  }}
+                <Tooltip
+                  content={"Create Project"}
+                  positioning={{ placement: "bottom-end" }}
+                  openDelay={0}
+                  closeDelay={0}
                 >
-                  New
-                </Flex>
+                  <Flex
+                    py={1}
+                    pr={2}
+                    fontSize="12px"
+                    color="#5137C5"
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      setModal3(true)
+                    }}
+                  >
+                    <Icon size="md">
+                      <FaRegSquarePlus />
+                    </Icon>
+                  </Flex>
+                </Tooltip>
+                <Tooltip
+                  content={"Create Folder"}
+                  positioning={{ placement: "bottom-end" }}
+                  openDelay={0}
+                  closeDelay={0}
+                >
+                  <Flex
+                    py={1}
+                    px={2}
+                    fontSize="12px"
+                    color="#5137C5"
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      setModal4(true)
+                    }}
+                  >
+                    <Icon size="md">
+                      <FaFolderPlus />
+                    </Icon>
+                  </Flex>
+                </Tooltip>
+                <Tooltip
+                  content={"Create File"}
+                  positioning={{ placement: "bottom-end" }}
+                  openDelay={0}
+                  closeDelay={0}
+                >
+                  <Flex
+                    py={1}
+                    px={2}
+                    fontSize="12px"
+                    color="#5137C5"
+                    css={{
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      _hover: { opacity: 0.75 },
+                    }}
+                    onClick={async () => {
+                      setModal(true)
+                    }}
+                  >
+                    <Icon size="md">
+                      <FaFileCirclePlus />
+                    </Icon>
+                  </Flex>
+                </Tooltip>
+                <Box flex={1} />
+
                 <Flex
-                  ml={4}
+                  ml={2}
                   py={1}
-                  px={4}
+                  px={2}
                   fontSize="12px"
                   color="#ddd"
                   bg="#5137C5"
@@ -681,10 +841,9 @@ export default function Home({}) {
                   />
                   Import
                 </Flex>
-                <Box flex={1} />
                 {wsid ? (
                   <Flex
-                    ml={4}
+                    ml={2}
                     fontSize="12px"
                     bg="white"
                     color="#5137C5"
@@ -779,6 +938,7 @@ export default function Home({}) {
                           }
                         }
                         //for (let v of lfs) setOpen(v.path, v.open)
+                        console.log(lfs)
                         setLocalFS(lfs)
                       }
                       hub1 = new Hub("ws://localhost:9090")
@@ -1847,23 +2007,21 @@ export default function Home({}) {
                           px={4}
                           align="center"
                           bg="#eee"
-                          onClick={() => {
+                          onClick={async () => {
                             const pr = clone(projects)
                             for (let v2 of pr) {
                               if (v.id === v2.id) v2.open = !v2.open
                             }
                             setProjects(pr)
+                            await lf.setItem("projects", pr)
                           }}
                           css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
                         >
                           <Icon size="sm" color="#5137C5" mr={2}>
-                            <FaRegFloppyDisk />
+                            {!v.open ? <FaAngleRight /> : <FaAngleDown />}
                           </Icon>
                           <Box>{v.name}</Box>
                           <Box flex={1} />
-                          <Icon size="sm" color="#5137C5" mr={2}>
-                            {!v.open ? <FaAngleDown /> : <FaAngleUp />}
-                          </Icon>
                         </Flex>
                         {!v.open
                           ? null
@@ -2875,7 +3033,6 @@ export default function Home({}) {
                           success,
                           fail,
                         }
-                        console.log(result)
                         if (success > 0 || fail > 0) {
                           setTab("Tests")
                           setTest(result)
@@ -3422,6 +3579,191 @@ export default function Home({}) {
                 }}
               >
                 Launch
+              </Flex>
+            </Box>
+          </Box>
+        </Flex>
+      )}
+      {!modal3 ? null : (
+        <Flex
+          align="center"
+          justify="center"
+          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
+          bg="rgba(1,1,1,0.5)"
+          w="100vw"
+          h="100vh"
+        >
+          <Box
+            mb="50px"
+            w="600px"
+            bg="white"
+            css={{ borderRadius: "10px", position: "relative" }}
+          >
+            <Flex
+              justify="flex-end"
+              w="100%"
+              p={2}
+              css={{ position: "absolute" }}
+            >
+              <Icon
+                size="md"
+                color="#999"
+                m={2}
+                css={{
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={() => setModal3(false)}
+              >
+                <FaX />
+              </Icon>
+            </Flex>
+            <Box p={6}>
+              <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
+                Create New Project
+              </Box>
+              <Box fontSize="12px" color="#666" mb={2}>
+                Project Name
+              </Box>
+              <Flex align="flex-end">
+                <Input
+                  flex={1}
+                  value={projectname}
+                  onChange={e => setProjectname(e.target.value)}
+                />
+              </Flex>
+              <Flex
+                align="center"
+                justify="center"
+                mt={4}
+                p={1}
+                mb={1}
+                color="#5137C5"
+                css={{
+                  borderRadius: "3px",
+                  border: "1px solid #5137C5",
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  if (/^\s*$/.test(projectname))
+                    return alert("Enter a project name.")
+                  const id = generateId()
+                  const _pr = {
+                    name: projectname,
+                    created: Date.now(),
+                    id,
+                    open: true,
+                  }
+                  const _prs = append(_pr, projects)
+                  await lf.setItem("projects", _prs)
+                  setProjects(_prs)
+                  setProjectname("")
+                  setModal3(false)
+                }}
+              >
+                Create
+              </Flex>
+            </Box>
+          </Box>
+        </Flex>
+      )}
+      {!modal4 ? null : (
+        <Flex
+          align="center"
+          justify="center"
+          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
+          bg="rgba(1,1,1,0.5)"
+          w="100vw"
+          h="100vh"
+        >
+          <Box
+            mb="50px"
+            w="600px"
+            bg="white"
+            css={{ borderRadius: "10px", position: "relative" }}
+          >
+            <Flex
+              justify="flex-end"
+              w="100%"
+              p={2}
+              css={{ position: "absolute" }}
+            >
+              <Icon
+                size="md"
+                color="#999"
+                m={2}
+                css={{
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={() => setModal4(false)}
+              >
+                <FaX />
+              </Icon>
+            </Flex>
+            <Box p={6}>
+              <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
+                Create New Folder
+              </Box>
+              <Box fontSize="12px" color="#666" mb={2}>
+                Folder Name
+              </Box>
+              <Flex align="flex-end">
+                <Input
+                  flex={1}
+                  value={dirname}
+                  onChange={e => setDirname(e.target.value)}
+                />
+              </Flex>
+              <Box fontSize="12px" color="#666" mb={2} mt={4}>
+                Location
+              </Box>
+              <Box fontSize="12px" mb={6}>
+                {getDirs()}
+              </Box>
+              <Flex
+                align="center"
+                justify="center"
+                p={1}
+                mb={1}
+                color="#5137C5"
+                css={{
+                  borderRadius: "3px",
+                  border: "1px solid #5137C5",
+                  cursor: "pointer",
+                  _hover: { opacity: 0.75 },
+                }}
+                onClick={async () => {
+                  if (/^\s*$/.test(dirname))
+                    return alert("Enter a folder name.")
+                  const id = generateId()
+                  for (let f of files) {
+                    if (
+                      f.pid === selDir.pid &&
+                      f.name === dirname &&
+                      f.path === selDir.path
+                    ) {
+                      alert("Directory already exists!")
+                      return
+                    }
+                  }
+                  const _file = {
+                    name: `${dirname}`,
+                    update: Date.now(),
+                    id,
+                    pid: selDir.pid,
+                    dir: true,
+                    path: selDir.path,
+                  }
+                  const _files = append(_file, files)
+                  await lf.setItem("files", _files)
+                  setFiles(_files)
+                  setModal4(false)
+                  setDirname("")
+                }}
+              >
+                Create
               </Flex>
             </Box>
           </Box>
