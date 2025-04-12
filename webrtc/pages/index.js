@@ -1,4 +1,5 @@
 import markdownIt from "markdown-it"
+import * as cheerio from "cheerio"
 import { toHtml } from "hast-util-to-html"
 import { common, createStarryNight } from "@wooorm/starry-night"
 import { Link, ssr } from "arnext"
@@ -147,7 +148,20 @@ const getPreview = async txt => {
       })
     },
   })
-  return markdownItInstance.render(txt)
+  const html = markdownItInstance.render(txt)
+  const $ = cheerio.load(html)
+  $("a").each((_, el) => {
+    const href = $(el).attr("href")
+    $(el).attr("target", "_blank")
+    if (href && !href.match(/^(?:[a-z]+:)?\/\//i)) {
+      $(el).addClass("relative-link")
+      $(el).attr("data-href", href)
+    }
+  })
+  console.log(html)
+  console.log($("h1").length)
+  console.log($.html())
+  return $.html()
 }
 const readme = {
   ext: "md",
@@ -249,7 +263,82 @@ export default function Home({}) {
     setProcs(_procs)
     setModule(mod)
   }
+  function resolvePath(basePath, relativePath) {
+    const stack = basePath.replace(/\/+$/, "").split("/")
+    const parts = relativePath.split("/")
 
+    for (const part of parts) {
+      if (part === "..") {
+        if (stack.length > 1) stack.pop()
+      } else if (part !== "." && part !== "") {
+        stack.push(part)
+      }
+    }
+
+    return stack.join("/")
+  }
+  const clickFile = async v => {
+    setFile(v)
+    let opens = clone(openFilesRef.current)
+    let exists = false
+    for (let v2 of openFilesRef.current) {
+      if (v2.id === v.id) {
+        exists = true
+        break
+      }
+    }
+    if (!exists) {
+      opens.push(v)
+      setOpenFiles(opens)
+    }
+    setType(v.ext)
+    if (v.pid === "2") {
+      hub1.socket.send(
+        JSON.stringify({
+          type: "data",
+          path: v.filename,
+        })
+      )
+    } else {
+      const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
+      setTimeout(() => editorRef.current.setValue(txt), 100)
+      if (v.ext === "md" && preview) setPreviewContent(await getPreview(txt))
+    }
+  }
+  useEffect(() => {
+    const handler = e => {
+      const el = e.target.closest("a.relative-link")
+      if (el) {
+        e.preventDefault()
+        const href = el.getAttribute("data-href")
+        const idmap = []
+        const get = (p, d) => {
+          for (let v of filesRef.current) {
+            if (v.pid === fileRef.current.pid) {
+              if (v.path === p) {
+                idmap.push({
+                  ...v,
+                  dirname: d,
+                  filename: `${d}${v.name}${v.dir ? "/" : ""}`,
+                })
+                if (v.dir) get(`${p}${v.id}/`, `${d}${v.name}/`)
+              }
+            }
+          }
+        }
+        get("/", "/")
+        const idmap2 = indexBy(prop("filename"))(idmap)
+        const idmap3 = indexBy(prop("id"))(idmap)
+        const p = decodeURIComponent(
+          resolvePath(idmap3[fileRef.current.id].dirname, href)
+        )
+        console.log(idmap2, p)
+        if (idmap2[p]) clickFile(idmap2[p])
+      }
+    }
+    document.addEventListener("click", handler)
+    return () => document.removeEventListener("click", handler)
+  }, [])
   useEffect(() => {
     ;(async () => {
       const _wallet = await lf.getItem("wallet")
@@ -312,9 +401,11 @@ export default function Home({}) {
       }
     })()
   }, [proc])
+  const filesRef = useRef(null)
+  const openFilesRef = useRef(null)
   const editorRef = useRef(null)
   const setType = fileext =>
-    monaco.editor.setModelLanguage(
+    monacoRef.current.editor.setModelLanguage(
       editorRef.current.getModel(),
       fileext === "js"
         ? "javascript"
@@ -336,10 +427,23 @@ export default function Home({}) {
     })()
   }, [])
   const fileRef = useRef(null)
+  const monacoRef = useRef(null)
 
   useEffect(() => {
     fileRef.current = file
   }, [file])
+
+  useEffect(() => {
+    monacoRef.current = monaco
+  }, [monaco])
+
+  useEffect(() => {
+    openFilesRef.current = openFiles
+  }, [openFiles])
+
+  useEffect(() => {
+    filesRef.current = [...(localFS ?? []), ...files]
+  }, [files, localFS])
 
   useEffect(() => {
     ;(async () => {
