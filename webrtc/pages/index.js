@@ -7,6 +7,7 @@ import { Icon } from "@chakra-ui/react"
 import { DataItem } from "arbundles"
 import { Tooltip } from "@/components/ui/tooltip"
 import _assert from "assert"
+import md5 from "md5"
 import {
   Input,
   NativeSelect,
@@ -162,6 +163,7 @@ export default function Home({}) {
     { name: "Default Project", id: "1", open: true },
   ])
   const [localFS, setLocalFS] = useState(null)
+  const [localFSOpen, setLocalFSOpen] = useState(true)
   const [dryrun, setDryrun] = useState(true)
   const [ttab, setTtab] = useState("lua")
   const [modal, setModal] = useState(false)
@@ -338,6 +340,7 @@ export default function Home({}) {
   useEffect(() => {
     fileRef.current = file
   }, [file])
+
   useEffect(() => {
     ;(async () => {
       try {
@@ -552,49 +555,57 @@ export default function Home({}) {
       )
     }, dirs)
   }
-  const pmap = indexBy(prop("id"), projects)
+  const _projects = [
+    ...(localFS
+      ? [{ id: "2", name: "Local Computer", open: localFSOpen }]
+      : []),
+    ...projects,
+  ]
+
+  const pmap = indexBy(prop("id"), _projects)
+  const _files = [...(localFS ?? []), ...files]
   let dirmap = {}
-  for (let v of files) {
+  for (let v of _files) {
     if (!v.dir) continue
     dirmap[`${v.pid}${v.path}${v.id}/`] = v.open ?? false
   }
   const isShow = v => {
     if (!pmap[v.pid]) return false
     const path = `${v.pid}${v.path}`
-    return pmap[v.pid].open && (v.path === "/" || dirmap[path])
+    let sp = path.split("/")
+    sp.pop()
+    sp.shift()
+    let ok = true
+    if (sp.length > 0) {
+      for (let i = 0; i < sp.length; i++) {
+        const p = `${v.pid}/${sp.slice(0, sp.length - i).join("/")}/`
+        if (!dirmap[p]) {
+          ok = false
+          break
+        }
+      }
+    }
+    return pmap[v.pid].open && ok
   }
   const getFiles = () => {
     let dirs = []
     let dmap = {}
     const get = (pid, _path) => {
-      for (let v of files) {
+      for (let v of _files) {
         if (v.pid !== pid) continue
         let p = filter(v => v !== "")(v.path.split("/"))
         dmap[v.pid] ??= {}
         if (_path !== v.path) continue
-        dmap[v.pid][v.id] = mergeLeft(
-          {
-            p,
-            show: isShow(v),
-          },
-          v
-        )
+        dmap[v.pid][v.id] = mergeLeft({ p, show: isShow(v) }, v)
         get(pid, `${v.path}${v.id}/`)
       }
     }
     let pdirs = {}
-    for (let v of projects) {
+    for (let v of _projects) {
       get(v.id, "/")
-      dirs.push({
-        project: true,
-        name: v.name,
-        id: v.id,
-        open: false,
-      })
+      dirs.push({ project: true, name: v.name, id: v.id, open: false })
       pdirs[v.id] ??= []
-      for (let k in dmap[v.id] ?? {}) {
-        pdirs[v.id].push(dmap[v.id][k])
-      }
+      for (let k in dmap[v.id] ?? {}) pdirs[v.id].push(dmap[v.id][k])
     }
     return pdirs
   }
@@ -892,7 +903,7 @@ export default function Home({}) {
                 </Flex>
                 {wsid ? (
                   <Flex
-                    ml={2}
+                    ml={3}
                     fontSize="12px"
                     bg="white"
                     color="#5137C5"
@@ -915,7 +926,7 @@ export default function Home({}) {
                   </Flex>
                 ) : (
                   <Flex
-                    ml={4}
+                    ml={3}
                     fontSize="12px"
                     color="#ddd"
                     bg="#5137C5"
@@ -934,61 +945,40 @@ export default function Home({}) {
                           return "/" + v.p.join("/") + "/" + v.name
                         }
                       }
+                      const dirmap = indexBy(prop("id"), localFS)
                       const updateDir = _localFS => {
-                        let lfs = null
-                        let fsmap = {}
-                        if (localFS) fsmap = indexBy(prop("path"))(localFS)
-                        if (_localFS) {
-                          lfs = []
-                          const listFiles = (fs, p = [], open = true) => {
-                            for (let k in fs) {
-                              if (typeof fs[k] === "number") {
-                                let v = {
-                                  name: k,
-                                  updated: fs[k],
-                                  p,
-                                  show: open,
-                                }
-                                v.path = getP(v)
-                                if (fsmap[v.path]) v.show = fsmap[v.path].show
-
-                                lfs.push(v)
-                              } else {
-                                let v = {
-                                  name: k,
-                                  show: open,
-                                  open: false,
-                                  dir: true,
-                                  p,
-                                }
-                                v.path = getP(v)
-                                if (fsmap[v.path]) {
-                                  v.open = fsmap[v.path].open
-                                  v.show = fsmap[v.path].show
-                                }
-                                lfs.push(v)
-                                listFiles(fs[k], [...p, k], false)
-                              }
-                            }
-                          }
-                          listFiles(_localFS)
-                        }
-                        const setOpen = (_path, _open) => {
-                          for (let v2 of lfs) {
-                            let _path2 = "/" + v2.p.join("/")
-                            if (_path && _path2 === _path) {
-                              if (_open) {
-                                v2.show = true
-                              } else {
-                                v2.show = false
-                              }
-                              if (v2.dir) setOpen(_path2 + "/" + v2.name, _open)
-                            }
+                        const _files = []
+                        const ls = (fs, p = [], dpath = []) => {
+                          for (let k in fs) {
+                            const path = `/${p.length === 0 ? "" : p.join("/") + "/"}`
+                            const _dpath = `/${dpath.length === 0 ? "" : dpath.join("/") + "/"}`
+                            const id = md5(
+                              `2${_dpath}${k}`.replace(
+                                new RegExp("/", "g"),
+                                "#"
+                              )
+                            )
+                            _files.push({
+                              dir: typeof fs[k] === "object",
+                              open: dirmap[id]?.open ?? false,
+                              name: k,
+                              pid: "2",
+                              p,
+                              ext:
+                                typeof fs[k] === "object"
+                                  ? null
+                                  : k.split(".").pop(),
+                              id,
+                              path,
+                              local: true,
+                              filename: `${_dpath}${k}`,
+                            })
+                            if (typeof fs[k] === "object")
+                              ls(fs[k], [...p, id], [...dpath, k])
                           }
                         }
-                        //for (let v of lfs) setOpen(v.path, v.open)
-                        console.log(lfs)
-                        setLocalFS(lfs)
+                        ls(_localFS)
+                        setLocalFS(_files)
                       }
                       hub1 = new Hub("ws://localhost:9090")
                       hub1.onMsg = async obj => {
@@ -996,21 +986,22 @@ export default function Home({}) {
                         if (obj.subtype === "content") {
                           const ext = obj.path.split(".").pop()
                           const file = fileRef.current
-                          if (file?.id === obj.path) {
+                          const id = md5(
+                            `2${obj.path}`.replace(new RegExp("/", "g"), "#")
+                          )
+                          await lf.setItem(`file-${id}`, obj.content)
+                          if (file?.id === id) {
                             setTimeout(() => {
                               setType(ext)
                               editorRef.current.setValue(obj.content)
                             }, 100)
                           }
                         } else if (obj.subtype === "dir_change") {
-                          console.log(obj)
                           updateDir(obj.dir)
                         }
                       }
+                      hub1.onClose = () => setWSID(null)
 
-                      hub1.onClose = () => {
-                        setWSID(null)
-                      }
                       hub1.onRegister = msg => {
                         setWSID(msg.id)
                         let lfs = null
@@ -1959,95 +1950,6 @@ export default function Home({}) {
                   fontSize="12px"
                   css={{ borderRight: "1px solid #ddd", overflowY: "auto" }}
                 >
-                  {!localFS ? null : (
-                    <Box css={{ borderBottom: "1px solid #ddd" }}>
-                      <Flex h="25px" p={4} align="center" bg="#eee">
-                        <Icon size="sm" color="#5137C5" mr={2}>
-                          <FaRegFloppyDisk />
-                        </Icon>
-                        <Box>Local Computer ( http://localhost:9090 )</Box>
-                      </Flex>
-                      {map(v => {
-                        return !v.show ? null : (
-                          <Flex
-                            bg={file?.id === v.path ? "#5137C5" : "white"}
-                            color={file?.id === v.path ? "#ddd" : "#222"}
-                            h="25px"
-                            px={4}
-                            align="center"
-                            css={{
-                              cursor: "pointer",
-                              _hover: { opacity: 0.75 },
-                            }}
-                            onClick={() => {
-                              if (v.dir) {
-                                let lfs = clone(localFS)
-                                let i = 0
-                                let _path = null
-                                let _open = null
-                                const setOpen = (_path, _open) => {
-                                  for (let v2 of lfs) {
-                                    let _path2 = "/" + v2.p.join("/")
-                                    if (_path && _path2 === _path) {
-                                      if (_open) {
-                                        v2.show = true
-                                      } else {
-                                        v2.show = false
-                                      }
-                                      if (v2.dir)
-                                        setOpen(_path2 + "/" + v2.name, _open)
-                                    }
-                                  }
-                                }
-                                for (let v2 of lfs) {
-                                  if (v.path === v2.path) {
-                                    v2.open = !v2.open
-                                    _path = v.path
-                                    _open = v2.open
-                                  }
-                                  setOpen(_path, _open)
-                                }
-                                setLocalFS(lfs)
-                              } else {
-                                const ext = v.name
-                                  .split(".")
-                                  .pop()
-                                  .toLowerCase()
-                                setFile({
-                                  name: v.name,
-                                  id: v.path,
-                                  ext,
-                                  local: true,
-                                })
-                                hub1.socket.send(
-                                  JSON.stringify({ type: "data", path: v.path })
-                                )
-                              }
-                            }}
-                          >
-                            <Box pl={20 * (v.p.length + 1) + "px"} />
-                            <Icon
-                              size="sm"
-                              color={file?.id !== v.path ? "#5137C5" : "#ddd"}
-                              mr={2}
-                              key={v.path + "-icon"}
-                            >
-                              {v.dir ? (
-                                v.open ? (
-                                  <FaRegFolderOpen />
-                                ) : (
-                                  <FaRegFolder />
-                                )
-                              ) : (
-                                <FaRegFileCode />
-                              )}
-                            </Icon>
-                            <Box>{v.name}</Box>
-                          </Flex>
-                        )
-                      })(localFS)}
-                    </Box>
-                  )}
                   {map(v => {
                     return (
                       <>
@@ -2057,6 +1959,10 @@ export default function Home({}) {
                           align="center"
                           bg="#eee"
                           onClick={async () => {
+                            if (v.id === "2") {
+                              setLocalFSOpen(!localFSOpen)
+                              return
+                            }
                             const pr = clone(projects)
                             for (let v2 of pr) {
                               if (v.id === v2.id) v2.open = !v2.open
@@ -2094,19 +2000,26 @@ export default function Home({}) {
                                       }}
                                       onClick={async () => {
                                         if (v.dir) {
-                                          let opens = clone(files)
-                                          for (let v2 of opens) {
-                                            if (v2.id === v.id) {
-                                              v2.open = !v2.open
-                                              break
+                                          if (v.pid === "2") {
+                                            let opens = clone(localFS)
+                                            for (let v2 of opens) {
+                                              if (v2.id === v.id) {
+                                                v2.open = !v2.open
+                                                break
+                                              }
                                             }
+                                            setLocalFS(opens)
+                                          } else {
+                                            let opens = clone(files)
+                                            for (let v2 of opens) {
+                                              if (v2.id === v.id) {
+                                                v2.open = !v2.open
+                                                break
+                                              }
+                                            }
+                                            setFiles(opens)
                                           }
-                                          setFiles(opens)
                                         } else {
-                                          const txt =
-                                            (await lf.getItem(
-                                              `file-${v.id}`
-                                            )) ?? ""
                                           setFile(v)
                                           let opens = clone(openFiles)
                                           let exists = false
@@ -2121,16 +2034,29 @@ export default function Home({}) {
                                             setOpenFiles(opens)
                                           }
                                           setType(v.ext)
-                                          // todo: handle this better
-                                          setTimeout(
-                                            () =>
-                                              editorRef.current.setValue(txt),
-                                            100
-                                          )
-                                          if (v.ext === "md" && preview) {
-                                            setPreviewContent(
-                                              await getPreview(txt)
+                                          if (v.pid === "2") {
+                                            hub1.socket.send(
+                                              JSON.stringify({
+                                                type: "data",
+                                                path: v.filename,
+                                              })
                                             )
+                                          } else {
+                                            const txt =
+                                              (await lf.getItem(
+                                                `file-${v.id}`
+                                              )) ?? ""
+
+                                            setTimeout(
+                                              () =>
+                                                editorRef.current.setValue(txt),
+                                              100
+                                            )
+                                            if (v.ext === "md" && preview) {
+                                              setPreviewContent(
+                                                await getPreview(txt)
+                                              )
+                                            }
                                           }
                                         }
                                       }}
@@ -2162,7 +2088,7 @@ export default function Home({}) {
                             )(pfiles[v.id] ?? [])}
                       </>
                     )
-                  })(projects)}
+                  })(_projects)}
                 </Box>
               </Flex>
             ) : tab === "Tests" ? (
@@ -2944,7 +2870,7 @@ export default function Home({}) {
                                   ? "#FFDC00"
                                   : "#3d9977"
                           }
-                          mr={3}
+                          mr={2}
                           fontWeight="bold"
                         >
                           {v.ext === "lua"
@@ -2957,7 +2883,15 @@ export default function Home({}) {
                                   ? "TS"
                                   : "{ }"}
                         </Flex>
-                        <Box w="80px" css={{ overflow: "hidden" }}>
+                        <Box
+                          title={v.name}
+                          w="80px"
+                          css={{
+                            overflow: "hidden",
+                            whiteSpace: "nowrap",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
                           {v.name}
                         </Box>
                         <Box flex={1} />
@@ -3156,7 +3090,7 @@ export default function Home({}) {
                         JSON.stringify({
                           type: "save",
                           content,
-                          path: file.id,
+                          path: file.filename,
                         })
                       )
                     }}
