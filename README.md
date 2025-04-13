@@ -1,6 +1,6 @@
 # WAO - Wizard AO SDK & Testing
 
-![](./assets/cover.png)
+![](./app/public/assets/cover.png)
 
 WAO SDK streamlines Arweave/AO development with elegant syntax enhancements and seamless message piping for enjoyable coding experiences. GraphQL operations are also made super easy.
 
