@@ -1,0 +1,123 @@
+### Process
+
+You can go for even more concise syntax with `Process` class.
+
+- [Instantiate](#instantiate-2)
+- [msg](#msg-1)
+- [m](#m)
+- [dry](#dry-1)
+- [d](#d)
+- [res](#res-1)
+- [r](#r)
+- [v](#v)
+
+#### Instantiate
+
+```js
+const p = ao.p(pid)
+```
+
+or
+
+```js
+const { p, pid } = await ao.deploy({ data, tags, src, fills })
+```
+
+#### msg
+
+The first argument is `Action`, the second argument is `Tags`, and the third argument is the rest of the options.
+
+```js
+const { mid, res, out, err } = await p.msg(
+  "Action", 
+  { Tag1: "value1", Tag2: "value2" }, 
+  { get: true, check: { TagA: "valueA" }, jwk }
+)
+```
+The default third argument is `{ get: true }` to return the JSON decoded `Data`.
+
+```js
+const { mid, out } = await p.msg("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+The third parameter defaults to `get` if it's not an object.
+
+```js
+const { mid, out } = await p.msg("Action", { Tag1: "value1" }, "TagA")
+```
+
+is equivalent to
+
+```js
+const { mid, out } = await p.msg("Action", { Tag1: "value1" }, "TagA") 
+```
+
+You can omit the second argument if there is no tag to pass to.
+
+```js
+const { mid, out } = await p.msg("Action", { check: "success!" }}
+```
+
+#### m
+
+You can only get `out` with `m`. This is the most extreme form.
+
+```js
+const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+This is a quite common pattern during testing. Doing the same with `aoconnect` requires an enormous amount of code, especially if it involves async/await `receive()`.
+
+```js
+const { p } = await ao.deploy({ tags, src_data, fills })
+const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" }) // get Data
+assert.equal(out, EXPECTED_JSON)
+```
+
+#### dry
+
+```js
+const { mid, out } = await p.dry("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+#### d
+
+```js
+const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
+```
+
+#### res
+
+```js
+const { err, res, out } = await p.res({ mid, check, get })
+```
+
+#### r
+
+```js
+const out = await p.r({ mid, check, get })
+```
+
+#### v
+
+`v` is a shortcut for [var](#var) to get a Lua variable with `dryrun`.
+
+```js
+const { p } = await ao.deploy({
+  src_data: `Table = { String = "Hello", Array = { "str", 3, true } }`,
+})
+const table = await p.v("Table") // { String: "Hello", Array: [ "str", 3, true ] }
+```
+
+To disable the auto JSON conversion and enable pretty print, use the 2nd and the 3rd arguments.
+
+```js
+const table = await p.v("Table", false, true)
+```
+
+---
+
+<nav style="display:flex;justify-content:space-between;">
+  <a href="./ao.md">AO</a>
+  <a href="./function-piping.md">Function Piping</a>
+</nav>
