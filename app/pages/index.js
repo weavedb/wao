@@ -1696,6 +1696,32 @@ export default function Home({}) {
       ) : null}
     </Flex>
   )
+  const FilePath = () => {
+    if (!file) return null
+    const pmap = indexBy(prop("id"))(projects)
+    let html = []
+    html.push(<Box>{pmap[file.pid].name}</Box>)
+    for (let v of file.path.split("/")) {
+      if (v === "") continue
+      html.push(
+        <>
+          <Icon boxSize="11px" mx={2}>
+            <FaAngleRight />
+          </Icon>
+          <Box>{v}</Box>
+        </>
+      )
+    }
+    return (
+      <>
+        {html}
+        <Icon boxSize="11px" mx={2}>
+          <FaAngleRight />
+        </Icon>
+        <Box>{file?.name}</Box>
+      </>
+    )
+  }
   const leftpane = !init ? null : (
     <Box
       fontSize="12px"
@@ -2439,11 +2465,7 @@ export default function Home({}) {
         color="#999"
         align="center"
       >
-        <Box>Quick Start Guide</Box>
-        <Icon boxSize="11px" mx={2}>
-          <FaAngleRight />
-        </Icon>
-        <Box>{file?.name}</Box>
+        <FilePath />
         <Box flex={1} />
       </Flex>
       <Flex w="100%" flex={1} css={{ overflowY: "auto" }}>
