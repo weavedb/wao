@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react"
 import { Box } from "@chakra-ui/react"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-
+import { FitAddon } from "./addon-fit"
 const Style = () => (
   <style jsx global>{`
     /* Custom scrollbar for terminal */
@@ -44,8 +44,8 @@ const config = {
   fontFamily: "monospace",
   theme: { background: "#1E1E1E" },
   convertEol: true,
-  cols: 110,
-  rows: 11,
+  //cols: 110,
+  //rows: 11,
 }
 
 const init = g => {
@@ -53,7 +53,11 @@ const init = g => {
   if (!elem) return
   g.term = new Terminal(config)
   g.termRef.current = g.term
+  g.fitAddon = new FitAddon()
+  g.term.loadAddon(g.fitAddon)
+  g.fitAddon.fit()
   g.term.open(elem)
+
   g.term.write(`select a process...... `)
 }
 
