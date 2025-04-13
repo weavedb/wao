@@ -1,0 +1,55 @@
+### ArMem
+
+`ArMem` stands for Arweave in memory and is a class to emulate an Arweave node and AO units in memory, which is internally used in the WAO testing framework. You can instantiate `ArMem` and control multiple emulators by passing it between other classes.
+
+- [Instantiate](#instantiate-4)
+
+#### Instantiate
+
+When you instantiate WAO `connect` or `AO` from `wao/test`, it automatically and internally instantiates `ArMem`.
+
+```js
+import { connect } from "wao/test"
+const { spawn, message, dryrun, assign, result, mem } = connect() // aoconnect APIs
+```
+
+
+```js
+import { AO } from "wao/test"
+const ao = new AO() // ao.mem
+```
+
+You can instantiate `ArMem` and pass it to other classes.
+
+```js
+import { ArMem, AO, AR, connect } = "wao/test"
+const mem = new ArMem()
+const { spawn, message, dryrun, assign, result } = connect(mem)
+const ao = new AO({ mem })
+const ar = new AR({ mem })
+```
+
+If you don't pass the same `ArMem` instance, the two AO instances will have different environments.
+
+```js
+import { AO } = "wao/test"
+const ao = new AO() // ao.mem
+const ao2 = new AO() // ao2.mem
+```
+
+`ao.mem` and `ao2.mem` are not connected. They are on different networks.
+
+```js
+import { AO } = "wao/test"
+const ao = new AO()
+const ao2 = new AO({ mem: ao.mem })
+```
+
+This will connect the two.
+
+---
+
+<nav style="display:flex;justify-content:space-between;">
+  <a href="./gql.md">GQL</a>
+  <a href="./hb.md">HB</a>
+</nav>
