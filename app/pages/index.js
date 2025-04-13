@@ -1294,7 +1294,7 @@ export default function Home({}) {
                 }
               }}
             >
-              FS : localhost:9090
+              FS : 9090
             </Flex>
           ) : (
             <Flex
@@ -1426,7 +1426,7 @@ export default function Home({}) {
                 }
               }}
             >
-              HUB localhost:8080
+              HUB : 8080
             </Flex>
           ) : (
             <Flex
@@ -3325,127 +3325,8 @@ export default function Home({}) {
       )}
     </Flex>
   )
-  return (
+  const modals = (
     <>
-      <GlobalStyle />
-      {!init ? (
-        <Flex
-          w="100%"
-          h="100%"
-          align="center"
-          justify="center"
-          fontSize="30px"
-          bg="#5137C5"
-          color="#9C89F6"
-          direction="column"
-          css={{ position: "fixed", top: 0, left: 0, zIndex: 100 }}
-        >
-          <Flex css={{ position: "relative" }} align="center" justify="center">
-            <Spinner
-              boxSize="350px"
-              css={{ position: "absolute" }}
-              borderWidth="5px"
-              animationDuration="1s"
-            />
-            <Box
-              boxSize="300px"
-              css={{
-                backgroundImage: "url(/logo.png)",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }}
-            />
-          </Flex>
-        </Flex>
-      ) : null}
-      <Flex direction="column" h="100vh" w="100vw">
-        <Flex h="30px">{top}</Flex>
-        <Flex h="calc(100vh - 60px)" w="100vw" css={{ overflow: "hidden" }}>
-          <Flex w="50px" h="calc(100vh - 60px)">
-            {sidebar}
-          </Flex>
-          <Flex w="315px" h="calc(100vh - 60px)">
-            {leftpane}
-          </Flex>
-          <Box
-            flex={1}
-            h="calc(100vh - 60px)"
-            w="100%"
-            css={{ overflow: "hidden" }}
-          >
-            <PanelGroup direction="horizontal">
-              {tab !== "Projects" ? (
-                <>
-                  <Panel defaultSize={30} minSize={20} order={1}>
-                    <Box h="calc(100vh - 60px)">{middlepane}</Box>
-                  </Panel>
-                  <PanelResizeHandle />
-                </>
-              ) : null}
-
-              <Panel minSize={30} order={2}>
-                <PanelGroup
-                  direction={tab !== "Projects" ? "vertical" : "horizontal"}
-                >
-                  <Panel maxSize={75}>{editor}</Panel>
-                  <PanelResizeHandle />
-                  <Panel maxSize={75}>
-                    <Box
-                      ref={containerRef}
-                      flex={1}
-                      h="100%"
-                      w="100%"
-                      css={{ overflow: "hidden" }}
-                    >
-                      {terminal}
-                    </Box>
-                  </Panel>
-                </PanelGroup>
-              </Panel>
-            </PanelGroup>
-          </Box>
-        </Flex>
-        <Flex h="30px">
-          <Footer />
-        </Flex>
-      </Flex>
-    </>
-  )
-  return (
-    <>
-      <Flex h="100vh" css={{ zIndex: 0 }} pt="30px">
-        {sidebar}
-        <Flex direction="column">
-          {buttons}
-          {leftpane}
-        </Flex>
-        {editor}
-        {tab !== "Projects" ? null : terminal}
-      </Flex>
-      <Footer />
-      {!init ? (
-        <Flex
-          w="100%"
-          h="100%"
-          align="center"
-          justify="center"
-          fontSize="30px"
-          bg="#5137C5"
-          color="#9C89F6"
-          direction="column"
-          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
-        >
-          <Flex css={{ position: "relative" }} align="center" justify="center">
-            <Spinner
-              boxSize="350px"
-              css={{ position: "absolute" }}
-              borderWidth="5px"
-              animationDuration="1s"
-            />
-            <Image src="/logo.png" boxSize="300px" />
-          </Flex>
-        </Flex>
-      ) : null}
       {!modal ? null : (
         <Flex
           align="center"
@@ -3871,6 +3752,94 @@ export default function Home({}) {
           </Box>
         </Flex>
       )}
+    </>
+  )
+
+  return (
+    <>
+      <GlobalStyle />
+      {!init ? (
+        <Flex
+          w="100%"
+          h="100%"
+          align="center"
+          justify="center"
+          fontSize="30px"
+          bg="#5137C5"
+          color="#9C89F6"
+          direction="column"
+          css={{ position: "fixed", top: 0, left: 0, zIndex: 100 }}
+        >
+          <Flex css={{ position: "relative" }} align="center" justify="center">
+            <Spinner
+              boxSize="350px"
+              css={{ position: "absolute" }}
+              borderWidth="5px"
+              animationDuration="1s"
+            />
+            <Box
+              boxSize="300px"
+              css={{
+                backgroundImage: "url(/logo.png)",
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }}
+            />
+          </Flex>
+        </Flex>
+      ) : null}
+      <Flex direction="column" h="100vh" w="100vw">
+        <Flex h="30px">{top}</Flex>
+        <Flex h="calc(100vh - 60px)" w="100vw" css={{ overflow: "hidden" }}>
+          <Flex w="50px" h="calc(100vh - 60px)">
+            {sidebar}
+          </Flex>
+          <Flex w="315px" h="calc(100vh - 60px)">
+            {leftpane}
+          </Flex>
+          <Box
+            flex={1}
+            h="calc(100vh - 60px)"
+            w="100%"
+            css={{ overflow: "hidden" }}
+          >
+            <PanelGroup direction="horizontal">
+              {tab !== "Projects" ? (
+                <>
+                  <Panel defaultSize={30} minSize={20} order={1}>
+                    <Box h="calc(100vh - 60px)">{middlepane}</Box>
+                  </Panel>
+                  <PanelResizeHandle />
+                </>
+              ) : null}
+
+              <Panel minSize={30} order={2}>
+                <PanelGroup
+                  direction={tab !== "Projects" ? "vertical" : "horizontal"}
+                >
+                  <Panel maxSize={75}>{editor}</Panel>
+                  <PanelResizeHandle />
+                  <Panel maxSize={75}>
+                    <Box
+                      ref={containerRef}
+                      flex={1}
+                      h="100%"
+                      w="100%"
+                      css={{ overflow: "hidden" }}
+                    >
+                      {terminal}
+                    </Box>
+                  </Panel>
+                </PanelGroup>
+              </Panel>
+            </PanelGroup>
+          </Box>
+        </Flex>
+        <Flex h="30px">
+          <Footer />
+        </Flex>
+      </Flex>
+      {modals}
     </>
   )
 }
