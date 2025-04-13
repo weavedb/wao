@@ -75,6 +75,7 @@ import {
   filter,
   propEq,
   mergeLeft,
+  is,
 } from "ramda"
 import { AO, acc, Adaptor } from "wao/web"
 import { HB } from "wao"
@@ -124,6 +125,7 @@ let global = {
 const getPreview = async txt => {
   const starryNight = await createStarryNight(common)
   const markdownItInstance = markdownIt({
+    html: true,
     highlight(value, lang) {
       const scope = starryNight.flagToScope(lang)
       return toHtml({
@@ -156,27 +158,62 @@ const getPreview = async txt => {
       $(el).attr("data-href", href)
     }
   })
+
   return $.html()
 }
-const readme = {
-  ext: "md",
-  name: "intro.md",
-  fetch: "/docs/intro.md",
-  nodel: true,
-  id: "readme",
-  path: "/",
-  pid: "0",
+const guide = [
+  "/",
+  ["README"],
+  "/tutorials/",
+  [
+    "README",
+    "installation",
+    "aoconnect-wrapper",
+    "setup-project",
+    "write-tests",
+    "use-sdk",
+    "cherrypick",
+    "check-response",
+    "async-receive",
+    "logging",
+    "fork-wasm-memory",
+    "weavedrive",
+    "local-server",
+    "hyperbeam",
+  ],
+  "/api/",
+  ["README", "ao", "process", "function-piping", "ar", "gql", "armem", "hb"],
+]
+let bfiles = []
+let dir = null
+for (let v of guide) {
+  if (typeof v === "string") {
+    if (bfiles.length > 0) {
+      bfiles.push({
+        dir: true,
+        name: v.replace(/\//g, ""),
+        id: v.replace(/\//g, ""),
+        path: v.split("/").slice(0, -2).join("/") + "/",
+        pid: "0",
+      })
+    }
+    dir = v
+    continue
+  }
+  if (is(Array, v)) {
+    for (let v2 of v) {
+      bfiles.push({
+        ext: "md",
+        name: `${v2}.md`,
+        fetch: `/docs${dir}${v2}.md`,
+        nodel: true,
+        id: `docs${dir.replace(/\//g, "#")}${v2}`,
+        path: dir,
+        pid: "0",
+      })
+    }
+  }
 }
-const get_started = {
-  ext: "md",
-  name: "get_started.md",
-  fetch: "/docs/get_started.md",
-  nodel: true,
-  id: "get_started",
-  path: "/",
-  pid: "0",
-}
-
 const bps = map(v => {
   return {
     ext: "lua",
@@ -201,7 +238,7 @@ const bps = map(v => {
 
 export default function Home({}) {
   const [projects, setProjects] = useState([
-    { name: "Quick Start Guide", id: "0", open: true },
+    { name: "Get Started", id: "0", open: true },
     { name: "Blueprints", id: "3", open: true },
     { name: "Default Project", id: "1", open: true },
   ])
@@ -238,11 +275,11 @@ export default function Home({}) {
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
   const [ctype, setCtype] = useState("ao.WLN.1")
-  const [files, setFiles] = useState([readme, get_started, ...bps])
-  const [openFiles, setOpenFiles] = useState([readme])
+  const [files, setFiles] = useState([...bfiles, ...bps])
+  const [openFiles, setOpenFiles] = useState([bfiles[0]])
   const [tests, setTests] = useState([])
   const [test, setTest] = useState(null)
-  const [file, setFile] = useState(readme)
+  const [file, setFile] = useState(bfiles[0])
   const [preview, setPreview] = useState(true)
   const [previewContent, setPreviewContent] = useState("")
   const [filename, setFilename] = useState("")
@@ -293,6 +330,7 @@ export default function Home({}) {
     setModule(mod)
   }
   function resolvePath(basePath, relativePath) {
+    if (relativePath[0] === "/") return relativePath
     const stack = basePath.replace(/\/+$/, "").split("/")
     const parts = relativePath.split("/")
 
@@ -307,7 +345,6 @@ export default function Home({}) {
     return stack.join("/")
   }
   const clickFile = async v => {
-    setFile(v)
     let opens = clone(openFilesRef.current)
     let exists = false
     for (let v2 of openFilesRef.current) {
@@ -317,9 +354,13 @@ export default function Home({}) {
       }
     }
     if (!exists) {
-      opens.push(v)
-      setOpenFiles(opens)
+      let _opens = []
+      for (let v2 of openFilesRef.current) {
+        _opens.push(v2.id === fileRef.current.id ? v : v2)
+      }
+      setOpenFiles(_opens)
     }
+    setFile(v)
     setType(v.ext)
     if (v.pid === "2") {
       hub1.socket.send(
@@ -366,7 +407,6 @@ export default function Home({}) {
         const p = decodeURIComponent(
           resolvePath(idmap3[fileRef.current.id].dirname, href)
         )
-        console.log(idmap2, p)
         if (idmap2[p]) clickFile(idmap2[p])
       }
     }
@@ -455,7 +495,7 @@ export default function Home({}) {
       const _prs = await lf.getItem("projects")
       if (_prs) setProjects(_prs)
       const _files = (await lf.getItem("files")) ?? []
-      setFiles([...[readme, get_started, ...bps], ..._files])
+      setFiles([...bfiles, ...bps, ..._files])
       const networks = await lf.getItem("networks")
       if (networks) setNetworks(networks)
     })()
@@ -539,7 +579,7 @@ export default function Home({}) {
   function handleEditorDidMount(editor, monaco) {
     editorRef.current = editor
     setMonaco(monaco)
-    fetch("/docs/intro.md")
+    fetch("/docs/README.md")
       .then(r => r.text())
       .then(txt => {
         editorRef.current.setValue(txt)
@@ -623,7 +663,7 @@ export default function Home({}) {
           show:
             v.pid === selDir.pid && new RegExp(`^${v.path}`).test(selDir.path),
         }
-        get(pid, `${v.path}${v.id}/`)
+        if (v.dir) get(pid, `${v.path}${v.id}/`)
       }
     }
     let pdirs = {}
@@ -697,6 +737,7 @@ export default function Home({}) {
       )
     }, dirs)
   }
+
   const _projects = [
     ...(localFS
       ? [{ id: "2", name: "Local Computer", open: localFSOpen }]
@@ -755,6 +796,75 @@ export default function Home({}) {
   return (
     <>
       <style jsx global>{`
+        .markdown-body nav[style*="justify-content:space-between"] {
+          display: flex;
+          justify-content: space-between;
+          gap: 1rem;
+          flex-wrap: nowrap;
+        }
+
+        .markdown-body nav[style*="justify-content:space-between"] > a {
+          width: calc(50% - 0.5rem);
+          padding: 0.75em 2em;
+          border: 1px solid #ccc;
+          border-radius: 6px;
+          text-decoration: none;
+          background: #fff;
+          box-sizing: border-box;
+          font-weight: 500;
+          transition: all 0.2s ease;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+        }
+
+        .markdown-body
+          nav[style*="justify-content:space-between"]
+          > a:first-of-type {
+          text-align: left;
+        }
+
+        .markdown-body
+          nav[style*="justify-content:space-between"]
+          > a:last-of-type {
+          text-align: right;
+        }
+
+        .markdown-body
+          nav[style*="justify-content:space-between"]
+          > a:first-of-type:not(:empty)::before {
+          content: "Previous page";
+          display: block;
+          font-size: 0.75em;
+          color: #888;
+          margin-bottom: 0.25em;
+          text-align: left;
+        }
+
+        .markdown-body
+          nav[style*="justify-content:space-between"]
+          > a:last-of-type:not(:empty)::before {
+          content: "Next page";
+          display: block;
+          font-size: 0.75em;
+          color: #888;
+          margin-bottom: 0.25em;
+          text-align: right;
+        }
+
+        .markdown-body nav[style*="justify-content:space-between"] > a:empty {
+          opacity: 0;
+          pointer-events: none;
+          border: none;
+          background: transparent;
+        }
+
+        .markdown-body
+          nav[style*="justify-content:space-between"]
+          > a:not(:empty):hover {
+          box-shadow: 0 0 0 1px #0969da80;
+        }
+
         * {
           scrollbar-width: thin;
           scrollbar-color: #bbbbbb #f1f1f1;
@@ -3082,10 +3192,10 @@ export default function Home({}) {
                                   break
                                 }
                                 if (!exists) {
-                                  setFile(readme)
-                                  setOpenFiles([readme])
-                                  setType(readme.ext)
-                                  fetch("/docs/intro.md")
+                                  setFile(bfiles[0])
+                                  setOpenFiles([bfiles[0]])
+                                  setType(bfiles[0].ext)
+                                  fetch("/docs/README.md")
                                     .then(r => r.text())
                                     .then(txt => {
                                       editorRef.current.setValue(txt)
@@ -3292,10 +3402,10 @@ export default function Home({}) {
                           break
                         }
                         if (!exists) {
-                          setFile(readme)
-                          setOpenFiles([readme])
-                          setType(readme.ext)
-                          fetch("/docs/intro.md")
+                          setFile(bfiles[0])
+                          setOpenFiles([bfiles[0]])
+                          setType(bfiles[0].ext)
+                          fetch("/docs/README.md")
                             .then(r => r.text())
                             .then(txt => {
                               editorRef.current.setValue(txt)
@@ -3341,12 +3451,15 @@ export default function Home({}) {
                   }
                   css={{ overflowY: "auto" }}
                 >
-                  <Box
-                    p="32px"
-                    w="894px"
-                    className="markdown-body"
-                    dangerouslySetInnerHTML={{ __html: previewContent }}
-                  />
+                  <Box pb="32px" maxW="894px" w="100%">
+                    <Box
+                      p="32px"
+                      maxW="894px"
+                      w="100%"
+                      className="markdown-body"
+                      dangerouslySetInnerHTML={{ __html: previewContent }}
+                    />
+                  </Box>
                 </Flex>
               ) : null}
               <Box display={isPreview ? "none" : "block"}>
