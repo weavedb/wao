@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Toaster, toaster } from "@/components/ui/toaster"
 import GlobalStyle from "/components/GlobalStyle"
 import Footer from "/components/Footer"
 import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels"
@@ -52,7 +53,7 @@ import lf from "localforage"
 function generateId() {
   return Math.random().toString(36).substring(2, 15)
 }
-
+const DateMS = Date
 dayjs.extend(relativeTime)
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 const hb_url = "http://localhost:10001"
@@ -326,6 +327,7 @@ export default function Home({}) {
   const [ntag, setNtag] = useState("")
   const [nver, setNver] = useState("")
   const [ndesc, setNdesc] = useState("")
+  const [logs, setLogs] = useState([])
   const [networks, setNetworks] = useState([
     { tag: "ao.WLN.1", desc: "WAO LOCALNET 1" },
   ])
@@ -629,7 +631,12 @@ export default function Home({}) {
         const txt = e.target.result
         const id = generateId()
         const fileext = file.name.split(".").pop().toLowerCase()
-        const _file = { name: file.name, update: Date.now(), id, ext: fileext }
+        const _file = {
+          name: file.name,
+          update: DateMS.now(),
+          id,
+          ext: fileext,
+        }
         const _files = prepend(_file, files)
         await lf.setItem("files", _files)
         await lf.setItem(`file-${id}`, txt)
@@ -822,6 +829,12 @@ export default function Home({}) {
     return pdirs
   }
   const pfiles = getFiles()
+  const addLog = (desc, opt = {}, toast) => {
+    let log = { desc, ...opt }
+    log.date ??= DateMS.now()
+    setLogs([...logs, log])
+    if (toast) toaster.create(toast)
+  }
   const terminal = (
     <Flex
       h="100%"
@@ -831,7 +844,7 @@ export default function Home({}) {
     >
       <Flex
         fontSize="12px"
-        h="30px"
+        h="25px"
         bg="#1E1E1E"
         color="#999"
         css={{ border: "1px solid #666" }}
@@ -868,8 +881,35 @@ export default function Home({}) {
           )
         })(ttabs)}
       </Flex>
-      <Box w="100%" h="100%" id="terminal" bg="#1E1E1E" borderRadius="0">
-        <Terminal {...{ global }} />
+      <Box flex={1} w="100%" h="100%" bg="#1E1E1E" position="relative">
+        {ttab !== "log" ? null : (
+          <Box
+            p={2}
+            bg="red"
+            fontSize="11px"
+            position="abosolute"
+            h="100%"
+            w="100%"
+            bg="#1e1e1e"
+            color="#c6c6c6"
+            fontFamily="monospace"
+            css={{ overflowY: "auto" }}
+          >
+            {map(v => {
+              return (
+                <Box>
+                  <Box as="span" color="#666" mr={2}>
+                    [{`${dayjs(v.date).format("MM/DD HH:mm:ss")}`}]
+                  </Box>{" "}
+                  {v.desc}
+                </Box>
+              )
+            })(logs)}
+          </Box>
+        )}
+        <Box id="terminal" borderRadius="0" w="100%" h="100%">
+          <Terminal {...{ global }} />
+        </Box>
       </Box>
     </Flex>
   )
@@ -996,6 +1036,13 @@ export default function Home({}) {
           onClick={async () => {
             setWallet(null)
             await lf.removeItem("wallet")
+            addLog(
+              `Wallet Disconnected: ${wallet.address}`,
+              {},
+              {
+                description: "Wallet Disconnected!",
+              }
+            )
           }}
         >
           {wallet.address.slice(0, 5) + "..." + wallet.address.slice(-5)}
@@ -1024,6 +1071,14 @@ export default function Home({}) {
               const userAddress = await arweaveWallet.getActiveAddress()
               setWallet({ address: userAddress })
               await lf.setItem("wallet", { address: userAddress })
+              addLog(
+                `Wallet Connected: ${userAddress}`,
+                {},
+                {
+                  type: "success",
+                  description: "Wallet Connected!",
+                }
+              )
             } catch (e) {
               alert("Arweave wallet not found")
             }
@@ -1162,7 +1217,6 @@ export default function Home({}) {
                   const jwk = await global.getWallet()
                   if (!jwk) return alert("wallet not connected")
                   const res = await p.msg("Eval", { data: lua, jwk })
-                  console.log(res)
                 }
               }}
             >
@@ -1607,7 +1661,7 @@ export default function Home({}) {
                             type: "Client",
                             msg: _msg.msg,
                             id,
-                            date: Date.now(),
+                            date: DateMS.now(),
                           },
                           m
                         )
@@ -2175,7 +2229,7 @@ export default function Home({}) {
                 descs.push({ desc: desc2, fn, tests: [] })
               }
               eval(js)
-              const ts = Date.now()
+              const ts = DateMS.now()
               let success = 0
               let fail = 0
               let res = []
@@ -2185,7 +2239,7 @@ export default function Home({}) {
                 let _fail = 0
                 await v.fn({ require })
                 for (let v2 of v.tests) {
-                  const start = Date.now()
+                  const start = DateMS.now()
                   try {
                     await v2.fn({
                       ao,
@@ -2196,7 +2250,7 @@ export default function Home({}) {
                       description: v2.desc,
                       success: true,
                       error: null,
-                      duration: Date.now() - start,
+                      duration: DateMS.now() - start,
                     })
                     _success++
                     success++
@@ -2205,7 +2259,7 @@ export default function Home({}) {
                       description: v2.desc,
                       success: false,
                       error: e.toString(),
-                      duration: Date.now() - start,
+                      duration: DateMS.now() - start,
                     })
                     _fail++
                     fail++
@@ -2223,7 +2277,7 @@ export default function Home({}) {
                 file: file.name,
                 id: generateId(),
                 date: ts,
-                duration: Date.now() - ts,
+                duration: DateMS.now() - ts,
                 tests: res,
                 success,
                 fail,
@@ -2374,7 +2428,7 @@ export default function Home({}) {
           <Flex
             fontSize="11px"
             w="140px"
-            h="30px"
+            h="25px"
             bg={open ? "#1e1e1e" : "#444"}
             px={3}
             color="#c6c6c6"
@@ -2388,7 +2442,7 @@ export default function Home({}) {
               setPreviewContent(await getPreview(txt))
             }}
             css={{
-              borderTop: `3px solid ${open ? "#5137C5" : "#444"}`,
+              //borderTop: `5px solid ${open ? "#5137C5" : "#666"}`,
               cursor: open ? "default" : "pointer",
               _hover: { opacity: open ? 1 : 0.75 },
             }}
@@ -2499,11 +2553,11 @@ export default function Home({}) {
         fontSize="10px"
         w="100%"
         h="25px"
+        pb="5px"
         color="#999"
         align="center"
       >
         <FilePath />
-        <Box flex={1} />
       </Flex>
       <Flex w="100%" flex={1} css={{ overflowY: "auto" }}>
         {isPreview ? (
@@ -2525,7 +2579,7 @@ export default function Home({}) {
           h="100%"
         >
           <Editor
-            height={tab !== "Projects" ? "100%" : "calc(100vh - 130px)"}
+            height={tab !== "Projects" ? "100%" : "calc(100vh - 120px)"}
             width="100%"
             theme="vs-dark"
             defaultLanguage={
@@ -3232,7 +3286,7 @@ export default function Home({}) {
                                           id: v,
                                           msg: _msg.msg,
                                           type: "SU",
-                                          date: Date.now(),
+                                          date: DateMS.now(),
                                         },
                                         m2
                                       )
@@ -3482,7 +3536,7 @@ export default function Home({}) {
                   }
                   const _file = {
                     name,
-                    update: Date.now(),
+                    update: DateMS.now(),
                     id,
                     ext: fileext,
                     pid: selDir.pid,
@@ -3693,7 +3747,7 @@ export default function Home({}) {
                   const id = generateId()
                   const _pr = {
                     name: projectname,
-                    created: Date.now(),
+                    created: DateMS.now(),
                     id,
                     open: true,
                   }
@@ -3792,7 +3846,7 @@ export default function Home({}) {
                   }
                   const _file = {
                     name: `${dirname}`,
-                    update: Date.now(),
+                    update: DateMS.now(),
                     id,
                     pid: selDir.pid,
                     dir: true,
@@ -3898,6 +3952,7 @@ export default function Home({}) {
         </Flex>
       </Flex>
       {modals}
+      <Toaster />
     </>
   )
 }
