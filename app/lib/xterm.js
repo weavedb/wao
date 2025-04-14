@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react"
+import chalk from "chalk"
 import { Box } from "@chakra-ui/react"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
@@ -57,6 +58,13 @@ const init = g => {
   g.term.loadAddon(g.fitAddon)
   setTimeout(() => g.fitAddon.fit(), 100)
   g.term.open(elem)
+  g.welcome = () => {
+    const txt = chalk.green(
+      "Welcome to WAO: Your web operating system for AO.\n"
+    )
+    g.term.write("\u001b[2K\r")
+    g.term.write(`${txt}\n`)
+  }
 
   g.term.write(`select a process...... `)
 }
