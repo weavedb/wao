@@ -55,7 +55,7 @@ const init = g => {
   g.termRef.current = g.term
   g.fitAddon = new FitAddon()
   g.term.loadAddon(g.fitAddon)
-  g.fitAddon.fit()
+  setTimeout(() => g.fitAddon.fit(), 100)
   g.term.open(elem)
 
   g.term.write(`select a process...... `)
@@ -70,7 +70,7 @@ const toggle = async g => {
 const aoeval = async (data, g) => {
   try {
     const jwk = await g.getWallet()
-    if (!jwk) return await g.prompt("wallet not found")
+    //if (!jwk) return await g.prompt("wallet not found")
     const fn = g.dryrun ? "dry" : "msg"
     const { res } = await g.ao[fn]({ act: "Eval", pid: g.proc.id, data, jwk })
     if (res?.Output?.data) {
@@ -129,7 +129,6 @@ const term = g => {
 
   g.term.onData(async d => {
     if (on) return
-    console.log("cur:", g.cur)
     if (d === "\x06") {
       if (g.cur < g.inputRef.current.length) {
         g.term.write("\x1b[C")
