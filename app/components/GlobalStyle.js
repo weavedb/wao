@@ -38,7 +38,7 @@ export default function GlobalStyle() {
       .markdown-body
         nav[style*="justify-content:space-between"]
         > a:first-of-type:not(:empty)::before {
-        content: "Previous page";
+        content: "Previous";
         display: block;
         font-size: 0.75em;
         color: #888;
@@ -49,7 +49,7 @@ export default function GlobalStyle() {
       .markdown-body
         nav[style*="justify-content:space-between"]
         > a:last-of-type:not(:empty)::before {
-        content: "Next page";
+        content: "Next";
         display: block;
         font-size: 0.75em;
         color: #888;
