@@ -25,6 +25,7 @@
     "arbundles": "^0.11.2",
     "arnext": "^0.1.4",
     "assert": "^2.1.0",
+    "chalk": "^5.4.1",
     "dayjs": "^1.11.13",
     "hast-util-to-html": "^9.0.5",
     "localforage": "^1.10.0",
