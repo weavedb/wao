@@ -112,6 +112,7 @@ end)`
 let global = {
   dryrun: true,
   getWallet: async () => {
+    if (!global.walletRef.current) return null
     arweaveWallet.connect(
       ["ACCESS_ADDRESS", "SIGN_TRANSACTION", "ACCESS_PUBLIC_KEY"],
       {
@@ -119,7 +120,11 @@ let global = {
       }
     )
     const userAddress = await arweaveWallet.getActiveAddress()
-    return userAddress ? arweaveWallet : null
+    if (global.walletRef.current.address !== userAddress) {
+      return null
+    } else {
+      return userAddress ? arweaveWallet : null
+    }
   },
 }
 const getPreview = async txt => {
@@ -265,9 +270,12 @@ function useResizeObserver(ref) {
 
   return dimensions
 }
+const mod = "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g"
 
 export default function Home({}) {
   const containerRef = useRef(null)
+  const walletRef = useRef(null)
+  global.walletRef = walletRef
   const { width, height } = useResizeObserver(containerRef)
   useEffect(() => {
     if (global.fitAddon) global.fitAddon.fit()
@@ -415,6 +423,7 @@ export default function Home({}) {
       if (v.ext === "md" && preview) setPreviewContent(await getPreview(txt))
     }
   }
+
   useEffect(() => {
     const handler = e => {
       const el = e.target.closest("a.relative-link")
@@ -448,63 +457,82 @@ export default function Home({}) {
     document.addEventListener("click", handler)
     return () => document.removeEventListener("click", handler)
   }, [])
+
   useEffect(() => {
     ;(async () => {
       const _wallet = await lf.getItem("wallet")
-      if (_wallet) setWallet(_wallet)
+      if (_wallet) {
+        global.walletRef.current = _wallet
+        setWallet(_wallet)
+      }
     })()
   }, [])
 
   useEffect(() => {
     global.dryrun = dryrun
   }, [dryrun])
+
+  const connectProc = async proc => {
+    global.setDryrun = setDryrun
+    global.proc = proc
+    global.ao = ao
+    global.prompt = async txt => {
+      const { res } = await ao.dry({
+        act: "Eval",
+        pid: proc.id,
+        data: "ao.id",
+      })
+      const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
+      if (prompt) {
+        global.term.write("\u001b[2K\r")
+        if (txt) {
+          txt = `${txt}\n`
+        } else if (txt === false) {
+          txt = ""
+        } else {
+          txt = `connecting to a process... ${proc.id}\n`
+        }
+        global.term.write(txt)
+        global.term.write(prompt)
+
+        // Reprint current input
+        global.term.write(global.inputRef.current)
+
+        // Restore cursor position
+        const tail = global.inputRef.current.slice(global.cur)
+        if (tail.length > 0) {
+          global.term.write(`\x1b[${tail.length}D`)
+        }
+        //global.term.write(`${txt}${prompt}`)
+        //global.term.write(`${global.inputRef.current}`)
+      }
+    }
+    await global.prompt()
+    if (!proc && global.term) {
+      global.term.write("\u001b[2K\r")
+      global.term.write(`select a process......`)
+      global.term.write(`${global.inputRef.current}`)
+    } else {
+      addLog(
+        `Connected to Process: ${proc.id}`,
+        {},
+        {
+          title: "Connected to Process!",
+          type: "success",
+          description: proc.id.slice(0, 30) + "...",
+        }
+      )
+    }
+  }
+
   useEffect(() => {
     ;(async () => {
-      console.log(proc)
-      global.setDryrun = setDryrun
       if (proc && ao) {
-        global.proc = proc
-        global.ao = ao
-        global.prompt = async txt => {
-          const { res } = await ao.dry({
-            act: "Eval",
-            pid: proc.id,
-            data: "ao.id",
-          })
-          const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
-          if (prompt) {
-            global.term.write("\u001b[2K\r")
-            if (txt) {
-              txt = `${txt}\n`
-            } else if (txt === false) {
-              txt = ""
-            } else {
-              txt = `connecting to a process... ${proc.id}\n`
-            }
-            global.term.write(txt)
-            global.term.write(prompt)
-
-            // Reprint current input
-            global.term.write(global.inputRef.current)
-
-            // Restore cursor position
-            const tail = global.inputRef.current.slice(global.cur)
-            if (tail.length > 0) {
-              global.term.write(`\x1b[${tail.length}D`)
-            }
-            //global.term.write(`${txt}${prompt}`)
-            //global.term.write(`${global.inputRef.current}`)
-          }
-        }
-        await global.prompt()
-      }
-      if (!proc && global.term) {
-        global.term.write("\u001b[2K\r")
-        global.term.write(`select a process......`)
-        global.term.write(`${global.inputRef.current}`)
+        await connectProc(proc)
       }
     })()
   }, [proc])
+
   const filesRef = useRef(null)
   const openFilesRef = useRef(null)
   const editorRef = useRef(null)
@@ -571,13 +599,34 @@ export default function Home({}) {
         _procs.push({ txid: k, module: mmap[val.module] })
       }
       setProcs(_procs)
-      _setModule("Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM")
+      _setModule(mod)
       setMessage(null)
       setMessages([])
       setInit(true)
     })()
   }, [cache])
-
+  useEffect(() => {
+    if (init && ao) {
+      ;(async () => {
+        let default_process = await lf.getItem("default_process")
+        if (!default_process) {
+          const { p, pid } = await ao.deploy({ module: mod })
+          addLog(
+            `Process Spawned: ${pid}`,
+            {},
+            {
+              title: "Process Spawned!",
+              type: "success",
+              description: pid.slice(0, 30) + "...",
+            }
+          )
+          default_process = { id: pid }
+          await lf.setItem("default_process", default_process)
+        }
+        setProc(ao.mem.env[default_process.id])
+      })()
+    }
+  }, [init])
   const ctypes = [
     {
       key: "hb",
@@ -1035,11 +1084,13 @@ export default function Home({}) {
           }}
           onClick={async () => {
             setWallet(null)
+            global.walletRef.current = null
             await lf.removeItem("wallet")
             addLog(
               `Wallet Disconnected: ${wallet.address}`,
               {},
               {
+                type: "warning",
                 description: "Wallet Disconnected!",
               }
             )
@@ -1070,6 +1121,7 @@ export default function Home({}) {
               )
               const userAddress = await arweaveWallet.getActiveAddress()
               setWallet({ address: userAddress })
+              global.walletRef.current = { address: userAddress }
               await lf.setItem("wallet", { address: userAddress })
               addLog(
                 `Wallet Connected: ${userAddress}`,
@@ -1163,10 +1215,7 @@ export default function Home({}) {
               const jwk = await global.getWallet()
               if (!jwk) return alert("wallet not connected")
               let pid, p
-              ;({ pid, p } = await ao.deploy({
-                module: module.id,
-                jwk,
-              }))
+              ;({ pid, p } = await ao.deploy({ module: module.id, jwk }))
               const v = pid
               let _proc = clone(ao.mem.env[v])
               delete _proc.memory
@@ -2743,7 +2792,7 @@ export default function Home({}) {
                     </Box>
                   </Flex>
                 )
-              })(proc.tags)}
+              })(proc?.tags || [])}
               <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
                 Messages ( {proc.results.length} )
               </Flex>
