@@ -478,12 +478,40 @@ export default function Home({}) {
     global.setDryrun = setDryrun
     global.proc = proc
     global.ao = ao
+
+    global.stats = async (txt, wallet) => {
+      let owner = null
+      txt += `Process:\t${proc.id}\n`
+      owner = ao.mem.env[proc.id].owner
+      txt += `Owner:\t\t${owner}\n`
+      let addr = null
+      if (wallet) {
+        addr = await wallet.getActiveAddress()
+        txt += `Wallet:\t\t${addr}\n\n`
+      } else {
+        addr = ao.ar.addr
+        txt += `Wallet:\t\t${ao.ar.addr}\n\n`
+      }
+      if (addr !== owner) {
+        const txt2 = chalk.red(
+          `you are not the owner of the process, which limits certain features like Eval...\n\n`
+        )
+        txt += txt2
+      }
+      return txt
+    }
+
+    global.connect = async (txt = "") => {
+      txt += `connecting to a process... ${proc.id}]\n\n`
+      const wallet = await global.getWallet()
+      if (!wallet) {
+        txt += `wallet not connected, using the preset default wallet...\n\n`
+      }
+      return await global.stats(txt, wallet)
+    }
+
     global.prompt = async txt => {
-      const { res } = await ao.dry({
-        act: "Eval",
-        pid: proc.id,
-        data: "ao.id",
-      })
+      const { res } = await ao.dry({ act: "Eval", pid: proc.id, data: "ao.id" })
       const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
       if (prompt) {
         global.term.write("\u001b[2K\r")
@@ -492,8 +520,9 @@ export default function Home({}) {
         } else if (txt === false) {
           txt = ""
         } else {
-          txt = `connecting to a process... ${proc.id}\n`
+          txt = await global.connect()
         }
+        console.log(txt)
         global.term.write(txt)
         global.term.write(prompt)
 
@@ -502,11 +531,7 @@ export default function Home({}) {
 
         // Restore cursor position
         const tail = global.inputRef.current.slice(global.cur)
-        if (tail.length > 0) {
-          global.term.write(`\x1b[${tail.length}D`)
-        }
-        //global.term.write(`${txt}${prompt}`)
-        //global.term.write(`${global.inputRef.current}`)
+        if (tail.length > 0) global.term.write(`\x1b[${tail.length}D`)
       }
     }
     await global.prompt()
@@ -1097,6 +1122,15 @@ export default function Home({}) {
                 description: "Wallet Disconnected!",
               }
             )
+            if (global.prompt) {
+              await global.prompt(
+                await global.stats(
+                  chalk.red(
+                    `wallet disconnected, using the preset default wallet now...\n\n`
+                  )
+                )
+              )
+            }
           }}
         >
           {wallet.address.slice(0, 5) + "..." + wallet.address.slice(-5)}
@@ -1134,6 +1168,14 @@ export default function Home({}) {
                   description: "Wallet Connected!",
                 }
               )
+              if (global.prompt) {
+                await global.prompt(
+                  await global.stats(
+                    chalk.green(`wallet connected!\n\n`),
+                    arweaveWallet
+                  )
+                )
+              }
             } catch (e) {
               alert("Arweave wallet not found")
             }
@@ -1216,7 +1258,7 @@ export default function Home({}) {
             }}
             onClick={async () => {
               const jwk = await global.getWallet()
-              if (!jwk) return alert("wallet not connected")
+              //if (!jwk) return alert("wallet not connected")
               let pid, p
               ;({ pid, p } = await ao.deploy({ module: module.id, jwk }))
               const v = pid
@@ -1267,8 +1309,9 @@ export default function Home({}) {
                   const p = ao.p(proc.id)
                   const lua = editorRef.current.getValue()
                   const jwk = await global.getWallet()
-                  if (!jwk) return alert("wallet not connected")
+                  //if (!jwk) return alert("wallet not connected")
                   const res = await p.msg("Eval", { data: lua, jwk })
+                  console.log(res)
                 }
               }}
             >
