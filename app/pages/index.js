@@ -1,4 +1,5 @@
 import * as React from "react"
+import chalk from "chalk"
 import { Toaster, toaster } from "@/components/ui/toaster"
 import GlobalStyle from "/components/GlobalStyle"
 import Footer from "/components/Footer"
@@ -55,6 +56,7 @@ function generateId() {
 }
 const DateMS = Date
 dayjs.extend(relativeTime)
+
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 const hb_url = "http://localhost:10001"
 import {
@@ -623,6 +625,7 @@ export default function Home({}) {
           default_process = { id: pid }
           await lf.setItem("default_process", default_process)
         }
+        global.welcome()
         setProc(ao.mem.env[default_process.id])
       })()
     }
