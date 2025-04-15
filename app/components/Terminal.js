@@ -2,23 +2,26 @@ import { Box, Flex } from "@chakra-ui/react"
 import { map } from "ramda"
 import dynamic from "next/dynamic"
 import { dayjs } from "/lib/utils"
+import g from "/lib/global"
+import use from "/lib/use"
+
 const XTerminal = dynamic(
   () => import("../components/Xterm").then(mod => mod),
-  {
-    ssr: false,
-  }
+  { ssr: false }
 )
 
-export default function Terminal({
-  ttab,
-  global,
-  ttabs,
-  setTtab,
-  setDryrun,
-  dryrun,
-  logs,
-  containerRef,
-}) {
+export default function Terminal({}) {
+  const [ttab, setTtab] = use("ttab")
+  const [dryrun, setDryrun] = use("dryrun")
+  const [logs, setLogs] = use("logs")
+  const ttabs = [
+    {
+      key: "lua",
+      name: `AOS ${dryrun ? " ( DRYRUN )" : ""}`,
+    },
+    { key: "log", name: "LOGS" },
+  ]
+
   const terminal = (
     <Flex
       h="100%"
@@ -48,11 +51,11 @@ export default function Terminal({
               color={ttab === v.key ? "#ddd" : "#999"}
               justify="center"
               onClick={async () => {
-                if (ttab === v.key && v.key === "lua" && global.prompt) {
+                if (ttab === v.key && v.key === "lua" && g.prompt) {
                   setDryrun(!dryrun)
-                  const on = !global.dryrun
-                  global.setDryrun(on)
-                  await global.prompt(
+                  const on = !g.dryrun
+                  g.setDryrun(on)
+                  await g.prompt(
                     "toggling dryrun mode...... " + (on ? "on" : "off")
                   )
                 } else {
@@ -92,7 +95,7 @@ export default function Terminal({
           </Box>
         )}
         <Box id="terminal" borderRadius="0" w="100%" h="100%">
-          <XTerminal {...{ global }} />
+          <XTerminal {...{ global: g }} />
         </Box>
       </Box>
     </Flex>
@@ -100,7 +103,7 @@ export default function Terminal({
 
   return (
     <Box
-      ref={containerRef}
+      ref={g.containerRef}
       flex={1}
       h="100%"
       w="100%"
