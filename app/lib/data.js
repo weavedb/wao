@@ -25,5 +25,5 @@ const ctypes = [
     desc: "Websocket connections to WAO hubs",
   },
 ]
-
-export { ctypes }
+const hb_url = "http://localhost:10001"
+export { ctypes, hb_url }
