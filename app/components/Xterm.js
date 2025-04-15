@@ -46,7 +46,13 @@ const aoeval = async (data, g) => {
     const jwk = await g.getWallet()
     //if (!jwk) return await g.prompt("wallet not found")
     const fn = g.dryrun ? "dry" : "msg"
-    const { res } = await g.ao[fn]({ act: "Eval", pid: g.proc.id, data, jwk })
+    const { res, mid } = await g.ao[fn]({
+      act: "Eval",
+      pid: g.proc.id,
+      data,
+      jwk,
+    })
+    if (!g.dryrun) g.logMsg(mid)
     if (res?.Output?.data) {
       const data = res.Output.data.output ?? res.Output.data
       g.term.write(`${data}\r\n`)

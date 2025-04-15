@@ -3,8 +3,8 @@ import { default_projects, bps, bfiles } from "/lib/guide"
 export default store({
   tab: "Projects",
   ttab: "lua",
-  ctype: "ao.WLN.1",
-  cache: "ao.WLN.1",
+  ctype: "ao.TN.1",
+  cache: "ao.TN.1",
   file: bfiles[0],
   projects: default_projects,
   init: false,
@@ -20,7 +20,9 @@ export default store({
   openFiles: [bfiles[0]],
   selDir: { pid: "1", path: "/" },
   preview: true,
-  networks: [{ tag: "ao.WLN.1", desc: "WAO LOCALNET 1" }],
+  networks: [
+    { tag: "ao.TN.1", desc: "LOCALNET | Not Connected to AO Testnet" },
+  ],
   test: null,
   tests: [],
   modules: [],

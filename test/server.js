@@ -197,11 +197,14 @@ Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })
 end)
 `
-    console.log(acc[0].addr)
-    console.log(await ao.postScheduler({ url: "http://localhost:7003" }))
-    ////console.log(await ao.spwn({ scheduler: acc[0].addr }))
-    const { p, pid } = await ao.deploy({ scheduler: acc[0].addr, src_data })
-    console.log(pid)
+    const { res, id } = await ao.postScheduler({ url: "http://localhost:7003" })
+    console.log("scheduler posted:", id)
+    const { pid, p } = await ao.deploy({
+      scheduler: acc[0].addr,
+      src_data,
+      module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
+    })
+    console.log("process deployed:", pid)
     console.log(await p.msg("Hello", false))
     return
   })

@@ -1,11 +1,11 @@
 import { Input, Box, Flex, Icon } from "@chakra-ui/react"
 import { FaAngleRight } from "react-icons/fa6"
-import { tags } from "/lib/utils"
 import use from "/lib/use"
 import chalk from "chalk"
 import g from "/lib/global"
 import lf from "localforage"
 import { prop, indexBy } from "ramda"
+import { getAct } from "/lib/utils"
 export default function Header() {
   const [proc, setProc] = use("proc")
   const [module, setModule] = use("module")
@@ -15,11 +15,6 @@ export default function Header() {
   const [message, setMessage] = use("message")
   const [wallet, setWallet] = use("wallet")
   const modmap = indexBy(prop("txid"))(modules ?? [])
-  let act = null
-  if (message) {
-    const t = tags(message.http_msg.tags)
-    act = t.Type === "Process" ? "Process" : t.Action
-  }
 
   return (
     <Flex w="100%" bg="white" css={{ borderBottom: "1px solid #ddd" }}>
@@ -116,7 +111,7 @@ export default function Header() {
                   {message.slot}
                 </Box>
                 <Box px={2} bg="#ddd" css={{ borderRadius: "0 3px 3px 0" }}>
-                  {act}
+                  {getAct(message)}
                 </Box>
                 <Box ml={3}>{message?.id}</Box>
               </Flex>
@@ -142,14 +137,10 @@ export default function Header() {
             setWallet(null)
             g.walletRef.current = null
             await lf.removeItem("wallet")
-            g.addLog(
-              `Wallet Disconnected: ${wallet.address}`,
-              {},
-              {
-                type: "warning",
-                description: "Wallet Disconnected!",
-              }
-            )
+            g.log(`Wallet Disconnected: ${wallet.address}`, {
+              type: "warning",
+              description: "Wallet Disconnected!",
+            })
             if (g.prompt) {
               await g.prompt(
                 await g.stats(
@@ -188,14 +179,10 @@ export default function Header() {
               setWallet({ address: userAddress })
               g.walletRef.current = { address: userAddress }
               await lf.setItem("wallet", { address: userAddress })
-              addLog(
-                `Wallet Connected: ${userAddress}`,
-                {},
-                {
-                  type: "success",
-                  description: "Wallet Connected!",
-                }
-              )
+              g.log(`Wallet Connected: ${userAddress}`, {
+                type: "success",
+                description: "Wallet Connected!",
+              })
               if (g.prompt) {
                 await g.prompt(
                   await g.stats(
