@@ -1,19 +1,9 @@
-import * as React from "react"
-import chalk from "chalk"
-import { Toaster, toaster } from "@/components/ui/toaster"
-import GlobalStyle from "/components/GlobalStyle"
-import Footer from "/components/Footer"
+// react
+import { useRef, useEffect, useState } from "react"
 import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels"
-import markdownIt from "markdown-it"
-import * as cheerio from "cheerio"
-import { toHtml } from "hast-util-to-html"
-import { common, createStarryNight } from "@wooorm/starry-night"
-import { Spinner } from "@chakra-ui/react"
-import { Icon } from "@chakra-ui/react"
-import { DataItem } from "arbundles"
-import { Tooltip } from "@/components/ui/tooltip"
-import _assert from "assert"
-import md5 from "md5"
+import use from "/lib/use"
+
+// chakra-ui
 import {
   Input,
   NativeSelect,
@@ -21,19 +11,12 @@ import {
   Box,
   Flex,
   Textarea,
+  Icon,
 } from "@chakra-ui/react"
-import { useRef, useEffect, useState } from "react"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
+import { Spinner } from "@chakra-ui/react"
+import { Toaster, toaster } from "@/components/ui/toaster"
+import { Tooltip } from "@/components/ui/tooltip"
 import {
-  FaCode,
-  FaBug,
-  FaWallet,
-  FaCoins,
-  FaCodeCompare,
-  FaEnvelopesBulk,
-  FaCubes,
-  FaRegFloppyDisk,
   FaRegFolder,
   FaRegFolderOpen,
   FaRegFileCode,
@@ -50,15 +33,45 @@ import {
   FaFileCirclePlus,
   FaFolderPlus,
 } from "react-icons/fa6"
-import lf from "localforage"
-function generateId() {
-  return Math.random().toString(36).substring(2, 15)
-}
-const DateMS = Date
-dayjs.extend(relativeTime)
 
-const wait = ms => new Promise(res => setTimeout(() => res(), ms))
-const hb_url = "http://localhost:10001"
+// styles
+import GlobalStyle from "/components/GlobalStyle"
+import EditorScrollbarStyle from "/components/EditorScrollbarStyle"
+
+// components
+import FilePath from "/components/FilePath"
+import Sidebar from "/components/Sidebar"
+import Logo from "/components/Logo"
+import Footer from "/components/Footer"
+import Editor from "/components/Editor"
+import Terminal from "/components/Terminal"
+import Modal from "/components/Modal"
+
+//data
+import { ctypes } from "/lib/data"
+
+// utils
+import chalk from "chalk"
+import _assert from "assert"
+import { src_data_js, src_data_lua } from "/lib/scripts"
+import md5 from "md5"
+
+import lf from "localforage"
+const DateMS = Date
+
+import {
+  ftype,
+  dayjs,
+  tags,
+  wait,
+  generateId,
+  getPreview,
+  useResizeObserver,
+  resolvePath,
+} from "/lib/utils"
+
+import global from "/lib/global"
+
 import {
   addIndex,
   prop,
@@ -79,218 +92,50 @@ import {
   mergeLeft,
   is,
 } from "ramda"
+
+// wao sdk
 import { AO, acc, Adaptor } from "wao/web"
 import { HB } from "wao"
+import { DataItem } from "arbundles"
+
+// websocket/webrtc
 import Hub from "../lib/hub"
 import WebRTC from "../lib/webrtc"
-import Editor from "@monaco-editor/react"
-import dynamic from "next/dynamic"
-const Terminal = dynamic(
-  () =>
-    import("../lib/xterm").then(mod => {
-      return mod
-    }),
-  { ssr: false }
-)
 
+// guide
+import { default_projects, bps, bfiles } from "/lib/guide"
+
+// variables
+const hb_url = "http://localhost:10001"
+const mod = "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g"
 let peer1 = null
 let peer2 = {}
-
 let hub1 = null
 let hub2 = null
 let ao = null
-const tags = tags => fromPairs(map(v => [v.name, v.value])(tags))
-
-const src_data_js = `describe("WAO", ()=>{
-  it("should run", async ({ ao, p, src })=> {
-    // write your test here
-  })
-})`
-
-const src_data_lua = `Handlers.add("Hello", "Hello", function (msg)
-  msg.reply({ Data = "Hello, World!" })
-end)`
-
-let global = {
-  dryrun: true,
-  getWallet: async () => {
-    if (!global.walletRef.current) return null
-    arweaveWallet.connect(
-      ["ACCESS_ADDRESS", "SIGN_TRANSACTION", "ACCESS_PUBLIC_KEY"],
-      {
-        name: "WAO LOCALNET",
-      }
-    )
-    const userAddress = await arweaveWallet.getActiveAddress()
-    if (global.walletRef.current.address !== userAddress) {
-      return null
-    } else {
-      return userAddress ? arweaveWallet : null
-    }
-  },
-}
-const getPreview = async txt => {
-  const starryNight = await createStarryNight(common)
-  const markdownItInstance = markdownIt({
-    html: true,
-    highlight(value, lang) {
-      const scope = starryNight.flagToScope(lang)
-      return toHtml({
-        type: "element",
-        tagName: "pre",
-        properties: {
-          className: scope
-            ? [
-                "highlight",
-                "highlight-" +
-                  scope.replace(/^source\./, "").replace(/\./g, "-"),
-              ]
-            : undefined,
-        },
-        children: scope
-          ? /** @type {Array<ElementContent>} */ (
-              starryNight.highlight(value, scope).children
-            )
-          : [{ type: "text", value }],
-      })
-    },
-  })
-  const html = markdownItInstance.render(txt)
-  const $ = cheerio.load(html)
-  $("a").each((_, el) => {
-    const href = $(el).attr("href")
-    $(el).attr("target", "_blank")
-    if (href && !href.match(/^(?:[a-z]+:)?\/\//i)) {
-      $(el).addClass("relative-link")
-      $(el).attr("data-href", href)
-    }
-  })
-
-  return $.html()
-}
-const guide = [
-  "/",
-  ["README"],
-  "/tutorials/",
-  [
-    "README",
-    "installation",
-    "aoconnect-wrapper",
-    "setup-project",
-    "write-tests",
-    "use-sdk",
-    "cherrypick",
-    "check-response",
-    "async-receive",
-    "logging",
-    "fork-wasm-memory",
-    "weavedrive",
-    "local-server",
-    "hyperbeam",
-  ],
-  "/api/",
-  ["README", "ao", "process", "function-piping", "ar", "gql", "armem", "hb"],
-]
-let bfiles = []
-let dir = null
-for (let v of guide) {
-  if (typeof v === "string") {
-    if (bfiles.length > 0) {
-      bfiles.push({
-        dir: true,
-        name: v.replace(/\//g, ""),
-        id: v.replace(/\//g, ""),
-        path: v.split("/").slice(0, -2).join("/") + "/",
-        pid: "0",
-      })
-    }
-    dir = v
-    continue
-  }
-  if (is(Array, v)) {
-    for (let v2 of v) {
-      bfiles.push({
-        ext: "md",
-        name: `${v2}.md`,
-        fetch: `/docs${dir}${v2}.md`,
-        nodel: true,
-        id: `docs${dir.replace(/\//g, "#")}${v2}`,
-        path: dir,
-        pid: "0",
-      })
-    }
-  }
-}
-const bps = map(v => {
-  return {
-    ext: "lua",
-    name: `${v}.lua`,
-    fetch: `/blueprints/${v}.lua`,
-    nodel: true,
-    id: v,
-    path: "/",
-    pid: "3",
-  }
-})([
-  "apm",
-  "arena",
-  "arns",
-  "chat",
-  "chatroom",
-  "patch-legacy-reply",
-  "staking",
-  "token",
-  "voting",
-])
-
-function useResizeObserver(ref) {
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
-
-  useEffect(() => {
-    // Only run on client side
-    if (typeof window === "undefined" || !ref.current) return
-
-    const observeTarget = ref.current
-
-    const resizeObserver = new ResizeObserver(entries => {
-      // We only care about the first element, most often there is only one.
-      const entry = entries[0]
-
-      setDimensions({
-        width: entry.contentRect.width,
-        height: entry.contentRect.height,
-      })
-    })
-
-    resizeObserver.observe(observeTarget)
-
-    return () => {
-      resizeObserver.unobserve(observeTarget)
-      resizeObserver.disconnect()
-    }
-  }, [ref])
-
-  return dimensions
-}
-const mod = "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g"
 
 export default function Home({}) {
+  const filesRef = useRef(null)
+  const openFilesRef = useRef(null)
+  const editorRef = useRef(null)
+  const fileRef = useRef(null)
+  const monacoRef = useRef(null)
   const containerRef = useRef(null)
   const walletRef = useRef(null)
+  const fileInputRef = useRef(null)
+
   global.walletRef = walletRef
   const { width, height } = useResizeObserver(containerRef)
-  useEffect(() => {
-    if (global.fitAddon) global.fitAddon.fit()
-  }, [height, width])
-  const [projects, setProjects] = useState([
-    { name: "Get Started", id: "0", open: true },
-    { name: "Blueprints", id: "3", open: true },
-    { name: "Default Project", id: "1", open: true },
-  ])
+  const [projects, setProjects] = useState(default_projects)
+
+  const [tab, setTab] = useState("Projects")
+  const [ttab, setTtab] = useState("lua")
+  const [ctype, setCtype] = useState("ao.WLN.1")
+  const [cache, setCache] = useState("ao.WLN.1")
+
   const [localFS, setLocalFS] = useState(null)
   const [localFSOpen, setLocalFSOpen] = useState(true)
   const [dryrun, setDryrun] = useState(true)
-  const [ttab, setTtab] = useState("lua")
   const [modal, setModal] = useState(false)
   const [modal2, setModal2] = useState(false)
   const [modal3, setModal3] = useState(false)
@@ -311,7 +156,6 @@ export default function Home({}) {
   const [psid, setPSID] = useState(null)
   const [cid, setCID] = useState(null)
   const [client, setClient] = useState(null)
-  const [tab, setTab] = useState("Projects")
   const [init, setInit] = useState(false)
   const [modules, setModules] = useState([])
   const [module, setModule] = useState(null)
@@ -319,7 +163,6 @@ export default function Home({}) {
   const [proc, setProc] = useState(null)
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
-  const [ctype, setCtype] = useState("ao.WLN.1")
   const [files, setFiles] = useState([...bfiles, ...bps])
   const [openFiles, setOpenFiles] = useState([bfiles[0]])
   const [tests, setTests] = useState([])
@@ -333,7 +176,7 @@ export default function Home({}) {
   const [dirname, setDirname] = useState("")
   const [fileext, setFileext] = useState("js")
   const [monaco, setMonaco] = useState(null)
-  const [cache, setCache] = useState("ao.WLN.1")
+
   const [ntag, setNtag] = useState("")
   const [nver, setNver] = useState("")
   const [ndesc, setNdesc] = useState("")
@@ -341,19 +184,6 @@ export default function Home({}) {
   const [networks, setNetworks] = useState([
     { tag: "ao.WLN.1", desc: "WAO LOCALNET 1" },
   ])
-  const tabmap = {
-    Projects: { icon: <FaCode /> },
-    Tests: { icon: <FaBug /> },
-    Modules: { icon: <FaCubes /> },
-    Processes: { icon: <FaCodeCompare /> },
-    Messages: { icon: <FaEnvelopesBulk /> },
-    //    Accounts: { icon: <FaWallet /> },
-    //    Tokens: { icon: <FaCoins /> },
-    //    Storage: { icon: <FaHardDrive /> },
-    //    Database: { icon: <FaDatabase /> },
-    Networks: { icon: <FaNetworkWired /> },
-  }
-  const tabs = keys(tabmap)
   const _setModule = id => {
     let mmap = {}
     for (let k in ao.mem.modules) {
@@ -373,21 +203,6 @@ export default function Home({}) {
     }
     setProcs(_procs)
     setModule(mod)
-  }
-  function resolvePath(basePath, relativePath) {
-    if (relativePath[0] === "/") return relativePath
-    const stack = basePath.replace(/\/+$/, "").split("/")
-    const parts = relativePath.split("/")
-
-    for (const part of parts) {
-      if (part === "..") {
-        if (stack.length > 1) stack.pop()
-      } else if (part !== "." && part !== "") {
-        stack.push(part)
-      }
-    }
-
-    return stack.join("/")
   }
   const clickFile = async v => {
     let opens = clone(openFilesRef.current)
@@ -425,6 +240,10 @@ export default function Home({}) {
       if (v.ext === "md" && preview) setPreviewContent(await getPreview(txt))
     }
   }
+
+  useEffect(() => {
+    if (global.fitAddon) global.fitAddon.fit()
+  }, [height, width])
 
   useEffect(() => {
     const handler = e => {
@@ -560,19 +379,10 @@ export default function Home({}) {
     })()
   }, [proc])
 
-  const filesRef = useRef(null)
-  const openFilesRef = useRef(null)
-  const editorRef = useRef(null)
   const setType = fileext =>
     monacoRef.current.editor.setModelLanguage(
       editorRef.current.getModel(),
-      fileext === "js"
-        ? "javascript"
-        : fileext === "ts"
-          ? "typescript"
-          : fileext === "md"
-            ? "markdown"
-            : fileext
+      ftype(fileext)
     )
 
   useEffect(() => {
@@ -585,8 +395,6 @@ export default function Home({}) {
       if (networks) setNetworks(networks)
     })()
   }, [])
-  const fileRef = useRef(null)
-  const monacoRef = useRef(null)
 
   useEffect(() => {
     fileRef.current = file
@@ -655,46 +463,7 @@ export default function Home({}) {
       })()
     }
   }, [init])
-  const ctypes = [
-    {
-      key: "hb",
-      name: "HyperBEAM Nodes",
-      desc: "Websocket subscriptions to remote HyperBEAM nodes",
-    },
-    {
-      key: "su",
-      name: "Scheduler Units ( SUs )",
-      desc: "Connections to browser SUs via WebRTC",
-    },
-    {
-      key: "cu",
-      name: "Compute Units ( CUs )",
-      desc: "Connections to browser CUs via WebRTC",
-    },
-    {
-      key: "c",
-      name: "Clients",
-      desc: "Other browsers subscribing to your SU & CU via WebRTC",
-    },
-    {
-      key: "hub",
-      name: "WAO Hubs",
-      desc: "Websocket connections to WAO hubs",
-    },
-  ]
   const modmap = indexBy(prop("txid"))(modules ?? [])
-  function handleEditorDidMount(editor, monaco) {
-    editorRef.current = editor
-    setMonaco(monaco)
-    fetch("/docs/README.md")
-      .then(r => r.text())
-      .then(txt => {
-        editorRef.current.setValue(txt)
-        getPreview(txt).then(setPreviewContent)
-      })
-  }
-
-  const fileInputRef = useRef(null)
 
   const handleImportClick = () => {
     fileInputRef.current.click()
@@ -748,8 +517,7 @@ export default function Home({}) {
   const ttabs = [
     {
       key: "lua",
-      //name: `LUA EVAL${dryrun ? " ( DRYRUN )" : ""} ${!proc ? "" : " > " + proc.id.slice(0, 7) + "..." + proc.id.slice(-7)}`,
-      name: `LUA ${dryrun ? " ( DRYRUN )" : ""}`,
+      name: `AOS ${dryrun ? " ( DRYRUN )" : ""}`,
     },
     { key: "log", name: "LOGS" },
   ]
@@ -912,84 +680,6 @@ export default function Home({}) {
     setLogs([...logs, log])
     if (toast) toaster.create(toast)
   }
-  const terminal = (
-    <Flex
-      h="100%"
-      direction="column"
-      w="100%"
-      css={{ borderLeft: "1px solid #666" }}
-    >
-      <Flex
-        fontSize="12px"
-        h="25px"
-        bg="#1E1E1E"
-        color="#999"
-        css={{ border: "1px solid #666" }}
-      >
-        {map(v => {
-          return (
-            <Flex
-              flex={1}
-              align="center"
-              css={{
-                borderRight: "1px solid #666",
-                cursor: "pointer",
-                _hover: { opacity: 0.75 },
-              }}
-              px={2}
-              bg={ttab === v.key ? "#5137C5" : ""}
-              color={ttab === v.key ? "#ddd" : "#999"}
-              justify="center"
-              onClick={async () => {
-                if (ttab === v.key && v.key === "lua" && global.prompt) {
-                  setDryrun(!dryrun)
-                  const on = !global.dryrun
-                  global.setDryrun(on)
-                  await global.prompt(
-                    "toggling dryrun mode...... " + (on ? "on" : "off")
-                  )
-                } else {
-                  setTtab(v.key)
-                }
-              }}
-            >
-              {v.name}
-            </Flex>
-          )
-        })(ttabs)}
-      </Flex>
-      <Box flex={1} w="100%" h="100%" bg="#1E1E1E" position="relative">
-        {ttab !== "log" ? null : (
-          <Box
-            p={2}
-            bg="red"
-            fontSize="11px"
-            position="abosolute"
-            h="100%"
-            w="100%"
-            bg="#1e1e1e"
-            color="#c6c6c6"
-            fontFamily="monospace"
-            css={{ overflowY: "auto" }}
-          >
-            {map(v => {
-              return (
-                <Box>
-                  <Box as="span" color="#666" mr={2}>
-                    [{`${dayjs(v.date).format("MM/DD HH:mm:ss")}`}]
-                  </Box>{" "}
-                  {v.desc}
-                </Box>
-              )
-            })(logs)}
-          </Box>
-        )}
-        <Box id="terminal" borderRadius="0" w="100%" h="100%">
-          <Terminal {...{ global }} />
-        </Box>
-      </Box>
-    </Flex>
-  )
   const top = (
     <Flex w="100%" bg="white" css={{ borderBottom: "1px solid #ddd" }}>
       <Flex
@@ -999,9 +689,6 @@ export default function Home({}) {
         align="center"
         justify="center"
         w="50px"
-        onClick={() => {
-          console.log(global.fitAddon.fit())
-        }}
       >
         WAO
       </Flex>
@@ -1184,55 +871,6 @@ export default function Home({}) {
           Connect Wallet
         </Flex>
       )}
-    </Flex>
-  )
-  const sidebar = !init ? null : (
-    <Flex css={{ overflowY: "auto", borderRight: "1px solid #ddd" }}>
-      <Flex direction="column" w="50px">
-        {map(v => {
-          return (
-            <Tooltip
-              content={v.toUpperCase()}
-              positioning={{ placement: "right-end" }}
-              openDelay={0}
-              closeDelay={0}
-            >
-              <Flex
-                h="50px"
-                w="100%"
-                fontSize="12px"
-                align="center"
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                  flexShrink: "0",
-                }}
-                onClick={() => {
-                  if (v === "Messages" && proc === null) return
-                  if (
-                    includes(v, ["Accounts", "Tokens", "Storage", "Database"])
-                  ) {
-                    return alert("Coming Soon!")
-                  }
-                  setTab(v)
-                }}
-                bg={v === tab ? "#5137C5" : ""}
-                color={
-                  includes(v, ["Accounts", "Tokens", "Storage", "Database"]) ||
-                  (v === "Messages" && proc === null)
-                    ? "#999"
-                    : v === tab
-                      ? "white"
-                      : ""
-                }
-                justify="center"
-              >
-                <Icon size="lg">{tabmap[v].icon}</Icon>
-              </Flex>
-            </Tooltip>
-          )
-        })(tabs)}
-      </Flex>
     </Flex>
   )
   const buttons = (
@@ -1845,32 +1483,6 @@ export default function Home({}) {
       ) : null}
     </Flex>
   )
-  const FilePath = () => {
-    if (!file) return null
-    const pmap = indexBy(prop("id"))(projects)
-    let html = []
-    html.push(<Box>{pmap[file.pid].name}</Box>)
-    for (let v of file.path.split("/")) {
-      if (v === "") continue
-      html.push(
-        <>
-          <Icon boxSize="11px" mx={2}>
-            <FaAngleRight />
-          </Icon>
-          <Box>{v}</Box>
-        </>
-      )
-    }
-    return (
-      <>
-        {html}
-        <Icon boxSize="11px" mx={2}>
-          <FaAngleRight />
-        </Icon>
-        <Box>{file?.name}</Box>
-      </>
-    )
-  }
   const leftpane = !init ? null : (
     <Box
       fontSize="12px"
@@ -2483,6 +2095,7 @@ export default function Home({}) {
       )}
     </Flex>
   )
+
   const EditorTabs = () => (
     <Flex
       flex={1}
@@ -2491,32 +2104,7 @@ export default function Home({}) {
       overflowY="hidden"
       className="editor-tabs"
     >
-      <style jsx global>{`
-        .editor-tabs {
-          scrollbar-width: thin;
-          scrollbar-color: #444 #1e1e1e;
-        }
-
-        .editor-tabs::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
-        }
-
-        .editor-tabs::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 4px;
-        }
-
-        .editor-tabs::-webkit-scrollbar-thumb {
-          background: #bbbbbb;
-          border-radius: 4px;
-        }
-
-        .editor-tabs::-webkit-scrollbar-thumb:hover {
-          background: #999999;
-        }
-      `}</style>
-
+      <EditorScrollbarStyle />
       {map(v => {
         const open = v.id === file?.id
         return (
@@ -2652,7 +2240,7 @@ export default function Home({}) {
         color="#999"
         align="center"
       >
-        <FilePath />
+        <FilePath {...{ file, projects }} />
       </Flex>
       <Flex w="100%" flex={1} css={{ overflowY: "auto" }}>
         {isPreview ? (
@@ -2674,24 +2262,19 @@ export default function Home({}) {
           h="100%"
         >
           <Editor
-            height={tab !== "Projects" ? "100%" : "calc(100vh - 120px)"}
-            width="100%"
-            theme="vs-dark"
-            defaultLanguage={
-              file?.ext === "js" ? "js" : file?.ext ? file.ext : "lua"
-            }
-            onMount={handleEditorDidMount}
-            onChange={async () => {
-              if (file) {
-                const lua = editorRef.current.getValue()
-                await lf.setItem(`file-${file.id}`, lua)
-              }
+            {...{
+              file,
+              editorRef,
+              tab,
+              setMonaco,
+              setPreviewContent,
             }}
           />
         </Box>
       </Flex>
     </Flex>
   )
+
   const middlepane = (
     <Flex w="100%">
       {!init ? null : tab === "Messages" ? (
@@ -3533,473 +3116,306 @@ export default function Home({}) {
       )}
     </Flex>
   )
+
   const modals = (
     <>
-      {!modal ? null : (
-        <Flex
-          align="center"
-          justify="center"
-          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
-          bg="rgba(1,1,1,0.5)"
-          w="100vw"
-          h="100vh"
-        >
-          <Box
-            mb="50px"
-            w="600px"
-            bg="white"
-            css={{ borderRadius: "10px", position: "relative" }}
-          >
-            <Flex
-              justify="flex-end"
-              w="100%"
-              p={2}
-              css={{ position: "absolute" }}
-            >
-              <Icon
-                size="md"
-                color="#999"
-                m={2}
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={() => setModal(false)}
-              >
-                <FaX />
-              </Icon>
-            </Flex>
-            <Box p={6}>
-              <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-                Create New File
-              </Box>
-              <Box fontSize="12px" color="#666" mb={2}>
-                File Name
-              </Box>
-              <Flex align="flex-end">
-                <Input
-                  flex={1}
-                  value={filename}
-                  onChange={e => setFilename(e.target.value)}
-                />
-                <Box mx={2}>.</Box>
-                <NativeSelect.Root w="80px">
-                  <NativeSelect.Field
-                    value={fileext}
-                    onChange={e => setFileext(e.target.value)}
-                  >
-                    <option value="lua">lua</option>
-                    <option value="js">js</option>
-                    <option value="json">json</option>
-                    <option value="md">md</option>
-                  </NativeSelect.Field>
-                  <NativeSelect.Indicator />
-                </NativeSelect.Root>
-              </Flex>
-              <Box fontSize="12px" color="#666" mb={2} mt={4}>
-                Location
-              </Box>
-              <Box fontSize="12px" mb={6}>
-                {getDirs()}
-              </Box>
-              <Flex
-                align="center"
-                justify="center"
-                mt={4}
-                p={1}
-                mb={1}
-                color="#5137C5"
-                css={{
-                  borderRadius: "3px",
-                  border: "1px solid #5137C5",
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={async () => {
-                  if (/^\s*$/.test(filename)) return alert("Enter a filename.")
-                  const id = generateId()
-                  const name = `${filename}.${fileext}`
-                  for (let f of files) {
-                    if (
-                      f.pid === selDir.pid &&
-                      f.name === name &&
-                      f.path === selDir.path
-                    ) {
-                      alert("File already exists!")
-                      return
-                    }
-                  }
-                  const _file = {
-                    name,
-                    update: DateMS.now(),
-                    id,
-                    ext: fileext,
-                    pid: selDir.pid,
-                    path: selDir.path,
-                  }
-                  const txt =
-                    fileext === "js"
-                      ? src_data_js
-                      : fileext === "lua"
-                        ? src_data_lua
-                        : ""
-                  const _files = append(_file, files)
-                  await lf.setItem("files", _files)
-                  await lf.setItem(`file-${id}`, txt)
-                  setFiles(_files)
-                  setOpenFiles([...openFiles, _file])
-                  setFile(_file)
-                  setPreview(false)
-                  setType(fileext)
-                  // todo: handle this better
-                  setTimeout(() => editorRef.current.setValue(txt), 100)
-                  setModal(false)
-                  setFilename("")
-                }}
-              >
-                Create
-              </Flex>
-            </Box>
+      <Modal {...{ modal, setModal }}>
+        <Box p={6}>
+          <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
+            Create New File
           </Box>
-        </Flex>
-      )}
-      {!modal2 ? null : (
-        <Flex
-          align="center"
-          justify="center"
-          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
-          bg="rgba(1,1,1,0.5)"
-          w="100vw"
-          h="100vh"
-        >
-          <Box
-            mb="50px"
-            w="600px"
-            bg="white"
-            css={{ borderRadius: "10px", position: "relative" }}
-          >
-            <Flex
-              justify="flex-end"
-              w="100%"
-              p={2}
-              css={{ position: "absolute" }}
-            >
-              <Icon
-                size="md"
-                color="#999"
-                m={2}
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={() => setModal2(false)}
+          <Box fontSize="12px" color="#666" mb={2}>
+            File Name
+          </Box>
+          <Flex align="flex-end">
+            <Input
+              flex={1}
+              value={filename}
+              onChange={e => setFilename(e.target.value)}
+            />
+            <Box mx={2}>.</Box>
+            <NativeSelect.Root w="80px">
+              <NativeSelect.Field
+                value={fileext}
+                onChange={e => setFileext(e.target.value)}
               >
-                <FaX />
-              </Icon>
-            </Flex>
-            <Box p={6}>
-              <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-                Launch New AO Network
-              </Box>
+                <option value="lua">lua</option>
+                <option value="js">js</option>
+                <option value="json">json</option>
+                <option value="md">md</option>
+              </NativeSelect.Field>
+              <NativeSelect.Indicator />
+            </NativeSelect.Root>
+          </Flex>
+          <Box fontSize="12px" color="#666" mb={2} mt={4}>
+            Location
+          </Box>
+          <Box fontSize="12px" mb={6}>
+            {getDirs()}
+          </Box>
+          <Flex
+            align="center"
+            justify="center"
+            mt={4}
+            p={1}
+            mb={1}
+            color="#5137C5"
+            css={{
+              borderRadius: "3px",
+              border: "1px solid #5137C5",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={async () => {
+              if (/^\s*$/.test(filename)) return alert("Enter a filename.")
+              const id = generateId()
+              const name = `${filename}.${fileext}`
+              for (let f of files) {
+                if (
+                  f.pid === selDir.pid &&
+                  f.name === name &&
+                  f.path === selDir.path
+                ) {
+                  alert("File already exists!")
+                  return
+                }
+              }
+              const _file = {
+                name,
+                update: DateMS.now(),
+                id,
+                ext: fileext,
+                pid: selDir.pid,
+                path: selDir.path,
+              }
+              const txt =
+                fileext === "js"
+                  ? src_data_js
+                  : fileext === "lua"
+                    ? src_data_lua
+                    : ""
+              const _files = append(_file, files)
+              await lf.setItem("files", _files)
+              await lf.setItem(`file-${id}`, txt)
+              setFiles(_files)
+              setOpenFiles([...openFiles, _file])
+              setFile(_file)
+              setPreview(false)
+              setType(fileext)
+              // todo: handle this better
+              setTimeout(() => editorRef.current.setValue(txt), 100)
+              setModal(false)
+              setFilename("")
+            }}
+          >
+            Create
+          </Flex>
+        </Box>
+      </Modal>
+      <Modal {...{ modal: modal2, setModal: setModal2 }}>
+        <Box p={6}>
+          <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
+            Launch New AO Network
+          </Box>
 
-              <Box>
-                <Box fontSize="12px" color="#666" mb={2}>
-                  Network Tag
-                </Box>
-                <Flex align="flex-end">
-                  <Input value="ao" disabled={true} w="100px" />
-                  <Box mx={2}>.</Box>
-                  <Input
-                    w="100px"
-                    placeholder="WLN"
-                    value={ntag}
-                    onChange={e => setNtag(e.target.value)}
-                  />
-                  <Box mx={2}>.</Box>
-                  <Input
-                    w="100px"
-                    placeholder="1"
-                    value={nver}
-                    onChange={e => setNver(e.target.value)}
-                  />
-                </Flex>
-              </Box>
-              <Box flex={1} mt={4}>
-                <Box fontSize="12px" color="#666" mb={2}>
-                  Description
-                </Box>
-                <Input
-                  placeholder=""
-                  value={ndesc}
-                  onChange={e => setNdesc(e.target.value)}
-                />
-              </Box>
-
-              <Flex
-                align="center"
-                justify="center"
-                mt={4}
-                p={1}
-                mb={1}
-                color="#5137C5"
-                css={{
-                  borderRadius: "3px",
-                  border: "1px solid #5137C5",
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={async () => {
-                  if (/^\s*$/.test(ntag.trim()))
-                    return alert("Enter a network name")
-                  if (/^\s*$/.test(nver.trim()))
-                    return alert("Enter a network version")
-                  const tag = `ao.${ntag}.${nver}`
-                  for (let v of networks) {
-                    if (tag === v.tag) return alert(`${ntag} already exists!`)
-                  }
-
-                  const _networks = append({ tag, desc: ndesc }, networks)
-                  setNetworks(_networks)
-                  setCache(tag)
-                  setCtype(tag)
-                  setNtag("")
-                  setNver("")
-                  setNdesc("")
-                  setModal2(false)
-                  await lf.setItem("networks", _networks)
-                }}
-              >
-                Launch
-              </Flex>
+          <Box>
+            <Box fontSize="12px" color="#666" mb={2}>
+              Network Tag
             </Box>
-          </Box>
-        </Flex>
-      )}
-      {!modal3 ? null : (
-        <Flex
-          align="center"
-          justify="center"
-          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
-          bg="rgba(1,1,1,0.5)"
-          w="100vw"
-          h="100vh"
-        >
-          <Box
-            mb="50px"
-            w="600px"
-            bg="white"
-            css={{ borderRadius: "10px", position: "relative" }}
-          >
-            <Flex
-              justify="flex-end"
-              w="100%"
-              p={2}
-              css={{ position: "absolute" }}
-            >
-              <Icon
-                size="md"
-                color="#999"
-                m={2}
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={() => setModal3(false)}
-              >
-                <FaX />
-              </Icon>
+            <Flex align="flex-end">
+              <Input value="ao" disabled={true} w="100px" />
+              <Box mx={2}>.</Box>
+              <Input
+                w="100px"
+                placeholder="WLN"
+                value={ntag}
+                onChange={e => setNtag(e.target.value)}
+              />
+              <Box mx={2}>.</Box>
+              <Input
+                w="100px"
+                placeholder="1"
+                value={nver}
+                onChange={e => setNver(e.target.value)}
+              />
             </Flex>
-            <Box p={6}>
-              <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-                Create New Project
-              </Box>
-              <Box fontSize="12px" color="#666" mb={2}>
-                Project Name
-              </Box>
-              <Flex align="flex-end">
-                <Input
-                  flex={1}
-                  value={projectname}
-                  onChange={e => setProjectname(e.target.value)}
-                />
-              </Flex>
-              <Flex
-                align="center"
-                justify="center"
-                mt={4}
-                p={1}
-                mb={1}
-                color="#5137C5"
-                css={{
-                  borderRadius: "3px",
-                  border: "1px solid #5137C5",
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={async () => {
-                  if (/^\s*$/.test(projectname))
-                    return alert("Enter a project name.")
-                  const id = generateId()
-                  const _pr = {
-                    name: projectname,
-                    created: DateMS.now(),
-                    id,
-                    open: true,
-                  }
-                  const _prs = append(_pr, projects)
-                  await lf.setItem("projects", _prs)
-                  setProjects(_prs)
-                  setProjectname("")
-                  setModal3(false)
-                }}
-              >
-                Create
-              </Flex>
-            </Box>
           </Box>
-        </Flex>
-      )}
-      {!modal4 ? null : (
-        <Flex
-          align="center"
-          justify="center"
-          css={{ position: "fixed", top: 0, left: 0, zIndex: 5 }}
-          bg="rgba(1,1,1,0.5)"
-          w="100vw"
-          h="100vh"
-        >
-          <Box
-            mb="50px"
-            w="600px"
-            bg="white"
-            css={{ borderRadius: "10px", position: "relative" }}
+          <Box flex={1} mt={4}>
+            <Box fontSize="12px" color="#666" mb={2}>
+              Description
+            </Box>
+            <Input
+              placeholder=""
+              value={ndesc}
+              onChange={e => setNdesc(e.target.value)}
+            />
+          </Box>
+
+          <Flex
+            align="center"
+            justify="center"
+            mt={4}
+            p={1}
+            mb={1}
+            color="#5137C5"
+            css={{
+              borderRadius: "3px",
+              border: "1px solid #5137C5",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={async () => {
+              if (/^\s*$/.test(ntag.trim()))
+                return alert("Enter a network name")
+              if (/^\s*$/.test(nver.trim()))
+                return alert("Enter a network version")
+              const tag = `ao.${ntag}.${nver}`
+              for (let v of networks) {
+                if (tag === v.tag) return alert(`${ntag} already exists!`)
+              }
+
+              const _networks = append({ tag, desc: ndesc }, networks)
+              setNetworks(_networks)
+              setCache(tag)
+              setCtype(tag)
+              setNtag("")
+              setNver("")
+              setNdesc("")
+              setModal2(false)
+              await lf.setItem("networks", _networks)
+            }}
           >
-            <Flex
-              justify="flex-end"
-              w="100%"
-              p={2}
-              css={{ position: "absolute" }}
-            >
-              <Icon
-                size="md"
-                color="#999"
-                m={2}
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={() => setModal4(false)}
-              >
-                <FaX />
-              </Icon>
-            </Flex>
-            <Box p={6}>
-              <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-                Create New Folder
-              </Box>
-              <Box fontSize="12px" color="#666" mb={2}>
-                Folder Name
-              </Box>
-              <Flex align="flex-end">
-                <Input
-                  flex={1}
-                  value={dirname}
-                  onChange={e => setDirname(e.target.value)}
-                />
-              </Flex>
-              <Box fontSize="12px" color="#666" mb={2} mt={4}>
-                Location
-              </Box>
-              <Box fontSize="12px" mb={6}>
-                {getDirs()}
-              </Box>
-              <Flex
-                align="center"
-                justify="center"
-                p={1}
-                mb={1}
-                color="#5137C5"
-                css={{
-                  borderRadius: "3px",
-                  border: "1px solid #5137C5",
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={async () => {
-                  if (/^\s*$/.test(dirname))
-                    return alert("Enter a folder name.")
-                  const id = generateId()
-                  for (let f of files) {
-                    if (
-                      f.pid === selDir.pid &&
-                      f.name === dirname &&
-                      f.path === selDir.path
-                    ) {
-                      alert("Directory already exists!")
-                      return
-                    }
-                  }
-                  const _file = {
-                    name: `${dirname}`,
-                    update: DateMS.now(),
-                    id,
-                    pid: selDir.pid,
-                    dir: true,
-                    path: selDir.path,
-                  }
-                  const _files = append(_file, files)
-                  await lf.setItem("files", _files)
-                  setFiles(_files)
-                  setModal4(false)
-                  setDirname("")
-                }}
-              >
-                Create
-              </Flex>
-            </Box>
+            Launch
+          </Flex>
+        </Box>
+      </Modal>
+      <Modal {...{ modal: modal3, setModal: setModal3 }}>
+        <Box p={6}>
+          <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
+            Create New Project
           </Box>
-        </Flex>
-      )}
+          <Box fontSize="12px" color="#666" mb={2}>
+            Project Name
+          </Box>
+          <Flex align="flex-end">
+            <Input
+              flex={1}
+              value={projectname}
+              onChange={e => setProjectname(e.target.value)}
+            />
+          </Flex>
+          <Flex
+            align="center"
+            justify="center"
+            mt={4}
+            p={1}
+            mb={1}
+            color="#5137C5"
+            css={{
+              borderRadius: "3px",
+              border: "1px solid #5137C5",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={async () => {
+              if (/^\s*$/.test(projectname))
+                return alert("Enter a project name.")
+              const id = generateId()
+              const _pr = {
+                name: projectname,
+                created: DateMS.now(),
+                id,
+                open: true,
+              }
+              const _prs = append(_pr, projects)
+              await lf.setItem("projects", _prs)
+              setProjects(_prs)
+              setProjectname("")
+              setModal3(false)
+            }}
+          >
+            Create
+          </Flex>
+        </Box>
+      </Modal>
+      <Modal {...{ modal: modal4, setModal: setModal4 }}>
+        {" "}
+        <Box p={6}>
+          <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
+            Create New Folder
+          </Box>
+          <Box fontSize="12px" color="#666" mb={2}>
+            Folder Name
+          </Box>
+          <Flex align="flex-end">
+            <Input
+              flex={1}
+              value={dirname}
+              onChange={e => setDirname(e.target.value)}
+            />
+          </Flex>
+          <Box fontSize="12px" color="#666" mb={2} mt={4}>
+            Location
+          </Box>
+          <Box fontSize="12px" mb={6}>
+            {getDirs()}
+          </Box>
+          <Flex
+            align="center"
+            justify="center"
+            p={1}
+            mb={1}
+            color="#5137C5"
+            css={{
+              borderRadius: "3px",
+              border: "1px solid #5137C5",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={async () => {
+              if (/^\s*$/.test(dirname)) return alert("Enter a folder name.")
+              const id = generateId()
+              for (let f of files) {
+                if (
+                  f.pid === selDir.pid &&
+                  f.name === dirname &&
+                  f.path === selDir.path
+                ) {
+                  alert("Directory already exists!")
+                  return
+                }
+              }
+              const _file = {
+                name: `${dirname}`,
+                update: DateMS.now(),
+                id,
+                pid: selDir.pid,
+                dir: true,
+                path: selDir.path,
+              }
+              const _files = append(_file, files)
+              await lf.setItem("files", _files)
+              setFiles(_files)
+              setModal4(false)
+              setDirname("")
+            }}
+          >
+            Create
+          </Flex>
+        </Box>
+      </Modal>
     </>
   )
+
   return (
     <>
       <GlobalStyle />
-      {!init ? (
-        <Flex
-          w="100%"
-          h="100%"
-          align="center"
-          justify="center"
-          fontSize="30px"
-          bg="#5137C5"
-          color="#9C89F6"
-          direction="column"
-          css={{ position: "fixed", top: 0, left: 0, zIndex: 100 }}
-        >
-          <Flex css={{ position: "relative" }} align="center" justify="center">
-            <Spinner
-              boxSize="350px"
-              css={{ position: "absolute" }}
-              borderWidth="5px"
-              animationDuration="1s"
-            />
-            <Box
-              boxSize="300px"
-              css={{
-                backgroundImage: "url(/logo.png)",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }}
-            />
-          </Flex>
-        </Flex>
-      ) : null}
+      {!init ? <Logo /> : null}
       <Flex direction="column" h="100vh" w="100vw">
         <Flex h="30px">{top}</Flex>
         <Flex h="calc(100vh - 60px)" w="100vw" css={{ overflow: "hidden" }}>
           <Flex w="50px" h="calc(100vh - 60px)">
-            {sidebar}
+            <Sidebar {...{ init, tab, setTab, proc }} />
           </Flex>
           <Flex w="315px" h="calc(100vh - 60px)">
             {leftpane}
@@ -4027,24 +3443,25 @@ export default function Home({}) {
                   <Panel maxSize={75}>{editor}</Panel>
                   <PanelResizeHandle />
                   <Panel maxSize={75}>
-                    <Box
-                      ref={containerRef}
-                      flex={1}
-                      h="100%"
-                      w="100%"
-                      css={{ overflow: "hidden" }}
-                    >
-                      {terminal}
-                    </Box>
+                    <Terminal
+                      {...{
+                        ttab,
+                        global,
+                        ttabs,
+                        setTtab,
+                        setDryrun,
+                        dryrun,
+                        logs,
+                        containerRef,
+                      }}
+                    />
                   </Panel>
                 </PanelGroup>
               </Panel>
             </PanelGroup>
           </Box>
         </Flex>
-        <Flex h="30px">
-          <Footer />
-        </Flex>
+        <Footer />
       </Flex>
       {modals}
       <Toaster />
