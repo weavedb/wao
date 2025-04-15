@@ -2,7 +2,7 @@ const ctypes = [
   {
     key: "hb",
     name: "HyperBEAM Nodes",
-    desc: "Websocket subscriptions to remote HyperBEAM nodes",
+    desc: "WS subscriptions to remote HyperBEAM nodes",
   },
   {
     key: "su",
@@ -17,7 +17,7 @@ const ctypes = [
   {
     key: "c",
     name: "Clients",
-    desc: "Other browsers subscribing to your SU & CU via WebRTC",
+    desc: "Browsers subscribing to your SU/CU via WebRTC",
   },
   {
     key: "hub",
@@ -26,4 +26,6 @@ const ctypes = [
   },
 ]
 const hb_url = "http://localhost:10001"
-export { ctypes, hb_url }
+const mod = "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g"
+
+export { ctypes, hb_url, mod }

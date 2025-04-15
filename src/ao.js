@@ -3,9 +3,8 @@ const pkg = WarpArBundles.default ?? WarpArBundles
 const { createData, ArweaveSigner } = pkg
 import AR from "./ar.js"
 import md5 from "md5"
-import { createDataItemSigner } from "@permaweb/aoconnect"
-
 import {
+  createDataItemSigner,
   connect,
   assign,
   result,
@@ -15,7 +14,7 @@ import {
   dryrun,
   monitor,
   unmonitor,
-} from "aoconnect-wao"
+} from "@permaweb/aoconnect"
 
 import {
   dissoc,
@@ -371,6 +370,7 @@ class AO {
       if (auth) tags.Authority = auth
       if (!tags.Authority && this.authority) tags.Authority = this.authority
       let _tags = buildTags(null, tags)
+      console.log("yo.....................", data, _tags)
       pid = await this.spawn({
         variant: this.variant,
         memory,
