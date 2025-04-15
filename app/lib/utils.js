@@ -11,6 +11,7 @@ dayjs.extend(relativeTime)
 function generateId() {
   return Math.random().toString(36).substring(2, 15)
 }
+
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 
 const tags = tags => fromPairs(map(v => [v.name, v.value])(tags))
@@ -112,7 +113,16 @@ const ftype = fileext => {
 }
 const DateMS = Date
 
+const getAct = message => {
+  if (message) {
+    const t = tags(message.http_msg.tags)
+    return t.Type === "Process" ? "Process" : t.Action
+  }
+  return null
+}
+
 export {
+  getAct,
   DateMS,
   ftype,
   wait,

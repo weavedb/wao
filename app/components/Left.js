@@ -130,7 +130,7 @@ export default function Left() {
         <>
           <Flex
             py={1}
-            px={4}
+            px={3}
             fontSize="10px"
             color="#ddd"
             bg="#5137C5"
@@ -144,6 +144,7 @@ export default function Left() {
               //if (!jwk) return alert("wallet not connected")
               let pid, p
               ;({ pid, p } = await g.ao.deploy({ module: module.id, jwk }))
+              g.logSpawn(pid)
               const v = pid
               let _proc = clone(g.ao.mem.env[v])
               delete _proc.memory
@@ -176,7 +177,7 @@ export default function Left() {
           <>
             <Flex
               py={1}
-              px={4}
+              px={3}
               fontSize="10px"
               color="#ddd"
               bg="#5137C5"
@@ -194,7 +195,7 @@ export default function Left() {
                   const jwk = await g.getWallet()
                   //if (!jwk) return alert("wallet not connected")
                   const res = await p.msg("Eval", { data: lua, jwk })
-                  console.log(res)
+                  g.logMsg(res.mid)
                 }
               }}
             >
@@ -285,7 +286,7 @@ export default function Left() {
           <Flex
             ml={2}
             py={1}
-            px={4}
+            px={3}
             fontSize="10px"
             color="#ddd"
             bg="#5137C5"
@@ -312,7 +313,7 @@ export default function Left() {
               bg="white"
               color="#5137C5"
               py={1}
-              px={4}
+              px={3}
               css={{
                 border: "1px solid #5137C5",
                 borderRadius: "5px",
@@ -335,7 +336,7 @@ export default function Left() {
               color="#ddd"
               bg="#5137C5"
               py={1}
-              px={4}
+              px={3}
               css={{
                 borderRadius: "5px",
                 cursor: "pointer",
@@ -440,7 +441,7 @@ export default function Left() {
               bg="white"
               color="#5137C5"
               py={1}
-              px={4}
+              px={3}
               css={{
                 border: "1px solid #5137C5",
                 borderRadius: "5px",
@@ -466,7 +467,7 @@ export default function Left() {
               color="white"
               bg="#5137C5"
               py={1}
-              px={4}
+              px={3}
               css={{
                 borderRadius: "5px",
                 cursor: "pointer",
@@ -570,6 +571,7 @@ export default function Left() {
                     const t = tags(obj.message.http_msg.tags)
                     if (t.Type === "Process") {
                       const pid = await g.ao.spawn(obj.message)
+                      g.logSpawn(pid)
                       const val = g.ao.mem.env[pid]
                       let mmap = {}
                       for (let k in g.ao.mem.modules)
@@ -580,7 +582,8 @@ export default function Left() {
                     } else {
                       let { process } = obj.message
                       if (!(await recover(process))) return
-                      await g.ao.message(obj.message)
+                      const mid = await g.ao.message(obj.message)
+                      g.logMsg(mid)
                     }
                     g.hub1.socket.send(
                       JSON.stringify({
@@ -670,7 +673,7 @@ export default function Left() {
               bg="white"
               color="#5137C5"
               py={1}
-              px={4}
+              px={3}
               css={{
                 border: "1px solid #5137C5",
                 borderRadius: "5px",
@@ -684,7 +687,7 @@ export default function Left() {
                 }
               }}
             >
-              PROXY localhost:7070
+              PROXY : 7070
             </Flex>
           ) : (
             <Flex
@@ -693,7 +696,7 @@ export default function Left() {
               color="white"
               bg="#5137C5"
               py={1}
-              px={4}
+              px={3}
               css={{
                 borderRadius: "5px",
                 cursor: "pointer",
@@ -705,6 +708,26 @@ export default function Left() {
                 g.hub1.onMsg = async obj => {
                   console.log("New PX Msg:", obj)
                   adaptor.get(obj.req, res => {
+                    if (obj.req.device === "mu" && obj.req.path === "/") {
+                      try {
+                        let body = obj.req.body
+                        if (
+                          obj.req.body.type === "Buffer" &&
+                          Array.isArray(obj.req.body.data)
+                        ) {
+                          body = new Uint8Array(body.data)
+                        }
+
+                        const _tags = new DataItem(body).tags
+                        if (tags(_tags).Type === "Process") {
+                          g.logSpawn(res.json.id)
+                        } else {
+                          g.logMsg(res.json.id)
+                        }
+                      } catch (e) {
+                        console.log(e)
+                      }
+                    }
                     g.hub1.socket.send(
                       JSON.stringify({
                         type: "msg",
