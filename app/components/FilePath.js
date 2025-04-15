@@ -1,7 +1,11 @@
 import { Box, Flex, Icon } from "@chakra-ui/react"
 import { FaAngleRight } from "react-icons/fa6"
 import { indexBy, prop } from "ramda"
-export default function FilePath({ file, projects }) {
+import use from "/lib/use"
+
+export default function FilePath({}) {
+  const [file] = use("file")
+  const [projects] = use("projects")
   if (!file) return null
   const pmap = indexBy(prop("id"))(projects)
   let html = []

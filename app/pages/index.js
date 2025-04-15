@@ -36,28 +36,28 @@ import {
 
 // styles
 import GlobalStyle from "/components/GlobalStyle"
-import EditorScrollbarStyle from "/components/EditorScrollbarStyle"
 
 // components
-import FilePath from "/components/FilePath"
+
 import Sidebar from "/components/Sidebar"
 import Logo from "/components/Logo"
 import Footer from "/components/Footer"
 import Editor from "/components/Editor"
 import Terminal from "/components/Terminal"
-import Modal from "/components/Modal"
+import CreateFileModal from "/components/CreateFileModal"
+import CreateFolderModal from "/components/CreateFolderModal"
+import LaunchNetworkModal from "/components/LaunchNetworkModal"
+import CreateProjectModal from "/components/CreateProjectModal"
 
 //data
 import { ctypes } from "/lib/data"
 
 // utils
 import chalk from "chalk"
-import _assert from "assert"
 import { src_data_js, src_data_lua } from "/lib/scripts"
 import md5 from "md5"
 
 import lf from "localforage"
-const DateMS = Date
 
 import {
   ftype,
@@ -68,9 +68,10 @@ import {
   getPreview,
   useResizeObserver,
   resolvePath,
+  DateMS,
 } from "/lib/utils"
 
-import global from "/lib/global"
+import g from "/lib/global"
 
 import {
   addIndex,
@@ -118,28 +119,34 @@ export default function Home({}) {
   const filesRef = useRef(null)
   const openFilesRef = useRef(null)
   const editorRef = useRef(null)
+  g.editorRef = editorRef
   const fileRef = useRef(null)
-  const monacoRef = useRef(null)
   const containerRef = useRef(null)
+  g.containerRef = containerRef
   const walletRef = useRef(null)
   const fileInputRef = useRef(null)
+  g.walletRef = walletRef
 
-  global.walletRef = walletRef
   const { width, height } = useResizeObserver(containerRef)
-  const [projects, setProjects] = useState(default_projects)
-
-  const [tab, setTab] = useState("Projects")
-  const [ttab, setTtab] = useState("lua")
-  const [ctype, setCtype] = useState("ao.WLN.1")
-  const [cache, setCache] = useState("ao.WLN.1")
+  const [projects, setProjects] = use("projects")
+  const [tab, setTab] = use("tab")
+  const [ttab, setTtab] = use("ttab")
+  const [ctype, setCtype] = use("ctype")
+  const [cache, setCache] = use("cache")
+  const [init, setInit] = use("init")
+  const [dryrun, setDryrun] = use("dryrun")
+  const [proc, setProc] = use("proc")
+  const [file, setFile] = use("file")
+  const [previewContent, setPreviewContent] = use("previewContent")
+  const [logs, setLogs] = use("logs")
+  const [modal, setModal] = use("modal")
+  const [modal2, setModal2] = use("modal2")
+  const [modal3, setModal3] = use("modal3")
+  const [modal4, setModal4] = use("modal4")
 
   const [localFS, setLocalFS] = useState(null)
   const [localFSOpen, setLocalFSOpen] = useState(true)
-  const [dryrun, setDryrun] = useState(true)
-  const [modal, setModal] = useState(false)
-  const [modal2, setModal2] = useState(false)
-  const [modal3, setModal3] = useState(false)
-  const [modal4, setModal4] = useState(false)
+
   const [subs, setSubs] = useState({})
   const [clients, setClients] = useState([])
   const [processes, setProcesses] = useState([])
@@ -156,34 +163,21 @@ export default function Home({}) {
   const [psid, setPSID] = useState(null)
   const [cid, setCID] = useState(null)
   const [client, setClient] = useState(null)
-  const [init, setInit] = useState(false)
+
   const [modules, setModules] = useState([])
   const [module, setModule] = useState(null)
   const [procs, setProcs] = useState([])
-  const [proc, setProc] = useState(null)
+
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState(null)
-  const [files, setFiles] = useState([...bfiles, ...bps])
-  const [openFiles, setOpenFiles] = useState([bfiles[0]])
-  const [tests, setTests] = useState([])
-  const [test, setTest] = useState(null)
-  const [file, setFile] = useState(bfiles[0])
-  const [preview, setPreview] = useState(true)
-  const [previewContent, setPreviewContent] = useState("")
-  const [filename, setFilename] = useState("")
-  const [selDir, setSelDir] = useState({ pid: "1", path: "/" })
-  const [projectname, setProjectname] = useState("")
-  const [dirname, setDirname] = useState("")
-  const [fileext, setFileext] = useState("js")
-  const [monaco, setMonaco] = useState(null)
+  const [files, setFiles] = use("files")
+  const [openFiles, setOpenFiles] = use("openFiles")
+  const [tests, setTests] = use("tests")
+  const [test, setTest] = use("test")
+  const [preview, setPreview] = use("preview")
+  const [selDir, setSelDir] = use("selDir")
+  const [networks, setNetworks] = use("networks")
 
-  const [ntag, setNtag] = useState("")
-  const [nver, setNver] = useState("")
-  const [ndesc, setNdesc] = useState("")
-  const [logs, setLogs] = useState([])
-  const [networks, setNetworks] = useState([
-    { tag: "ao.WLN.1", desc: "WAO LOCALNET 1" },
-  ])
   const _setModule = id => {
     let mmap = {}
     for (let k in ao.mem.modules) {
@@ -221,7 +215,7 @@ export default function Home({}) {
       setOpenFiles(_opens)
     }
     setFile(v)
-    setType(v.ext)
+    g.setType(v.ext)
     if (v.pid === "2") {
       hub1.socket.send(
         JSON.stringify({
@@ -242,7 +236,7 @@ export default function Home({}) {
   }
 
   useEffect(() => {
-    if (global.fitAddon) global.fitAddon.fit()
+    if (g.fitAddon) g.fitAddon.fit()
   }, [height, width])
 
   useEffect(() => {
@@ -283,22 +277,22 @@ export default function Home({}) {
     ;(async () => {
       const _wallet = await lf.getItem("wallet")
       if (_wallet) {
-        global.walletRef.current = _wallet
+        g.walletRef.current = _wallet
         setWallet(_wallet)
       }
     })()
   }, [])
 
   useEffect(() => {
-    global.dryrun = dryrun
+    g.dryrun = dryrun
   }, [dryrun])
 
   const connectProc = async proc => {
-    global.setDryrun = setDryrun
-    global.proc = proc
-    global.ao = ao
+    g.setDryrun = setDryrun
+    g.proc = proc
+    g.ao = ao
 
-    global.stats = async (txt, wallet) => {
+    g.stats = async (txt, wallet) => {
       let owner = null
       txt += `Process:\t${proc.id}\n`
       owner = ao.mem.env[proc.id].owner
@@ -320,44 +314,44 @@ export default function Home({}) {
       return txt
     }
 
-    global.connect = async (txt = "") => {
+    g.connect = async (txt = "") => {
       txt += `connecting to a process... ${proc.id}]\n\n`
-      const wallet = await global.getWallet()
+      const wallet = await g.getWallet()
       if (!wallet) {
         txt += `wallet not connected, using the preset default wallet...\n\n`
       }
-      return await global.stats(txt, wallet)
+      return await g.stats(txt, wallet)
     }
 
-    global.prompt = async txt => {
+    g.prompt = async txt => {
       const { res } = await ao.dry({ act: "Eval", pid: proc.id, data: "ao.id" })
       const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
       if (prompt) {
-        global.term.write("\u001b[2K\r")
+        g.term.write("\u001b[2K\r")
         if (txt) {
           txt = `${txt}\n`
         } else if (txt === false) {
           txt = ""
         } else {
-          txt = await global.connect()
+          txt = await g.connect()
         }
         console.log(txt)
-        global.term.write(txt)
-        global.term.write(prompt)
+        g.term.write(txt)
+        g.term.write(prompt)
 
         // Reprint current input
-        global.term.write(global.inputRef.current)
+        g.term.write(g.inputRef.current)
 
         // Restore cursor position
-        const tail = global.inputRef.current.slice(global.cur)
-        if (tail.length > 0) global.term.write(`\x1b[${tail.length}D`)
+        const tail = g.inputRef.current.slice(g.cur)
+        if (tail.length > 0) g.term.write(`\x1b[${tail.length}D`)
       }
     }
-    await global.prompt()
-    if (!proc && global.term) {
-      global.term.write("\u001b[2K\r")
-      global.term.write(`select a process......`)
-      global.term.write(`${global.inputRef.current}`)
+    await g.prompt()
+    if (!proc && g.term) {
+      g.term.write("\u001b[2K\r")
+      g.term.write(`select a process......`)
+      g.term.write(`${g.inputRef.current}`)
     } else {
       addLog(
         `Connected to Process: ${proc.id}`,
@@ -379,8 +373,8 @@ export default function Home({}) {
     })()
   }, [proc])
 
-  const setType = fileext =>
-    monacoRef.current.editor.setModelLanguage(
+  g.setType = fileext =>
+    g.monacoRef.current.editor.setModelLanguage(
       editorRef.current.getModel(),
       ftype(fileext)
     )
@@ -401,10 +395,6 @@ export default function Home({}) {
   }, [file])
 
   useEffect(() => {
-    monacoRef.current = monaco
-  }, [monaco])
-
-  useEffect(() => {
     openFilesRef.current = openFiles
   }, [openFiles])
 
@@ -419,7 +409,7 @@ export default function Home({}) {
       } catch (e) {
         ao = await new AO({ variant: cache, cache }).init(acc[0])
       }
-      global.ao = ao
+      g.ao = ao
       await ao.mem.init()
       let _modules = []
       let mmap = {}
@@ -458,7 +448,7 @@ export default function Home({}) {
           default_process = { id: pid }
           await lf.setItem("default_process", default_process)
         }
-        global.welcome()
+        g.welcome()
         setProc(ao.mem.env[default_process.id])
       })()
     }
@@ -489,7 +479,7 @@ export default function Home({}) {
         setFiles(_files)
         setFile(_file)
         event.target.value = ""
-        setType(fileext.ext)
+        g.setType(fileext.ext)
         // todo: handle this better
         setTimeout(() => editorRef.current.setValue(txt), 100)
       }
@@ -514,19 +504,12 @@ export default function Home({}) {
       meta.push({ name: "From", value: _tx.owner })
     }
   }
-  const ttabs = [
-    {
-      key: "lua",
-      name: `AOS ${dryrun ? " ( DRYRUN )" : ""}`,
-    },
-    { key: "log", name: "LOGS" },
-  ]
   let selNetwork = null
   for (let v of networks) {
     if (v.tag === ctype) selNetwork = v
   }
   const isPreview = preview && file?.ext === "md"
-  const getDirs = () => {
+  g.getDirs = () => {
     let dirs = []
     let dmap = {}
     const get = (pid, _path) => {
@@ -799,7 +782,7 @@ export default function Home({}) {
           }}
           onClick={async () => {
             setWallet(null)
-            global.walletRef.current = null
+            g.walletRef.current = null
             await lf.removeItem("wallet")
             addLog(
               `Wallet Disconnected: ${wallet.address}`,
@@ -809,9 +792,9 @@ export default function Home({}) {
                 description: "Wallet Disconnected!",
               }
             )
-            if (global.prompt) {
-              await global.prompt(
-                await global.stats(
+            if (g.prompt) {
+              await g.prompt(
+                await g.stats(
                   chalk.red(
                     `wallet disconnected, using the preset default wallet now...\n\n`
                   )
@@ -845,7 +828,7 @@ export default function Home({}) {
               )
               const userAddress = await arweaveWallet.getActiveAddress()
               setWallet({ address: userAddress })
-              global.walletRef.current = { address: userAddress }
+              g.walletRef.current = { address: userAddress }
               await lf.setItem("wallet", { address: userAddress })
               addLog(
                 `Wallet Connected: ${userAddress}`,
@@ -855,9 +838,9 @@ export default function Home({}) {
                   description: "Wallet Connected!",
                 }
               )
-              if (global.prompt) {
-                await global.prompt(
-                  await global.stats(
+              if (g.prompt) {
+                await g.prompt(
+                  await g.stats(
                     chalk.green(`wallet connected!\n\n`),
                     arweaveWallet
                   )
@@ -895,7 +878,7 @@ export default function Home({}) {
               _hover: { opacity: 0.75 },
             }}
             onClick={async () => {
-              const jwk = await global.getWallet()
+              const jwk = await g.getWallet()
               //if (!jwk) return alert("wallet not connected")
               let pid, p
               ;({ pid, p } = await ao.deploy({ module: module.id, jwk }))
@@ -946,7 +929,7 @@ export default function Home({}) {
                 } else {
                   const p = ao.p(proc.id)
                   const lua = editorRef.current.getValue()
-                  const jwk = await global.getWallet()
+                  const jwk = await g.getWallet()
                   //if (!jwk) return alert("wallet not connected")
                   const res = await p.msg("Eval", { data: lua, jwk })
                   console.log(res)
@@ -1135,6 +1118,7 @@ export default function Home({}) {
                   setLocalFS(_files)
                 }
                 hub1 = new Hub("ws://localhost:9090")
+                g.hub1 = hub1
                 hub1.onMsg = async obj => {
                   console.log("New FS Msg:", obj)
                   if (obj.subtype === "content") {
@@ -1146,7 +1130,7 @@ export default function Home({}) {
                     await lf.setItem(`file-${id}`, obj.content)
                     if (file?.id === id) {
                       setTimeout(() => {
-                        setType(ext)
+                        g.setType(ext)
                         editorRef.current.setValue(obj.content)
                       }, 100)
                     }
@@ -1710,7 +1694,7 @@ export default function Home({}) {
                                   opens.push(v)
                                   setOpenFiles(opens)
                                 }
-                                setType(v.ext)
+                                g.setType(v.ext)
                                 if (v.pid === "2") {
                                   hub1.socket.send(
                                     JSON.stringify({
@@ -1885,394 +1869,6 @@ export default function Home({}) {
         </>
       )}
     </Box>
-  )
-  const EditorBtns = () => (
-    <Flex
-      shrink="0"
-      align="center"
-      h="100%"
-      overflowX="scroll"
-      overflowY="hidden"
-      className="editor-tabs"
-      fontSize="11px"
-    >
-      {!file || file.ext !== "js" ? null : (
-        <Flex
-          mr={4}
-          py={1}
-          px={6}
-          color="#5137C5"
-          css={{
-            borderRadius: "5px",
-            cursor: "pointer",
-            _hover: { opacity: 0.75 },
-          }}
-          onClick={async () => {
-            try {
-              const js = editorRef.current.getValue()
-              const p = proc ? ao.p(proc.id) : null
-              let descs = []
-              const src = async path => {
-                for (let v of files) {
-                  if (v.name === path) {
-                    return await lf.getItem(`file-${v.id}`)
-                  }
-                }
-                return null
-              }
-              const assert = _assert
-              const require = async name => {
-                let module = { exports: null }
-                const js = await src(name)
-                eval(js)
-                return module.exports
-              }
-              let i = 0
-              const it = (desc, fn) => {
-                descs[i].tests.push({ desc, fn })
-              }
-
-              const describe = (desc2, fn) => {
-                descs.push({ desc: desc2, fn, tests: [] })
-              }
-              eval(js)
-              const ts = DateMS.now()
-              let success = 0
-              let fail = 0
-              let res = []
-              for (let v of descs) {
-                let _res = []
-                let _success = 0
-                let _fail = 0
-                await v.fn({ require })
-                for (let v2 of v.tests) {
-                  const start = DateMS.now()
-                  try {
-                    await v2.fn({
-                      ao,
-                      src,
-                      p,
-                    })
-                    _res.push({
-                      description: v2.desc,
-                      success: true,
-                      error: null,
-                      duration: DateMS.now() - start,
-                    })
-                    _success++
-                    success++
-                  } catch (e) {
-                    _res.push({
-                      description: v2.desc,
-                      success: false,
-                      error: e.toString(),
-                      duration: DateMS.now() - start,
-                    })
-                    _fail++
-                    fail++
-                  }
-                  res.push({
-                    description: v.desc,
-                    cases: _res,
-                    success: _success,
-                    fail: _fail,
-                  })
-                }
-                i++
-              }
-              const result = {
-                file: file.name,
-                id: generateId(),
-                date: ts,
-                duration: DateMS.now() - ts,
-                tests: res,
-                success,
-                fail,
-              }
-              if (success > 0 || fail > 0) {
-                setTab("Tests")
-                setTest(result)
-                setTests([result, ...tests])
-              }
-            } catch (e) {
-              console.log(e)
-            }
-          }}
-        >
-          Test
-        </Flex>
-      )}
-      {file?.ext !== "md" ? null : (
-        <Flex
-          py={1}
-          px={6}
-          color="#5137C5"
-          css={{
-            borderRadius: "5px",
-            cursor: "pointer",
-            _hover: { opacity: 0.75 },
-          }}
-          onClick={async () => {
-            if (!preview) {
-              const txt = editorRef.current.getValue()
-              setPreviewContent(await getPreview(txt))
-            }
-            setPreview(!preview)
-          }}
-        >
-          {preview ? "Edit" : "Preview"}
-        </Flex>
-      )}
-      {file?.local ? (
-        <Flex
-          py={1}
-          px={6}
-          color="#5137C5"
-          css={{
-            borderRadius: "5px",
-            cursor: "pointer",
-            _hover: { opacity: 0.75 },
-          }}
-          onClick={async () => {
-            const content = editorRef.current.getValue()
-            hub1.socket.send(
-              JSON.stringify({
-                type: "save",
-                content,
-                path: file.filename,
-              })
-            )
-          }}
-        >
-          Save
-        </Flex>
-      ) : file?.nodel ? null : (
-        <Flex
-          py={1}
-          px={4}
-          color="#5137C5"
-          css={{
-            borderRadius: "5px",
-            cursor: "pointer",
-            _hover: { opacity: 0.75 },
-          }}
-          onClick={async () => {
-            if (confirm("Would you like to delete the file?")) {
-              editorRef.current.setValue("")
-              await lf.removeItem(`file-${file.id}`)
-              const _files = filter(v => file.id !== v.id)(files)
-              const _openFiles = filter(v => file.id !== v.id)(openFiles)
-              await lf.setItem(`files`, _files)
-              setFiles(_files)
-              setOpenFiles(_openFiles)
-              let exists = false
-              for (let v of _openFiles) {
-                exists = true
-                setFile(v)
-                setType(v.ext)
-                editorRef.current.setValue(
-                  (await lf.getItem(`file-${v.id}`)) ?? ""
-                )
-                break
-              }
-              if (!exists) {
-                setFile(bfiles[0])
-                setOpenFiles([bfiles[0]])
-                setType(bfiles[0].ext)
-                fetch("/docs/README.md")
-                  .then(r => r.text())
-                  .then(txt => {
-                    editorRef.current.setValue(txt)
-                    setPreview(true)
-                    getPreview(txt).then(setPreviewContent)
-                  })
-              }
-            }
-          }}
-        >
-          Delete
-        </Flex>
-      )}
-    </Flex>
-  )
-
-  const EditorTabs = () => (
-    <Flex
-      flex={1}
-      h="100%"
-      overflowX="scroll"
-      overflowY="hidden"
-      className="editor-tabs"
-    >
-      <EditorScrollbarStyle />
-      {map(v => {
-        const open = v.id === file?.id
-        return (
-          <Flex
-            fontSize="11px"
-            w="140px"
-            h="25px"
-            bg={open ? "#1e1e1e" : "#444"}
-            px={3}
-            color="#c6c6c6"
-            align="center"
-            onClick={async () => {
-              const txt = (await lf.getItem(`file-${v.id}`)) ?? ""
-              setFile(v)
-              setType(v.ext)
-              // todo: handle this better
-              setTimeout(() => editorRef.current.setValue(txt), 100)
-              setPreviewContent(await getPreview(txt))
-            }}
-            css={{
-              //borderTop: `5px solid ${open ? "#5137C5" : "#666"}`,
-              cursor: open ? "default" : "pointer",
-              _hover: { opacity: open ? 1 : 0.75 },
-            }}
-          >
-            <Flex
-              color={
-                v.ext === "lua"
-                  ? "#7FDBFF"
-                  : v.ext === "md"
-                    ? "#39CCCC"
-                    : includes(v.ext, ["js", "ts"])
-                      ? "#FFDC00"
-                      : "#3d9977"
-              }
-              mr={2}
-              fontWeight="bold"
-            >
-              {v.ext === "lua"
-                ? "Lua"
-                : v.ext == "md"
-                  ? "MD"
-                  : v.ext == "js"
-                    ? "JS"
-                    : v.ext === "ts"
-                      ? "TS"
-                      : "{ }"}
-            </Flex>
-            <Box
-              fontSize="11px"
-              title={v.name}
-              w="70px"
-              css={{
-                overflow: "hidden",
-                whiteSpace: "nowrap",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {v.name}
-            </Box>
-            <Box flex={1} />
-            <Box>
-              <Icon
-                boxSize="10px"
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75, color: "#FFDC00" },
-                }}
-                onClick={async e => {
-                  e.stopPropagation()
-                  let opens = filter(v2 => v2.id !== v.id)(openFiles)
-                  setOpenFiles(opens)
-                  if (open) {
-                    let exists = false
-                    for (let v of opens) {
-                      exists = true
-                      setFile(v)
-                      let txt = ""
-                      if (v.fetch) {
-                        txt = await fetch(v.fetch).then(r => r.text())
-                      } else {
-                        txt = (await lf.getItem(`file-${v.id}`)) ?? ""
-                      }
-                      setType(v.ext)
-                      editorRef.current.setValue(txt)
-                      if (v.ext === "md" && preview) {
-                        setPreviewContent(await getPreview(txt))
-                      }
-
-                      break
-                    }
-                    if (!exists) {
-                      setFile(bfiles[0])
-                      setOpenFiles([bfiles[0]])
-                      setType(bfiles[0].ext)
-                      fetch("/docs/README.md")
-                        .then(r => r.text())
-                        .then(txt => {
-                          editorRef.current.setValue(txt)
-                          setPreview(true)
-                          getPreview(txt).then(setPreviewContent)
-                        })
-                    }
-                  }
-                }}
-              >
-                <FaX />
-              </Icon>
-            </Box>
-          </Flex>
-        )
-      })(openFiles)}
-    </Flex>
-  )
-  const editor = !init ? null : (
-    <Flex
-      direction="column"
-      w="100%"
-      css={{ borderLeft: "1px solid #eee" }}
-      h="100%"
-    >
-      <Flex align="center" color="#5137C5" w="100%">
-        <EditorTabs />
-        <EditorBtns />
-      </Flex>
-      <Flex
-        bg="#1e1e1e"
-        px={3}
-        fontSize="10px"
-        w="100%"
-        h="25px"
-        pb="5px"
-        color="#999"
-        align="center"
-      >
-        <FilePath {...{ file, projects }} />
-      </Flex>
-      <Flex w="100%" flex={1} css={{ overflowY: "auto" }}>
-        {isPreview ? (
-          <Flex justify="center" flex={1} h="100%" css={{ overflowY: "auto" }}>
-            <Box w="100%">
-              <Box
-                p={6}
-                w="100%"
-                className="markdown-body"
-                dangerouslySetInnerHTML={{ __html: previewContent }}
-              />
-            </Box>
-          </Flex>
-        ) : null}
-        <Box
-          display={isPreview ? "none" : "block"}
-          w="100%"
-          bg="#1E1E1E"
-          h="100%"
-        >
-          <Editor
-            {...{
-              file,
-              editorRef,
-              tab,
-              setMonaco,
-              setPreviewContent,
-            }}
-          />
-        </Box>
-      </Flex>
-    </Flex>
   )
 
   const middlepane = (
@@ -3117,296 +2713,6 @@ export default function Home({}) {
     </Flex>
   )
 
-  const modals = (
-    <>
-      <Modal {...{ modal, setModal }}>
-        <Box p={6}>
-          <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-            Create New File
-          </Box>
-          <Box fontSize="12px" color="#666" mb={2}>
-            File Name
-          </Box>
-          <Flex align="flex-end">
-            <Input
-              flex={1}
-              value={filename}
-              onChange={e => setFilename(e.target.value)}
-            />
-            <Box mx={2}>.</Box>
-            <NativeSelect.Root w="80px">
-              <NativeSelect.Field
-                value={fileext}
-                onChange={e => setFileext(e.target.value)}
-              >
-                <option value="lua">lua</option>
-                <option value="js">js</option>
-                <option value="json">json</option>
-                <option value="md">md</option>
-              </NativeSelect.Field>
-              <NativeSelect.Indicator />
-            </NativeSelect.Root>
-          </Flex>
-          <Box fontSize="12px" color="#666" mb={2} mt={4}>
-            Location
-          </Box>
-          <Box fontSize="12px" mb={6}>
-            {getDirs()}
-          </Box>
-          <Flex
-            align="center"
-            justify="center"
-            mt={4}
-            p={1}
-            mb={1}
-            color="#5137C5"
-            css={{
-              borderRadius: "3px",
-              border: "1px solid #5137C5",
-              cursor: "pointer",
-              _hover: { opacity: 0.75 },
-            }}
-            onClick={async () => {
-              if (/^\s*$/.test(filename)) return alert("Enter a filename.")
-              const id = generateId()
-              const name = `${filename}.${fileext}`
-              for (let f of files) {
-                if (
-                  f.pid === selDir.pid &&
-                  f.name === name &&
-                  f.path === selDir.path
-                ) {
-                  alert("File already exists!")
-                  return
-                }
-              }
-              const _file = {
-                name,
-                update: DateMS.now(),
-                id,
-                ext: fileext,
-                pid: selDir.pid,
-                path: selDir.path,
-              }
-              const txt =
-                fileext === "js"
-                  ? src_data_js
-                  : fileext === "lua"
-                    ? src_data_lua
-                    : ""
-              const _files = append(_file, files)
-              await lf.setItem("files", _files)
-              await lf.setItem(`file-${id}`, txt)
-              setFiles(_files)
-              setOpenFiles([...openFiles, _file])
-              setFile(_file)
-              setPreview(false)
-              setType(fileext)
-              // todo: handle this better
-              setTimeout(() => editorRef.current.setValue(txt), 100)
-              setModal(false)
-              setFilename("")
-            }}
-          >
-            Create
-          </Flex>
-        </Box>
-      </Modal>
-      <Modal {...{ modal: modal2, setModal: setModal2 }}>
-        <Box p={6}>
-          <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-            Launch New AO Network
-          </Box>
-
-          <Box>
-            <Box fontSize="12px" color="#666" mb={2}>
-              Network Tag
-            </Box>
-            <Flex align="flex-end">
-              <Input value="ao" disabled={true} w="100px" />
-              <Box mx={2}>.</Box>
-              <Input
-                w="100px"
-                placeholder="WLN"
-                value={ntag}
-                onChange={e => setNtag(e.target.value)}
-              />
-              <Box mx={2}>.</Box>
-              <Input
-                w="100px"
-                placeholder="1"
-                value={nver}
-                onChange={e => setNver(e.target.value)}
-              />
-            </Flex>
-          </Box>
-          <Box flex={1} mt={4}>
-            <Box fontSize="12px" color="#666" mb={2}>
-              Description
-            </Box>
-            <Input
-              placeholder=""
-              value={ndesc}
-              onChange={e => setNdesc(e.target.value)}
-            />
-          </Box>
-
-          <Flex
-            align="center"
-            justify="center"
-            mt={4}
-            p={1}
-            mb={1}
-            color="#5137C5"
-            css={{
-              borderRadius: "3px",
-              border: "1px solid #5137C5",
-              cursor: "pointer",
-              _hover: { opacity: 0.75 },
-            }}
-            onClick={async () => {
-              if (/^\s*$/.test(ntag.trim()))
-                return alert("Enter a network name")
-              if (/^\s*$/.test(nver.trim()))
-                return alert("Enter a network version")
-              const tag = `ao.${ntag}.${nver}`
-              for (let v of networks) {
-                if (tag === v.tag) return alert(`${ntag} already exists!`)
-              }
-
-              const _networks = append({ tag, desc: ndesc }, networks)
-              setNetworks(_networks)
-              setCache(tag)
-              setCtype(tag)
-              setNtag("")
-              setNver("")
-              setNdesc("")
-              setModal2(false)
-              await lf.setItem("networks", _networks)
-            }}
-          >
-            Launch
-          </Flex>
-        </Box>
-      </Modal>
-      <Modal {...{ modal: modal3, setModal: setModal3 }}>
-        <Box p={6}>
-          <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-            Create New Project
-          </Box>
-          <Box fontSize="12px" color="#666" mb={2}>
-            Project Name
-          </Box>
-          <Flex align="flex-end">
-            <Input
-              flex={1}
-              value={projectname}
-              onChange={e => setProjectname(e.target.value)}
-            />
-          </Flex>
-          <Flex
-            align="center"
-            justify="center"
-            mt={4}
-            p={1}
-            mb={1}
-            color="#5137C5"
-            css={{
-              borderRadius: "3px",
-              border: "1px solid #5137C5",
-              cursor: "pointer",
-              _hover: { opacity: 0.75 },
-            }}
-            onClick={async () => {
-              if (/^\s*$/.test(projectname))
-                return alert("Enter a project name.")
-              const id = generateId()
-              const _pr = {
-                name: projectname,
-                created: DateMS.now(),
-                id,
-                open: true,
-              }
-              const _prs = append(_pr, projects)
-              await lf.setItem("projects", _prs)
-              setProjects(_prs)
-              setProjectname("")
-              setModal3(false)
-            }}
-          >
-            Create
-          </Flex>
-        </Box>
-      </Modal>
-      <Modal {...{ modal: modal4, setModal: setModal4 }}>
-        {" "}
-        <Box p={6}>
-          <Box color="#5137C5" fontWeight="bold" mb={4} fontSize="20px">
-            Create New Folder
-          </Box>
-          <Box fontSize="12px" color="#666" mb={2}>
-            Folder Name
-          </Box>
-          <Flex align="flex-end">
-            <Input
-              flex={1}
-              value={dirname}
-              onChange={e => setDirname(e.target.value)}
-            />
-          </Flex>
-          <Box fontSize="12px" color="#666" mb={2} mt={4}>
-            Location
-          </Box>
-          <Box fontSize="12px" mb={6}>
-            {getDirs()}
-          </Box>
-          <Flex
-            align="center"
-            justify="center"
-            p={1}
-            mb={1}
-            color="#5137C5"
-            css={{
-              borderRadius: "3px",
-              border: "1px solid #5137C5",
-              cursor: "pointer",
-              _hover: { opacity: 0.75 },
-            }}
-            onClick={async () => {
-              if (/^\s*$/.test(dirname)) return alert("Enter a folder name.")
-              const id = generateId()
-              for (let f of files) {
-                if (
-                  f.pid === selDir.pid &&
-                  f.name === dirname &&
-                  f.path === selDir.path
-                ) {
-                  alert("Directory already exists!")
-                  return
-                }
-              }
-              const _file = {
-                name: `${dirname}`,
-                update: DateMS.now(),
-                id,
-                pid: selDir.pid,
-                dir: true,
-                path: selDir.path,
-              }
-              const _files = append(_file, files)
-              await lf.setItem("files", _files)
-              setFiles(_files)
-              setModal4(false)
-              setDirname("")
-            }}
-          >
-            Create
-          </Flex>
-        </Box>
-      </Modal>
-    </>
-  )
-
   return (
     <>
       <GlobalStyle />
@@ -3415,7 +2721,7 @@ export default function Home({}) {
         <Flex h="30px">{top}</Flex>
         <Flex h="calc(100vh - 60px)" w="100vw" css={{ overflow: "hidden" }}>
           <Flex w="50px" h="calc(100vh - 60px)">
-            <Sidebar {...{ init, tab, setTab, proc }} />
+            <Sidebar />
           </Flex>
           <Flex w="315px" h="calc(100vh - 60px)">
             {leftpane}
@@ -3440,21 +2746,12 @@ export default function Home({}) {
                 <PanelGroup
                   direction={tab !== "Projects" ? "vertical" : "horizontal"}
                 >
-                  <Panel maxSize={75}>{editor}</Panel>
+                  <Panel maxSize={75}>
+                    <Editor />
+                  </Panel>
                   <PanelResizeHandle />
                   <Panel maxSize={75}>
-                    <Terminal
-                      {...{
-                        ttab,
-                        global,
-                        ttabs,
-                        setTtab,
-                        setDryrun,
-                        dryrun,
-                        logs,
-                        containerRef,
-                      }}
-                    />
+                    <Terminal />
                   </Panel>
                 </PanelGroup>
               </Panel>
@@ -3463,7 +2760,10 @@ export default function Home({}) {
         </Flex>
         <Footer />
       </Flex>
-      {modals}
+      <CreateFileModal />
+      <LaunchNetworkModal />
+      <CreateProjectModal />
+      <CreateFolderModal />
       <Toaster />
     </>
   )
