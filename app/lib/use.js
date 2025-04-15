@@ -1,3 +1,26 @@
 import store from "/lib/store"
-
-export default store({})
+import { default_projects, bps, bfiles } from "/lib/guide"
+export default store({
+  tab: "Projects",
+  ttab: "lua",
+  ctype: "ao.WLN.1",
+  cache: "ao.WLN.1",
+  file: bfiles[0],
+  projects: default_projects,
+  init: false,
+  proc: null,
+  previewContent: "",
+  dryrun: true,
+  logs: [],
+  modal: false,
+  modal2: false,
+  modal3: false,
+  modal4: false,
+  files: [...bfiles, ...bps],
+  openFiles: [bfiles[0]],
+  selDir: { pid: "1", path: "/" },
+  preview: true,
+  networks: [{ tag: "ao.WLN.1", desc: "WAO LOCALNET 1" }],
+  test: null,
+  tests: [],
+})

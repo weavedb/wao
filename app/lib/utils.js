@@ -110,7 +110,10 @@ const ftype = fileext => {
         ? "markdown"
         : fileext
 }
+const DateMS = Date
+
 export {
+  DateMS,
   ftype,
   wait,
   generateId,

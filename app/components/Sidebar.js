@@ -9,6 +9,7 @@ import {
 } from "@chakra-ui/react"
 import { Tooltip } from "@/components/ui/tooltip"
 import { keys, map, includes } from "ramda"
+import use from "/lib/use"
 
 import {
   FaCode,
@@ -33,7 +34,10 @@ const tabmap = {
 }
 const tabs = keys(tabmap)
 
-export default function Sidebar({ tab, setTab, init, proc }) {
+export default function Sidebar({}) {
+  const [tab, setTab] = use("tab")
+  const [init] = use("init")
+  const [proc] = use("proc")
   return !init ? null : (
     <Flex css={{ overflowY: "auto", borderRight: "1px solid #ddd" }}>
       <Flex direction="column" w="50px">
