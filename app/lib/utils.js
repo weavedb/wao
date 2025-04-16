@@ -121,7 +121,9 @@ const getAct = message => {
   return null
 }
 
-const filterFiles = filter(v => Number.isNaN(v.pid * 1))
+const filterFiles = filter(v => {
+  return v.pid && !includes(v.pid, ["0", "2", "3"])
+})
 const filterProjects = filter(v => v.id !== "2")
 export {
   filterProjects,
