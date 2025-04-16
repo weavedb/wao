@@ -4,7 +4,8 @@ const src_data_js = `describe("WAO", ()=>{
   })
 })`
 
-const src_data_lua = `Handlers.add("Hello", "Hello", function (msg)
+const src_data_lua = `
+Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })
 end)`
 

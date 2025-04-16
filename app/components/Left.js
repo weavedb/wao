@@ -1,4 +1,5 @@
 import use from "/lib/use"
+import _assert from "assert"
 import { DataItem } from "arbundles"
 import { Box, Flex, Icon } from "@chakra-ui/react"
 import { Tooltip } from "@/components/ui/tooltip"
@@ -210,15 +211,124 @@ export default function Left() {
                   const jwk = await g.getWallet()
                   //if (!jwk) return alert("wallet not connected")
                   const res = await p.msg("Eval", { data: lua, jwk })
-                  const _proc = clone(proc)
-                  _proc.results.push(res.mid)
-                  setProc(_proc)
                   g.logMsg(res.mid)
                   g.addMsg(res.mid)
                 }
               }}
             >
               Eval
+            </Flex>
+            <Box flex={1} />
+          </>
+        )
+      ) : tab === "Tests" ? (
+        !file || file.ext !== "js" ? null : (
+          <>
+            <Flex
+              py={1}
+              px={3}
+              fontSize="10px"
+              color="#ddd"
+              bg="#5137C5"
+              css={{
+                borderRadius: "5px",
+                cursor: "pointer",
+                _hover: { opacity: 0.75 },
+              }}
+              onClick={async () => {
+                try {
+                  const js = g.editorRef.current.getValue()
+                  const p = proc ? g.ao.p(proc.id) : null
+                  let descs = []
+                  const src = async path => {
+                    for (let v of files) {
+                      if (v.name === path) {
+                        return await lf.getItem(`file-${v.id}`)
+                      }
+                    }
+                    return null
+                  }
+                  const assert = _assert
+                  const require = async name => {
+                    let module = { exports: null }
+                    const js = await src(name)
+                    eval(js)
+                    return module.exports
+                  }
+                  let i = 0
+                  const it = (desc, fn) => {
+                    descs[i].tests.push({ desc, fn })
+                  }
+
+                  const describe = (desc2, fn) => {
+                    descs.push({ desc: desc2, fn, tests: [] })
+                  }
+                  eval(js)
+                  const ts = DateMS.now()
+                  let success = 0
+                  let fail = 0
+                  let res = []
+                  for (let v of descs) {
+                    let _res = []
+                    let _success = 0
+                    let _fail = 0
+                    await v.fn({ require })
+                    for (let v2 of v.tests) {
+                      const start = DateMS.now()
+                      try {
+                        await v2.fn({
+                          ao: g.ao,
+                          src,
+                          p,
+                        })
+                        _res.push({
+                          description: v2.desc,
+                          success: true,
+                          error: null,
+                          duration: DateMS.now() - start,
+                        })
+                        _success++
+                        success++
+                      } catch (e) {
+                        _res.push({
+                          description: v2.desc,
+                          success: false,
+                          error: e.toString(),
+                          duration: DateMS.now() - start,
+                        })
+                        _fail++
+                        fail++
+                      }
+                    }
+                    res.push({
+                      description: v.desc,
+                      cases: _res,
+                      success: _success,
+                      fail: _fail,
+                    })
+                    i++
+                  }
+                  const result = {
+                    file: file.name,
+                    process: proc?.id ?? null,
+                    id: generateId(),
+                    date: ts,
+                    duration: DateMS.now() - ts,
+                    tests: res,
+                    success,
+                    fail,
+                  }
+                  if (success > 0 || fail > 0) {
+                    setTab("Tests")
+                    setTest(result)
+                    setTests([result, ...tests])
+                  }
+                } catch (e) {
+                  console.log(e)
+                }
+              }}
+            >
+              Run Test
             </Flex>
             <Box flex={1} />
           </>
