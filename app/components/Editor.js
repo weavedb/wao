@@ -26,7 +26,6 @@ export default function Editor({}) {
   const [files, setFiles] = use("files")
   const [tests, setTests] = use("tests")
   const [test, setTest] = use("test")
-
   const EditorBtns = () => (
     <Flex
       shrink="0"
