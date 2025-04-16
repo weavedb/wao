@@ -12,13 +12,13 @@ export default function store(initial) {
     return state
   })
 
-  function use(key) {
+  function Use(key) {
     const value = useStore(zustandStore, s => s[key])
     const setter = zustandStore.getState()[`set${capitalize(key)}`]
     return [value, setter]
   }
 
-  return use
+  return Use
 }
 
 const capitalize = s => s[0].toUpperCase() + s.slice(1)

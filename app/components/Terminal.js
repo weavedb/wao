@@ -72,7 +72,6 @@ export default function Terminal({}) {
         {ttab !== "log" ? null : (
           <Box
             p={2}
-            bg="red"
             fontSize="11px"
             position="abosolute"
             h="100%"

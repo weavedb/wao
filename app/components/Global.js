@@ -339,18 +339,20 @@ export default function Global({}) {
     }
     let _procs = []
     let mod = clone(g.ao.mem.txs[id])
-    mod.processes = []
-    for (let k in g.ao.mem.env) {
-      for (let v of g.ao.mem.msgs[k]?.tags ?? []) {
-        if (v.name === "Module" && v.value === mod.id) {
-          mod.processes.push(k)
-          const val = g.ao.mem.env[k]
-          _procs.push({ txid: k, module: mmap[val.module] })
+    if (mod) {
+      mod.processes = []
+      for (let k in g.ao.mem.env) {
+        for (let v of g.ao.mem.msgs[k]?.tags ?? []) {
+          if (v.name === "Module" && v.value === mod.id) {
+            mod.processes.push(k)
+            const val = g.ao.mem.env[k]
+            _procs.push({ txid: k, module: mmap[val.module] })
+          }
         }
       }
+      setProcs(_procs)
+      setModule(mod)
     }
-    setProcs(_procs)
-    setModule(mod)
   }
   g.clickFile = async v => {
     let opens = clone(g.openFilesRef.current)
