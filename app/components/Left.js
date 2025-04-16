@@ -79,7 +79,7 @@ export default function Left() {
   const [modal2, setModal2] = use("modal2")
   const [modal3, setModal3] = use("modal3")
   const [modal4, setModal4] = use("modal4")
-  const [module, setModule] = use("module")
+  const [mod, setModule] = use("module")
   const [proc, setProc] = use("proc")
   const [messages, setMessages] = use("messages")
   const [procs, setProcs] = use("procs")
@@ -156,14 +156,14 @@ export default function Left() {
               const jwk = await g.getWallet()
               //if (!jwk) return alert("wallet not connected")
               let pid, p
-              ;({ pid, p } = await g.ao.deploy({ module: module.id, jwk }))
+              ;({ pid, p } = await g.ao.deploy({ module: mod.id, jwk }))
               g.logSpawn(pid)
               const v = pid
               let _proc = clone(g.ao.mem.env[v])
               delete _proc.memory
               _proc.tags = clone(g.ao.mem.msgs[v]?.tags ?? [])
               _proc.id = v
-              let _module = clone(module)
+              let _module = clone(mod)
               _module.processes.push(pid)
               setModule(_module)
               setProc(_proc)
@@ -250,10 +250,10 @@ export default function Left() {
                   }
                   const assert = _assert
                   const require = async name => {
-                    let module = { exports: null }
+                    let _module = { exports: null }
                     const js = await src(name)
                     eval(js)
-                    return module.exports
+                    return _module.exports
                   }
                   let i = 0
                   const it = (desc, fn) => {
@@ -986,7 +986,7 @@ export default function Left() {
         map(v => (
           <Flex
             h="50px"
-            bg={v.txid === module?.id ? "#5137C5" : "white"}
+            bg={v.txid === mod?.id ? "#5137C5" : "white"}
             fontSize="12px"
             p={4}
             direction="column"
@@ -1007,14 +1007,11 @@ export default function Left() {
           >
             <Box
               fontWeight="bold"
-              color={v.txid !== module?.id ? "#5137C5" : "#ddd"}
+              color={v.txid !== mod?.id ? "#5137C5" : "#ddd"}
             >
               {v.name}
             </Box>
-            <Box
-              fontSize="10px"
-              color={v.txid !== module?.id ? "#222" : "#ddd"}
-            >
+            <Box fontSize="10px" color={v.txid !== mod?.id ? "#222" : "#ddd"}>
               {v.txid}
             </Box>
           </Flex>
