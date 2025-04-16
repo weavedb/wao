@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { fromPairs, map } from "ramda"
+import { fromPairs, map, filter, includes } from "ramda"
 import { common, createStarryNight } from "@wooorm/starry-night"
 import markdownIt from "markdown-it"
 import * as cheerio from "cheerio"
@@ -121,7 +121,11 @@ const getAct = message => {
   return null
 }
 
+const filterFiles = filter(v => Number.isNaN(v.pid * 1))
+const filterProjects = filter(v => v.id !== "2")
 export {
+  filterProjects,
+  filterFiles,
   getAct,
   DateMS,
   ftype,
