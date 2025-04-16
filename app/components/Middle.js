@@ -32,6 +32,7 @@ export default function Middle() {
   const [suid, setSUID] = use("suid")
   const [cid, setCID] = use("cid")
   let meta = []
+  let pmeta = []
   let act = null
   if (message) {
     const t = tags(message.http_msg.tags)
@@ -48,6 +49,10 @@ export default function Middle() {
       meta.push({ name: "From", value: _tx.owner })
     }
   }
+  if (proc) {
+    pmeta.push({ name: "ID", value: proc.id })
+    pmeta.push({ name: "Owner", value: proc.owner })
+  }
   let selNetwork = null
   for (let v of networks) {
     if (v.tag === ctype) selNetwork = v
@@ -61,7 +66,7 @@ export default function Middle() {
             <Box
               px={4}
               py={2}
-              fontSize="12px"
+              fontSize="11px"
               flex={1}
               h="calc(100vh - 110px)"
               css={{ overflowY: "auto" }}
@@ -170,11 +175,39 @@ export default function Middle() {
             <Box
               px={4}
               py={2}
-              fontSize="12px"
+              fontSize="11px"
               flex={1}
               h="calc(100vh - 110px)"
               css={{ overflowY: "auto" }}
             >
+              <Flex my={2} fontWeight="bold" color="#5137C5">
+                Metadata
+              </Flex>
+              {map(v => {
+                if (includes(v.name, ["signature", "signature-input"])) {
+                  return null
+                }
+                return (
+                  <Flex my={2} align="center">
+                    <Box
+                      w="130px"
+                      color="white"
+                      bg="#5137C5"
+                      px={2}
+                      mr={4}
+                      css={{ borderRadius: "3px" }}
+                    >
+                      {v.name}
+                    </Box>
+                    <Box
+                      flex={1}
+                      css={{ wordBreak: "break-all", whiteSpace: "wrap" }}
+                    >
+                      {v.value}
+                    </Box>
+                  </Flex>
+                )
+              })(pmeta ?? [])}
               <Flex my={2} fontWeight="bold" color="#5137C5">
                 Tags
               </Flex>
@@ -255,7 +288,7 @@ export default function Middle() {
             <Box
               px={4}
               py={2}
-              fontSize="12px"
+              fontSize="11px"
               flex={1}
               h="calc(100vh - 110px)"
               css={{ overflowY: "auto" }}
@@ -324,7 +357,7 @@ export default function Middle() {
             <Box
               px={4}
               py={2}
-              fontSize="12px"
+              fontSize="11px"
               flex={1}
               h="calc(100vh - 110px)"
               css={{ overflowY: "auto" }}
@@ -480,7 +513,7 @@ export default function Middle() {
                 <Box
                   px={4}
                   py={2}
-                  fontSize="12px"
+                  fontSize="11px"
                   flex={1}
                   h="calc(100vh - 110px)"
                   css={{ overflowY: "auto" }}
