@@ -68,6 +68,7 @@ export default function CreateFileModal() {
           onClick={async () => {
             if (/^\s*$/.test(filename)) return alert("Enter a filename.")
             const id = generateId()
+            console.log(id)
             const name = `${filename}.${fileext}`
             for (let f of files) {
               if (
