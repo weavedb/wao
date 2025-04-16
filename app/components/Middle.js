@@ -1,4 +1,4 @@
-import { Box, Flex, Textarea } from "@chakra-ui/react"
+import { Icon, Box, Flex, Textarea } from "@chakra-ui/react"
 import { prepend, addIndex, includes, map, clone } from "ramda"
 import { dayjs, DateMS, tags } from "/lib/utils"
 import g from "/lib/global"
@@ -6,6 +6,7 @@ import use from "/lib/use"
 import { DataItem } from "arbundles"
 import WebRTC from "../lib/webrtc"
 import Hub from "../lib/hub"
+import { FaX, FaCheck } from "react-icons/fa6"
 
 export default function Middle() {
   const [hbs, setHBs] = use("hbs")
@@ -377,30 +378,85 @@ export default function Middle() {
                   </Flex>
                 )
               })([
-                { name: "File", value: test.file },
+                { name: "Main Process", value: test.process },
+                { name: "Test File", value: test.file },
                 { name: "Duration", value: `${test.duration} ms` },
                 { name: "Success", value: `${test.success}` },
                 { name: "Fail", value: `${test.fail}` },
                 { name: "Date", value: dayjs(test.date).fromNow() },
               ])}
-              <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
-                Result
+              <Flex mt={4} fontWeight="bold" color="#5137C5">
+                Results
               </Flex>
-              <code>
-                <Box
-                  as="pre"
-                  bg="#eee"
-                  p={4}
-                  css={{
-                    borderRadius: "3px",
-                    wordBreak: "break-word",
-                    whiteSpace: "pre-wrap",
-                    overflow: "auto",
-                  }}
-                >
-                  {JSON.stringify(test.tests, undefined, 2)}
-                </Box>
-              </code>
+
+              {addIndex(map)((v, i) => {
+                return (
+                  <>
+                    <Flex
+                      mt={4}
+                      fontSize="12px"
+                      p={1}
+                      mb={2}
+                      bg={v.fail === 0 ? "#4e9a06" : "#cc0000"}
+                      color="#ddd"
+                      css={{ borderRadius: "3px" }}
+                    >
+                      <Flex px={2} align="center" w="100%">
+                        <Box mr={3}>{i + 1}</Box>
+                        <Box>{v.description}</Box>
+                        <Box flex={1} />
+                        <Flex mr={4}>
+                          <Icon size="sm" mr={2}>
+                            <FaCheck />
+                          </Icon>
+                          {v.success}
+                        </Flex>
+                        <Flex>
+                          <Icon size="sm" mr={2}>
+                            <FaX />
+                          </Icon>
+                          {v.fail}
+                        </Flex>
+                      </Flex>
+                    </Flex>
+                    {addIndex(map)((v2, i2) => {
+                      return (
+                        <Flex
+                          fontSize="11px"
+                          ml={10}
+                          p={1}
+                          mb={2}
+                          color="#eee"
+                          css={{
+                            borderRadius: "3px",
+                          }}
+                          bg={v2.success ? "#4e9a06" : "#cc0000"}
+                          direction="column"
+                        >
+                          <Flex>
+                            <Flex px={2} align="center" w="100%">
+                              <Box mr={3}>
+                                <Icon size="sm">
+                                  {v2.success ? <FaCheck /> : <FaX />}
+                                </Icon>
+                              </Box>
+                              <Box>{v2.description}</Box>
+                              <Box flex={1} />
+                              <Box>{v2.duration} ms</Box>
+                            </Flex>
+                          </Flex>
+
+                          {v2.error ? (
+                            <Flex mt={1} pl={9} fontSize="10px">
+                              {v2.error}
+                            </Flex>
+                          ) : null}
+                        </Flex>
+                      )
+                    })(v.cases)}
+                  </>
+                )
+              })(test.tests)}
             </Box>
           )}
         </Flex>
