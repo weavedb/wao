@@ -139,8 +139,8 @@ export default function Global({}) {
     ;(async () => {
       const _prs = await lf.getItem("projects")
       if (_prs) setProjects(_prs)
-      const _files = (await lf.getItem("files")) ?? []
-      setFiles([...bfiles, ...bps, ..._files])
+      let _files = (await lf.getItem("files")) ?? []
+      setFiles([...bfiles, ...bps, _files])
       const networks = await lf.getItem("networks")
       if (networks) setNetworks(networks)
     })()
@@ -431,9 +431,8 @@ export default function Global({}) {
       g.editorRef.current.getModel(),
       ftype(fileext)
     )
-
   const _projects = [
-    ...(localFS
+    ...(localFS.length > 0
       ? [{ id: "2", name: "Local Computer", open: localFSOpen }]
       : []),
     ...projects,

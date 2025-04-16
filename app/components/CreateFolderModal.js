@@ -3,7 +3,7 @@ import lf from "localforage"
 import Modal from "/components/Modal"
 import use from "/lib/use"
 import { useState } from "react"
-import { generateId, DateMS } from "/lib/utils"
+import { generateId, DateMS, filterFiles } from "/lib/utils"
 import { append } from "ramda"
 import g from "/lib/global"
 
@@ -69,7 +69,7 @@ export default function CreateProjectModal() {
               path: selDir.path,
             }
             const _files = append(_file, files)
-            await lf.setItem("files", _files)
+            await lf.setItem("files", filterFiles(_files))
             setFiles(_files)
             setModal4(false)
             setDirname("")
