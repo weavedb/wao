@@ -6,10 +6,11 @@ import * as cheerio from "cheerio"
 import { toHtml } from "hast-util-to-html"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
+import { v4 } from "uuid"
 dayjs.extend(relativeTime)
 
 function generateId() {
-  return Math.random().toString(36).substring(2, 15)
+  return v4()
 }
 
 const wait = ms => new Promise(res => setTimeout(() => res(), ms))
