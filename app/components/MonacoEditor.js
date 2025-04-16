@@ -35,8 +35,8 @@ export default function MonacoEditor({}) {
       onMount={handleEditorDidMount}
       onChange={async () => {
         if (file) {
-          const lua = global.editorRef.current.getValue()
-          await lf.setItem(`file-${file.id}`, lua)
+          const body = global.editorRef.current.getValue()
+          await lf.setItem(`file-${file.id}`, body)
         }
       }}
     />

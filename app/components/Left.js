@@ -40,7 +40,16 @@ import {
   keys,
   includes,
 } from "ramda"
-import { DateMS, generateId, wait, tags, dayjs } from "/lib/utils"
+import {
+  DateMS,
+  generateId,
+  wait,
+  tags,
+  dayjs,
+  getPreview,
+  filterFiles,
+  filterProjects,
+} from "/lib/utils"
 import lf from "localforage"
 import md5 from "md5"
 import { ctypes } from "/lib/data"
@@ -80,7 +89,7 @@ export default function Left() {
   const [previewContent, setPreviewContent] = use("previewContent")
 
   const _projects = [
-    ...(localFS
+    ...(localFS.length > 0
       ? [{ id: "2", name: "Local Computer", open: localFSOpen }]
       : []),
     ...projects,
@@ -104,7 +113,8 @@ export default function Left() {
           ext: fileext,
         }
         const _files = prepend(_file, files)
-        await lf.setItem("files", _files)
+        console.log(_files)
+        await lf.setItem("files", filterFiles(_files))
         await lf.setItem(`file-${id}`, txt)
         setFiles(_files)
         setFile(_file)
@@ -920,7 +930,7 @@ export default function Left() {
                     if (v.id === v2.id) v2.open = !v2.open
                   }
                   setProjects(pr)
-                  await lf.setItem("projects", pr)
+                  await lf.setItem("projects", filterProjects(pr))
                 }}
                 css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
               >
