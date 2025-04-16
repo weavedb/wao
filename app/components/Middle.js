@@ -329,19 +329,6 @@ export default function Middle() {
                     _proc.tags = clone(g.ao.mem.msgs[v]?.tags ?? [])
                     _proc.id = v
                     setProc(_proc)
-                    setMessages(
-                      addIndex(map)((v, i) => {
-                        if (!v.http_msg) {
-                          return {
-                            http_msg: g.ao.mem.msgs[v],
-                            id: v,
-                            slot: i,
-                          }
-                        } else {
-                          return g.ao.mem.msgs[v]
-                        }
-                      })(_proc.results)
-                    )
                     setTab("Processes")
                   }}
                 >
