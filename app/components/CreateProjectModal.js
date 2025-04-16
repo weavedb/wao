@@ -3,7 +3,7 @@ import lf from "localforage"
 import Modal from "/components/Modal"
 import use from "/lib/use"
 import { useState } from "react"
-import { generateId, DateMS } from "/lib/utils"
+import { generateId, DateMS, filterProjects } from "/lib/utils"
 import { append } from "ramda"
 
 export default function CreateProjectModal() {
@@ -49,7 +49,7 @@ export default function CreateProjectModal() {
               open: true,
             }
             const _prs = append(_pr, projects)
-            await lf.setItem("projects", _prs)
+            await lf.setItem("projects", filterProjects(_prs))
             setProjects(_prs)
             setProjectname("")
             setModal3(false)

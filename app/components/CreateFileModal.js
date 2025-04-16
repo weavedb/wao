@@ -3,7 +3,7 @@ import Modal from "/components/Modal"
 import use from "/lib/use"
 import { useState } from "react"
 import g from "/lib/global"
-import { generateId, DateMS } from "/lib/utils"
+import { generateId, DateMS, filterFiles } from "/lib/utils"
 import { src_data_js, src_data_lua } from "/lib/scripts"
 import { append } from "ramda"
 import lf from "localforage"
@@ -94,7 +94,7 @@ export default function CreateFileModal() {
                   ? src_data_lua
                   : ""
             const _files = append(_file, files)
-            await lf.setItem("files", _files)
+            await lf.setItem("files", filterFiles(_files))
             await lf.setItem(`file-${id}`, txt)
             setFiles(_files)
             setOpenFiles([...openFiles, _file])
