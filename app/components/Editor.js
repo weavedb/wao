@@ -10,7 +10,6 @@ import EditorScrollbarStyle from "/components/EditorScrollbarStyle"
 import g from "/lib/global"
 import { filter, map, includes } from "ramda"
 import { FaX } from "react-icons/fa6"
-import _assert from "assert"
 import { DateMS, generateId } from "/lib/utils"
 import { bfiles } from "/lib/guide"
 
@@ -36,112 +35,6 @@ export default function Editor({}) {
       className="editor-tabs"
       fontSize="11px"
     >
-      {!file || file.ext !== "js" ? null : (
-        <Flex
-          mr={4}
-          py={1}
-          px={6}
-          color="#5137C5"
-          css={{
-            borderRadius: "5px",
-            cursor: "pointer",
-            _hover: { opacity: 0.75 },
-          }}
-          onClick={async () => {
-            try {
-              const js = g.editorRef.current.getValue()
-              const p = proc ? g.ao.p(proc.id) : null
-              let descs = []
-              const src = async path => {
-                for (let v of files) {
-                  if (v.name === path) {
-                    return await lf.getItem(`file-${v.id}`)
-                  }
-                }
-                return null
-              }
-              const assert = _assert
-              const require = async name => {
-                let module = { exports: null }
-                const js = await src(name)
-                eval(js)
-                return module.exports
-              }
-              let i = 0
-              const it = (desc, fn) => {
-                descs[i].tests.push({ desc, fn })
-              }
-
-              const describe = (desc2, fn) => {
-                descs.push({ desc: desc2, fn, tests: [] })
-              }
-              eval(js)
-              const ts = DateMS.now()
-              let success = 0
-              let fail = 0
-              let res = []
-              for (let v of descs) {
-                let _res = []
-                let _success = 0
-                let _fail = 0
-                await v.fn({ require })
-                for (let v2 of v.tests) {
-                  const start = DateMS.now()
-                  try {
-                    await v2.fn({
-                      ao: g.ao,
-                      src,
-                      p,
-                    })
-                    _res.push({
-                      description: v2.desc,
-                      success: true,
-                      error: null,
-                      duration: DateMS.now() - start,
-                    })
-                    _success++
-                    success++
-                  } catch (e) {
-                    _res.push({
-                      description: v2.desc,
-                      success: false,
-                      error: e.toString(),
-                      duration: DateMS.now() - start,
-                    })
-                    _fail++
-                    fail++
-                  }
-                  res.push({
-                    description: v.desc,
-                    cases: _res,
-                    success: _success,
-                    fail: _fail,
-                  })
-                }
-                i++
-              }
-              const result = {
-                file: file.name,
-                id: generateId(),
-                date: ts,
-                duration: DateMS.now() - ts,
-                tests: res,
-                success,
-                fail,
-              }
-              if (success > 0 || fail > 0) {
-                setTab("Tests")
-                setTest(result)
-                setTests([result, ...tests])
-              }
-            } catch (e) {
-              console.log(e)
-            }
-          }}
-        >
-          Test
-        </Flex>
-      )}
       {file?.ext !== "md" || file?.nodel ? null : (
         <Flex
           py={1}
