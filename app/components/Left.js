@@ -4,6 +4,7 @@ import { Box, Flex, Icon } from "@chakra-ui/react"
 import { Tooltip } from "@/components/ui/tooltip"
 import Hub from "../lib/hub"
 import { Spinner } from "@chakra-ui/react"
+
 import {
   FaNetworkWired,
   FaFileCirclePlus,
@@ -21,6 +22,7 @@ import {
   FaAngleRight,
   FaX,
 } from "react-icons/fa6"
+
 import g from "/lib/global"
 import { hb_url, src_data_lua } from "/lib/scripts"
 import { Adaptor } from "wao/web"
@@ -160,6 +162,9 @@ export default function Left() {
               delete _proc.memory
               _proc.tags = clone(g.ao.mem.msgs[v]?.tags ?? [])
               _proc.id = v
+              let _module = clone(module)
+              _module.processes.push(pid)
+              setModule(_module)
               setProc(_proc)
               setMessages(
                 addIndex(map)((v, i) => {
@@ -205,7 +210,11 @@ export default function Left() {
                   const jwk = await g.getWallet()
                   //if (!jwk) return alert("wallet not connected")
                   const res = await p.msg("Eval", { data: lua, jwk })
+                  const _proc = clone(proc)
+                  _proc.results.push(res.mid)
+                  setProc(_proc)
                   g.logMsg(res.mid)
+                  g.addMsg(res.mid)
                 }
               }}
             >
@@ -594,6 +603,7 @@ export default function Left() {
                       if (!(await recover(process))) return
                       const mid = await g.ao.message(obj.message)
                       g.logMsg(mid)
+                      g.addMsg(mid)
                     }
                     g.hub1.socket.send(
                       JSON.stringify({
@@ -733,6 +743,7 @@ export default function Left() {
                           g.logSpawn(res.json.id)
                         } else {
                           g.logMsg(res.json.id)
+                          g.addMsg(res.json.id)
                         }
                       } catch (e) {
                         console.log(e)
@@ -843,19 +854,6 @@ export default function Left() {
               _proc.id = v.txid
               setProc(_proc)
               setMessage(null)
-              setMessages(
-                addIndex(map)((v, i) => {
-                  if (!v.http_msg) {
-                    return {
-                      http_msg: g.ao.mem.msgs[v],
-                      id: v,
-                      slot: i,
-                    }
-                  } else {
-                    return g.ao.mem.msgs[v]
-                  }
-                })(_proc.results)
-              )
             }}
             css={{
               borderBottom: "1px solid #ddd",
