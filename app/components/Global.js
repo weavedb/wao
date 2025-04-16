@@ -30,7 +30,16 @@ import {
 
 import g from "/lib/global"
 
-import { prop, indexBy, includes, clone, map, filter, mergeLeft } from "ramda"
+import {
+  prop,
+  indexBy,
+  includes,
+  clone,
+  map,
+  filter,
+  mergeLeft,
+  addIndex,
+} from "ramda"
 
 // wao sdk
 import { AO, acc } from "wao/web"
@@ -80,6 +89,7 @@ export default function Global({}) {
   useEffect(() => {
     ;(async () => {
       if (proc && g.ao) await g.connectProc(proc)
+      if (proc) g.updateMsgs()
     })()
   }, [proc])
 
@@ -140,7 +150,7 @@ export default function Global({}) {
       const _prs = await lf.getItem("projects")
       if (_prs) setProjects(_prs)
       let _files = (await lf.getItem("files")) ?? []
-      setFiles([...bfiles, ...bps, _files])
+      setFiles([...bfiles, ...bps, ..._files])
       const networks = await lf.getItem("networks")
       if (networks) setNetworks(networks)
     })()
@@ -200,6 +210,34 @@ export default function Global({}) {
       })()
     }
   }, [init])
+
+  g.updateMsgs = () => {
+    if (proc) {
+      setMessages(
+        addIndex(map)((v, i) => {
+          if (!v.http_msg) {
+            return {
+              http_msg: g.ao.mem.msgs[v],
+              id: v,
+              slot: i,
+            }
+          } else {
+            return g.ao.mem.msgs[v]
+          }
+        })(proc.results)
+      )
+    }
+  }
+
+  g.addMsg = mid => {
+    if (proc) {
+      if (g.ao.mem.msgs[mid]?.process === proc.id) {
+        let _proc = clone(proc)
+        _proc.results.push(mid)
+        setProc(_proc)
+      }
+    }
+  }
 
   g.getDirs = () => {
     let dirs = []
@@ -357,7 +395,7 @@ export default function Global({}) {
     g.stats = async (txt, wallet) => {
       let owner = null
       txt += `Process:\t${proc.id}\n`
-      owner = g.ao.mem.env[proc.id].owner
+      owner = g.ao.mem.env[proc.id]?.owner
       txt += `Owner:\t\t${owner}\n`
       let addr = null
       if (wallet) {
@@ -521,6 +559,5 @@ export default function Global({}) {
       return userAddress ? arweaveWallet : null
     }
   }
-
   return null
 }

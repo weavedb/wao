@@ -53,6 +53,7 @@ const aoeval = async (data, g) => {
       jwk,
     })
     if (!g.dryrun) g.logMsg(mid)
+    g.addMsg(mid)
     if (res?.Output?.data) {
       const data = res.Output.data.output ?? res.Output.data
       g.term.write(`${data}\r\n`)
