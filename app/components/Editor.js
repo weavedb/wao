@@ -1,9 +1,8 @@
 import Monaco from "@monaco-editor/react"
 import lf from "localforage"
-import { getPreview } from "/lib/utils"
+import { getPreview, filterFiles } from "/lib/utils"
 import use from "/lib/use"
 import { useRef, useEffect, useState } from "react"
-import global from "/lib/global"
 import MonacoEditor from "/components/MonacoEditor"
 import FilePath from "/components/FilePath"
 import { Box, Flex, Icon } from "@chakra-ui/react"
@@ -144,7 +143,7 @@ export default function Editor({}) {
           Test
         </Flex>
       )}
-      {file?.ext !== "md" ? null : (
+      {file?.ext !== "md" || file?.nodel ? null : (
         <Flex
           py={1}
           px={6}
@@ -200,7 +199,7 @@ export default function Editor({}) {
               await lf.removeItem(`file-${file.id}`)
               const _files = filter(v => file.id !== v.id)(files)
               const _openFiles = filter(v => file.id !== v.id)(openFiles)
-              await lf.setItem(`files`, _files)
+              await lf.setItem(`files`, filterFiles(_files))
               setFiles(_files)
               setOpenFiles(_openFiles)
               let exists = false
@@ -259,11 +258,11 @@ export default function Editor({}) {
               setFile(v)
               g.setType(v.ext)
               // todo: handle this better
+              if (v.ext === "md" && v.nodel) setPreview(true)
+              if (v.ext === "md") setPreviewContent(await getPreview(txt))
               setTimeout(() => g.editorRef.current.setValue(txt), 100)
-              setPreviewContent(await getPreview(txt))
             }}
             css={{
-              //borderTop: `5px solid ${open ? "#5137C5" : "#666"}`,
               cursor: open ? "default" : "pointer",
               _hover: { opacity: open ? 1 : 0.75 },
             }}
@@ -328,7 +327,8 @@ export default function Editor({}) {
                       }
                       g.setType(v.ext)
                       g.editorRef.current.setValue(txt)
-                      if (v.ext === "md" && preview) {
+                      if (v.ext === "md" && v.nodel) setPreview(true)
+                      if (v.ext === "md" && (preview || v.nodel)) {
                         setPreviewContent(await getPreview(txt))
                       }
 
@@ -357,6 +357,7 @@ export default function Editor({}) {
       })(openFiles)}
     </Flex>
   )
+
   const isPreview = preview && file?.ext === "md"
   return !init ? null : (
     <Flex
