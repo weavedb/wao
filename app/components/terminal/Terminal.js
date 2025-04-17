@@ -6,7 +6,7 @@ import g from "/lib/global"
 import use from "/lib/use"
 
 const XTerminal = dynamic(
-  () => import("../components/Xterm").then(mod => mod),
+  () => import("/components/terminal/Xterm").then(mod => mod),
   { ssr: false }
 )
 
