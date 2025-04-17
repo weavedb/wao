@@ -1,6 +1,6 @@
 import { Input, Box, Flex } from "@chakra-ui/react"
 import lf from "localforage"
-import Modal from "/components/Modal"
+import Modal from "/components/modals/Modal"
 import use from "/lib/use"
 import { useState } from "react"
 import { append } from "ramda"

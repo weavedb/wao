@@ -7,7 +7,7 @@ import { Box, Flex, Icon } from "@chakra-ui/react"
 import { Toaster } from "@/components/ui/toaster"
 
 // components
-import GlobalStyle from "/components/GlobalStyle"
+import GlobalStyle from "/components/styles/GlobalStyle"
 import Global from "/components/Global"
 import Header from "/components/Header"
 import Left from "/components/Left"
@@ -15,12 +15,12 @@ import Middle from "/components/Middle"
 import Sidebar from "/components/Sidebar"
 import Logo from "/components/Logo"
 import Footer from "/components/Footer"
-import Editor from "/components/Editor"
-import Terminal from "/components/Terminal"
-import CreateFileModal from "/components/CreateFileModal"
-import CreateFolderModal from "/components/CreateFolderModal"
-import LaunchNetworkModal from "/components/LaunchNetworkModal"
-import CreateProjectModal from "/components/CreateProjectModal"
+import Editor from "/components/editor/Editor"
+import Terminal from "/components/terminal/Terminal"
+import CreateFileModal from "/components/modals/CreateFileModal"
+import CreateFolderModal from "/components/modals/CreateFolderModal"
+import LaunchNetworkModal from "/components/modals/LaunchNetworkModal"
+import CreateProjectModal from "/components/modals/CreateProjectModal"
 
 export default function Home({}) {
   const [tab, setTab] = use("tab")
