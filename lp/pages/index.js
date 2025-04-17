@@ -3,7 +3,7 @@ import Head from "next/head"
 
 export default function Home() {
   // Set the launch date (modify this to your actual launch date)
-  const launchDate = new Date("2025-04-27T00:00:00")
+  const launchDate = new Date("2025-04-25T00:00:00")
 
   const [timeLeft, setTimeLeft] = useState({
     days: 0,
@@ -160,8 +160,11 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>WAO | DevNet Launch</title>
-        <meta name="description" content="Countdown to our WAO DevNet launch" />
+        <title>WAO | LocalNet Launch</title>
+        <meta
+          name="description"
+          content="Countdown to our WAO LocalNet launch"
+        />
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
@@ -409,17 +412,6 @@ export default function Home() {
             >
               WAO
             </h1>
-            <nav
-              className="desktop-nav"
-              style={{ display: "flex", gap: "2rem" }}
-            >
-              <a
-                href="https://docs.wao.eco"
-                style={{ color: "#d8b4fe", fontWeight: "bold" }}
-              >
-                Docs
-              </a>
-            </nav>
             <div
               className="mobile-menu-icon"
               style={{
@@ -470,7 +462,7 @@ export default function Home() {
                 textShadow: "0 0 10px #c252ff",
               }}
             >
-              WAO DevNet Launch
+              WAO LocalNet Launch
             </h2>
             <p
               className="main-description"
@@ -482,7 +474,7 @@ export default function Home() {
                 lineHeight: "1.6",
               }}
             >
-              Web-Based Implementation of AO
+              Blazing-Fast Local AO Network for Rapid Development
             </p>
 
             {/* Countdown Display */}
@@ -633,41 +625,17 @@ export default function Home() {
                 </div>
               </div>
             </div>
-
-            <a
-              href="https://x.com/waoeco"
-              target="_blank"
-              rel="noopener noreferrer"
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                marginTop: "50px",
+              }}
             >
-              <button
-                className="join-button"
-                style={{
-                  background: "linear-gradient(90deg, #9333EA, #7928CA)",
-                  color: "white",
-                  border: "none",
-                  padding: "0.875rem 1.75rem",
-                  fontSize: "1rem",
-                  fontWeight: "bold",
-                  borderRadius: "9999px",
-                  cursor: "pointer",
-                  boxShadow: "0 0 15px rgba(194, 82, 255, 0.5)",
-                  border: "1px solid rgba(194, 82, 255, 0.5)",
-                  transition: "transform 0.3s ease, box-shadow 0.3s ease",
-                }}
-                onMouseOver={e => {
-                  e.currentTarget.style.transform = "translateY(-3px)"
-                  e.currentTarget.style.boxShadow =
-                    "0 5px 20px rgba(194, 82, 255, 0.7)"
-                }}
-                onMouseOut={e => {
-                  e.currentTarget.style.transform = "translateY(0)"
-                  e.currentTarget.style.boxShadow =
-                    "0 0 15px rgba(194, 82, 255, 0.5)"
-                }}
-              >
-                Follow The Purple Elephants
-              </button>
-            </a>
+              <a href="https://arweaveindia.com/adi" target="_blank">
+                <img src="/adi.avif" width="300px" />
+              </a>
+            </div>
           </div>
         </main>
 

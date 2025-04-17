@@ -3,8 +3,8 @@ import chalk from "chalk"
 import { Box } from "@chakra-ui/react"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import { FitAddon } from "../lib/addon-fit"
-import XtermStyle from "./XtermStyle"
+import { FitAddon } from "/lib/addon-fit"
+import XtermStyle from "/components/styles/XtermStyle"
 const config = {
   cursorBlink: true,
   fontSize: 12,
