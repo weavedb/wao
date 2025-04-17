@@ -1,5 +1,5 @@
 import { Input, NativeSelect, Box, Flex } from "@chakra-ui/react"
-import Modal from "/components/Modal"
+import Modal from "/components/modals/Modal"
 import use from "/lib/use"
 import { useState } from "react"
 import g from "/lib/global"
