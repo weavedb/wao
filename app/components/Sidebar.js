@@ -12,6 +12,7 @@ import { keys, map, includes } from "ramda"
 import use from "/lib/use"
 
 import {
+  FaWallet,
   FaCode,
   FaBug,
   FaCodeCompare,
@@ -26,7 +27,7 @@ const tabmap = {
   Modules: { icon: <FaCubes /> },
   Processes: { icon: <FaCodeCompare /> },
   Messages: { icon: <FaEnvelopesBulk /> },
-  //    Accounts: { icon: <FaWallet /> },
+  Accounts: { icon: <FaWallet /> },
   //    Tokens: { icon: <FaCoins /> },
   //    Storage: { icon: <FaHardDrive /> },
   //    Database: { icon: <FaDatabase /> },
@@ -38,6 +39,7 @@ export default function Sidebar({}) {
   const [tab, setTab] = use("tab")
   const [init] = use("init")
   const [proc] = use("proc")
+  const [acc] = use("acc")
   return !init ? null : (
     <Flex css={{ overflowY: "auto", borderRight: "1px solid #ddd" }}>
       <Flex direction="column" w="50px">
@@ -61,9 +63,8 @@ export default function Sidebar({}) {
                 }}
                 onClick={() => {
                   if (v === "Messages" && proc === null) return
-                  if (
-                    includes(v, ["Accounts", "Tokens", "Storage", "Database"])
-                  ) {
+                  if (v === "Accounts" && acc === null) return
+                  if (includes(v, ["Tokens", "Storage", "Database"])) {
                     return alert("Coming Soon!")
                   }
                   setTab(v)

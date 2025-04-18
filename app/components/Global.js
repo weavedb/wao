@@ -26,6 +26,7 @@ import {
   useResizeObserver,
   resolvePath,
   DateMS,
+  tags,
 } from "/lib/utils"
 
 import g from "/lib/global"
@@ -39,6 +40,7 @@ import {
   filter,
   mergeLeft,
   addIndex,
+  append,
 } from "ramda"
 
 // wao sdk
@@ -200,7 +202,10 @@ export default function Global({}) {
       ;(async () => {
         let default_process = await lf.getItem("default_process")
         if (!default_process) {
-          const { p, pid } = await g.ao.deploy({ module: mod })
+          const { p, pid } = await g.ao.deploy({
+            module: mod,
+            tags: { Name: "Default Process" },
+          })
           g.logSpawn(pid)
           default_process = { id: pid }
           await lf.setItem("default_process", default_process)
@@ -334,9 +339,7 @@ export default function Global({}) {
 
   g._setModule = id => {
     let mmap = {}
-    for (let k in g.ao.mem.modules) {
-      mmap[g.ao.mem.modules[k]] = k
-    }
+    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
     let _procs = []
     let mod = clone(g.ao.mem.txs[id])
     if (mod) {
@@ -344,8 +347,12 @@ export default function Global({}) {
       for (let k in g.ao.mem.env) {
         for (let v of g.ao.mem.msgs[k]?.tags ?? []) {
           if (v.name === "Module" && v.value === mod.id) {
-            mod.processes.push(k)
             const val = g.ao.mem.env[k]
+            let name = null
+            if (g.ao.mem.msgs[k]) {
+              name = tags(g.ao.mem.msgs[k].tags).Name ?? null
+            }
+            mod.processes.push({ id: k, name })
             _procs.push({ txid: k, module: mmap[val.module] })
           }
         }
@@ -354,6 +361,17 @@ export default function Global({}) {
       setModule(mod)
     }
   }
+
+  g._setProcess = id => {
+    let _proc = clone(g.ao.mem.env[id])
+    delete _proc.memory
+    _proc.tags = clone(g.ao.mem.msgs[id]?.tags ?? [])
+    _proc.id = id
+    let mmap = {}
+    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
+    setProcs(append({ txid: id, module: mmap[_proc.module] }, procs))
+  }
+
   g.clickFile = async v => {
     let opens = clone(g.openFilesRef.current)
     let exists = false

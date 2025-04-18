@@ -1,7 +1,7 @@
 import use from "/lib/use"
 import { Box, Flex } from "@chakra-ui/react"
 import g from "/lib/global"
-import { clone, map, addIndex } from "ramda"
+import { clone, map, addIndex, append } from "ramda"
 
 export default function Left() {
   const [modules, setModules] = use("modules")
@@ -38,14 +38,16 @@ export default function Left() {
             let pid, p
             ;({ pid, p } = await g.ao.deploy({ module: mod.id, jwk }))
             g.logSpawn(pid)
+            g._setModule(mod.id)
+            g._setProcess(pid)
+            setTab("Processes")
+
+            /*
             const v = pid
             let _proc = clone(g.ao.mem.env[v])
             delete _proc.memory
             _proc.tags = clone(g.ao.mem.msgs[v]?.tags ?? [])
             _proc.id = v
-            let _module = clone(mod)
-            _module.processes.push(pid)
-            setModule(_module)
             setProc(_proc)
             setMessages(
               addIndex(map)((v, i) => {
@@ -61,7 +63,7 @@ export default function Left() {
             let mmap = {}
             for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
             setProcs(append({ txid: pid, module: mmap[_proc.module] }, procs))
-            setTab("Processes")
+            */
           }}
         >
           Spawn
@@ -86,14 +88,7 @@ export default function Left() {
           p={4}
           direction="column"
           justify="center"
-          onClick={() => {
-            g._setModule(v.txid)
-            let mmap = {}
-            for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
-            setProc(null)
-            setMessages([])
-            setMessage(null)
-          }}
+          onClick={() => g._setModule(v.txid)}
           css={{
             borderBottom: "1px solid #ddd",
             cursor: "pointer",

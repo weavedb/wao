@@ -370,7 +370,6 @@ class AO {
       if (auth) tags.Authority = auth
       if (!tags.Authority && this.authority) tags.Authority = this.authority
       let _tags = buildTags(null, tags)
-      console.log("yo.....................", data, _tags)
       pid = await this.spawn({
         variant: this.variant,
         memory,
