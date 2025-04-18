@@ -82,9 +82,9 @@ export default function Left() {
   const pfiles = g.getFiles()
   const buttons = (
     <Flex
-      h="50px"
+      h="30px"
       align="center"
-      p={4}
+      px={3}
       fontSize="12px"
       css={{ borderBottom: "1px solid #ddd" }}
     >
@@ -311,7 +311,7 @@ export default function Left() {
         return (
           <>
             <Flex
-              h="25px"
+              h="30px"
               px={4}
               align="center"
               bg="#eee"
@@ -342,7 +342,7 @@ export default function Left() {
                     !v.show ? null : (
                       <>
                         <Flex
-                          h="25px"
+                          h="30px"
                           px={4}
                           align="center"
                           bg={v.id === file?.id ? "#5137C5" : "white"}

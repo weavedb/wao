@@ -49,4 +49,5 @@ export default store({
   processes: [],
   su: null,
   acc: null,
+  entity: null,
 })

@@ -45,7 +45,7 @@ export default function Header() {
           fontSize="12px"
           align="center"
           justify="center"
-          w="50px"
+          w="60px"
         >
           WAO
         </Flex>
@@ -253,17 +253,17 @@ export default function Header() {
             onClick={() => setModal(false)}
           >
             <Box
-              mb="50px"
+              mb="60px"
               width="315px"
               bg="white"
-              css={{ position: "absolute", top: 0, left: "50px" }}
+              css={{ position: "absolute", top: 0, left: "60px" }}
               onClick={e => {
                 e.stopPropagation()
               }}
             >
               {(results ?? []).length === 0 ? (
                 <Flex
-                  h="50px"
+                  h="60px"
                   bg={"white"}
                   fontSize="12px"
                   p={4}
@@ -282,7 +282,7 @@ export default function Header() {
                 map(v => {
                   return (
                     <Flex
-                      h="50px"
+                      h="60px"
                       bg={"white"}
                       fontSize="12px"
                       p={4}
@@ -343,7 +343,7 @@ export default function Header() {
                         _hover: { opacity: 0.75 },
                       }}
                     >
-                      <Box fontWeight="bold" color="#5137C5">
+                      <Box fontWeight="bold" color="#5137C5" mb={1}>
                         {v.type}
                       </Box>
                       <Box fontSize="10px" color={"#222"}>

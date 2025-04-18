@@ -140,7 +140,7 @@ export default function Editor({}) {
           <Flex
             fontSize="11px"
             w="140px"
-            h="25px"
+            h="30px"
             bg={open ? "#1e1e1e" : "#444"}
             px={3}
             color="#c6c6c6"
@@ -267,7 +267,7 @@ export default function Editor({}) {
         px={3}
         fontSize="10px"
         w="100%"
-        h="25px"
+        h="20px"
         pb="5px"
         color="#999"
         align="center"

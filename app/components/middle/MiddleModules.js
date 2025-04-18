@@ -8,6 +8,90 @@ export default function Middle() {
   const [tab, setTab] = use("tab")
   const [proc, setProc] = use("proc")
   const [module, setModule] = use("module")
+  const [modules, setModules] = use("modules")
+  const [subtab, setSubtab] = useState("Tags")
+  const subtabs = ["Tags", "Processes"]
+  const buttons = (
+    <Flex
+      h="60px"
+      justify="center"
+      fontSize="10px"
+      css={{ borderBottom: "1px solid #ddd" }}
+      direction="column"
+    >
+      <Flex
+        fontSize="12px"
+        h="30px"
+        px={3}
+        align="center"
+        bg="#5137c5"
+        color="#ddd"
+        css={{ borderBottom: "1px solid #ddd" }}
+      >
+        <Box>Modules / {modules.length}</Box>
+      </Flex>
+      <Flex h="30px" bg="#eee" align="center">
+        <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+          Name
+        </Box>
+        <Box px={3} fontSize="10px" w="300px">
+          TxID
+        </Box>
+        <Box px={3} fontSize="10px" w="270px">
+          Module Format
+        </Box>
+        <Box px={3} fontSize="10px" w="80px">
+          Memory
+        </Box>
+        <Box px={3} fontSize="10px" flex={1}>
+          Timestamp
+        </Box>
+      </Flex>
+    </Flex>
+  )
+  return (
+    <Box w="100%">
+      {buttons}
+      {map(v => (
+        <Flex
+          fontSize="10px"
+          h="30px"
+          align="center"
+          css={{
+            borderBottom: "1px solid #ddd",
+            cursor: "pointer",
+            _hover: { color: "#ddd", bg: "#5137C5" },
+          }}
+          className="group"
+          onClick={() => {
+            g.getModule(v.txid)
+          }}
+        >
+          <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+            {v.name ?? v.module}
+          </Box>
+          <Box px={3} fontSize="10px" w="300px">
+            {v.txid}
+          </Box>
+          <Box px={3} fontSize="10px" w="270px">
+            {v.format}
+          </Box>
+          <Box px={3} fontSize="10px" w="80px">
+            {v.memory}
+          </Box>
+          <Box px={3} fontSize="10px" flex={1}>
+            {v.timestamp}
+          </Box>
+        </Flex>
+      ))(modules)}
+    </Box>
+  )
+}
+
+function MiddleOld() {
+  const [tab, setTab] = use("tab")
+  const [proc, setProc] = use("proc")
+  const [module, setModule] = use("module")
   const [subtab, setSubtab] = useState("Tags")
   const subtabs = ["Tags", "Processes"]
   const buttons = (
@@ -15,7 +99,7 @@ export default function Middle() {
       h="50px"
       align="center"
       p={4}
-      fontSize="12px"
+      fontSize="10px"
       css={{ borderBottom: "1px solid #ddd" }}
     >
       {map(v => {
@@ -68,7 +152,7 @@ export default function Middle() {
         map(v => (
           <Flex
             px={4}
-            fontSize="12px"
+            fontSize="10px"
             direction="column"
             h="50px"
             justify="center"
@@ -92,7 +176,7 @@ export default function Middle() {
               color="#5137c5"
               _groupHover={{ color: "white" }}
             >
-              {v.name ?? "Process"}
+              {v.name ?? v.module}
             </Box>
             <Box fontSize="10px">{v.id}</Box>
           </Flex>
