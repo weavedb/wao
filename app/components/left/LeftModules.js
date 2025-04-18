@@ -34,36 +34,11 @@ export default function Left() {
           }}
           onClick={async () => {
             const jwk = await g.getWallet()
-            //if (!jwk) return alert("wallet not connected")
-            let pid, p
-            ;({ pid, p } = await g.ao.deploy({ module: mod.id, jwk }))
+            const { pid, p } = await g.ao.deploy({ module: mod.id, jwk })
             g.logSpawn(pid)
             g._setModule(mod.id)
             g._setProcess(pid)
             setTab("Processes")
-
-            /*
-            const v = pid
-            let _proc = clone(g.ao.mem.env[v])
-            delete _proc.memory
-            _proc.tags = clone(g.ao.mem.msgs[v]?.tags ?? [])
-            _proc.id = v
-            setProc(_proc)
-            setMessages(
-              addIndex(map)((v, i) => {
-                return {
-                  id: v,
-                  ...g.ao.mem.msgs[v],
-                  slot: i,
-                  http_msg: g.ao.mem.msgs[v],
-                }
-              })(_proc.results)
-            )
-
-            let mmap = {}
-            for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
-            setProcs(append({ txid: pid, module: mmap[_proc.module] }, procs))
-            */
           }}
         >
           Spawn
