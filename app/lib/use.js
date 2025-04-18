@@ -48,4 +48,5 @@ export default store({
   prc: null,
   processes: [],
   su: null,
+  acc: null,
 })
