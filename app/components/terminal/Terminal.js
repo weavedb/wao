@@ -31,7 +31,7 @@ export default function Terminal({}) {
     >
       <Flex
         fontSize="12px"
-        h="25px"
+        h="30px"
         bg="#1E1E1E"
         color="#999"
         css={{ border: "1px solid #666" }}

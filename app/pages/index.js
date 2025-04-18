@@ -6,6 +6,9 @@ import use from "/lib/use"
 import { Box, Flex, Icon } from "@chakra-ui/react"
 import { Toaster } from "@/components/ui/toaster"
 
+// utils
+import { includes } from "ramda"
+
 // components
 import GlobalStyle from "/components/styles/GlobalStyle"
 import Global from "/components/Global"
@@ -35,12 +38,14 @@ export default function Home({}) {
           <Header />
         </Flex>
         <Flex h="calc(100vh - 60px)" w="100vw" css={{ overflow: "hidden" }}>
-          <Flex w="50px" h="calc(100vh - 60px)">
+          <Flex w="60px" h="calc(100vh - 60px)">
             <Sidebar />
           </Flex>
-          <Flex w="315px" h="calc(100vh - 60px)">
-            <Left />
-          </Flex>
+          {includes(tab, ["Modules", "Entity"]) ? null : (
+            <Flex w="315px" h="calc(100vh - 60px)">
+              <Left />
+            </Flex>
+          )}
           <Box
             flex={1}
             h="calc(100vh - 60px)"
@@ -48,9 +53,18 @@ export default function Home({}) {
             css={{ overflow: "hidden" }}
           >
             <PanelGroup direction="horizontal">
-              {tab !== "Projects" ? (
+              {!includes(tab, ["Projects", "Modules", "Entity"]) ? (
                 <>
-                  <Panel defaultSize={30} minSize={20} order={1}>
+                  <Panel defaultSize={35} minSize={20} order={1}>
+                    <Box h="calc(100vh - 60px)">
+                      <Middle />
+                    </Box>
+                  </Panel>
+                  <PanelResizeHandle />
+                </>
+              ) : tab !== "Projects" ? (
+                <>
+                  <Panel defaultSize={50} minSize={20} order={1}>
                     <Box h="calc(100vh - 60px)">
                       <Middle />
                     </Box>
@@ -58,16 +72,15 @@ export default function Home({}) {
                   <PanelResizeHandle />
                 </>
               ) : null}
-
-              <Panel minSize={30} order={2}>
+              <Panel minSize={30} defaultSize={35} order={2}>
                 <PanelGroup
                   direction={tab !== "Projects" ? "vertical" : "horizontal"}
                 >
-                  <Panel maxSize={75}>
+                  <Panel maxSize={65}>
                     <Editor />
                   </Panel>
                   <PanelResizeHandle />
-                  <Panel maxSize={75}>
+                  <Panel maxSize={65}>
                     <Terminal />
                   </Panel>
                 </PanelGroup>

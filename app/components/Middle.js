@@ -6,6 +6,7 @@ import MiddleModules from "/components/middle/MiddleModules"
 import MiddleProcesses from "/components/middle/MiddleProcesses"
 import MiddleMessages from "/components/middle/MiddleMessages"
 import MiddleNetworks from "/components/middle/MiddleNetworks"
+import MiddleEntity from "/components/middle/MiddleEntity"
 
 export default function Middle() {
   const [tab, setTab] = use("tab")
@@ -25,6 +26,8 @@ export default function Middle() {
         return <MiddleMessages />
       case "Networks":
         return <MiddleNetworks />
+      case "Entity":
+        return <MiddleEntity />
     }
   })()
   return <Flex w="100%">{!init ? null : <Flex w="100%">{middle}</Flex>}</Flex>
