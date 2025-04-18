@@ -40,7 +40,7 @@ import {
   filter,
   mergeLeft,
   addIndex,
-  append,
+  prepend,
 } from "ramda"
 
 // wao sdk
@@ -59,6 +59,7 @@ export default function Global({}) {
   g.fileInputRef = useRef(null)
 
   const { width, height } = useResizeObserver(g.containerRef)
+  const [entity, setEntity] = use("entity")
   const [projects, setProjects] = use("projects")
   const [tab, setTab] = use("tab")
   const [ctype, setCtype] = use("ctype")
@@ -178,25 +179,15 @@ export default function Global({}) {
         g.ao = await new AO({ variant: cache, cache }).init(acc[0])
       }
       await g.ao.mem.init()
-      let _modules = []
-      let mmap = {}
-      for (let k in g.ao.mem.modules) {
-        _modules.push({ name: k, txid: g.ao.mem.modules[k] })
-        mmap[g.ao.mem.modules[k]] = k
-      }
-      setModules(_modules)
-      let _procs = []
-      for (let k in g.ao.mem.env) {
-        const val = g.ao.mem.env[k]
-        _procs.push({ txid: k, module: mmap[val.module] })
-      }
-      setProcs(_procs)
+      g.listModules()
+      g.listProcesses()
       g._setModule(mod)
       setMessage(null)
       setMessages([])
       setInit(true)
     })()
   }, [cache])
+
   useEffect(() => {
     if (init && g.ao) {
       ;(async () => {
@@ -211,10 +202,88 @@ export default function Global({}) {
           await lf.setItem("default_process", default_process)
         }
         g.welcome()
-        setProc(g.ao.mem.env[default_process.id])
+        g._setProcess(default_process.id)
       })()
     }
   }, [init])
+  g.getModule = id => {
+    let mmap = {}
+    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
+    let _procs = []
+    let mod = clone(g.ao.mem.txs[id])
+    mod.name = mmap[id]
+    mod.type = "module"
+    if (mod) {
+      const tx = g.ao.mem.txs[id]
+      let timestamp = null
+      const bdl = g.ao.mem.txs[id]
+      const block = g.ao.mem.blockmap[bdl.block]
+      mod.timestamp = block.timestamp
+      mod.processes = []
+      for (let k in g.ao.mem.env) {
+        for (let v of g.ao.mem.msgs[k]?.tags ?? []) {
+          if (v.name === "Module" && v.value === mod.id) {
+            const val = g.ao.mem.env[k]
+            let name = null
+            if (g.ao.mem.msgs[k]) {
+              name = tags(g.ao.mem.msgs[k].tags).Name ?? null
+            }
+            const tx = g.ao.mem.txs[k]
+            let timestamp = null
+            if (tx.bundle) {
+              const bdl = g.ao.mem.txs[tx.bundle]
+              const block = g.ao.mem.blockmap[bdl.block]
+              timestamp = block.timestamp
+            }
+            mod.processes.push({
+              id: k,
+              name,
+              module: mmap[val.module],
+              timestamp,
+              outgoing: g.ao.mem.env[k]?.results.length,
+            })
+            _procs.push({
+              txid: k,
+              module: mmap[val.module],
+            })
+          }
+        }
+      }
+      setEntity(mod)
+      setTab("Entity")
+    }
+  }
+  g.listModules = () => {
+    let _modules = []
+    let mmap = {}
+    for (let k in g.ao.mem.modules) {
+      const txid = g.ao.mem.modules[k]
+      const tx = g.ao.mem.txs[txid]
+      const block = g.ao.mem.blockmap[tx.block]
+      const t = tags(tx.tags)
+      _modules.push({
+        name: k,
+        txid,
+        timestamp: block.timestamp,
+        memory: t["Memory-Limit"],
+        format: t["Module-Format"],
+        compute: t["Compute-Limit"],
+      })
+      mmap[g.ao.mem.modules[k]] = k
+    }
+    setModules(_modules)
+  }
+
+  g.listProcesses = () => {
+    let _procs = []
+    let mmap = {}
+    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
+    for (let k in g.ao.mem.env) {
+      const val = g.ao.mem.env[k]
+      _procs.unshift({ txid: k, module: mmap[val.module] })
+    }
+    setProcs(_procs)
+  }
 
   g.updateMsgs = () => {
     if (proc) {
@@ -352,12 +421,11 @@ export default function Global({}) {
             if (g.ao.mem.msgs[k]) {
               name = tags(g.ao.mem.msgs[k].tags).Name ?? null
             }
-            mod.processes.push({ id: k, name })
+            mod.processes.push({ id: k, name, module: mmap[val.module] })
             _procs.push({ txid: k, module: mmap[val.module] })
           }
         }
       }
-      setProcs(_procs)
       setModule(mod)
     }
   }
@@ -367,9 +435,8 @@ export default function Global({}) {
     delete _proc.memory
     _proc.tags = clone(g.ao.mem.msgs[id]?.tags ?? [])
     _proc.id = id
-    let mmap = {}
-    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
-    setProcs(append({ txid: id, module: mmap[_proc.module] }, procs))
+    setProc(_proc)
+    g.listProcesses()
   }
 
   g.clickFile = async v => {

@@ -42,7 +42,7 @@ export default function Sidebar({}) {
   const [acc] = use("acc")
   return !init ? null : (
     <Flex css={{ overflowY: "auto", borderRight: "1px solid #ddd" }}>
-      <Flex direction="column" w="50px">
+      <Flex direction="column" w="60px">
         {map(v => {
           return (
             <Tooltip
@@ -52,7 +52,7 @@ export default function Sidebar({}) {
               closeDelay={0}
             >
               <Flex
-                h="50px"
+                h="60px"
                 w="100%"
                 fontSize="12px"
                 align="center"
