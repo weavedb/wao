@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { hash as sha256 } from "fast-sha256"
 import { fromPairs, map, filter, includes } from "ramda"
 import { common, createStarryNight } from "@wooorm/starry-night"
 import markdownIt from "markdown-it"
@@ -131,7 +132,28 @@ const short = (addr, len = 8) => {
 const fromNow = ts => {
   return dayjs(ts).fromNow()
 }
+
+function b64urlEncode(buf) {
+  const b64 =
+    typeof btoa === "function"
+      ? btoa(String.fromCharCode(...buf))
+      : Buffer.from(buf).toString("base64")
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
+function b64urlDecode(str) {
+  str = str.replace(/-/g, "+").replace(/_/g, "/")
+  if (str.length % 4) str += "=".repeat(4 - (str.length % 4))
+  if (typeof atob === "function") {
+    const bin = atob(str)
+    return Uint8Array.from(bin, c => c.charCodeAt(0))
+  }
+  return Uint8Array.from(Buffer.from(str, "base64"))
+}
+
+const toAddr = pub => b64urlEncode(sha256(b64urlDecode(pub)))
+
 export {
+  toAddr,
   fromNow,
   short,
   filterProjects,
