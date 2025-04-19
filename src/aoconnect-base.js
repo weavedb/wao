@@ -367,6 +367,15 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
               signer: mu.signer,
               from: opt.process,
             })
+          } else {
+            await record({
+              for: opt.message,
+              tags: v.Tags,
+              data: v.Data,
+              signer: mu.signer,
+              from: opt.process,
+              target: v.Target,
+            })
           }
         }
         for (const v of res.Spawns ?? []) {
@@ -509,6 +518,35 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       const key = `${opt.process}:${id}}`
       delete ongoing[key]
       return id
+    }
+    const record = async opt => {
+      let id = opt?.item?.id ?? ""
+      let owner = opt.owner ?? ""
+      let item = opt.item
+      opt.tags = buildTags(
+        null,
+        mergeLeft(tags(opt.tags ?? []), {
+          "Data-Protocol": "ao",
+          Variant: variant ?? "ao.TN.1",
+          Type: "Message",
+        })
+      )
+      if (opt.for) {
+        opt.tags.push({ name: "Pushed-For", value: opt.for })
+        opt.tags.push({ name: "From-Process", value: opt.from })
+        const pr = (await mem.getTx(opt.from))?.tags ?? []
+        const module = tags(pr).Module
+        if (module) opt.tags.push({ name: "From-Module", value: module })
+      }
+      ;({ item, id, owner } = await ar.dataitem({
+        data: opt.data,
+        signer: opt.signer,
+        tags: tags(opt.tags),
+        target: opt.process,
+      }))
+      const _msg = dissoc("signer", opt)
+      await mem.set(_msg, "msgs", id)
+      await ar.postItems(item, su.jwk)
     }
     const recover = async (pid, next) => {
       let count = 0
