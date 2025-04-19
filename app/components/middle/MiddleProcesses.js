@@ -31,7 +31,7 @@ export default function MiddleProcesses() {
           Name
         </Box>
         <Box px={3} fontSize="10px" w="300px">
-          TxID
+          ID
         </Box>
         <Box px={3} fontSize="10px" w="120px">
           Module

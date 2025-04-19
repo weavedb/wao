@@ -31,7 +31,7 @@ export default function MiddleMessages() {
           Action
         </Box>
         <Box px={3} fontSize="10px" w="300px">
-          TxID
+          ID
         </Box>
         <Box px={3} fontSize="10px" w="150px">
           From
