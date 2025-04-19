@@ -57,6 +57,8 @@ export default function MiddleEntityMessage() {
   if (entity) {
     meta.push({ name: "ID", value: entity.id })
     meta.push({ name: "Process", value: entity.process })
+    meta.push({ name: "From", value: entity.from })
+    meta.push({ name: "To", value: entity.to })
     meta.push({ name: "Timestamp", value: entity.timestamp })
   }
   return (
@@ -78,12 +80,12 @@ export default function MiddleEntityMessage() {
           </Box>
           <Box
             flex={1}
-            px={4}
+            p={4}
             fontSize="11px"
             h="calc(100vh - 120px)"
             css={{ borderLeft: "1px solid #ddd", overflowY: "auto" }}
           >
-            <Flex my={2} fontWeight="bold" color="#5137C5" fontSize="14px">
+            <Flex mb={2} fontWeight="bold" color="#5137C5" fontSize="14px">
               Tags
             </Flex>
             {map(v => (

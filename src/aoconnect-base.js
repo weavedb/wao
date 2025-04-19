@@ -199,6 +199,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         height: 0,
         results: [id],
       }
+      let __msg = null
       if (memory) {
         // forking...
       } else if (_tags["On-Boot"] || true) {
@@ -206,6 +207,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         if (_tags["On-Boot"] === "Data") data = opt.data ?? ""
         else data = (await mem.get("msgs", _tags["On-Boot"]))?.data ?? ""
         let msg = await genMsg(id, p, data, opt.tags, owner, msg_owner, true)
+        __msg = msg
         const _env = await genEnv({
           pid: p.id,
           owner: p.owner,
@@ -217,7 +219,11 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       } else {
         p.height += 1
       }
-      const _msg = { ...o(dissoc("signer"), dissoc("memory"))(opt), res }
+      const _msg = {
+        ...o(dissoc("signer"), dissoc("memory"))(opt),
+        res,
+        msg: __msg,
+      }
       await mem.set(_msg, "msgs", id)
       if (_tags["Cron-Interval"]) {
         let [num, unit] = _tags["Cron-Interval"].split("-")
@@ -349,7 +355,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         delete res.Memory
         p.results.push(opt.message)
         await mem.set(p, "env", opt.process)
-        const _msg = { ...dissoc("signer", _opt), res }
+        const _msg = { ...dissoc("signer", _opt), res, msg }
         await mem.set(_msg, "msgs", opt.message)
         for (const v of res.Messages ?? []) {
           if (await mem.get("env", v.Target)) {
@@ -486,7 +492,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           delete res.Memory
           p.results.push(id)
           await mem.set(p, "env", opt.process)
-          const _msg = { ...dissoc("signer", _opt), res }
+          const _msg = { ...dissoc("signer", _opt), res, msg }
           await mem.set(_msg, "msgs", id)
         } catch (e) {
           console.log(e)

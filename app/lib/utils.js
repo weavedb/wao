@@ -125,7 +125,11 @@ const filterFiles = filter(v => {
   return v.pid && !includes(v.pid, ["0", "2", "3"])
 })
 const filterProjects = filter(v => v.id !== "2")
+const short = (addr, len = 8) => {
+  return !addr ? "" : addr.slice(0, len) + "..." + addr.slice(-len)
+}
 export {
+  short,
   filterProjects,
   filterFiles,
   getAct,

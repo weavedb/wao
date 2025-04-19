@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Box, Flex } from "@chakra-ui/react"
 import { includes, map } from "ramda"
-import { tags } from "/lib/utils"
+import { tags, short } from "/lib/utils"
 import g from "/lib/global"
 import use from "/lib/use"
 
@@ -33,7 +33,10 @@ export default function MiddleMessages() {
         <Box px={3} fontSize="10px" w="300px">
           TxID
         </Box>
-        <Box px={3} fontSize="10px" w="300px">
+        <Box px={3} fontSize="10px" w="150px">
+          From
+        </Box>
+        <Box px={3} fontSize="10px" w="150px">
           To
         </Box>
         <Box px={3} fontSize="10px" flex={1}>
@@ -67,8 +70,11 @@ export default function MiddleMessages() {
             <Box px={3} fontSize="10px" w="300px">
               {v.id}
             </Box>
-            <Box px={3} fontSize="10px" w="300px">
-              {v.to}
+            <Box px={3} fontSize="10px" w="150px">
+              {short(v.from)}
+            </Box>
+            <Box px={3} fontSize="10px" w="150px">
+              {short(v.to)}
             </Box>
             <Box px={3} fontSize="10px" flex={1}>
               {v.timestamp}
