@@ -12,6 +12,7 @@ import { keys, map, includes } from "ramda"
 import use from "/lib/use"
 
 import {
+  FaPuzzlePiece,
   FaWallet,
   FaCode,
   FaBug,
@@ -23,9 +24,10 @@ import {
 
 const tabmap = {
   Projects: { icon: <FaCode /> },
-  Modules: { icon: <FaCubes /> },
+  Modules: { icon: <FaPuzzlePiece /> },
   Processes: { icon: <FaCodeCompare /> },
   Messages: { icon: <FaEnvelopesBulk /> },
+  Blocks: { icon: <FaCubes /> },
   //Accounts: { icon: <FaWallet /> },
   //    Tokens: { icon: <FaCoins /> },
   //    Storage: { icon: <FaHardDrive /> },
