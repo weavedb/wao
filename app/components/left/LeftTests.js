@@ -15,7 +15,7 @@ export default function Left() {
   const [tab, setTab] = use("tab")
   const buttons = (
     <Flex
-      h="50px"
+      h="60px"
       align="center"
       p={4}
       fontSize="12px"
