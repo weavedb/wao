@@ -76,7 +76,7 @@ export default function Left() {
   const pfiles = g.getFiles()
   const buttons = (
     <Flex
-      h="30px"
+      h="60px"
       align="center"
       px={3}
       fontSize="12px"
