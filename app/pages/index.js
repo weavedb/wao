@@ -46,6 +46,7 @@ export default function Home({}) {
             "Processes",
             "Messages",
             "Entity",
+            "Blocks",
           ]) ? null : (
             <Flex w="315px" h="calc(100vh - 60px)">
               <Left />
@@ -64,6 +65,7 @@ export default function Home({}) {
                 "Processes",
                 "Messages",
                 "Entity",
+                "Blocks",
               ]) ? (
                 <>
                   <Panel defaultSize={35} minSize={20} order={1}>
