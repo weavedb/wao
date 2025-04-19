@@ -82,13 +82,31 @@ export default function Terminal({}) {
             css={{ overflowY: "auto" }}
           >
             {map(v => {
+              let sp, addr, isaddr
+              try {
+                sp = v.desc.split(":")
+                addr = sp.pop().trim()
+                isaddr = /^[A-Za-z0-9_-]{43}$/.test(addr)
+              } catch (e) {}
               return (
-                <Box>
+                <Flex>
                   <Box as="span" color="#666" mr={2}>
                     [{`${dayjs(v.date).format("MM/DD HH:mm:ss")}`}]
                   </Box>{" "}
-                  {v.desc}
-                </Box>
+                  {addr ? (
+                    <Flex>
+                      <Box mr={1}>{sp.join(":") + ": "}</Box>
+                      <Box
+                        onClick={() => g.getAccount(addr)}
+                        css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
+                      >
+                        {addr}
+                      </Box>
+                    </Flex>
+                  ) : (
+                    v.desc
+                  )}
+                </Flex>
               )
             })(logs)}
           </Box>
