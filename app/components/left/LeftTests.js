@@ -3,7 +3,7 @@ import _assert from "assert"
 import { Box, Flex } from "@chakra-ui/react"
 import g from "/lib/global"
 import { prepend, map } from "ramda"
-import { DateMS, generateId, dayjs, filterFiles } from "/lib/utils"
+import { generateId, dayjs, filterFiles } from "/lib/utils"
 import lf from "localforage"
 
 export default function Left() {
@@ -63,7 +63,7 @@ export default function Left() {
                   descs.push({ desc: desc2, fn, tests: [] })
                 }
                 eval(js)
-                const ts = DateMS.now()
+                const ts = Date.now()
                 let success = 0
                 let fail = 0
                 let res = []
@@ -73,7 +73,7 @@ export default function Left() {
                   let _fail = 0
                   await v.fn({ require })
                   for (let v2 of v.tests) {
-                    const start = DateMS.now()
+                    const start = Date.now()
                     try {
                       await v2.fn({
                         ao: g.ao,
@@ -84,7 +84,7 @@ export default function Left() {
                         description: v2.desc,
                         success: true,
                         error: null,
-                        duration: DateMS.now() - start,
+                        duration: Date.now() - start,
                       })
                       _success++
                       success++
@@ -93,7 +93,7 @@ export default function Left() {
                         description: v2.desc,
                         success: false,
                         error: e.toString(),
-                        duration: DateMS.now() - start,
+                        duration: Date.now() - start,
                       })
                       _fail++
                       fail++
@@ -112,7 +112,7 @@ export default function Left() {
                   process: proc?.id ?? null,
                   id: generateId(),
                   date: ts,
-                  duration: DateMS.now() - ts,
+                  duration: Date.now() - ts,
                   tests: res,
                   success,
                   fail,

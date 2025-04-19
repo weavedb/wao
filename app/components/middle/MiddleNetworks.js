@@ -1,6 +1,6 @@
 import { Box, Flex, Textarea } from "@chakra-ui/react"
 import { prepend, includes, map, clone } from "ramda"
-import { DateMS, tags } from "/lib/utils"
+import { tags } from "/lib/utils"
 import g from "/lib/global"
 import use from "/lib/use"
 import { DataItem } from "arbundles"
@@ -371,7 +371,7 @@ export default function Middle() {
                                 id: v,
                                 msg: _msg.msg,
                                 type: "SU",
-                                date: DateMS.now(),
+                                date: Date.now(),
                               },
                               m2
                             )

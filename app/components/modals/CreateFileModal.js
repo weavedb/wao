@@ -3,7 +3,7 @@ import Modal from "/components/modals/Modal"
 import use from "/lib/use"
 import { useState } from "react"
 import g from "/lib/global"
-import { generateId, DateMS, filterFiles } from "/lib/utils"
+import { generateId, filterFiles } from "/lib/utils"
 import { src_data_js, src_data_lua } from "/lib/scripts"
 import { append } from "ramda"
 import lf from "localforage"
@@ -82,7 +82,7 @@ export default function CreateFileModal() {
             }
             const _file = {
               name,
-              update: DateMS.now(),
+              update: Date.now(),
               id,
               ext: fileext,
               pid: selDir.pid,

@@ -197,13 +197,14 @@ describe("SDK", function () {
     assert.equal(await p2.d("Hello", false), "Hello, World!")
   })
 
-  it.only("should spawn a message from a handler with receive", async () => {
+  it("should spawn a message from a handler with receive", async () => {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data2 })
     assert.equal(
       await p.m("Hello2", { get: "Hello", timeout: 3000 }),
       "Hello, Japan!"
     )
   })
+
   it("should spawn a process from a handler", async () => {
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_data3 })
     const { res } = await p.msg(
@@ -491,5 +492,19 @@ end)
       }),
       { Hello: "World", Age: 5 }
     )
+  })
+})
+
+describe("Timestamp", () => {
+  it.only("should get a timestamp in ms", async () => {
+    const src_data = `
+Handlers.add("Timestamp", "Timestamp", function (msg)
+  msg.reply({ Data = msg.Timestamp })
+end)
+`
+    const now = Date.now()
+    const ao = await new AO({}).init(acc[0])
+    const { p, pid } = await ao.deploy({ src_data })
+    assert((await p.m("Timestamp", false)) * 1 >= now)
   })
 })

@@ -15,13 +15,7 @@ import {
 } from "react-icons/fa6"
 import g from "/lib/global"
 import { filter, clone, indexBy, prop, prepend, map, compose } from "ramda"
-import {
-  DateMS,
-  generateId,
-  getPreview,
-  filterFiles,
-  filterProjects,
-} from "/lib/utils"
+import { generateId, getPreview, filterFiles, filterProjects } from "/lib/utils"
 import lf from "localforage"
 import md5 from "md5"
 
@@ -60,7 +54,7 @@ export default function Left() {
         const fileext = file.name.split(".").pop().toLowerCase()
         const _file = {
           name: file.name,
-          update: DateMS.now(),
+          update: Date.now(),
           id,
           ext: fileext,
         }
