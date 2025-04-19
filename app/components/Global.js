@@ -206,13 +206,60 @@ export default function Global({}) {
       })()
     }
   }, [init])
+
+  g.msg = id => {
+    let proc = g.ao.mem.env[id] ?? null
+    if (proc) {
+      proc = clone(proc)
+      delete proc.memory
+    }
+    let msg = g.ao.mem.msgs[id] ?? null
+    if (msg) msg = clone(msg)
+    const _tags = clone(msg?.tags ?? [])
+    const t = tags(_tags)
+    let tx = g.ao.mem.txs[id] ?? null
+    if (tx.bundle) tx = g.ao.mem.txs[tx.bundle]
+    if (tx) tx = clone(tx)
+    let block = g.ao.mem.blockmap[tx.block] ?? null
+    if (block) block = clone(block)
+    return { proc, msg, tags: _tags, t, tx, block }
+  }
+
+  g.getProcess = id => {
+    let { proc, msg, tags, t, tx, block } = g.msg(id)
+    console.log(msg)
+    const p = {
+      ...proc,
+      name: t.Name ?? null,
+      tags,
+      id,
+      type: "Process",
+      timestamp: block?.timestamp ?? null,
+      incoming: [],
+      outgoing: [],
+    }
+    let i = 0
+    for (let v of proc.results) {
+      let { msg, tags, t, tx, block } = g.msg(v)
+      p.incoming.push({
+        slot: i,
+        id: v,
+        timestamp: block.timestamp,
+        act: (i === 0 ? "Spawn" : t.Action) ?? null,
+      })
+      i++
+    }
+    setEntity(p)
+    setTab("Entity")
+  }
+
   g.getModule = id => {
     let mmap = {}
     for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
     let _procs = []
     let mod = clone(g.ao.mem.txs[id])
     mod.name = mmap[id]
-    mod.type = "module"
+    mod.type = "Module"
     if (mod) {
       const tx = g.ao.mem.txs[id]
       let timestamp = null
@@ -279,8 +326,14 @@ export default function Global({}) {
     let mmap = {}
     for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
     for (let k in g.ao.mem.env) {
-      const val = g.ao.mem.env[k]
-      _procs.unshift({ txid: k, module: mmap[val.module] })
+      let { proc, msg, tags, t, tx, block } = g.msg(k)
+      _procs.unshift({
+        name: t.Name,
+        id: k,
+        module: mmap[proc.module],
+        timestamp: block.timestamp,
+        incoming: proc.results.length,
+      })
     }
     setProcs(_procs)
   }

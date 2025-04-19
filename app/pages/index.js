@@ -41,7 +41,7 @@ export default function Home({}) {
           <Flex w="60px" h="calc(100vh - 60px)">
             <Sidebar />
           </Flex>
-          {includes(tab, ["Modules", "Entity"]) ? null : (
+          {includes(tab, ["Modules", "Processes", "Entity"]) ? null : (
             <Flex w="315px" h="calc(100vh - 60px)">
               <Left />
             </Flex>
@@ -53,7 +53,12 @@ export default function Home({}) {
             css={{ overflow: "hidden" }}
           >
             <PanelGroup direction="horizontal">
-              {!includes(tab, ["Projects", "Modules", "Entity"]) ? (
+              {!includes(tab, [
+                "Projects",
+                "Modules",
+                "Processes",
+                "Entity",
+              ]) ? (
                 <>
                   <Panel defaultSize={35} minSize={20} order={1}>
                     <Box h="calc(100vh - 60px)">
