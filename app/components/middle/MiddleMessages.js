@@ -7,7 +7,6 @@ import use from "/lib/use"
 
 export default function MiddleMessages() {
   const [messages] = use("messages")
-  console.log(messages)
   const buttons = (
     <Flex
       h="60px"
@@ -46,35 +45,37 @@ export default function MiddleMessages() {
   return (
     <Box w="100%">
       {buttons}
-      {map(v => (
-        <Flex
-          fontSize="10px"
-          h="30px"
-          align="center"
-          css={{
-            borderBottom: "1px solid #ddd",
-            cursor: "pointer",
-            _hover: { color: "#ddd", bg: "#5137C5" },
-          }}
-          className="group"
-          onClick={() => {
-            g.getMessage(v.id)
-          }}
-        >
-          <Box px={3} w="120px" _groupHover={{ color: "white" }}>
-            {v.act}
-          </Box>
-          <Box px={3} fontSize="10px" w="300px">
-            {v.id}
-          </Box>
-          <Box px={3} fontSize="10px" w="300px">
-            {v.to}
-          </Box>
-          <Box px={3} fontSize="10px" flex={1}>
-            {v.timestamp}
-          </Box>
-        </Flex>
-      ))(messages || [])}
+      <Box css={{ overflowY: "auto" }} h="calc(100vh - 120px)">
+        {map(v => (
+          <Flex
+            fontSize="10px"
+            h="30px"
+            align="center"
+            css={{
+              borderBottom: "1px solid #ddd",
+              cursor: "pointer",
+              _hover: { color: "#ddd", bg: "#5137C5" },
+            }}
+            className="group"
+            onClick={() => {
+              g.getMessage(v.id)
+            }}
+          >
+            <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+              {v.act}
+            </Box>
+            <Box px={3} fontSize="10px" w="300px">
+              {v.id}
+            </Box>
+            <Box px={3} fontSize="10px" w="300px">
+              {v.to}
+            </Box>
+            <Box px={3} fontSize="10px" flex={1}>
+              {v.timestamp}
+            </Box>
+          </Flex>
+        ))(messages || [])}
+      </Box>
     </Box>
   )
 }
