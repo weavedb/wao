@@ -1,6 +1,7 @@
 // react
 import { useRef, useEffect } from "react"
 import use from "/lib/use"
+import { AR } from "wao"
 
 // chakra-ui
 import { Box, Flex, Icon } from "@chakra-ui/react"
@@ -29,6 +30,7 @@ import {
   useResizeObserver,
   resolvePath,
   tags,
+  toAddr,
 } from "/lib/utils"
 
 import g from "/lib/global"
@@ -228,6 +230,7 @@ export default function Global({}) {
     if (block) block = clone(block)
     return { proc, msg, tags: _tags, t, tx, block }
   }
+
   g.getAccount = id => {
     if (g.ao.mem.wasms[id]) {
       g.getModule(id)
@@ -277,6 +280,33 @@ export default function Global({}) {
     } else if (g.ao.mem.txs[id] && !g.ao.mem.txs[id].bundle) {
       setEntity({ ...g.ao.mem.txs[id], type: "Tx" })
       setTab("Entity")
+    } else {
+      try {
+        if (g.ao.mem.txs[id].bundle) {
+          const tx = g.ao.mem.txs[g.ao.mem.txs[id].bundle]
+          const items = new Bundle(tx.data).items
+          for (let v of items) {
+            if (v.id === id) {
+              const t = tags(v.tags)
+              const addr = toAddr(v.owner)
+              const block = g.ao.mem.blockmap[tx.block]
+              const a = {
+                id,
+                tags: v.tags,
+                target: v.target,
+                from: addr,
+                timestamp: block.timestamp,
+                type: "Assignment",
+              }
+              setEntity(a)
+              setTab("Entity")
+              break
+            }
+          }
+        }
+      } catch (e) {
+        console.log(e)
+      }
     }
   }
   g.getMessage = id => {
