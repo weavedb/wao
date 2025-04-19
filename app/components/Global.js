@@ -92,7 +92,7 @@ export default function Global({}) {
   useEffect(() => {
     ;(async () => {
       if (proc && g.ao) await g.connectProc(proc)
-      if (proc) g.updateMsgs()
+      //if (proc) g.updateMsgs()
     })()
   }, [proc])
 
@@ -181,9 +181,9 @@ export default function Global({}) {
       await g.ao.mem.init()
       g.listModules()
       g.listProcesses()
+      g.listMessages()
       g._setModule(mod)
       setMessage(null)
-      setMessages([])
       setInit(true)
     })()
   }, [cache])
@@ -225,9 +225,24 @@ export default function Global({}) {
     return { proc, msg, tags: _tags, t, tx, block }
   }
 
+  g.getMessage = id => {
+    let { proc, msg, tags, t, tx, block } = g.msg(id)
+    let m = {
+      ...msg,
+      name: t.Name ?? null,
+      tags,
+      id,
+      type: "Message",
+      timestamp: block?.timestamp ?? null,
+      outgoing: [],
+    }
+    if (t.Type === "Process") m.process = id
+    setEntity(m)
+    setTab("Entity")
+  }
+
   g.getProcess = id => {
     let { proc, msg, tags, t, tx, block } = g.msg(id)
-    console.log(msg)
     const p = {
       ...proc,
       name: t.Name ?? null,
@@ -290,7 +305,7 @@ export default function Global({}) {
               outgoing: g.ao.mem.env[k]?.results.length,
             })
             _procs.push({
-              txid: k,
+              id: k,
               module: mmap[val.module],
             })
           }
@@ -310,7 +325,7 @@ export default function Global({}) {
       const t = tags(tx.tags)
       _modules.push({
         name: k,
-        txid,
+        id: txid,
         timestamp: block.timestamp,
         memory: t["Memory-Limit"],
         format: t["Module-Format"],
@@ -336,6 +351,24 @@ export default function Global({}) {
       })
     }
     setProcs(_procs)
+  }
+
+  g.listMessages = () => {
+    let msgs = []
+    for (let k in g.ao.mem.env) {
+      let i = 0
+      for (let m of g.ao.mem.env[k].results) {
+        let { proc, msg, tags, t, tx, block } = g.msg(m)
+        msgs.unshift({
+          id: m,
+          timestamp: block.timestamp,
+          to: k,
+          act: i === 0 ? "Spawn" : t.Action,
+        })
+        i++
+      }
+    }
+    setMessages(msgs)
   }
 
   g.updateMsgs = () => {
@@ -475,7 +508,7 @@ export default function Global({}) {
               name = tags(g.ao.mem.msgs[k].tags).Name ?? null
             }
             mod.processes.push({ id: k, name, module: mmap[val.module] })
-            _procs.push({ txid: k, module: mmap[val.module] })
+            _procs.push({ id: k, module: mmap[val.module] })
           }
         }
       }
