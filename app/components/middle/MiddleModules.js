@@ -3,6 +3,7 @@ import { map } from "ramda"
 import g from "/lib/global"
 import use from "/lib/use"
 import { useState } from "react"
+import { fromNow } from "/lib/utils"
 
 export default function Middle() {
   const [modules, setModules] = use("modules")
@@ -78,7 +79,7 @@ export default function Middle() {
               {v.memory}
             </Box>
             <Box px={3} fontSize="10px" flex={1}>
-              {v.timestamp}
+              {fromNow(v.timestamp)}
             </Box>
           </Flex>
         ))(modules)}
