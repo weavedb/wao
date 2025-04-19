@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Box, Flex } from "@chakra-ui/react"
 import { includes, map } from "ramda"
-import { tags, short } from "/lib/utils"
+import { tags, short, fromNow } from "/lib/utils"
 import g from "/lib/global"
 import use from "/lib/use"
 
@@ -77,7 +77,7 @@ export default function MiddleMessages() {
               {short(v.to)}
             </Box>
             <Box px={3} fontSize="10px" flex={1}>
-              {v.timestamp}
+              {fromNow(v.timestamp)}
             </Box>
           </Flex>
         ))(messages || [])}

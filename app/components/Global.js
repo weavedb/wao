@@ -260,7 +260,7 @@ export default function Global({}) {
       p.incoming.push({
         slot: i,
         id: v,
-        timestamp: block.timestamp,
+        timestamp: block?.timestamp ?? 0,
         act: (i === 0 ? "Spawn" : t.Action) ?? null,
       })
       i++
@@ -281,7 +281,7 @@ export default function Global({}) {
       let timestamp = null
       const bdl = g.ao.mem.txs[id]
       const block = g.ao.mem.blockmap[bdl.block]
-      mod.timestamp = block.timestamp
+      mod.timestamp = block?.timestamp ?? 0
       mod.processes = []
       for (let k in g.ao.mem.env) {
         for (let v of g.ao.mem.msgs[k]?.tags ?? []) {
@@ -347,7 +347,7 @@ export default function Global({}) {
         name: t.Name,
         id: k,
         module: mmap[proc.module],
-        timestamp: block.timestamp,
+        timestamp: block?.timestamp ?? 0,
         incoming: proc.results.length,
       })
     }
@@ -361,10 +361,10 @@ export default function Global({}) {
       for (let m of g.ao.mem.env[k].results) {
         let { proc, msg, tags, t, tx, block } = g.msg(m)
         msgs.unshift({
-          from: msg.msg.From,
-          to: msg.msg.Target,
+          from: msg?.msg?.From,
+          to: msg?.msg?.Target,
           id: m,
-          timestamp: block.timestamp,
+          timestamp: block?.timestamp ?? 0,
           act: i === 0 ? "Spawn" : t.Action,
         })
         i++
@@ -520,11 +520,13 @@ export default function Global({}) {
 
   g._setProcess = id => {
     let _proc = clone(g.ao.mem.env[id])
-    delete _proc.memory
-    _proc.tags = clone(g.ao.mem.msgs[id]?.tags ?? [])
-    _proc.id = id
-    setProc(_proc)
-    g.listProcesses()
+    if (_proc) {
+      delete _proc.memory
+      _proc.tags = clone(g.ao.mem.msgs[id]?.tags ?? [])
+      _proc.id = id
+      setProc(_proc)
+      g.listProcesses()
+    }
   }
 
   g.clickFile = async v => {

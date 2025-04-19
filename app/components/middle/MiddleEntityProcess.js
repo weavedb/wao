@@ -3,6 +3,7 @@ import { map, clone } from "ramda"
 import g from "/lib/global"
 import use from "/lib/use"
 import { useState } from "react"
+import { fromNow } from "/lib/utils"
 
 export default function MiddleEntityProcess() {
   const [subtab, setSubtab] = useState("Metadata")
@@ -57,7 +58,7 @@ export default function MiddleEntityProcess() {
   if (entity) {
     meta.push({ name: "ID", value: entity.id })
     meta.push({ name: "Module", value: entity.module })
-    meta.push({ name: "Timestamp", value: entity.timestamp })
+    meta.push({ name: "Timestamp", value: fromNow(entity.timestamp) })
   }
   return (
     <Box w="100%" h="100%">
@@ -143,7 +144,7 @@ export default function MiddleEntityProcess() {
                 {v.id}
               </Box>
               <Box px={3} fontSize="10px" flex={1}>
-                {v.timestamp}
+                {fromNow(v.timestamp)}
               </Box>
             </Flex>
           ))(entity.incoming || [])}

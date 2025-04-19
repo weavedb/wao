@@ -3,6 +3,7 @@ import { map, clone } from "ramda"
 import g from "/lib/global"
 import use from "/lib/use"
 import { useState } from "react"
+import { fromNow } from "/lib/utils"
 
 export default function MiddleEntityMessage() {
   const [subtab, setSubtab] = useState("Metadata")
@@ -59,7 +60,7 @@ export default function MiddleEntityMessage() {
     meta.push({ name: "Process", value: entity.process })
     meta.push({ name: "From", value: entity.from })
     meta.push({ name: "To", value: entity.to })
-    meta.push({ name: "Timestamp", value: entity.timestamp })
+    meta.push({ name: "Timestamp", value: fromNow(entity.timestamp) })
   }
   return (
     <Box w="100%" h="100%">
