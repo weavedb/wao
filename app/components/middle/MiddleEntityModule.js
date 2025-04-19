@@ -4,6 +4,7 @@ import g from "/lib/global"
 import use from "/lib/use"
 import { useState } from "react"
 import { fromNow } from "/lib/utils"
+import Tags from "/components/Tags"
 
 export default function MiddleEntityModule() {
   const [subtab, setSubtab] = useState("Metadata")
@@ -84,24 +85,7 @@ export default function MiddleEntityModule() {
             css={{ borderLeft: "1px solid #ddd", overflowY: "auto" }}
             h="calc(100vh - 120px)"
           >
-            <Flex mb={2} fontWeight="bold" color="#5137C5" fontSize="14px">
-              Tags
-            </Flex>
-            {map(v => (
-              <Flex my={2} align="center">
-                <Box
-                  w="130px"
-                  color="white"
-                  bg="#5137C5"
-                  px={2}
-                  mr={4}
-                  css={{ borderRadius: "3px" }}
-                >
-                  {v.name}
-                </Box>
-                <Box>{v.value}</Box>
-              </Flex>
-            ))(entity.tags)}
+            <Tags tags={entity.tags} />
           </Box>
         </Flex>
       ) : (
