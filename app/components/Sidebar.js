@@ -23,15 +23,15 @@ import {
 
 const tabmap = {
   Projects: { icon: <FaCode /> },
-  Tests: { icon: <FaBug /> },
   Modules: { icon: <FaCubes /> },
   Processes: { icon: <FaCodeCompare /> },
   Messages: { icon: <FaEnvelopesBulk /> },
-  Accounts: { icon: <FaWallet /> },
+  //Accounts: { icon: <FaWallet /> },
   //    Tokens: { icon: <FaCoins /> },
   //    Storage: { icon: <FaHardDrive /> },
   //    Database: { icon: <FaDatabase /> },
   Networks: { icon: <FaNetworkWired /> },
+  Tests: { icon: <FaBug /> },
 }
 const tabs = keys(tabmap)
 
