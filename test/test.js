@@ -496,7 +496,7 @@ end)
 })
 
 describe("Timestamp", () => {
-  it.only("should get a timestamp in ms", async () => {
+  it("should get a timestamp in ms", async () => {
     const src_data = `
 Handlers.add("Timestamp", "Timestamp", function (msg)
   msg.reply({ Data = msg.Timestamp })
@@ -508,5 +508,24 @@ end)
     const { out, mid } = await p.msg("Timestamp", false)
     assert(out * 1 >= now)
     assert.equal(ao.mem.msgs[mid].msg.From, acc[0].addr)
+  })
+})
+
+describe("user target messages", () => {
+  it.only("should be stored on Arweave", async () => {
+    const src_data = `
+Handlers.add("Timestamp", "Timestamp", function (msg)
+  msg.reply({ Data = msg.Timestamp })
+end)
+`
+    const now = Date.now()
+    const ao = await new AO({}).init(acc[0])
+    const { p, pid } = await ao.deploy({ src_data })
+    const { out, mid } = await p.msg("Timestamp", false)
+    let exist = false
+    for (let k in ao.mem.msgs) {
+      if (ao.mem.msgs[k].target === acc[0].addr) exist = true
+    }
+    assert(exist)
   })
 })
