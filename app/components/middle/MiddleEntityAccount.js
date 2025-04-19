@@ -5,7 +5,7 @@ import use from "/lib/use"
 import { useState } from "react"
 import { short, fromNow } from "/lib/utils"
 
-export default function MiddleEntityProcess() {
+export default function MiddleEntityAccount() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
   const subtabs = ["Metadata", "Outgoing", "Processes"]

@@ -173,7 +173,10 @@ export default class ArMemBase {
     this.isInit = true
     if (typeof this._init === "function") await this._init()
     if (this.db) {
-      for (const v of ["height", "blocks"]) this[v] = await this.get(v)
+      for (const v of ["height", "blocks"]) {
+        const val = await this.db.get(v)
+        if (val) this[v] = val
+      }
       for (const v of [
         "items",
         "txs",
