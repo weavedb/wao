@@ -20,7 +20,7 @@ import {
   keys,
   includes,
 } from "ramda"
-import { DateMS, generateId, wait, tags } from "/lib/utils"
+import { generateId, wait, tags } from "/lib/utils"
 import lf from "localforage"
 import { ctypes } from "/lib/data"
 
@@ -279,7 +279,7 @@ export default function Left() {
                           type: "Client",
                           msg: _msg.msg,
                           id,
-                          date: DateMS.now(),
+                          date: Date.now(),
                         },
                         m
                       )
