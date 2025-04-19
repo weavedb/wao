@@ -1,128 +1,80 @@
+import { useState } from "react"
 import { Box, Flex } from "@chakra-ui/react"
 import { includes, map } from "ramda"
 import { tags } from "/lib/utils"
 import g from "/lib/global"
 import use from "/lib/use"
 
-export default function Middle() {
-  const [message, setMessage] = use("message")
-  const [init, setInit] = use("init")
-  const [tab, setTab] = use("tab")
-
-  let meta = []
-  let act = null
-  if (message) {
-    const t = tags(message.http_msg.tags)
-    act = t.Type === "Process" ? "Process" : t.Action
-    meta.push({ name: "ID", value: message.id })
-    meta.push({
-      name: "Process",
-      value: t.Type === "Process" ? message.id : message.http_msg.process,
-    })
-    meta.push({ name: "Slot", value: message.slot })
-    const tx = g.ao?.mem.txs[message.id]
-    if (tx?.bundle) {
-      const _tx = g.ao.mem.txs[tx.bundle]
-      meta.push({ name: "From", value: _tx.owner })
-    }
-  }
-
-  return !message ? null : (
-    <Box
-      px={4}
-      py={2}
-      fontSize="11px"
-      flex={1}
-      h="calc(100vh - 110px)"
-      css={{ overflowY: "auto" }}
+export default function MiddleMessages() {
+  const [messages] = use("messages")
+  console.log(messages)
+  const buttons = (
+    <Flex
+      h="60px"
+      justify="center"
+      fontSize="10px"
+      css={{ borderBottom: "1px solid #ddd" }}
+      direction="column"
     >
-      <Flex my={2} fontWeight="bold" color="#5137C5">
-        Metadata
+      <Flex
+        fontSize="12px"
+        h="30px"
+        px={3}
+        align="center"
+        bg="#5137c5"
+        color="#ddd"
+        css={{ borderBottom: "1px solid #ddd" }}
+      >
+        <Box>Messages / {messages.length}</Box>
       </Flex>
-      {map(v => {
-        if (includes(v.name, ["signature", "signature-input"])) {
-          return null
-        }
-        return (
-          <Flex my={2} align="center">
-            <Box
-              w="130px"
-              color="white"
-              bg="#5137C5"
-              px={2}
-              mr={4}
-              css={{ borderRadius: "3px" }}
-            >
-              {v.name}
-            </Box>
-            <Box flex={1} css={{ wordBreak: "break-all", whiteSpace: "wrap" }}>
-              {v.value}
-            </Box>
-          </Flex>
-        )
-      })(meta ?? [])}
-      <Flex my={2} fontWeight="bold" color="#5137C5">
-        Tags
+      <Flex h="30px" bg="#eee" align="center">
+        <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+          Action
+        </Box>
+        <Box px={3} fontSize="10px" w="300px">
+          TxID
+        </Box>
+        <Box px={3} fontSize="10px" w="300px">
+          To
+        </Box>
+        <Box px={3} fontSize="10px" flex={1}>
+          Timestamp
+        </Box>
       </Flex>
-      {map(v => {
-        if (includes(v.name, ["signature", "signature-input"])) {
-          return null
-        }
-        return (
-          <Flex my={2} align="center">
-            <Box
-              w="130px"
-              color="white"
-              bg="#5137C5"
-              px={2}
-              mr={4}
-              css={{ borderRadius: "3px" }}
-            >
-              {v.name}
-            </Box>
-            <Box flex={1} css={{ wordBreak: "break-all", whiteSpace: "wrap" }}>
-              {v.value}
-            </Box>
-          </Flex>
-        )
-      })(message.http_msg.tags)}
-      <Flex mt={4} fontWeight="bold" mb={2} color="#5137C5">
-        Data
-      </Flex>
-      <code>
-        <Box
-          as="pre"
-          bg="#eee"
-          p={4}
+    </Flex>
+  )
+  return (
+    <Box w="100%">
+      {buttons}
+      {map(v => (
+        <Flex
+          fontSize="10px"
+          h="30px"
+          align="center"
           css={{
-            borderRadius: "3px",
-            wordBreak: "break-word",
-            whiteSpace: "pre-wrap",
-            overflow: "auto",
+            borderBottom: "1px solid #ddd",
+            cursor: "pointer",
+            _hover: { color: "#ddd", bg: "#5137C5" },
+          }}
+          className="group"
+          onClick={() => {
+            g.getMessage(v.id)
           }}
         >
-          {message.http_msg?.data}
-        </Box>
-      </code>
-
-      <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
-        Result
-      </Flex>
-      <code>
-        <Box
-          as="pre"
-          bg="#eee"
-          p={4}
-          css={{
-            borderRadius: "3px",
-            wordBreak: "break-word",
-            whiteSpace: "pre-wrap",
-            overflow: "auto",
-          }}
-        >
-          {!message.res ? "" : JSON.stringify(message.res, undefined, 2)}
-        </Box>
-      </code>
+          <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+            {v.act}
+          </Box>
+          <Box px={3} fontSize="10px" w="300px">
+            {v.id}
+          </Box>
+          <Box px={3} fontSize="10px" w="300px">
+            {v.to}
+          </Box>
+          <Box px={3} fontSize="10px" flex={1}>
+            {v.timestamp}
+          </Box>
+        </Flex>
+      ))(messages || [])}
     </Box>
   )
 }
