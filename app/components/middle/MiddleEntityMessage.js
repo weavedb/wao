@@ -57,9 +57,9 @@ export default function MiddleEntityMessage() {
   let meta = []
   if (entity) {
     meta.push({ name: "ID", value: entity.id })
-    meta.push({ name: "Process", value: entity.process })
-    meta.push({ name: "From", value: entity.from })
-    meta.push({ name: "To", value: entity.to })
+    meta.push({ name: "Process", value: entity.process, link: true })
+    meta.push({ name: "From", value: entity.from, link: true })
+    meta.push({ name: "To", value: entity.to, link: true })
     meta.push({ name: "Timestamp", value: fromNow(entity.timestamp) })
   }
   return (
@@ -74,7 +74,17 @@ export default function MiddleEntityMessage() {
                   <Box fontWeight="bold" color="#5137c5" fontSize="12px" mb={1}>
                     {v.name}
                   </Box>
-                  <Box>{v.value}</Box>
+                  <Box
+                    css={{
+                      cursor: v.link ? "pointer" : "default",
+                      _hover: { opacity: v.link ? 0.75 : 1 },
+                    }}
+                    onClick={() => {
+                      if (v.link) g.getAccount(v.value)
+                    }}
+                  >
+                    {v.value}
+                  </Box>
                 </Flex>
               )
             })(meta)}
