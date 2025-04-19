@@ -80,7 +80,8 @@ export default function MiddleEntityMessage() {
             flex={1}
             px={4}
             fontSize="11px"
-            css={{ borderLeft: "1px solid #ddd" }}
+            h="calc(100vh - 120px)"
+            css={{ borderLeft: "1px solid #ddd", overflowY: "auto" }}
           >
             <Flex my={2} fontWeight="bold" color="#5137C5" fontSize="14px">
               Tags
@@ -100,7 +101,13 @@ export default function MiddleEntityMessage() {
                 <Box>{v.value}</Box>
               </Flex>
             ))(entity.tags)}
-            <Flex mt={4} fontWeight="bold" mb={2} color="#5137C5">
+            <Flex
+              mt={4}
+              fontWeight="bold"
+              mb={2}
+              color="#5137C5"
+              fontSize="14px"
+            >
               Data
             </Flex>
             <code>
@@ -119,7 +126,13 @@ export default function MiddleEntityMessage() {
               </Box>
             </code>
 
-            <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+            <Flex
+              mt={4}
+              mb={2}
+              fontWeight="bold"
+              color="#5137C5"
+              fontSize="14px"
+            >
               Result
             </Flex>
             <code>

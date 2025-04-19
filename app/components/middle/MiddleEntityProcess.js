@@ -80,7 +80,8 @@ export default function MiddleEntityProcess() {
             flex={1}
             px={4}
             fontSize="11px"
-            css={{ borderLeft: "1px solid #ddd" }}
+            css={{ borderLeft: "1px solid #ddd", overflowY: "auto" }}
+            h="calc(100vh - 120px)"
           >
             <Flex my={2} fontWeight="bold" color="#5137C5" fontSize="14px">
               Tags
