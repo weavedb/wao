@@ -25,7 +25,6 @@ import {
   getPreview,
   useResizeObserver,
   resolvePath,
-  DateMS,
   tags,
 } from "/lib/utils"
 
@@ -698,7 +697,7 @@ export default function Global({}) {
   }
   g.log = (desc, toast, opt = {}) => {
     let log = { desc, ...opt }
-    log.date ??= DateMS.now()
+    log.date ??= Date.now()
     setLogs([...logs, log])
     if (toast) toaster.create(toast)
   }
