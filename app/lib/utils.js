@@ -112,7 +112,6 @@ const ftype = fileext => {
         ? "markdown"
         : fileext
 }
-const DateMS = Date
 
 const getAct = message => {
   if (message) {
@@ -130,7 +129,6 @@ export {
   filterProjects,
   filterFiles,
   getAct,
-  DateMS,
   ftype,
   wait,
   generateId,
