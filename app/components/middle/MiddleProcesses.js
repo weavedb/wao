@@ -3,6 +3,7 @@ import { Box, Flex } from "@chakra-ui/react"
 import { map } from "ramda"
 import g from "/lib/global"
 import use from "/lib/use"
+import { fromNow } from "/lib/utils"
 
 export default function MiddleProcesses() {
   const [procs] = use("procs")
@@ -76,7 +77,7 @@ export default function MiddleProcesses() {
               {v.incoming}
             </Box>
             <Box px={3} fontSize="10px" flex={1}>
-              {v.timestamp}
+              {fromNow(v.timestamp)}
             </Box>
           </Flex>
         ))(procs || [])}
