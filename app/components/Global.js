@@ -16,6 +16,9 @@ import {
 //data
 import { mod, hb_url } from "/lib/data"
 
+// ao
+import { Bundle, DataItem } from "arbundles"
+
 // utils
 import chalk from "chalk"
 import lf from "localforage"
@@ -58,6 +61,7 @@ export default function Global({}) {
   g.fileInputRef = useRef(null)
 
   const { width, height } = useResizeObserver(g.containerRef)
+  const [blocks, setBlocks] = use("blocks")
   const [entity, setEntity] = use("entity")
   const [projects, setProjects] = use("projects")
   const [tab, setTab] = use("tab")
@@ -181,6 +185,7 @@ export default function Global({}) {
       g.listModules()
       g.listProcesses()
       g.listMessages()
+      g.listBlocks()
       g._setModule(mod)
       setMessage(null)
       setInit(true)
@@ -265,11 +270,12 @@ export default function Global({}) {
           })
         }
       }
-      console.log(a)
       setEntity(a)
       setTab("Entity")
+    } else if (g.ao.mem.msgs[id]) {
+      g.getMessage(id)
     } else {
-      console.log("tx or msg", id)
+      console.log("tx", id)
     }
   }
   g.getMessage = id => {
@@ -364,6 +370,64 @@ export default function Global({}) {
       setTab("Entity")
     }
   }
+
+  g.getBlock = id => {
+    const block = g.ao.mem.blockmap[id]
+    let b = {
+      ...block,
+      type: "Block",
+    }
+    let txs = 0
+    let msgs = 0
+    let _txs = {}
+    for (let v of block.txs) {
+      const tx = g.ao.mem.txs[v]
+      if (tx.bundle) {
+        msgs++
+        _txs[tx.bundle] ??= { type: "bundle", txs: [], id: tx.bundle }
+        _txs[tx.bundle].txs.push(v)
+        _txs[tx.bundle].type = "bundle"
+      } else {
+        _txs[v] ??= { type: "tx", txs: [], id: v }
+        txs++
+      }
+    }
+    b.transactions = []
+    for (let k in _txs) {
+      let tmap = {}
+      try {
+        const bd = new Bundle(g.ao.mem.txs[k].data)
+        for (let v of bd.items) {
+          const id = v.id
+          const t = tags(v.tags)
+          tmap[id] = t.Type
+        }
+      } catch (e) {}
+      _txs[k].txs = map(v => ({ id: v, type: tmap[v] }))(_txs[k].txs)
+      b.transactions.push(_txs[k])
+    }
+
+    b.tx_count = txs
+    b.msg_count = msgs
+    setEntity(b)
+    setTab("Entity")
+  }
+
+  g.listBlocks = () => {
+    let _blocks = []
+    for (let v of g.ao.mem.blocks) {
+      const block = g.ao.mem.blockmap[v]
+      console.log(block)
+      _blocks.push({
+        id: v,
+        timestamp: block.timestamp,
+        txs: block.txs.length,
+        height: block.height,
+      })
+    }
+    setBlocks(_blocks)
+  }
+
   g.listModules = () => {
     let _modules = []
     let mmap = {}
