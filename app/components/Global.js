@@ -227,6 +227,8 @@ export default function Global({}) {
   g.getMessage = id => {
     let { proc, msg, tags, t, tx, block } = g.msg(id)
     let m = {
+      from: msg.msg.From,
+      to: msg.msg.Target,
       ...msg,
       name: t.Name ?? null,
       tags,
@@ -359,9 +361,10 @@ export default function Global({}) {
       for (let m of g.ao.mem.env[k].results) {
         let { proc, msg, tags, t, tx, block } = g.msg(m)
         msgs.unshift({
+          from: msg.msg.From,
+          to: msg.msg.Target,
           id: m,
           timestamp: block.timestamp,
-          to: k,
           act: i === 0 ? "Spawn" : t.Action,
         })
         i++
