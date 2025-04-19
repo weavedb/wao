@@ -17,7 +17,7 @@ import {
 import { mod, hb_url } from "/lib/data"
 
 // ao
-import { Bundle, DataItem } from "arbundles"
+import { Bundle } from "arbundles"
 
 // utils
 import chalk from "chalk"
@@ -274,8 +274,9 @@ export default function Global({}) {
       setTab("Entity")
     } else if (g.ao.mem.msgs[id]) {
       g.getMessage(id)
-    } else {
-      console.log("tx", id)
+    } else if (g.ao.mem.txs[id] && !g.ao.mem.txs[id].bundle) {
+      setEntity({ ...g.ao.mem.txs[id], type: "Tx" })
+      setTab("Entity")
     }
   }
   g.getMessage = id => {
