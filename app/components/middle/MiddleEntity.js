@@ -5,8 +5,9 @@ import Message from "/components/middle/MiddleEntityMessage"
 import Account from "/components/middle/MiddleEntityAccount"
 import Block from "/components/middle/MiddleEntityBlock"
 import Tx from "/components/middle/MiddleEntityTx"
+import Assignment from "/components/middle/MiddleEntityAssignment"
 
-const components = { Module, Process, Message, Account, Block, Tx }
+const components = { Module, Process, Message, Account, Block, Tx, Assignment }
 
 export default function MiddleEntity() {
   const [entity] = use("entity")
