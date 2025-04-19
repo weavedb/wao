@@ -63,7 +63,6 @@ export default function MiddleEntityBlock() {
     meta.push({ name: "Messages", value: entity.msg_count })
     meta.push({ name: "Timestamp", value: fromNow(entity.timestamp) })
   }
-  console.log(entity)
   return (
     <Box w="100%" h="100%">
       {buttons}
@@ -118,30 +117,27 @@ export default function MiddleEntityBlock() {
                     {v.id}
                   </Box>
                 </Flex>
-                {map(v2 => {
-                  console.log(v2)
-                  return (
-                    <Flex
-                      fontSize="10px"
-                      h="30px"
-                      align="center"
-                      css={{
-                        cursor: "pointer",
-                        _hover: { color: "#ddd", bg: "#5137C5" },
-                        borderTop: "1px solid #ddd",
-                      }}
-                      className="group"
-                      onClick={() => g.getAccount(v2.id)}
-                    >
-                      <Flex px={3} w="120px">
-                        {v2.type}
-                      </Flex>
-                      <Box px={3} fontSize="10px" w="300px">
-                        {v2.id}
-                      </Box>
+                {map(v2 => (
+                  <Flex
+                    fontSize="10px"
+                    h="30px"
+                    align="center"
+                    css={{
+                      cursor: "pointer",
+                      _hover: { color: "#ddd", bg: "#5137C5" },
+                      borderTop: "1px solid #ddd",
+                    }}
+                    className="group"
+                    onClick={() => g.getAccount(v2.id)}
+                  >
+                    <Flex px={3} w="120px">
+                      {v2.type}
                     </Flex>
-                  )
-                })(v.txs)}
+                    <Box px={3} fontSize="10px" w="300px">
+                      {v2.id}
+                    </Box>
+                  </Flex>
+                ))(v.txs)}
               </Flex>
             ))(entity.transactions || [])}
           </Box>
