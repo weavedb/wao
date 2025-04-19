@@ -158,7 +158,7 @@ export default class ArMemBase {
     this.blockmap["0"] = {
       txs,
       timestamp: Date.now(),
-      height: 0,
+      height: 1,
       previous: "",
       id: "0",
     }
