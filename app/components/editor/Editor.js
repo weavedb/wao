@@ -10,7 +10,7 @@ import EditorScrollbarStyle from "/components/styles/EditorScrollbarStyle"
 import g from "/lib/global"
 import { filter, map, includes } from "ramda"
 import { FaX } from "react-icons/fa6"
-import { DateMS, generateId } from "/lib/utils"
+import { generateId } from "/lib/utils"
 import { bfiles } from "/lib/guide"
 
 export default function Editor({}) {

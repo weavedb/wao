@@ -1,5 +1,5 @@
 import buffer from "buffer"
-
+let datenow = () => 0
 var require = n => {
   let pkg = { buffer }
   return pkg[n]
@@ -27,7 +27,7 @@ var require_emscripten = __commonJS({
         _scriptDir = _scriptDir || __filename
       return function (
         binaryOrInstantiate,
-        { computeLimit, memoryLimit, extensions, format },
+        { computeLimit, memoryLimit, extensions, format }
       ) {
         var Module2 = Module2 || {}
         if (typeof binaryOrInstantiate === "function")
@@ -59,7 +59,7 @@ var require_emscripten = __commonJS({
         }
         _listeners_.push(
           ["uncaughtException", uncaughtException],
-          ["unhandledRejection", unhandledRejection],
+          ["unhandledRejection", unhandledRejection]
         )
         var Module2 = typeof Module2 !== "undefined" ? Module2 : {}
         let readyPromiseResolve, readyPromiseReject
@@ -162,7 +162,7 @@ var require_emscripten = __commonJS({
           if (scriptDirectory.indexOf("blob:") !== 0) {
             scriptDirectory = scriptDirectory.substr(
               0,
-              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1,
+              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1
             )
           } else {
             scriptDirectory = ""
@@ -322,7 +322,7 @@ var require_emscripten = __commonJS({
                 const ch = u0 - 65536
                 str += String.fromCharCode(
                   55296 | (ch >> 10),
-                  56320 | (ch & 1023),
+                  56320 | (ch & 1023)
                 )
               }
             }
@@ -554,7 +554,7 @@ var require_emscripten = __commonJS({
                     function (response) {
                       resolve(new Uint8Array(response))
                     },
-                    reject,
+                    reject
                   )
                 })
               }
@@ -613,7 +613,7 @@ var require_emscripten = __commonJS({
                 function (response) {
                   const result = WebAssembly.instantiateStreaming(
                     response,
-                    info,
+                    info
                   )
                   return result.then(
                     receiveInstantiationResult,
@@ -621,9 +621,9 @@ var require_emscripten = __commonJS({
                       err("wasm streaming compile failed: " + reason)
                       err("falling back to ArrayBuffer instantiation")
                       return instantiateArrayBuffer(receiveInstantiationResult)
-                    },
+                    }
                   )
-                },
+                }
               )
             } else {
               return instantiateArrayBuffer(receiveInstantiationResult)
@@ -741,7 +741,7 @@ var require_emscripten = __commonJS({
           const summerOffset = new Date(
             date.getFullYear(),
             6,
-            1,
+            1
           ).getTimezoneOffset()
           const winterOffset = start.getTimezoneOffset()
           const dst =
@@ -758,7 +758,7 @@ var require_emscripten = __commonJS({
             HEAP32[(tmPtr + 8) >> 2],
             HEAP32[(tmPtr + 4) >> 2],
             HEAP32[tmPtr >> 2],
-            0,
+            0
           )
           const dst = HEAP32[(tmPtr + 32) >> 2]
           const guessedOffset = date.getTimezoneOffset()
@@ -766,13 +766,13 @@ var require_emscripten = __commonJS({
           const summerOffset = new Date(
             date.getFullYear(),
             6,
-            1,
+            1
           ).getTimezoneOffset()
           const winterOffset = start.getTimezoneOffset()
           const dstOffset = Math.min(winterOffset, summerOffset)
           if (dst < 0) {
             HEAP32[(tmPtr + 32) >> 2] = Number(
-              summerOffset != winterOffset && dstOffset == guessedOffset,
+              summerOffset != winterOffset && dstOffset == guessedOffset
             )
           } else if (dst > 0 != (dstOffset == guessedOffset)) {
             const nonDstOffset = Math.max(winterOffset, summerOffset)
@@ -855,11 +855,11 @@ var require_emscripten = __commonJS({
             let overGrownHeapSize = oldSize * (1 + 0.2 / cutDown)
             overGrownHeapSize = Math.min(
               overGrownHeapSize,
-              requestedSize + 100663296,
+              requestedSize + 100663296
             )
             const newSize = Math.min(
               maxHeapSize,
-              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536),
+              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536)
             )
             const replacement = emscripten_realloc_buffer(newSize)
             if (replacement) {
@@ -1045,7 +1045,7 @@ var require_emscripten = __commonJS({
           for (var rule in EXPANSION_RULES_1) {
             pattern = pattern.replace(
               new RegExp(rule, "g"),
-              EXPANSION_RULES_1[rule],
+              EXPANSION_RULES_1[rule]
             )
           }
           const WEEKDAYS = [
@@ -1116,7 +1116,7 @@ var require_emscripten = __commonJS({
           function getWeekBasedYear(date2) {
             const thisDate = __addDays(
               new Date(date2.tm_year + 1900, 0, 1),
-              date2.tm_yday,
+              date2.tm_yday
             )
             const janFourthThisYear = new Date(thisDate.getFullYear(), 0, 4)
             const janFourthNextYear = new Date(thisDate.getFullYear() + 1, 0, 4)
@@ -1179,9 +1179,9 @@ var require_emscripten = __commonJS({
                     __isLeapYear(date2.tm_year + 1900)
                       ? __MONTH_DAYS_LEAP
                       : __MONTH_DAYS_REGULAR,
-                    date2.tm_mon - 1,
+                    date2.tm_mon - 1
                   ),
-                3,
+                3
               )
             },
             "%m": function (date2) {
@@ -1215,7 +1215,7 @@ var require_emscripten = __commonJS({
             },
             "%V": function (date2) {
               let val = Math.floor(
-                (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7,
+                (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7
               )
               if ((date2.tm_wday + 371 - date2.tm_yday - 2) % 7 <= 2) {
                 val++
@@ -1268,7 +1268,7 @@ var require_emscripten = __commonJS({
             if (pattern.includes(rule)) {
               pattern = pattern.replace(
                 new RegExp(rule, "g"),
-                EXPANSION_RULES_2[rule](date),
+                EXPANSION_RULES_2[rule](date)
               )
             }
           }
@@ -1326,7 +1326,7 @@ var require_emscripten = __commonJS({
             stringy,
             u8array,
             0,
-            u8array.length,
+            u8array.length
           )
           if (dontAddNull) u8array.length = numBytesWritten
           return u8array
@@ -1371,7 +1371,7 @@ var require_emscripten = __commonJS({
         var _handle = (Module2._handle = function () {
           return (_handle = Module2._handle = Module2.asm.G).apply(
             null,
-            arguments,
+            arguments
           )
         })
         var _main = (Module2._main = function () {
@@ -1380,7 +1380,7 @@ var require_emscripten = __commonJS({
         var _malloc = (Module2._malloc = function () {
           return (_malloc = Module2._malloc = Module2.asm.J).apply(
             null,
-            arguments,
+            arguments
           )
         })
         var ___errno_location = (Module2.___errno_location = function () {
@@ -1390,25 +1390,25 @@ var require_emscripten = __commonJS({
         var _setThrew = (Module2._setThrew = function () {
           return (_setThrew = Module2._setThrew = Module2.asm.L).apply(
             null,
-            arguments,
+            arguments
           )
         })
         var stackSave = (Module2.stackSave = function () {
           return (stackSave = Module2.stackSave = Module2.asm.M).apply(
             null,
-            arguments,
+            arguments
           )
         })
         var stackRestore = (Module2.stackRestore = function () {
           return (stackRestore = Module2.stackRestore = Module2.asm.N).apply(
             null,
-            arguments,
+            arguments
           )
         })
         var stackAlloc = (Module2.stackAlloc = function () {
           return (stackAlloc = Module2.stackAlloc = Module2.asm.O).apply(
             null,
-            arguments,
+            arguments
           )
         })
         function invoke_vii(index, a1, a2) {
@@ -1427,9 +1427,9 @@ var require_emscripten = __commonJS({
           return MAGIC
         }
         let TIME = 1e4
-        Date.now = () => TIME++
-        if (typeof performance === "object") performance.now = Date.now
-        if (ENVIRONMENT_IS_NODE) process.hrtime = Date.now
+        datenow = () => TIME++
+        if (typeof performance === "object") performance.now = datenow
+        if (ENVIRONMENT_IS_NODE) process.hrtime = datenow
         if (!Module2) Module2 = {}
         Module2.thisProgram = "thisProgram"
         Module2.cwrap = cwrap
@@ -1535,7 +1535,7 @@ var require_emscripten2 = __commonJS({
         _scriptDir = _scriptDir || __filename
       return function (
         binaryOrInstantiate,
-        { computeLimit, memoryLimit, extensions, format },
+        { computeLimit, memoryLimit, extensions, format }
       ) {
         var Module2 = Module2 || {}
         if (typeof binaryOrInstantiate === "function")
@@ -1567,7 +1567,7 @@ var require_emscripten2 = __commonJS({
         }
         _listeners_.push(
           ["uncaughtException", uncaughtException],
-          ["unhandledRejection", unhandledRejection],
+          ["unhandledRejection", unhandledRejection]
         )
         var Module2 = typeof Module2 != "undefined" ? Module2 : {}
         var readyPromiseResolve, readyPromiseReject
@@ -1580,7 +1580,7 @@ var require_emscripten2 = __commonJS({
             configurable: true,
             get: function () {
               abort(
-                "You are getting _main on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                "You are getting _main on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
               )
             },
           })
@@ -1588,7 +1588,7 @@ var require_emscripten2 = __commonJS({
             configurable: true,
             set: function () {
               abort(
-                "You are setting _main on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                "You are setting _main on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
               )
             },
           })
@@ -1598,7 +1598,7 @@ var require_emscripten2 = __commonJS({
             configurable: true,
             get: function () {
               abort(
-                "You are getting _handle on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                "You are getting _handle on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
               )
             },
           })
@@ -1606,7 +1606,7 @@ var require_emscripten2 = __commonJS({
             configurable: true,
             set: function () {
               abort(
-                "You are setting _handle on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                "You are setting _handle on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
               )
             },
           })
@@ -1616,7 +1616,7 @@ var require_emscripten2 = __commonJS({
             configurable: true,
             get: function () {
               abort(
-                "You are getting _fflush on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                "You are getting _fflush on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
               )
             },
           })
@@ -1624,7 +1624,7 @@ var require_emscripten2 = __commonJS({
             configurable: true,
             set: function () {
               abort(
-                "You are setting _fflush on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                "You are setting _fflush on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
               )
             },
           })
@@ -1632,14 +1632,14 @@ var require_emscripten2 = __commonJS({
         if (
           !Object.getOwnPropertyDescriptor(
             Module2["ready"],
-            "onRuntimeInitialized",
+            "onRuntimeInitialized"
           )
         ) {
           Object.defineProperty(Module2["ready"], "onRuntimeInitialized", {
             configurable: true,
             get: function () {
               abort(
-                "You are getting onRuntimeInitialized on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                "You are getting onRuntimeInitialized on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
               )
             },
           })
@@ -1647,7 +1647,7 @@ var require_emscripten2 = __commonJS({
             configurable: true,
             set: function () {
               abort(
-                "You are setting onRuntimeInitialized on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                "You are setting onRuntimeInitialized on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
               )
             },
           })
@@ -1671,7 +1671,7 @@ var require_emscripten2 = __commonJS({
           !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_NODE && !ENVIRONMENT_IS_WORKER
         if (Module2["ENVIRONMENT"]) {
           throw new Error(
-            "Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -sENVIRONMENT=web or -sENVIRONMENT=node)",
+            "Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -sENVIRONMENT=web or -sENVIRONMENT=node)"
           )
         }
         var scriptDirectory = ""
@@ -1696,7 +1696,7 @@ var require_emscripten2 = __commonJS({
         if (ENVIRONMENT_IS_NODE) {
           if (!(typeof process == "object" && typeof require == "function"))
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           if (ENVIRONMENT_IS_WORKER) {
             scriptDirectory = require("path").dirname(scriptDirectory) + "/"
@@ -1754,7 +1754,7 @@ var require_emscripten2 = __commonJS({
             typeof importScripts == "function"
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           if (typeof read != "undefined") {
             read_ = function shell_read(f) {
@@ -1806,7 +1806,7 @@ var require_emscripten2 = __commonJS({
           if (scriptDirectory.indexOf("blob:") !== 0) {
             scriptDirectory = scriptDirectory.substr(
               0,
-              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1,
+              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1
             )
           } else {
             scriptDirectory = ""
@@ -1815,7 +1815,7 @@ var require_emscripten2 = __commonJS({
             !(typeof window == "object" || typeof importScripts == "function")
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           {
             read_ = url => {
@@ -1832,7 +1832,7 @@ var require_emscripten2 = __commonJS({
                 xhr.send(null)
                 return new Uint8Array(
                   /** @type{!ArrayBuffer} */
-                  xhr.response,
+                  xhr.response
                 )
               }
             }
@@ -1868,39 +1868,39 @@ var require_emscripten2 = __commonJS({
         legacyModuleProp("quit", "quit_")
         assert(
           typeof Module2["memoryInitializerPrefixURL"] == "undefined",
-          "Module.memoryInitializerPrefixURL option was removed, use Module.locateFile instead",
+          "Module.memoryInitializerPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["pthreadMainPrefixURL"] == "undefined",
-          "Module.pthreadMainPrefixURL option was removed, use Module.locateFile instead",
+          "Module.pthreadMainPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["cdInitializerPrefixURL"] == "undefined",
-          "Module.cdInitializerPrefixURL option was removed, use Module.locateFile instead",
+          "Module.cdInitializerPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["filePackagePrefixURL"] == "undefined",
-          "Module.filePackagePrefixURL option was removed, use Module.locateFile instead",
+          "Module.filePackagePrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["read"] == "undefined",
-          "Module.read option was removed (modify read_ in JS)",
+          "Module.read option was removed (modify read_ in JS)"
         )
         assert(
           typeof Module2["readAsync"] == "undefined",
-          "Module.readAsync option was removed (modify readAsync in JS)",
+          "Module.readAsync option was removed (modify readAsync in JS)"
         )
         assert(
           typeof Module2["readBinary"] == "undefined",
-          "Module.readBinary option was removed (modify readBinary in JS)",
+          "Module.readBinary option was removed (modify readBinary in JS)"
         )
         assert(
           typeof Module2["setWindowTitle"] == "undefined",
-          "Module.setWindowTitle option was removed (modify setWindowTitle in JS)",
+          "Module.setWindowTitle option was removed (modify setWindowTitle in JS)"
         )
         assert(
           typeof Module2["TOTAL_MEMORY"] == "undefined",
-          "Module.TOTAL_MEMORY has been renamed Module.INITIAL_MEMORY",
+          "Module.TOTAL_MEMORY has been renamed Module.INITIAL_MEMORY"
         )
         legacyModuleProp("read", "read_")
         legacyModuleProp("readAsync", "readAsync")
@@ -1916,7 +1916,7 @@ var require_emscripten2 = __commonJS({
           "NODEFS is no longer included by default; build with -lnodefs.js"
         assert(
           !ENVIRONMENT_IS_SHELL,
-          "shell environment detected but not enabled at build time.  Add 'shell' to `-sENVIRONMENT` to enable.",
+          "shell environment detected but not enabled at build time.  Add 'shell' to `-sENVIRONMENT` to enable."
         )
         var STACK_ALIGN = 16
         var POINTER_SIZE = 4
@@ -1946,7 +1946,7 @@ var require_emscripten2 = __commonJS({
                 const bits = Number(type.substr(1))
                 assert(
                   bits % 8 === 0,
-                  "getNativeTypeSize invalid bits " + bits + ", type " + type,
+                  "getNativeTypeSize invalid bits " + bits + ", type " + type
                 )
                 return bits / 8
               } else {
@@ -2015,7 +2015,7 @@ var require_emscripten2 = __commonJS({
           for (var i = 0; i < sigParam.length; ++i) {
             assert(
               sigParam[i] in typeCodes,
-              "invalid signature char: " + sigParam[i],
+              "invalid signature char: " + sigParam[i]
             )
             typeSection.push(typeCodes[sigParam[i]])
           }
@@ -2044,8 +2044,8 @@ var require_emscripten2 = __commonJS({
                 // export section
                 // (export "f" (func 0 (type 0)))
                 1, 1, 102, 0, 0,
-              ],
-            ),
+              ]
+            )
           )
           var module3 = new WebAssembly.Module(bytes)
           var instance = new WebAssembly.Instance(module3, {
@@ -2098,7 +2098,7 @@ var require_emscripten2 = __commonJS({
             }
             assert(
               typeof sig != "undefined",
-              "Missing signature argument to addFunction: " + func,
+              "Missing signature argument to addFunction: " + func
             )
             var wrapped = convertJsFunctionToWasm(func, sig)
             setWasmTableEntry(ret, wrapped)
@@ -2120,7 +2120,7 @@ var require_emscripten2 = __commonJS({
                     prop +
                     " has been replaced with plain " +
                     newName +
-                    " (the initial value can be provided on Module, but after startup the value is only looked for on a local variable of that name)",
+                    " (the initial value can be provided on Module, but after startup the value is only looked for on a local variable of that name)"
                 )
               },
             })
@@ -2133,7 +2133,7 @@ var require_emscripten2 = __commonJS({
                 prop +
                 "` was supplied but `" +
                 prop +
-                "` not included in INCOMING_MODULE_JS_API",
+                "` not included in INCOMING_MODULE_JS_API"
             )
           }
         }
@@ -2190,7 +2190,7 @@ var require_emscripten2 = __commonJS({
             func,
             "Cannot call unknown function " +
               ident +
-              ", make sure it is exported",
+              ", make sure it is exported"
           )
           return func
         }
@@ -2252,11 +2252,11 @@ var require_emscripten2 = __commonJS({
           var ret
           assert(
             typeof allocator == "number",
-            "allocate no longer takes a type argument",
+            "allocate no longer takes a type argument"
           )
           assert(
             typeof slab != "number",
-            "allocate no longer takes a number as arg0",
+            "allocate no longer takes a number as arg0"
           )
           if (allocator == ALLOC_STACK) {
             ret = stackAlloc(slab.length)
@@ -2298,7 +2298,7 @@ var require_emscripten2 = __commonJS({
                   warnOnce(
                     "Invalid UTF-8 leading byte 0x" +
                       u0.toString(16) +
-                      " encountered when deserializing a UTF-8 string in wasm memory to a JS string!",
+                      " encountered when deserializing a UTF-8 string in wasm memory to a JS string!"
                   )
                 u0 =
                   ((u0 & 7) << 18) |
@@ -2312,7 +2312,7 @@ var require_emscripten2 = __commonJS({
                 var ch = u0 - 65536
                 str += String.fromCharCode(
                   55296 | (ch >> 10),
-                  56320 | (ch & 1023),
+                  56320 | (ch & 1023)
                 )
               }
             }
@@ -2350,7 +2350,7 @@ var require_emscripten2 = __commonJS({
                 warnOnce(
                   "Invalid Unicode code point 0x" +
                     u.toString(16) +
-                    " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF).",
+                    " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF)."
                 )
               heap[outIdx++] = 240 | (u >> 18)
               heap[outIdx++] = 128 | ((u >> 12) & 63)
@@ -2364,7 +2364,7 @@ var require_emscripten2 = __commonJS({
         function stringToUTF8(str, outPtr, maxBytesToWrite) {
           assert(
             typeof maxBytesToWrite == "number",
-            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!",
+            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!"
           )
           return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite)
         }
@@ -2399,7 +2399,7 @@ var require_emscripten2 = __commonJS({
         function UTF16ToString(ptr, maxBytesToRead) {
           assert(
             ptr % 2 == 0,
-            "Pointer passed to UTF16ToString must be aligned to two bytes!",
+            "Pointer passed to UTF16ToString must be aligned to two bytes!"
           )
           var endPtr = ptr
           var idx = endPtr >> 1
@@ -2421,11 +2421,11 @@ var require_emscripten2 = __commonJS({
         function stringToUTF16(str, outPtr, maxBytesToWrite) {
           assert(
             outPtr % 2 == 0,
-            "Pointer passed to stringToUTF16 must be aligned to two bytes!",
+            "Pointer passed to stringToUTF16 must be aligned to two bytes!"
           )
           assert(
             typeof maxBytesToWrite == "number",
-            "stringToUTF16(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!",
+            "stringToUTF16(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!"
           )
           if (maxBytesToWrite === void 0) {
             maxBytesToWrite = 2147483647
@@ -2449,7 +2449,7 @@ var require_emscripten2 = __commonJS({
         function UTF32ToString(ptr, maxBytesToRead) {
           assert(
             ptr % 4 == 0,
-            "Pointer passed to UTF32ToString must be aligned to four bytes!",
+            "Pointer passed to UTF32ToString must be aligned to four bytes!"
           )
           var i = 0
           var str = ""
@@ -2461,7 +2461,7 @@ var require_emscripten2 = __commonJS({
               var ch = utf32 - 65536
               str += String.fromCharCode(
                 55296 | (ch >> 10),
-                56320 | (ch & 1023),
+                56320 | (ch & 1023)
               )
             } else {
               str += String.fromCharCode(utf32)
@@ -2472,11 +2472,11 @@ var require_emscripten2 = __commonJS({
         function stringToUTF32(str, outPtr, maxBytesToWrite) {
           assert(
             outPtr % 4 == 0,
-            "Pointer passed to stringToUTF32 must be aligned to four bytes!",
+            "Pointer passed to stringToUTF32 must be aligned to four bytes!"
           )
           assert(
             typeof maxBytesToWrite == "number",
-            "stringToUTF32(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!",
+            "stringToUTF32(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!"
           )
           if (maxBytesToWrite === void 0) {
             maxBytesToWrite = 2147483647
@@ -2521,7 +2521,7 @@ var require_emscripten2 = __commonJS({
         }
         function writeStringToMemory(string, buffer2, dontAddNull) {
           warnOnce(
-            "writeStringToMemory is deprecated and should not be called! Use stringToUTF8() instead!",
+            "writeStringToMemory is deprecated and should not be called! Use stringToUTF8() instead!"
           )
           var lastChar, end
           if (dontAddNull) {
@@ -2534,7 +2534,7 @@ var require_emscripten2 = __commonJS({
         function writeArrayToMemory(array, buffer2) {
           assert(
             array.length >= 0,
-            "writeArrayToMemory array must have a length (should be an array or typed array)",
+            "writeArrayToMemory array must have a length (should be an array or typed array)"
           )
           HEAP8.set(array, buffer2)
         }
@@ -2570,7 +2570,7 @@ var require_emscripten2 = __commonJS({
         if (Module2["TOTAL_STACK"])
           assert(
             TOTAL_STACK === Module2["TOTAL_STACK"],
-            "the stack size can no longer be determined at runtime",
+            "the stack size can no longer be determined at runtime"
           )
         var INITIAL_MEMORY = Module2["INITIAL_MEMORY"] || 6291456
         legacyModuleProp("INITIAL_MEMORY", "INITIAL_MEMORY")
@@ -2580,22 +2580,22 @@ var require_emscripten2 = __commonJS({
             INITIAL_MEMORY +
             "! (TOTAL_STACK=" +
             TOTAL_STACK +
-            ")",
+            ")"
         )
         assert(
           typeof Int32Array != "undefined" &&
             typeof Float64Array !== "undefined" &&
             Int32Array.prototype.subarray != void 0 &&
             Int32Array.prototype.set != void 0,
-          "JS engine does not provide full typed array support",
+          "JS engine does not provide full typed array support"
         )
         assert(
           !Module2["wasmMemory"],
-          "Use of `wasmMemory` detected.  Use -sIMPORTED_MEMORY to define wasmMemory externally",
+          "Use of `wasmMemory` detected.  Use -sIMPORTED_MEMORY to define wasmMemory externally"
         )
         assert(
           INITIAL_MEMORY == 6291456,
-          "Detected runtime INITIAL_MEMORY setting.  Use -sIMPORTED_MEMORY to define wasmMemory dynamically",
+          "Detected runtime INITIAL_MEMORY setting.  Use -sIMPORTED_MEMORY to define wasmMemory dynamically"
         )
         var wasmTable
         function writeStackCookie() {
@@ -2617,12 +2617,12 @@ var require_emscripten2 = __commonJS({
                 ", expected hex dwords 0x89BACDFE and 0x2135467, but received 0x" +
                 cookie2.toString(16) +
                 " 0x" +
-                cookie1.toString(16),
+                cookie1.toString(16)
             )
           }
           if (HEAPU32[0] !== 1668509029)
             abort(
-              "Runtime error: The application has corrupted its heap memory area (address zero)!",
+              "Runtime error: The application has corrupted its heap memory area (address zero)!"
             )
         }
         ;(function () {
@@ -2690,19 +2690,19 @@ var require_emscripten2 = __commonJS({
         }
         assert(
           Math.imul,
-          "This browser does not support Math.imul(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.imul(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.fround,
-          "This browser does not support Math.fround(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.fround(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.clz32,
-          "This browser does not support Math.clz32(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.clz32(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.trunc,
-          "This browser does not support Math.trunc(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.trunc(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         var runDependencies = 0
         var runDependencyWatcher = null
@@ -2805,12 +2805,12 @@ var require_emscripten2 = __commonJS({
               runtimeInitialized,
               "native function `" +
                 displayName +
-                "` called before runtime initialization",
+                "` called before runtime initialization"
             )
             if (!asm2[name]) {
               assert(
                 asm2[name],
-                "exported native function `" + displayName + "` not found",
+                "exported native function `" + displayName + "` not found"
               )
             }
             return asm2[name].apply(null, arguments)
@@ -2861,11 +2861,11 @@ var require_emscripten2 = __commonJS({
                       resolve(
                         new Uint8Array(
                           /** @type{!ArrayBuffer} */
-                          response,
-                        ),
+                          response
+                        )
                       )
                     },
-                    reject,
+                    reject
                   )
                 })
               }
@@ -2902,7 +2902,7 @@ var require_emscripten2 = __commonJS({
           function receiveInstantiationResult(result) {
             assert(
               Module2 === trueModule,
-              "the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?",
+              "the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?"
             )
             trueModule = null
             receiveInstance(result["instance"])
@@ -2921,7 +2921,7 @@ var require_emscripten2 = __commonJS({
                   err(
                     "warning: Loading from a file URI (" +
                       wasmBinaryFile +
-                      ") is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing",
+                      ") is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing"
                   )
                 }
                 abort(reason)
@@ -2950,9 +2950,9 @@ var require_emscripten2 = __commonJS({
                       err("wasm streaming compile failed: " + reason)
                       err("falling back to ArrayBuffer instantiation")
                       return instantiateArrayBuffer(receiveInstantiationResult)
-                    },
+                    }
                   )
-                },
+                }
               )
             } else {
               return instantiateArrayBuffer(receiveInstantiationResult)
@@ -3000,7 +3000,7 @@ var require_emscripten2 = __commonJS({
         }
         function demangle(func) {
           warnOnce(
-            "warning: build with -sDEMANGLE_SUPPORT to link in libcxxabi demangling",
+            "warning: build with -sDEMANGLE_SUPPORT to link in libcxxabi demangling"
           )
           return func
         }
@@ -3043,7 +3043,7 @@ var require_emscripten2 = __commonJS({
           }
           assert(
             wasmTable.get(funcPtr) == func,
-            "JavaScript-side Wasm function table mirror is out of date!",
+            "JavaScript-side Wasm function table mirror is out of date!"
           )
           return func
         }
@@ -3090,12 +3090,12 @@ var require_emscripten2 = __commonJS({
                   ? tempDouble > 0
                     ? (Math.min(
                         +Math.floor(tempDouble / 4294967296),
-                        4294967295,
+                        4294967295
                       ) |
                         0) >>>
                       0
                     : ~~+Math.ceil(
-                        (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                        (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                       ) >>> 0
                   : 0),
               ]),
@@ -3131,7 +3131,7 @@ var require_emscripten2 = __commonJS({
                 filename ? UTF8ToString(filename) : "unknown filename",
                 line,
                 func ? UTF8ToString(func) : "unknown function",
-              ],
+              ]
           )
         }
         var PATH = {
@@ -3167,7 +3167,7 @@ var require_emscripten2 = __commonJS({
               trailingSlash = path.substr(-1) === "/"
             path = PATH.normalizeArray(
               path.split("/").filter(p => !!p),
-              !isAbsolute,
+              !isAbsolute
             ).join("/")
             if (!path && !isAbsolute) {
               path = "."
@@ -3225,7 +3225,7 @@ var require_emscripten2 = __commonJS({
           }
           return function () {
             abort(
-              "no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: function(array) { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };",
+              "no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: function(array) { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };"
             )
           }
         }
@@ -3249,7 +3249,7 @@ var require_emscripten2 = __commonJS({
             }
             resolvedPath = PATH.normalizeArray(
               resolvedPath.split("/").filter(p => !!p),
-              !resolvedAbsolute,
+              !resolvedAbsolute
             ).join("/")
             return (resolvedAbsolute ? "/" : "") + resolvedPath || "."
           },
@@ -3329,7 +3329,7 @@ var require_emscripten2 = __commonJS({
                 buffer2[offset + i] = result
               }
               if (bytesRead) {
-                stream.node.timestamp = Date.now()
+                stream.node.timestamp = datenow()
               }
               return bytesRead
             },
@@ -3345,7 +3345,7 @@ var require_emscripten2 = __commonJS({
                 throw new FS.ErrnoError(29)
               }
               if (length) {
-                stream.node.timestamp = Date.now()
+                stream.node.timestamp = datenow()
               }
               return i
             },
@@ -3364,7 +3364,7 @@ var require_emscripten2 = __commonJS({
                       buf,
                       0,
                       BUFSIZE,
-                      -1,
+                      -1
                     )
                   } catch (e) {
                     if (e.toString().includes("EOF")) bytesRead = 0
@@ -3517,7 +3517,7 @@ var require_emscripten2 = __commonJS({
               node.node_ops = MEMFS.ops_table.chrdev.node
               node.stream_ops = MEMFS.ops_table.chrdev.stream
             }
-            node.timestamp = Date.now()
+            node.timestamp = datenow()
             if (parent) {
               parent.contents[name] = node
               parent.timestamp = node.timestamp
@@ -3538,7 +3538,7 @@ var require_emscripten2 = __commonJS({
               newCapacity,
               (prevCapacity *
                 (prevCapacity < CAPACITY_DOUBLING_MAX ? 2 : 1.125)) >>>
-                0,
+                0
             )
             if (prevCapacity != 0) newCapacity = Math.max(newCapacity, 256)
             var oldContents = node.contents
@@ -3556,7 +3556,7 @@ var require_emscripten2 = __commonJS({
               node.contents = new Uint8Array(newSize)
               if (oldContents) {
                 node.contents.set(
-                  oldContents.subarray(0, Math.min(newSize, node.usedBytes)),
+                  oldContents.subarray(0, Math.min(newSize, node.usedBytes))
                 )
               }
               node.usedBytes = newSize
@@ -3618,7 +3618,7 @@ var require_emscripten2 = __commonJS({
                 }
               }
               delete old_node.parent.contents[old_node.name]
-              old_node.parent.timestamp = Date.now()
+              old_node.parent.timestamp = datenow()
               old_node.name = new_name
               new_dir.contents[new_name] = old_node
               new_dir.timestamp = old_node.parent.timestamp
@@ -3626,7 +3626,7 @@ var require_emscripten2 = __commonJS({
             },
             unlink: function (parent, name) {
               delete parent.contents[name]
-              parent.timestamp = Date.now()
+              parent.timestamp = datenow()
             },
             rmdir: function (parent, name) {
               var node = FS.lookupNode(parent, name)
@@ -3634,7 +3634,7 @@ var require_emscripten2 = __commonJS({
                 throw new FS.ErrnoError(55)
               }
               delete parent.contents[name]
-              parent.timestamp = Date.now()
+              parent.timestamp = datenow()
             },
             readdir: function (node) {
               var entries = [".", ".."]
@@ -3667,7 +3667,7 @@ var require_emscripten2 = __commonJS({
               if (size > 8 && contents.subarray) {
                 buffer2.set(
                   contents.subarray(position, position + size),
-                  offset,
+                  offset
                 )
               } else {
                 for (var i = 0; i < size; i++)
@@ -3681,7 +3681,7 @@ var require_emscripten2 = __commonJS({
               offset,
               length,
               position,
-              canOwn,
+              canOwn
             ) {
               assert(!(buffer2 instanceof ArrayBuffer))
               if (buffer2.buffer === HEAP8.buffer) {
@@ -3689,7 +3689,7 @@ var require_emscripten2 = __commonJS({
               }
               if (!length) return 0
               var node = stream.node
-              node.timestamp = Date.now()
+              node.timestamp = datenow()
               if (
                 buffer2.subarray &&
                 (!node.contents || node.contents.subarray)
@@ -3697,7 +3697,7 @@ var require_emscripten2 = __commonJS({
                 if (canOwn) {
                   assert(
                     position === 0,
-                    "canOwn must imply no weird position inside the file",
+                    "canOwn must imply no weird position inside the file"
                   )
                   node.contents = buffer2.subarray(offset, offset + length)
                   node.usedBytes = length
@@ -3709,7 +3709,7 @@ var require_emscripten2 = __commonJS({
                 } else if (position + length <= node.usedBytes) {
                   node.contents.set(
                     buffer2.subarray(offset, offset + length),
-                    position,
+                    position
                   )
                   return length
                 }
@@ -3718,7 +3718,7 @@ var require_emscripten2 = __commonJS({
               if (node.contents.subarray && buffer2.subarray) {
                 node.contents.set(
                   buffer2.subarray(offset, offset + length),
-                  position,
+                  position
                 )
               } else {
                 for (var i = 0; i < length; i++) {
@@ -3746,7 +3746,7 @@ var require_emscripten2 = __commonJS({
               MEMFS.expandFileStorage(stream.node, offset + length)
               stream.node.usedBytes = Math.max(
                 stream.node.usedBytes,
-                offset + length,
+                offset + length
               )
             },
             mmap: function (stream, length, position, prot, flags) {
@@ -3767,7 +3767,7 @@ var require_emscripten2 = __commonJS({
                     contents = Array.prototype.slice.call(
                       contents,
                       position,
-                      position + length,
+                      position + length
                     )
                   }
                 }
@@ -3793,7 +3793,7 @@ var require_emscripten2 = __commonJS({
                 0,
                 length,
                 offset,
-                false,
+                false
               )
               return 0
             },
@@ -3806,7 +3806,7 @@ var require_emscripten2 = __commonJS({
             function (arrayBuffer) {
               assert(
                 arrayBuffer,
-                'Loading data file "' + url + '" failed (no arrayBuffer).',
+                'Loading data file "' + url + '" failed (no arrayBuffer).'
               )
               onload(new Uint8Array(arrayBuffer))
               if (dep) removeRunDependency(dep)
@@ -3817,7 +3817,7 @@ var require_emscripten2 = __commonJS({
               } else {
                 throw 'Loading data file "' + url + '" failed.'
               }
-            },
+            }
           )
           if (dep) addRunDependency(dep)
         }
@@ -3970,7 +3970,7 @@ var require_emscripten2 = __commonJS({
             }
             var parts = PATH.normalizeArray(
               path.split("/").filter(p => !!p),
-              false,
+              false
             )
             var current = FS.root
             var current_path = "/"
@@ -3992,7 +3992,7 @@ var require_emscripten2 = __commonJS({
                   var link = FS.readlink(current_path)
                   current_path = PATH_FS.resolve(
                     PATH.dirname(current_path),
-                    link,
+                    link
                   )
                   var lookup = FS.lookupPath(current_path, {
                     recurse_count: opts.recurse_count + 1,
@@ -4296,7 +4296,7 @@ var require_emscripten2 = __commonJS({
               err(
                 "warning: " +
                   FS.syncFSRequests +
-                  " FS.syncfs operations in flight at once, probably just doing extra work",
+                  " FS.syncfs operations in flight at once, probably just doing extra work"
               )
             }
             var mounts = FS.getMounts(FS.root.mount)
@@ -4581,7 +4581,7 @@ var require_emscripten2 = __commonJS({
             }
             return PATH_FS.resolve(
               FS.getPath(link.parent),
-              link.node_ops.readlink(link),
+              link.node_ops.readlink(link)
             )
           },
           stat: (path, dontFollow) => {
@@ -4611,7 +4611,7 @@ var require_emscripten2 = __commonJS({
             }
             node.node_ops.setattr(node, {
               mode: (mode & 4095) | (node.mode & ~4095),
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           lchmod: (path, mode) => {
@@ -4636,7 +4636,7 @@ var require_emscripten2 = __commonJS({
               throw new FS.ErrnoError(63)
             }
             node.node_ops.setattr(node, {
-              timestamp: Date.now(),
+              timestamp: datenow(),
               // we ignore the uid / gid for now
             })
           },
@@ -4676,7 +4676,7 @@ var require_emscripten2 = __commonJS({
             }
             node.node_ops.setattr(node, {
               size: len,
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           ftruncate: (fd, len) => {
@@ -4833,7 +4833,7 @@ var require_emscripten2 = __commonJS({
               buffer2,
               offset,
               length,
-              position,
+              position
             )
             if (!seeking) stream.position += bytesRead
             return bytesRead
@@ -4869,7 +4869,7 @@ var require_emscripten2 = __commonJS({
               offset,
               length,
               position,
-              canOwn,
+              canOwn
             )
             if (!seeking) stream.position += bytesWritten
             return bytesWritten
@@ -4917,7 +4917,7 @@ var require_emscripten2 = __commonJS({
               buffer2,
               offset,
               length,
-              mmapFlags,
+              mmapFlags
             )
           },
           munmap: stream => 0,
@@ -5024,7 +5024,7 @@ var require_emscripten2 = __commonJS({
                 },
               },
               {},
-              "/proc/self/fd",
+              "/proc/self/fd"
             )
           },
           createStandardStreams: () => {
@@ -5048,15 +5048,15 @@ var require_emscripten2 = __commonJS({
             var stderr = FS.open("/dev/stderr", 1)
             assert(
               stdin.fd === 0,
-              "invalid handle for stdin (" + stdin.fd + ")",
+              "invalid handle for stdin (" + stdin.fd + ")"
             )
             assert(
               stdout.fd === 1,
-              "invalid handle for stdout (" + stdout.fd + ")",
+              "invalid handle for stdout (" + stdout.fd + ")"
             )
             assert(
               stderr.fd === 2,
-              "invalid handle for stderr (" + stderr.fd + ")",
+              "invalid handle for stderr (" + stderr.fd + ")"
             )
           },
           ensureErrnoError: () => {
@@ -5107,7 +5107,7 @@ var require_emscripten2 = __commonJS({
           init: (input, output, error) => {
             assert(
               !FS.init.initialized,
-              "FS.init was previously called. If you want to initialize later with custom parameters, remove any earlier calls (note that one is automatically added to the generated code)",
+              "FS.init was previously called. If you want to initialize later with custom parameters, remove any earlier calls (note that one is automatically added to the generated code)"
             )
             FS.init.initialized = true
             FS.ensureErrnoError()
@@ -5191,7 +5191,7 @@ var require_emscripten2 = __commonJS({
           createFile: (parent, name, properties, canRead, canWrite) => {
             var path = PATH.join2(
               typeof parent == "string" ? parent : FS.getPath(parent),
-              name,
+              name
             )
             var mode = FS.getMode(canRead, canWrite)
             return FS.create(path, mode)
@@ -5222,7 +5222,7 @@ var require_emscripten2 = __commonJS({
           createDevice: (parent, name, input, output) => {
             var path = PATH.join2(
               typeof parent == "string" ? parent : FS.getPath(parent),
-              name,
+              name
             )
             var mode = FS.getMode(!!input, !!output)
             if (!FS.createDevice.major) FS.createDevice.major = 64
@@ -5253,7 +5253,7 @@ var require_emscripten2 = __commonJS({
                   buffer2[offset + i] = result
                 }
                 if (bytesRead) {
-                  stream.node.timestamp = Date.now()
+                  stream.node.timestamp = datenow()
                 }
                 return bytesRead
               },
@@ -5266,7 +5266,7 @@ var require_emscripten2 = __commonJS({
                   }
                 }
                 if (length) {
-                  stream.node.timestamp = Date.now()
+                  stream.node.timestamp = datenow()
                 }
                 return i
               },
@@ -5278,7 +5278,7 @@ var require_emscripten2 = __commonJS({
               return true
             if (typeof XMLHttpRequest != "undefined") {
               throw new Error(
-                "Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread.",
+                "Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread."
               )
             } else if (read_) {
               try {
@@ -5322,7 +5322,7 @@ var require_emscripten2 = __commonJS({
                   )
                 )
                   throw new Error(
-                    "Couldn't load " + url + ". Status: " + xhr.status,
+                    "Couldn't load " + url + ". Status: " + xhr.status
                   )
                 var datalength = Number(xhr.getResponseHeader("Content-length"))
                 var header
@@ -5341,13 +5341,13 @@ var require_emscripten2 = __commonJS({
                         from +
                         ", " +
                         to +
-                        ") or no bytes requested!",
+                        ") or no bytes requested!"
                     )
                   if (to > datalength - 1)
                     throw new Error(
                       "only " +
                         datalength +
-                        " bytes available! programmer error!",
+                        " bytes available! programmer error!"
                     )
                   var xhr2 = new XMLHttpRequest()
                   xhr2.open("GET", url, false)
@@ -5365,12 +5365,12 @@ var require_emscripten2 = __commonJS({
                     )
                   )
                     throw new Error(
-                      "Couldn't load " + url + ". Status: " + xhr2.status,
+                      "Couldn't load " + url + ". Status: " + xhr2.status
                     )
                   if (xhr2.response !== void 0) {
                     return new Uint8Array(
                       /** @type{Array<number>} */
-                      xhr2.response || [],
+                      xhr2.response || []
                     )
                   } else {
                     return intArrayFromString(xhr2.responseText || "", true)
@@ -5393,7 +5393,7 @@ var require_emscripten2 = __commonJS({
                   datalength = this.getter(0).length
                   chunkSize = datalength
                   out(
-                    "LazyFiles on gzip forces download of the whole file when length is accessed",
+                    "LazyFiles on gzip forces download of the whole file when length is accessed"
                   )
                 }
                 this._length = datalength
@@ -5435,7 +5435,7 @@ var require_emscripten2 = __commonJS({
               name,
               properties,
               canRead,
-              canWrite,
+              canWrite
             )
             if (properties.contents) {
               node.contents = properties.contents
@@ -5503,7 +5503,7 @@ var require_emscripten2 = __commonJS({
             onerror,
             dontCreateFile,
             canOwn,
-            preFinish,
+            preFinish
           ) => {
             var fullname = name
               ? PATH_FS.resolve(PATH.join2(parent, name))
@@ -5519,7 +5519,7 @@ var require_emscripten2 = __commonJS({
                     byteArray2,
                     canRead,
                     canWrite,
-                    canOwn,
+                    canOwn
                   )
                 }
                 if (onload) onload()
@@ -5533,7 +5533,7 @@ var require_emscripten2 = __commonJS({
                   () => {
                     if (onerror) onerror()
                     removeRunDependency(dep)
-                  },
+                  }
                 )
               ) {
                 return
@@ -5588,7 +5588,7 @@ var require_emscripten2 = __commonJS({
               paths.forEach(path => {
                 var putRequest = files.put(
                   FS.analyzePath(path).object.contents,
-                  path,
+                  path
                 )
                 putRequest.onsuccess = () => {
                   ok++
@@ -5641,7 +5641,7 @@ var require_emscripten2 = __commonJS({
                     getRequest.result,
                     true,
                     true,
-                    true,
+                    true
                   )
                   ok++
                   if (ok + fail == total) finish()
@@ -5657,7 +5657,7 @@ var require_emscripten2 = __commonJS({
           },
           absolutePath: () => {
             abort(
-              "FS.absolutePath has been removed; use PATH_FS.resolve instead",
+              "FS.absolutePath has been removed; use PATH_FS.resolve instead"
             )
           },
           createFolder: () => {
@@ -5671,12 +5671,12 @@ var require_emscripten2 = __commonJS({
           },
           mmapAlloc: () => {
             abort(
-              "FS.mmapAlloc has been replaced by the top level function mmapAlloc",
+              "FS.mmapAlloc has been replaced by the top level function mmapAlloc"
             )
           },
           standardizePath: () => {
             abort(
-              "FS.standardizePath has been removed; use PATH.normalize instead",
+              "FS.standardizePath has been removed; use PATH.normalize instead"
             )
           },
         }
@@ -5731,12 +5731,12 @@ var require_emscripten2 = __commonJS({
                 ? tempDouble > 0
                   ? (Math.min(
                       +Math.floor(tempDouble / 4294967296),
-                      4294967295,
+                      4294967295
                     ) |
                       0) >>>
                     0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -5757,12 +5757,12 @@ var require_emscripten2 = __commonJS({
                 ? tempDouble > 0
                   ? (Math.min(
                       +Math.floor(tempDouble / 4294967296),
-                      4294967295,
+                      4294967295
                     ) |
                       0) >>>
                     0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -6138,7 +6138,7 @@ var require_emscripten2 = __commonJS({
             assert(flags === 0)
             path = SYSCALLS.calculateAt(dirfd, path, true)
             if (!times) {
-              var atime = Date.now()
+              var atime = datenow()
               var mtime = atime
             } else {
               var seconds = HEAP32[times >> 2]
@@ -6206,7 +6206,7 @@ var require_emscripten2 = __commonJS({
           var summerOffset = new Date(
             date.getFullYear(),
             6,
-            1,
+            1
           ).getTimezoneOffset()
           var winterOffset = start.getTimezoneOffset()
           var dst =
@@ -6223,7 +6223,7 @@ var require_emscripten2 = __commonJS({
             HEAP32[(tmPtr + 8) >> 2],
             HEAP32[(tmPtr + 4) >> 2],
             HEAP32[tmPtr >> 2],
-            0,
+            0
           )
           var dst = HEAP32[(tmPtr + 32) >> 2]
           var guessedOffset = date.getTimezoneOffset()
@@ -6231,13 +6231,13 @@ var require_emscripten2 = __commonJS({
           var summerOffset = new Date(
             date.getFullYear(),
             6,
-            1,
+            1
           ).getTimezoneOffset()
           var winterOffset = start.getTimezoneOffset()
           var dstOffset = Math.min(winterOffset, summerOffset)
           if (dst < 0) {
             HEAP32[(tmPtr + 32) >> 2] = Number(
-              summerOffset != winterOffset && dstOffset == guessedOffset,
+              summerOffset != winterOffset && dstOffset == guessedOffset
             )
           } else if (dst > 0 != (dstOffset == guessedOffset)) {
             var nonDstOffset = Math.max(winterOffset, summerOffset)
@@ -6345,7 +6345,7 @@ var require_emscripten2 = __commonJS({
                 " bytes to " +
                 size +
                 " bytes, but got error: " +
-                e,
+                e
             )
           }
         }
@@ -6360,7 +6360,7 @@ var require_emscripten2 = __commonJS({
                 requestedSize +
                 " bytes, but the limit is " +
                 maxHeapSize +
-                " bytes!",
+                " bytes!"
             )
             return false
           }
@@ -6370,11 +6370,11 @@ var require_emscripten2 = __commonJS({
             var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown)
             overGrownHeapSize = Math.min(
               overGrownHeapSize,
-              requestedSize + 100663296,
+              requestedSize + 100663296
             )
             var newSize = Math.min(
               maxHeapSize,
-              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536),
+              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536)
             )
             var replacement = emscripten_realloc_buffer(newSize)
             if (replacement) {
@@ -6386,7 +6386,7 @@ var require_emscripten2 = __commonJS({
               oldSize +
               " bytes to " +
               newSize +
-              " bytes, not enough memory!",
+              " bytes, not enough memory!"
           )
           return false
         }
@@ -6508,12 +6508,12 @@ var require_emscripten2 = __commonJS({
                 ? tempDouble > 0
                   ? (Math.min(
                       +Math.floor(tempDouble / 4294967296),
-                      4294967295,
+                      4294967295
                     ) |
                       0) >>>
                     0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -6685,7 +6685,7 @@ var require_emscripten2 = __commonJS({
           for (var rule in EXPANSION_RULES_1) {
             pattern = pattern.replace(
               new RegExp(rule, "g"),
-              EXPANSION_RULES_1[rule],
+              EXPANSION_RULES_1[rule]
             )
           }
           var WEEKDAYS = [
@@ -6756,7 +6756,7 @@ var require_emscripten2 = __commonJS({
           function getWeekBasedYear(date2) {
             var thisDate = __addDays(
               new Date(date2.tm_year + 1900, 0, 1),
-              date2.tm_yday,
+              date2.tm_yday
             )
             var janFourthThisYear = new Date(thisDate.getFullYear(), 0, 4)
             var janFourthNextYear = new Date(thisDate.getFullYear() + 1, 0, 4)
@@ -6819,9 +6819,9 @@ var require_emscripten2 = __commonJS({
                     __isLeapYear(date2.tm_year + 1900)
                       ? __MONTH_DAYS_LEAP
                       : __MONTH_DAYS_REGULAR,
-                    date2.tm_mon - 1,
+                    date2.tm_mon - 1
                   ),
-                3,
+                3
               )
             },
             "%m": function (date2) {
@@ -6855,7 +6855,7 @@ var require_emscripten2 = __commonJS({
             },
             "%V": function (date2) {
               var val = Math.floor(
-                (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7,
+                (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7
               )
               if ((date2.tm_wday + 371 - date2.tm_yday - 2) % 7 <= 2) {
                 val++
@@ -6908,7 +6908,7 @@ var require_emscripten2 = __commonJS({
             if (pattern.includes(rule)) {
               pattern = pattern.replace(
                 new RegExp(rule, "g"),
-                EXPANSION_RULES_2[rule](date),
+                EXPANSION_RULES_2[rule](date)
               )
             }
           }
@@ -7150,7 +7150,7 @@ var require_emscripten2 = __commonJS({
             stringy,
             u8array,
             0,
-            u8array.length,
+            u8array.length
           )
           if (dontAddNull) u8array.length = numBytesWritten
           return u8array
@@ -7169,7 +7169,7 @@ var require_emscripten2 = __commonJS({
                     String.fromCharCode(chr) +
                     ")  at offset " +
                     i +
-                    " not in 0x00-0xFF.",
+                    " not in 0x00-0xFF."
                 )
               }
               chr &= 255
@@ -7344,9 +7344,9 @@ var require_emscripten2 = __commonJS({
           return MAGIC
         }
         var TIME = 1e4
-        Date.now = () => TIME++
-        if (typeof performance == "object") performance.now = Date.now
-        if (ENVIRONMENT_IS_NODE) process["hrtime"] = Date.now
+        datenow = () => TIME++
+        if (typeof performance == "object") performance.now = datenow
+        if (ENVIRONMENT_IS_NODE) process["hrtime"] = datenow
         if (!Module2) Module2 = {}
         Module2["thisProgram"] = "thisProgram"
         function hashMemory(id) {
@@ -7506,7 +7506,7 @@ var require_emscripten2 = __commonJS({
         unexportedRuntimeFunction("fillDeviceOrientationEventData", false)
         unexportedRuntimeFunction(
           "registerDeviceOrientationEventCallback",
-          false,
+          false
         )
         unexportedRuntimeFunction("fillDeviceMotionEventData", false)
         unexportedRuntimeFunction("registerDeviceMotionEventCallback", false)
@@ -7514,12 +7514,12 @@ var require_emscripten2 = __commonJS({
         unexportedRuntimeFunction("fillOrientationChangeEventData", false)
         unexportedRuntimeFunction(
           "registerOrientationChangeEventCallback",
-          false,
+          false
         )
         unexportedRuntimeFunction("fillFullscreenChangeEventData", false)
         unexportedRuntimeFunction(
           "registerFullscreenChangeEventCallback",
-          false,
+          false
         )
         unexportedRuntimeFunction("JSEvents_requestFullscreen", false)
         unexportedRuntimeFunction("JSEvents_resizeCanvasForFullscreen", false)
@@ -7531,23 +7531,23 @@ var require_emscripten2 = __commonJS({
         unexportedRuntimeFunction("restoreOldWindowedStyle", false)
         unexportedRuntimeFunction(
           "softFullscreenResizeWebGLRenderTarget",
-          false,
+          false
         )
         unexportedRuntimeFunction("doRequestFullscreen", false)
         unexportedRuntimeFunction("fillPointerlockChangeEventData", false)
         unexportedRuntimeFunction(
           "registerPointerlockChangeEventCallback",
-          false,
+          false
         )
         unexportedRuntimeFunction(
           "registerPointerlockErrorEventCallback",
-          false,
+          false
         )
         unexportedRuntimeFunction("requestPointerLock", false)
         unexportedRuntimeFunction("fillVisibilityChangeEventData", false)
         unexportedRuntimeFunction(
           "registerVisibilityChangeEventCallback",
-          false,
+          false
         )
         unexportedRuntimeFunction("registerTouchEventCallback", false)
         unexportedRuntimeFunction("fillGamepadEventData", false)
@@ -7597,7 +7597,7 @@ var require_emscripten2 = __commonJS({
         unexportedRuntimeFunction("webglGetUniformLocation", false)
         unexportedRuntimeFunction(
           "webglPrepareUniformLocationsBeforeFirstUse",
-          false,
+          false
         )
         unexportedRuntimeFunction("webglGetLeftBracePos", false)
         unexportedRuntimeFunction("emscriptenWebGLGetVertexAttrib", false)
@@ -7631,11 +7631,11 @@ var require_emscripten2 = __commonJS({
         function callMain(args) {
           assert(
             runDependencies == 0,
-            'cannot call main when async dependencies remain! (listen on Module["onRuntimeInitialized"])',
+            'cannot call main when async dependencies remain! (listen on Module["onRuntimeInitialized"])'
           )
           assert(
             __ATPRERUN__.length == 0,
-            "cannot call main when preRun functions remain to be called",
+            "cannot call main when preRun functions remain to be called"
           )
           var entryFunction = Module2["_main"]
           args = args || []
@@ -7652,7 +7652,7 @@ var require_emscripten2 = __commonJS({
             exit(
               ret,
               /* implicit = */
-              true,
+              true
             )
             return ret
           } catch (e) {
@@ -7726,7 +7726,7 @@ var require_emscripten2 = __commonJS({
           err = oldErr
           if (has) {
             warnOnce(
-              "stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the FAQ), or make sure to emit a newline when you printf etc.",
+              "stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the FAQ), or make sure to emit a newline when you printf etc."
             )
           }
         }
@@ -7782,7 +7782,7 @@ var require_emscripten3 = __commonJS({
         _scriptDir = _scriptDir || __filename
       return function (
         binaryOrInstantiate,
-        { computeLimit, memoryLimit, extensions, format },
+        { computeLimit, memoryLimit, extensions, format }
       ) {
         var Module2 = Module2 || {}
         if (typeof binaryOrInstantiate === "function")
@@ -7814,7 +7814,7 @@ var require_emscripten3 = __commonJS({
         }
         _listeners_.push(
           ["uncaughtException", uncaughtException],
-          ["unhandledRejection", unhandledRejection],
+          ["unhandledRejection", unhandledRejection]
         )
         var readyPromiseResolve, readyPromiseReject
         Module2["ready"] = new Promise((resolve, reject) => {
@@ -7834,13 +7834,13 @@ var require_emscripten3 = __commonJS({
                 abort(
                   "You are getting " +
                     prop +
-                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
                 ),
               set: () =>
                 abort(
                   "You are setting " +
                     prop +
-                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
                 ),
             })
           }
@@ -7862,7 +7862,7 @@ var require_emscripten3 = __commonJS({
           !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_NODE && !ENVIRONMENT_IS_WORKER
         if (Module2["ENVIRONMENT"]) {
           throw new Error(
-            "Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -sENVIRONMENT=web or -sENVIRONMENT=node)",
+            "Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -sENVIRONMENT=web or -sENVIRONMENT=node)"
           )
         }
         var scriptDirectory = ""
@@ -7880,7 +7880,7 @@ var require_emscripten3 = __commonJS({
             process.release.name !== "node"
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           var nodeVersion = process.versions.node
           var numericVersion = nodeVersion.split(".").slice(0, 3)
@@ -7893,7 +7893,7 @@ var require_emscripten3 = __commonJS({
             throw new Error(
               "This emscripten-generated code requires node v16.0.0 (detected v" +
                 nodeVersion +
-                ")",
+                ")"
             )
           }
           var fs = require("./fs")
@@ -7941,7 +7941,7 @@ var require_emscripten3 = __commonJS({
             typeof importScripts == "function"
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           if (typeof read != "undefined") {
             read_ = read
@@ -8008,14 +8008,14 @@ var require_emscripten3 = __commonJS({
           } else {
             scriptDirectory = scriptDirectory.substr(
               0,
-              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1,
+              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1
             )
           }
           if (
             !(typeof window == "object" || typeof importScripts == "function")
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           {
             read_ = url => {
@@ -8032,7 +8032,7 @@ var require_emscripten3 = __commonJS({
                 xhr.send(null)
                 return new Uint8Array(
                   /** @type{!ArrayBuffer} */
-                  xhr.response,
+                  xhr.response
                 )
               }
             }
@@ -8067,39 +8067,39 @@ var require_emscripten3 = __commonJS({
         legacyModuleProp("quit", "quit_")
         assert(
           typeof Module2["memoryInitializerPrefixURL"] == "undefined",
-          "Module.memoryInitializerPrefixURL option was removed, use Module.locateFile instead",
+          "Module.memoryInitializerPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["pthreadMainPrefixURL"] == "undefined",
-          "Module.pthreadMainPrefixURL option was removed, use Module.locateFile instead",
+          "Module.pthreadMainPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["cdInitializerPrefixURL"] == "undefined",
-          "Module.cdInitializerPrefixURL option was removed, use Module.locateFile instead",
+          "Module.cdInitializerPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["filePackagePrefixURL"] == "undefined",
-          "Module.filePackagePrefixURL option was removed, use Module.locateFile instead",
+          "Module.filePackagePrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["read"] == "undefined",
-          "Module.read option was removed (modify read_ in JS)",
+          "Module.read option was removed (modify read_ in JS)"
         )
         assert(
           typeof Module2["readAsync"] == "undefined",
-          "Module.readAsync option was removed (modify readAsync in JS)",
+          "Module.readAsync option was removed (modify readAsync in JS)"
         )
         assert(
           typeof Module2["readBinary"] == "undefined",
-          "Module.readBinary option was removed (modify readBinary in JS)",
+          "Module.readBinary option was removed (modify readBinary in JS)"
         )
         assert(
           typeof Module2["setWindowTitle"] == "undefined",
-          "Module.setWindowTitle option was removed (modify emscripten_set_window_title in JS)",
+          "Module.setWindowTitle option was removed (modify emscripten_set_window_title in JS)"
         )
         assert(
           typeof Module2["TOTAL_MEMORY"] == "undefined",
-          "Module.TOTAL_MEMORY has been renamed Module.INITIAL_MEMORY",
+          "Module.TOTAL_MEMORY has been renamed Module.INITIAL_MEMORY"
         )
         legacyModuleProp("asm", "wasmExports")
         legacyModuleProp("read", "read_")
@@ -8123,7 +8123,7 @@ var require_emscripten3 = __commonJS({
           "NODEFS is no longer included by default; build with -lnodefs.js"
         assert(
           !ENVIRONMENT_IS_SHELL,
-          "shell environment detected but not enabled at build time.  Add `shell` to `-sENVIRONMENT` to enable.",
+          "shell environment detected but not enabled at build time.  Add `shell` to `-sENVIRONMENT` to enable."
         )
         var wasmBinary
         if (Module2["wasmBinary"]) wasmBinary = Module2["wasmBinary"]
@@ -8141,12 +8141,12 @@ var require_emscripten3 = __commonJS({
         }
         function _malloc() {
           abort(
-            "malloc() called but not included in the build - add `_malloc` to EXPORTED_FUNCTIONS",
+            "malloc() called but not included in the build - add `_malloc` to EXPORTED_FUNCTIONS"
           )
         }
         function _free() {
           abort(
-            "free() called but not included in the build - add `_free` to EXPORTED_FUNCTIONS",
+            "free() called but not included in the build - add `_free` to EXPORTED_FUNCTIONS"
           )
         }
         var HEAP,
@@ -8171,22 +8171,22 @@ var require_emscripten3 = __commonJS({
         }
         assert(
           !Module2["STACK_SIZE"],
-          "STACK_SIZE can no longer be set at runtime.  Use -sSTACK_SIZE at link time",
+          "STACK_SIZE can no longer be set at runtime.  Use -sSTACK_SIZE at link time"
         )
         assert(
           typeof Int32Array != "undefined" &&
             typeof Float64Array !== "undefined" &&
             Int32Array.prototype.subarray != void 0 &&
             Int32Array.prototype.set != void 0,
-          "JS engine does not provide full typed array support",
+          "JS engine does not provide full typed array support"
         )
         assert(
           !Module2["wasmMemory"],
-          "Use of `wasmMemory` detected.  Use -sIMPORTED_MEMORY to define wasmMemory externally",
+          "Use of `wasmMemory` detected.  Use -sIMPORTED_MEMORY to define wasmMemory externally"
         )
         assert(
           !Module2["INITIAL_MEMORY"],
-          "Detected runtime INITIAL_MEMORY setting.  Use -sIMPORTED_MEMORY to define wasmMemory dynamically",
+          "Detected runtime INITIAL_MEMORY setting.  Use -sIMPORTED_MEMORY to define wasmMemory dynamically"
         )
         function writeStackCookie() {
           var max = _emscripten_stack_get_end()
@@ -8208,12 +8208,12 @@ var require_emscripten3 = __commonJS({
           var cookie2 = HEAPU32[((max + 4) >>> 2) >>> 0]
           if (cookie1 != 34821223 || cookie2 != 2310721022) {
             abort(
-              `Stack overflow! Stack cookie has been overwritten at ${ptrToString(max)}, expected hex dwords 0x89BACDFE and 0x2135467, but received ${ptrToString(cookie2)} ${ptrToString(cookie1)}`,
+              `Stack overflow! Stack cookie has been overwritten at ${ptrToString(max)}, expected hex dwords 0x89BACDFE and 0x2135467, but received ${ptrToString(cookie2)} ${ptrToString(cookie1)}`
             )
           }
           if (HEAPU32[(0 >>> 2) >>> 0] != 1668509029) {
             abort(
-              "Runtime error: The application has corrupted its heap memory area (address zero)!",
+              "Runtime error: The application has corrupted its heap memory area (address zero)!"
             )
           }
         }
@@ -8279,19 +8279,19 @@ var require_emscripten3 = __commonJS({
         }
         assert(
           Math.imul,
-          "This browser does not support Math.imul(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.imul(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.fround,
-          "This browser does not support Math.fround(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.fround(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.clz32,
-          "This browser does not support Math.clz32(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.clz32(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.trunc,
-          "This browser does not support Math.trunc(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.trunc(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         var runDependencies = 0
         var runDependencyWatcher = null
@@ -8375,7 +8375,7 @@ var require_emscripten3 = __commonJS({
           return (...args) => {
             assert(
               runtimeInitialized,
-              `native function \`${name}\` called before runtime initialization`,
+              `native function \`${name}\` called before runtime initialization`
             )
             var f = wasmExports[name]
             assert(f, `exported native function \`${name}\` not found`)
@@ -8417,10 +8417,10 @@ var require_emscripten3 = __commonJS({
                     resolve(
                       new Uint8Array(
                         /** @type{!ArrayBuffer} */
-                        response,
-                      ),
+                        response
+                      )
                     ),
-                  reject,
+                  reject
                 )
               })
             }
@@ -8434,7 +8434,7 @@ var require_emscripten3 = __commonJS({
               err(`failed to asynchronously prepare wasm: ${reason}`)
               if (isFileURI(wasmBinaryFile)) {
                 err(
-                  `warning: Loading from a file URI (${wasmBinaryFile}) is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing`,
+                  `warning: Loading from a file URI (${wasmBinaryFile}) is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing`
                 )
               }
               abort(reason)
@@ -8490,7 +8490,7 @@ var require_emscripten3 = __commonJS({
           function receiveInstantiationResult(result) {
             assert(
               Module2 === trueModule,
-              "the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?",
+              "the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?"
             )
             trueModule = null
             receiveInstance(result["instance"])
@@ -8507,7 +8507,7 @@ var require_emscripten3 = __commonJS({
             wasmBinary,
             wasmBinaryFile,
             info,
-            receiveInstantiationResult,
+            receiveInstantiationResult
           ).catch(readyPromiseReject)
           return {}
         }
@@ -8523,7 +8523,7 @@ var require_emscripten3 = __commonJS({
                   : ""
                 abort(
                   `\`Module.${prop}\` has been replaced by \`${newName}\`` +
-                    extra,
+                    extra
                 )
               },
             })
@@ -8532,7 +8532,7 @@ var require_emscripten3 = __commonJS({
         function ignoredModuleProp(prop) {
           if (Object.getOwnPropertyDescriptor(Module2, prop)) {
             abort(
-              `\`Module.${prop}\` was supplied but \`${prop}\` not included in INCOMING_MODULE_JS_API`,
+              `\`Module.${prop}\` was supplied but \`${prop}\` not included in INCOMING_MODULE_JS_API`
             )
           }
         }
@@ -8554,7 +8554,7 @@ var require_emscripten3 = __commonJS({
               configurable: true,
               get() {
                 warnOnce(
-                  `\`${sym}\` is not longer defined by emscripten. ${msg}`,
+                  `\`${sym}\` is not longer defined by emscripten. ${msg}`
                 )
                 return void 0
               },
@@ -8715,7 +8715,7 @@ var require_emscripten3 = __commonJS({
               trailingSlash = path.substr(-1) === "/"
             path = PATH.normalizeArray(
               path.split("/").filter(p => !!p),
-              !isAbsolute,
+              !isAbsolute
             ).join("/")
             if (!path && !isAbsolute) {
               path = "."
@@ -8766,7 +8766,7 @@ var require_emscripten3 = __commonJS({
             } catch (e) {}
           }
           abort(
-            "no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: (array) => { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };",
+            "no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: (array) => { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };"
           )
         }
         var randomFill = view => (randomFill = initRandomFill())(view)
@@ -8786,7 +8786,7 @@ var require_emscripten3 = __commonJS({
             }
             resolvedPath = PATH.normalizeArray(
               resolvedPath.split("/").filter(p => !!p),
-              !resolvedAbsolute,
+              !resolvedAbsolute
             ).join("/")
             return (resolvedAbsolute ? "/" : "") + resolvedPath || "."
           },
@@ -8853,7 +8853,7 @@ var require_emscripten3 = __commonJS({
                 warnOnce(
                   "Invalid UTF-8 leading byte " +
                     ptrToString(u0) +
-                    " encountered when deserializing a UTF-8 string in wasm memory to a JS string!",
+                    " encountered when deserializing a UTF-8 string in wasm memory to a JS string!"
                 )
               u0 =
                 ((u0 & 7) << 18) |
@@ -8867,7 +8867,7 @@ var require_emscripten3 = __commonJS({
               var ch = u0 - 65536
               str += String.fromCharCode(
                 55296 | (ch >> 10),
-                56320 | (ch & 1023),
+                56320 | (ch & 1023)
               )
             }
           }
@@ -8895,7 +8895,7 @@ var require_emscripten3 = __commonJS({
           outIdx >>>= 0
           assert(
             typeof str === "string",
-            `stringToUTF8Array expects a string (got ${typeof str})`,
+            `stringToUTF8Array expects a string (got ${typeof str})`
           )
           if (!(maxBytesToWrite > 0)) return 0
           var startIdx = outIdx
@@ -8924,7 +8924,7 @@ var require_emscripten3 = __commonJS({
                 warnOnce(
                   "Invalid Unicode code point " +
                     ptrToString(u) +
-                    " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF).",
+                    " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF)."
                 )
               heap[outIdx++ >>> 0] = 240 | (u >> 18)
               heap[outIdx++ >>> 0] = 128 | ((u >> 12) & 63)
@@ -8942,7 +8942,7 @@ var require_emscripten3 = __commonJS({
             stringy,
             u8array,
             0,
-            u8array.length,
+            u8array.length
           )
           if (dontAddNull) u8array.length = numBytesWritten
           return u8array
@@ -9034,7 +9034,7 @@ var require_emscripten3 = __commonJS({
                 buffer[offset + i] = result
               }
               if (bytesRead) {
-                stream.node.timestamp = Date.now()
+                stream.node.timestamp = datenow()
               }
               return bytesRead
             },
@@ -9050,7 +9050,7 @@ var require_emscripten3 = __commonJS({
                 throw new FS.ErrnoError(29)
               }
               if (length) {
-                stream.node.timestamp = Date.now()
+                stream.node.timestamp = datenow()
               }
               return i
             },
@@ -9131,7 +9131,7 @@ var require_emscripten3 = __commonJS({
               "/",
               16384 | 511,
               /* 0777 */
-              0,
+              0
             )
           },
           createNode(parent, name, mode, dev) {
@@ -9202,7 +9202,7 @@ var require_emscripten3 = __commonJS({
               node.node_ops = MEMFS.ops_table.chrdev.node
               node.stream_ops = MEMFS.ops_table.chrdev.stream
             }
-            node.timestamp = Date.now()
+            node.timestamp = datenow()
             if (parent) {
               parent.contents[name] = node
               parent.timestamp = node.timestamp
@@ -9223,7 +9223,7 @@ var require_emscripten3 = __commonJS({
               newCapacity,
               (prevCapacity *
                 (prevCapacity < CAPACITY_DOUBLING_MAX ? 2 : 1.125)) >>>
-                0,
+                0
             )
             if (prevCapacity != 0) newCapacity = Math.max(newCapacity, 256)
             var oldContents = node.contents
@@ -9241,7 +9241,7 @@ var require_emscripten3 = __commonJS({
               node.contents = new Uint8Array(newSize)
               if (oldContents) {
                 node.contents.set(
-                  oldContents.subarray(0, Math.min(newSize, node.usedBytes)),
+                  oldContents.subarray(0, Math.min(newSize, node.usedBytes))
                 )
               }
               node.usedBytes = newSize
@@ -9303,7 +9303,7 @@ var require_emscripten3 = __commonJS({
                 }
               }
               delete old_node.parent.contents[old_node.name]
-              old_node.parent.timestamp = Date.now()
+              old_node.parent.timestamp = datenow()
               old_node.name = new_name
               new_dir.contents[new_name] = old_node
               new_dir.timestamp = old_node.parent.timestamp
@@ -9311,7 +9311,7 @@ var require_emscripten3 = __commonJS({
             },
             unlink(parent, name) {
               delete parent.contents[name]
-              parent.timestamp = Date.now()
+              parent.timestamp = datenow()
             },
             rmdir(parent, name) {
               var node = FS.lookupNode(parent, name)
@@ -9319,7 +9319,7 @@ var require_emscripten3 = __commonJS({
                 throw new FS.ErrnoError(55)
               }
               delete parent.contents[name]
-              parent.timestamp = Date.now()
+              parent.timestamp = datenow()
             },
             readdir(node) {
               var entries = [".", ".."]
@@ -9333,7 +9333,7 @@ var require_emscripten3 = __commonJS({
                 parent,
                 newname,
                 511 /* 0777 */ | 40960,
-                0,
+                0
               )
               node.link = oldpath
               return node
@@ -9366,7 +9366,7 @@ var require_emscripten3 = __commonJS({
               }
               if (!length) return 0
               var node = stream.node
-              node.timestamp = Date.now()
+              node.timestamp = datenow()
               if (
                 buffer.subarray &&
                 (!node.contents || node.contents.subarray)
@@ -9374,7 +9374,7 @@ var require_emscripten3 = __commonJS({
                 if (canOwn) {
                   assert(
                     position === 0,
-                    "canOwn must imply no weird position inside the file",
+                    "canOwn must imply no weird position inside the file"
                   )
                   node.contents = buffer.subarray(offset, offset + length)
                   node.usedBytes = length
@@ -9386,7 +9386,7 @@ var require_emscripten3 = __commonJS({
                 } else if (position + length <= node.usedBytes) {
                   node.contents.set(
                     buffer.subarray(offset, offset + length),
-                    position,
+                    position
                   )
                   return length
                 }
@@ -9395,7 +9395,7 @@ var require_emscripten3 = __commonJS({
               if (node.contents.subarray && buffer.subarray) {
                 node.contents.set(
                   buffer.subarray(offset, offset + length),
-                  position,
+                  position
                 )
               } else {
                 for (var i = 0; i < length; i++) {
@@ -9423,7 +9423,7 @@ var require_emscripten3 = __commonJS({
               MEMFS.expandFileStorage(stream.node, offset + length)
               stream.node.usedBytes = Math.max(
                 stream.node.usedBytes,
-                offset + length,
+                offset + length
               )
             },
             mmap(stream, length, position, prot, flags) {
@@ -9444,7 +9444,7 @@ var require_emscripten3 = __commonJS({
                     contents = Array.prototype.slice.call(
                       contents,
                       position,
-                      position + length,
+                      position + length
                     )
                   }
                 }
@@ -9473,7 +9473,7 @@ var require_emscripten3 = __commonJS({
             arrayBuffer => {
               assert(
                 arrayBuffer,
-                `Loading data file "${url}" failed (no arrayBuffer).`,
+                `Loading data file "${url}" failed (no arrayBuffer).`
               )
               onload(new Uint8Array(arrayBuffer))
               if (dep) removeRunDependency(dep)
@@ -9484,7 +9484,7 @@ var require_emscripten3 = __commonJS({
               } else {
                 throw `Loading data file "${url}" failed.`
               }
-            },
+            }
           )
           if (dep) addRunDependency(dep)
         }
@@ -9494,7 +9494,7 @@ var require_emscripten3 = __commonJS({
           fileData,
           canRead,
           canWrite,
-          canOwn,
+          canOwn
         ) => {
           FS.createDataFile(parent, name, fileData, canRead, canWrite, canOwn)
         }
@@ -9503,7 +9503,7 @@ var require_emscripten3 = __commonJS({
           byteArray,
           fullname,
           finish,
-          onerror,
+          onerror
         ) => {
           if (typeof Browser != "undefined") Browser.init()
           var handled = false
@@ -9526,7 +9526,7 @@ var require_emscripten3 = __commonJS({
           onerror,
           dontCreateFile,
           canOwn,
-          preFinish,
+          preFinish
         ) => {
           var fullname = name
             ? PATH_FS.resolve(PATH.join2(parent, name))
@@ -9542,7 +9542,7 @@ var require_emscripten3 = __commonJS({
                   byteArray2,
                   canRead,
                   canWrite,
-                  canOwn,
+                  canOwn
                 )
               }
               onload?.()
@@ -9963,7 +9963,7 @@ var require_emscripten3 = __commonJS({
                   var link = FS.readlink(current_path)
                   current_path = PATH_FS.resolve(
                     PATH.dirname(current_path),
-                    link,
+                    link
                   )
                   var lookup = FS.lookupPath(current_path, {
                     recurse_count: opts.recurse_count + 1,
@@ -10214,7 +10214,7 @@ var require_emscripten3 = __commonJS({
             FS.syncFSRequests++
             if (FS.syncFSRequests > 1) {
               err(
-                `warning: ${FS.syncFSRequests} FS.syncfs operations in flight at once, probably just doing extra work`,
+                `warning: ${FS.syncFSRequests} FS.syncfs operations in flight at once, probably just doing extra work`
               )
             }
             var mounts = FS.getMounts(FS.root.mount)
@@ -10517,7 +10517,7 @@ var require_emscripten3 = __commonJS({
             }
             return PATH_FS.resolve(
               FS.getPath(link.parent),
-              link.node_ops.readlink(link),
+              link.node_ops.readlink(link)
             )
           },
           stat(path, dontFollow) {
@@ -10551,7 +10551,7 @@ var require_emscripten3 = __commonJS({
             }
             node.node_ops.setattr(node, {
               mode: (mode & 4095) | (node.mode & ~4095),
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           lchmod(path, mode) {
@@ -10575,7 +10575,7 @@ var require_emscripten3 = __commonJS({
               throw new FS.ErrnoError(63)
             }
             node.node_ops.setattr(node, {
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           lchown(path, uid, gid) {
@@ -10613,7 +10613,7 @@ var require_emscripten3 = __commonJS({
             }
             node.node_ops.setattr(node, {
               size: len,
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           ftruncate(fd, len) {
@@ -10768,7 +10768,7 @@ var require_emscripten3 = __commonJS({
               buffer,
               offset,
               length,
-              position,
+              position
             )
             if (!seeking) stream.position += bytesRead
             return bytesRead
@@ -10805,7 +10805,7 @@ var require_emscripten3 = __commonJS({
               offset,
               length,
               position,
-              canOwn,
+              canOwn
             )
             if (!seeking) stream.position += bytesWritten
             return bytesWritten
@@ -10854,7 +10854,7 @@ var require_emscripten3 = __commonJS({
               buffer,
               offset,
               length,
-              mmapFlags,
+              mmapFlags
             )
           },
           ioctl(stream, cmd, arg) {
@@ -10955,7 +10955,7 @@ var require_emscripten3 = __commonJS({
                     "fd",
                     16384 | 511,
                     /* 0777 */
-                    73,
+                    73
                   )
                   node.node_ops = {
                     lookup(parent, name) {
@@ -10978,7 +10978,7 @@ var require_emscripten3 = __commonJS({
                 },
               },
               {},
-              "/proc/self/fd",
+              "/proc/self/fd"
             )
           },
           createStandardStreams() {
@@ -11021,7 +11021,7 @@ var require_emscripten3 = __commonJS({
           init(input, output, error) {
             assert(
               !FS.init.initialized,
-              "FS.init was previously called. If you want to initialize later with custom parameters, remove any earlier calls (note that one is automatically added to the generated code)",
+              "FS.init was previously called. If you want to initialize later with custom parameters, remove any earlier calls (note that one is automatically added to the generated code)"
             )
             FS.init.initialized = true
             Module2["stdin"] = input || Module2["stdin"]
@@ -11103,7 +11103,7 @@ var require_emscripten3 = __commonJS({
           createFile(parent, name, properties, canRead, canWrite) {
             var path = PATH.join2(
               typeof parent == "string" ? parent : FS.getPath(parent),
-              name,
+              name
             )
             var mode = FS_getMode(canRead, canWrite)
             return FS.create(path, mode)
@@ -11133,7 +11133,7 @@ var require_emscripten3 = __commonJS({
           createDevice(parent, name, input, output) {
             var path = PATH.join2(
               typeof parent == "string" ? parent : FS.getPath(parent),
-              name,
+              name
             )
             var mode = FS_getMode(!!input, !!output)
             if (!FS.createDevice.major) FS.createDevice.major = 64
@@ -11164,7 +11164,7 @@ var require_emscripten3 = __commonJS({
                   buffer[offset + i] = result
                 }
                 if (bytesRead) {
-                  stream.node.timestamp = Date.now()
+                  stream.node.timestamp = datenow()
                 }
                 return bytesRead
               },
@@ -11177,7 +11177,7 @@ var require_emscripten3 = __commonJS({
                   }
                 }
                 if (length) {
-                  stream.node.timestamp = Date.now()
+                  stream.node.timestamp = datenow()
                 }
                 return i
               },
@@ -11189,7 +11189,7 @@ var require_emscripten3 = __commonJS({
               return true
             if (typeof XMLHttpRequest != "undefined") {
               throw new Error(
-                "Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread.",
+                "Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread."
               )
             } else if (read_) {
               try {
@@ -11230,7 +11230,7 @@ var require_emscripten3 = __commonJS({
                   )
                 )
                   throw new Error(
-                    "Couldn't load " + url + ". Status: " + xhr.status,
+                    "Couldn't load " + url + ". Status: " + xhr.status
                   )
                 var datalength = Number(xhr.getResponseHeader("Content-length"))
                 var header
@@ -11249,13 +11249,13 @@ var require_emscripten3 = __commonJS({
                         from +
                         ", " +
                         to +
-                        ") or no bytes requested!",
+                        ") or no bytes requested!"
                     )
                   if (to > datalength - 1)
                     throw new Error(
                       "only " +
                         datalength +
-                        " bytes available! programmer error!",
+                        " bytes available! programmer error!"
                     )
                   var xhr2 = new XMLHttpRequest()
                   xhr2.open("GET", url, false)
@@ -11273,12 +11273,12 @@ var require_emscripten3 = __commonJS({
                     )
                   )
                     throw new Error(
-                      "Couldn't load " + url + ". Status: " + xhr2.status,
+                      "Couldn't load " + url + ". Status: " + xhr2.status
                     )
                   if (xhr2.response !== void 0) {
                     return new Uint8Array(
                       /** @type{Array<number>} */
-                      xhr2.response || [],
+                      xhr2.response || []
                     )
                   }
                   return intArrayFromString(xhr2.responseText || "", true)
@@ -11300,7 +11300,7 @@ var require_emscripten3 = __commonJS({
                   datalength = this.getter(0).length
                   chunkSize = datalength
                   out(
-                    "LazyFiles on gzip forces download of the whole file when length is accessed",
+                    "LazyFiles on gzip forces download of the whole file when length is accessed"
                   )
                 }
                 this._length = datalength
@@ -11339,7 +11339,7 @@ var require_emscripten3 = __commonJS({
               name,
               properties,
               canRead,
-              canWrite,
+              canWrite
             )
             if (properties.contents) {
               node.contents = properties.contents
@@ -11400,7 +11400,7 @@ var require_emscripten3 = __commonJS({
           },
           absolutePath() {
             abort(
-              "FS.absolutePath has been removed; use PATH_FS.resolve instead",
+              "FS.absolutePath has been removed; use PATH_FS.resolve instead"
             )
           },
           createFolder() {
@@ -11414,19 +11414,19 @@ var require_emscripten3 = __commonJS({
           },
           mmapAlloc() {
             abort(
-              "FS.mmapAlloc has been replaced by the top level function mmapAlloc",
+              "FS.mmapAlloc has been replaced by the top level function mmapAlloc"
             )
           },
           standardizePath() {
             abort(
-              "FS.standardizePath has been removed; use PATH.normalize instead",
+              "FS.standardizePath has been removed; use PATH.normalize instead"
             )
           },
         }
         var UTF8ToString = (ptr, maxBytesToRead) => {
           assert(
             typeof ptr == "number",
-            `UTF8ToString expects a number (got ${typeof ptr})`,
+            `UTF8ToString expects a number (got ${typeof ptr})`
           )
           ptr >>>= 0
           return ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead) : ""
@@ -11467,7 +11467,7 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -11485,7 +11485,7 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -11499,7 +11499,7 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -11513,7 +11513,7 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -11527,7 +11527,7 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -11713,7 +11713,7 @@ var require_emscripten3 = __commonJS({
         var stringToUTF8 = (str, outPtr, maxBytesToWrite) => {
           assert(
             typeof maxBytesToWrite == "number",
-            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!",
+            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!"
           )
           return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite)
         }
@@ -11969,7 +11969,7 @@ var require_emscripten3 = __commonJS({
             assert(flags === 0)
             path = SYSCALLS.calculateAt(dirfd, path, true)
             if (!times) {
-              var atime = Date.now()
+              var atime = datenow()
               var mtime = atime
             } else {
               var seconds = readI53FromI64(times)
@@ -12080,7 +12080,7 @@ var require_emscripten3 = __commonJS({
           var summerOffset = new Date(
             date.getFullYear(),
             6,
-            1,
+            1
           ).getTimezoneOffset()
           var winterOffset = start.getTimezoneOffset()
           var dst =
@@ -12099,7 +12099,7 @@ var require_emscripten3 = __commonJS({
               HEAP32[((tmPtr + 8) >>> 2) >>> 0],
               HEAP32[((tmPtr + 4) >>> 2) >>> 0],
               HEAP32[(tmPtr >>> 2) >>> 0],
-              0,
+              0
             )
             var dst = HEAP32[((tmPtr + 32) >>> 2) >>> 0]
             var guessedOffset = date.getTimezoneOffset()
@@ -12107,13 +12107,13 @@ var require_emscripten3 = __commonJS({
             var summerOffset = new Date(
               date.getFullYear(),
               6,
-              1,
+              1
             ).getTimezoneOffset()
             var winterOffset = start.getTimezoneOffset()
             var dstOffset = Math.min(winterOffset, summerOffset)
             if (dst < 0) {
               HEAP32[((tmPtr + 32) >>> 2) >>> 0] = Number(
-                summerOffset != winterOffset && dstOffset == guessedOffset,
+                summerOffset != winterOffset && dstOffset == guessedOffset
               )
             } else if (dst > 0 != (dstOffset == guessedOffset)) {
               var nonDstOffset = Math.max(winterOffset, summerOffset)
@@ -12142,9 +12142,9 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
-                : 0),
+                : 0)
             ),
             ret >>> 0
           )
@@ -12157,7 +12157,7 @@ var require_emscripten3 = __commonJS({
           offset_low,
           offset_high,
           allocated,
-          addr,
+          addr
         ) {
           len >>>= 0
           var offset = convertI32PairToI53Checked(offset_low, offset_high)
@@ -12183,7 +12183,7 @@ var require_emscripten3 = __commonJS({
           flags,
           fd,
           offset_low,
-          offset_high,
+          offset_high
         ) {
           addr >>>= 0
           len >>>= 0
@@ -12228,7 +12228,7 @@ var require_emscripten3 = __commonJS({
         var _abort = () => {
           abort("native code called abort()")
         }
-        var _emscripten_date_now = () => Date.now()
+        var _emscripten_date_now = () => datenow()
         var getHeapMax = () => 4294901760
         function _emscripten_get_heap_max() {
           return getHeapMax()
@@ -12250,7 +12250,7 @@ var require_emscripten3 = __commonJS({
             return 1
           } catch (e) {
             err(
-              `growMemory: Attempted to grow heap from ${b.byteLength} bytes to ${size} bytes, but got error: ${e}`,
+              `growMemory: Attempted to grow heap from ${b.byteLength} bytes to ${size} bytes, but got error: ${e}`
             )
           }
         }
@@ -12261,7 +12261,7 @@ var require_emscripten3 = __commonJS({
           var maxHeapSize = getHeapMax()
           if (requestedSize > maxHeapSize) {
             err(
-              `Cannot enlarge memory, requested ${requestedSize} bytes, but the limit is ${maxHeapSize} bytes!`,
+              `Cannot enlarge memory, requested ${requestedSize} bytes, but the limit is ${maxHeapSize} bytes!`
             )
             return false
           }
@@ -12271,11 +12271,11 @@ var require_emscripten3 = __commonJS({
             var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown)
             overGrownHeapSize = Math.min(
               overGrownHeapSize,
-              requestedSize + 100663296,
+              requestedSize + 100663296
             )
             var newSize = Math.min(
               maxHeapSize,
-              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536),
+              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536)
             )
             var replacement = growMemory(newSize)
             if (replacement) {
@@ -12283,7 +12283,7 @@ var require_emscripten3 = __commonJS({
             }
           }
           err(
-            `Failed to grow the heap from ${oldSize} bytes to ${newSize} bytes, not enough memory!`,
+            `Failed to grow the heap from ${oldSize} bytes to ${newSize} bytes, not enough memory!`
           )
           return false
         }
@@ -12399,7 +12399,7 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -12412,7 +12412,7 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -12468,7 +12468,7 @@ var require_emscripten3 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -12559,7 +12559,7 @@ var require_emscripten3 = __commonJS({
         var writeArrayToMemory = (array, buffer) => {
           assert(
             array.length >= 0,
-            "writeArrayToMemory array must have a length (should be an array or typed array)",
+            "writeArrayToMemory array must have a length (should be an array or typed array)"
           )
           HEAP8.set(array, buffer >>> 0)
         }
@@ -12616,7 +12616,7 @@ var require_emscripten3 = __commonJS({
           for (var rule in EXPANSION_RULES_1) {
             pattern = pattern.replace(
               new RegExp(rule, "g"),
-              EXPANSION_RULES_1[rule],
+              EXPANSION_RULES_1[rule]
             )
           }
           var WEEKDAYS = [
@@ -12687,7 +12687,7 @@ var require_emscripten3 = __commonJS({
           function getWeekBasedYear(date2) {
             var thisDate = addDays(
               new Date(date2.tm_year + 1900, 0, 1),
-              date2.tm_yday,
+              date2.tm_yday
             )
             var janFourthThisYear = new Date(thisDate.getFullYear(), 0, 4)
             var janFourthNextYear = new Date(thisDate.getFullYear() + 1, 0, 4)
@@ -12730,9 +12730,9 @@ var require_emscripten3 = __commonJS({
                     isLeapYear(date2.tm_year + 1900)
                       ? MONTH_DAYS_LEAP
                       : MONTH_DAYS_REGULAR,
-                    date2.tm_mon - 1,
+                    date2.tm_mon - 1
                   ),
-                3,
+                3
               ),
             "%m": date2 => leadingNulls(date2.tm_mon + 1, 2),
             "%M": date2 => leadingNulls(date2.tm_min, 2),
@@ -12752,7 +12752,7 @@ var require_emscripten3 = __commonJS({
             },
             "%V": date2 => {
               var val = Math.floor(
-                (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7,
+                (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7
               )
               if ((date2.tm_wday + 371 - date2.tm_yday - 2) % 7 <= 2) {
                 val++
@@ -12795,7 +12795,7 @@ var require_emscripten3 = __commonJS({
             if (pattern.includes(rule)) {
               pattern = pattern.replace(
                 new RegExp(rule, "g"),
-                EXPANSION_RULES_2[rule](date),
+                EXPANSION_RULES_2[rule](date)
               )
             }
           }
@@ -12815,7 +12815,7 @@ var require_emscripten3 = __commonJS({
           if (e instanceof WebAssembly.RuntimeError) {
             if (_emscripten_stack_get_current() <= 0) {
               err(
-                "Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 209715200)",
+                "Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 209715200)"
               )
             }
           }
@@ -12832,7 +12832,7 @@ var require_emscripten3 = __commonJS({
           }
           assert(
             wasmTable.get(funcPtr) == func,
-            "JavaScript-side Wasm function table mirror is out of date!",
+            "JavaScript-side Wasm function table mirror is out of date!"
           )
           return func
         }
@@ -12842,7 +12842,7 @@ var require_emscripten3 = __commonJS({
             func,
             "Cannot call unknown function " +
               ident +
-              ", make sure it is exported",
+              ", make sure it is exported"
           )
           return func
         }
@@ -13007,7 +13007,7 @@ var require_emscripten3 = __commonJS({
         var setTempRet0 = createExportWrapper("setTempRet0")
         var _fflush = createExportWrapper("fflush")
         var _emscripten_builtin_memalign = createExportWrapper(
-          "emscripten_builtin_memalign",
+          "emscripten_builtin_memalign"
         )
         var _sbrk = createExportWrapper("sbrk")
         var _setThrew = createExportWrapper("setThrew")
@@ -13089,21 +13089,21 @@ var require_emscripten3 = __commonJS({
           var makeWrapper_p = f => () => f() >>> 0
           var makeWrapper_pp = f => a0 => f(a0) >>> 0
           wasmExports2["emscripten_builtin_memalign"] = makeWrapper_ppp(
-            wasmExports2["emscripten_builtin_memalign"],
+            wasmExports2["emscripten_builtin_memalign"]
           )
           wasmExports2["sbrk"] = makeWrapper_pP(wasmExports2["sbrk"])
           wasmExports2["emscripten_stack_get_base"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_base"],
+            wasmExports2["emscripten_stack_get_base"]
           )
           wasmExports2["emscripten_stack_get_end"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_end"],
+            wasmExports2["emscripten_stack_get_end"]
           )
           wasmExports2["stackSave"] = makeWrapper_p(wasmExports2["stackSave"])
           wasmExports2["stackAlloc"] = makeWrapper_pp(
-            wasmExports2["stackAlloc"],
+            wasmExports2["stackAlloc"]
           )
           wasmExports2["emscripten_stack_get_current"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_current"],
+            wasmExports2["emscripten_stack_get_current"]
           )
           return wasmExports2
         }
@@ -13116,7 +13116,7 @@ var require_emscripten3 = __commonJS({
         function deterministicNow() {
           return TIME++
         }
-        Date.now = deterministicNow
+        datenow = deterministicNow
         Module2["thisProgram"] = "thisProgram"
         function hashMemory(id) {
           var ret = 0
@@ -13420,11 +13420,11 @@ var require_emscripten3 = __commonJS({
         function callMain() {
           assert(
             runDependencies == 0,
-            'cannot call main when async dependencies remain! (listen on Module["onRuntimeInitialized"])',
+            'cannot call main when async dependencies remain! (listen on Module["onRuntimeInitialized"])'
           )
           assert(
             __ATPRERUN__.length == 0,
-            "cannot call main when preRun functions remain to be called",
+            "cannot call main when preRun functions remain to be called"
           )
           var entryFunction = _main
           var argc = 0
@@ -13434,7 +13434,7 @@ var require_emscripten3 = __commonJS({
             exitJS(
               ret,
               /* implicit = */
-              true,
+              true
             )
             return ret
           } catch (e) {
@@ -13504,7 +13504,7 @@ var require_emscripten3 = __commonJS({
           err = oldErr
           if (has) {
             warnOnce(
-              "stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the Emscripten FAQ), or make sure to emit a newline when you printf etc.",
+              "stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the Emscripten FAQ), or make sure to emit a newline when you printf etc."
             )
           }
         }
@@ -13571,13 +13571,13 @@ var require_emscripten4 = __commonJS({
                 abort(
                   "You are getting " +
                     prop +
-                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
                 ),
               set: () =>
                 abort(
                   "You are setting " +
                     prop +
-                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
                 ),
             })
           }
@@ -13592,7 +13592,7 @@ var require_emscripten4 = __commonJS({
           !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_NODE && !ENVIRONMENT_IS_WORKER
         if (Module2["ENVIRONMENT"]) {
           throw new Error(
-            "Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -sENVIRONMENT=web or -sENVIRONMENT=node)",
+            "Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -sENVIRONMENT=web or -sENVIRONMENT=node)"
           )
         }
         if (ENVIRONMENT_IS_NODE) {
@@ -13619,7 +13619,7 @@ var require_emscripten4 = __commonJS({
             process.release.name !== "node"
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           var nodeVersion = process.versions.node
           var numericVersion = nodeVersion.split(".").slice(0, 3)
@@ -13631,7 +13631,7 @@ var require_emscripten4 = __commonJS({
             throw new Error(
               "This emscripten-generated code requires node v16.0.0 (detected v" +
                 nodeVersion +
-                ")",
+                ")"
             )
           }
           var fs = require("./fs")
@@ -13675,7 +13675,7 @@ var require_emscripten4 = __commonJS({
             typeof importScripts == "function"
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
         } else if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
           if (ENVIRONMENT_IS_WORKER) {
@@ -13691,14 +13691,14 @@ var require_emscripten4 = __commonJS({
           } else {
             scriptDirectory = scriptDirectory.substr(
               0,
-              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1,
+              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1
             )
           }
           if (
             !(typeof window == "object" || typeof importScripts == "function")
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           {
             read_ = url => {
@@ -13715,7 +13715,7 @@ var require_emscripten4 = __commonJS({
                 xhr.send(null)
                 return new Uint8Array(
                   /** @type{!ArrayBuffer} */
-                  xhr.response,
+                  xhr.response
                 )
               }
             }
@@ -13750,39 +13750,39 @@ var require_emscripten4 = __commonJS({
         legacyModuleProp("quit", "quit_")
         assert(
           typeof Module2["memoryInitializerPrefixURL"] == "undefined",
-          "Module.memoryInitializerPrefixURL option was removed, use Module.locateFile instead",
+          "Module.memoryInitializerPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["pthreadMainPrefixURL"] == "undefined",
-          "Module.pthreadMainPrefixURL option was removed, use Module.locateFile instead",
+          "Module.pthreadMainPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["cdInitializerPrefixURL"] == "undefined",
-          "Module.cdInitializerPrefixURL option was removed, use Module.locateFile instead",
+          "Module.cdInitializerPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["filePackagePrefixURL"] == "undefined",
-          "Module.filePackagePrefixURL option was removed, use Module.locateFile instead",
+          "Module.filePackagePrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["read"] == "undefined",
-          "Module.read option was removed (modify read_ in JS)",
+          "Module.read option was removed (modify read_ in JS)"
         )
         assert(
           typeof Module2["readAsync"] == "undefined",
-          "Module.readAsync option was removed (modify readAsync in JS)",
+          "Module.readAsync option was removed (modify readAsync in JS)"
         )
         assert(
           typeof Module2["readBinary"] == "undefined",
-          "Module.readBinary option was removed (modify readBinary in JS)",
+          "Module.readBinary option was removed (modify readBinary in JS)"
         )
         assert(
           typeof Module2["setWindowTitle"] == "undefined",
-          "Module.setWindowTitle option was removed (modify emscripten_set_window_title in JS)",
+          "Module.setWindowTitle option was removed (modify emscripten_set_window_title in JS)"
         )
         assert(
           typeof Module2["TOTAL_MEMORY"] == "undefined",
-          "Module.TOTAL_MEMORY has been renamed Module.INITIAL_MEMORY",
+          "Module.TOTAL_MEMORY has been renamed Module.INITIAL_MEMORY"
         )
         legacyModuleProp("asm", "wasmExports")
         legacyModuleProp("read", "read_")
@@ -13791,7 +13791,7 @@ var require_emscripten4 = __commonJS({
         legacyModuleProp("setWindowTitle", "setWindowTitle")
         assert(
           !ENVIRONMENT_IS_SHELL,
-          "shell environment detected but not enabled at build time.  Add `shell` to `-sENVIRONMENT` to enable.",
+          "shell environment detected but not enabled at build time.  Add `shell` to `-sENVIRONMENT` to enable."
         )
         var wasmBinary
         if (Module2["wasmBinary"]) wasmBinary = Module2["wasmBinary"]
@@ -13836,22 +13836,22 @@ var require_emscripten4 = __commonJS({
         }
         assert(
           !Module2["STACK_SIZE"],
-          "STACK_SIZE can no longer be set at runtime.  Use -sSTACK_SIZE at link time",
+          "STACK_SIZE can no longer be set at runtime.  Use -sSTACK_SIZE at link time"
         )
         assert(
           typeof Int32Array != "undefined" &&
             typeof Float64Array !== "undefined" &&
             Int32Array.prototype.subarray != void 0 &&
             Int32Array.prototype.set != void 0,
-          "JS engine does not provide full typed array support",
+          "JS engine does not provide full typed array support"
         )
         assert(
           !Module2["wasmMemory"],
-          "Use of `wasmMemory` detected.  Use -sIMPORTED_MEMORY to define wasmMemory externally",
+          "Use of `wasmMemory` detected.  Use -sIMPORTED_MEMORY to define wasmMemory externally"
         )
         assert(
           !Module2["INITIAL_MEMORY"],
-          "Detected runtime INITIAL_MEMORY setting.  Use -sIMPORTED_MEMORY to define wasmMemory dynamically",
+          "Detected runtime INITIAL_MEMORY setting.  Use -sIMPORTED_MEMORY to define wasmMemory dynamically"
         )
         function writeStackCookie() {
           var max = _emscripten_stack_get_end()
@@ -13873,12 +13873,12 @@ var require_emscripten4 = __commonJS({
           var cookie2 = HEAPU32[((max + 4) >>> 2) >>> 0]
           if (cookie1 != 34821223 || cookie2 != 2310721022) {
             abort(
-              `Stack overflow! Stack cookie has been overwritten at ${ptrToString(max)}, expected hex dwords 0x89BACDFE and 0x2135467, but received ${ptrToString(cookie2)} ${ptrToString(cookie1)}`,
+              `Stack overflow! Stack cookie has been overwritten at ${ptrToString(max)}, expected hex dwords 0x89BACDFE and 0x2135467, but received ${ptrToString(cookie2)} ${ptrToString(cookie1)}`
             )
           }
           if (HEAPU32[(0 >>> 2) >>> 0] != 1668509029) {
             abort(
-              "Runtime error: The application has corrupted its heap memory area (address zero)!",
+              "Runtime error: The application has corrupted its heap memory area (address zero)!"
             )
           }
         }
@@ -13934,19 +13934,19 @@ var require_emscripten4 = __commonJS({
         }
         assert(
           Math.imul,
-          "This browser does not support Math.imul(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.imul(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.fround,
-          "This browser does not support Math.fround(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.fround(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.clz32,
-          "This browser does not support Math.clz32(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.clz32(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.trunc,
-          "This browser does not support Math.trunc(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.trunc(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         var runDependencies = 0
         var runDependencyWatcher = null
@@ -14034,13 +14034,13 @@ var require_emscripten4 = __commonJS({
           return (...args) => {
             assert(
               runtimeInitialized,
-              `native function \`${name}\` called before runtime initialization`,
+              `native function \`${name}\` called before runtime initialization`
             )
             var f = wasmExports[name]
             assert(f, `exported native function \`${name}\` not found`)
             assert(
               args.length <= nargs,
-              `native function \`${name}\` called with ${args.length} args but expects ${nargs}`,
+              `native function \`${name}\` called with ${args.length} args but expects ${nargs}`
             )
             return f(...args)
           }
@@ -14083,10 +14083,10 @@ var require_emscripten4 = __commonJS({
                     resolve(
                       new Uint8Array(
                         /** @type{!ArrayBuffer} */
-                        response,
-                      ),
+                        response
+                      )
                     ),
-                  reject,
+                  reject
                 )
               })
             }
@@ -14100,7 +14100,7 @@ var require_emscripten4 = __commonJS({
               err(`failed to asynchronously prepare wasm: ${reason}`)
               if (isFileURI(wasmBinaryFile)) {
                 err(
-                  `warning: Loading from a file URI (${wasmBinaryFile}) is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing`,
+                  `warning: Loading from a file URI (${wasmBinaryFile}) is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing`
                 )
               }
               abort(reason)
@@ -14161,7 +14161,7 @@ var require_emscripten4 = __commonJS({
           function receiveInstantiationResult(result) {
             assert(
               Module2 === trueModule,
-              "the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?",
+              "the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?"
             )
             trueModule = null
             receiveInstance(result["instance"])
@@ -14179,7 +14179,7 @@ var require_emscripten4 = __commonJS({
             wasmBinary,
             wasmBinaryFile,
             info,
-            receiveInstantiationResult,
+            receiveInstantiationResult
           ).catch(readyPromiseReject)
           return {}
         }
@@ -14195,7 +14195,7 @@ var require_emscripten4 = __commonJS({
                   : ""
                 abort(
                   `\`Module.${prop}\` has been replaced by \`${newName}\`` +
-                    extra,
+                    extra
                 )
               },
             })
@@ -14204,7 +14204,7 @@ var require_emscripten4 = __commonJS({
         function ignoredModuleProp(prop) {
           if (Object.getOwnPropertyDescriptor(Module2, prop)) {
             abort(
-              `\`Module.${prop}\` was supplied but \`${prop}\` not included in INCOMING_MODULE_JS_API`,
+              `\`Module.${prop}\` was supplied but \`${prop}\` not included in INCOMING_MODULE_JS_API`
             )
           }
         }
@@ -14226,7 +14226,7 @@ var require_emscripten4 = __commonJS({
               configurable: true,
               get() {
                 warnOnce(
-                  `\`${sym}\` is not longer defined by emscripten. ${msg}`,
+                  `\`${sym}\` is not longer defined by emscripten. ${msg}`
                 )
                 return void 0
               },
@@ -14362,7 +14362,7 @@ var require_emscripten4 = __commonJS({
                 warnOnce(
                   "Invalid UTF-8 leading byte " +
                     ptrToString(u0) +
-                    " encountered when deserializing a UTF-8 string in wasm memory to a JS string!",
+                    " encountered when deserializing a UTF-8 string in wasm memory to a JS string!"
                 )
               u0 =
                 ((u0 & 7) << 18) |
@@ -14376,7 +14376,7 @@ var require_emscripten4 = __commonJS({
               var ch = u0 - 65536
               str += String.fromCharCode(
                 55296 | (ch >> 10),
-                56320 | (ch & 1023),
+                56320 | (ch & 1023)
               )
             }
           }
@@ -14385,7 +14385,7 @@ var require_emscripten4 = __commonJS({
         var UTF8ToString = (ptr, maxBytesToRead) => {
           assert(
             typeof ptr == "number",
-            `UTF8ToString expects a number (got ${typeof ptr})`,
+            `UTF8ToString expects a number (got ${typeof ptr})`
           )
           ptr >>>= 0
           return ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead) : ""
@@ -14400,7 +14400,7 @@ var require_emscripten4 = __commonJS({
                 filename ? UTF8ToString(filename) : "unknown filename",
                 line,
                 func ? UTF8ToString(func) : "unknown function",
-              ],
+              ]
           )
         }
         class ExceptionInfo {
@@ -14467,7 +14467,7 @@ var require_emscripten4 = __commonJS({
           uncaughtExceptionCount++
           assert(
             false,
-            "Exception thrown, but exception catching is not enabled. Compile with -sNO_DISABLE_EXCEPTION_CATCHING or -sEXCEPTION_CATCHING_ALLOWED=[..] to catch.",
+            "Exception thrown, but exception catching is not enabled. Compile with -sNO_DISABLE_EXCEPTION_CATCHING or -sEXCEPTION_CATCHING_ALLOWED=[..] to catch."
           )
         }
         var PATH = {
@@ -14503,7 +14503,7 @@ var require_emscripten4 = __commonJS({
               trailingSlash = path.substr(-1) === "/"
             path = PATH.normalizeArray(
               path.split("/").filter(p => !!p),
-              !isAbsolute,
+              !isAbsolute
             ).join("/")
             if (!path && !isAbsolute) {
               path = "."
@@ -14554,7 +14554,7 @@ var require_emscripten4 = __commonJS({
             } catch (e) {}
           }
           abort(
-            "no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: (array) => { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };",
+            "no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: (array) => { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };"
           )
         }
         var randomFill = view => (randomFill = initRandomFill())(view)
@@ -14574,7 +14574,7 @@ var require_emscripten4 = __commonJS({
             }
             resolvedPath = PATH.normalizeArray(
               resolvedPath.split("/").filter(p => !!p),
-              !resolvedAbsolute,
+              !resolvedAbsolute
             ).join("/")
             return (resolvedAbsolute ? "/" : "") + resolvedPath || "."
           },
@@ -14633,7 +14633,7 @@ var require_emscripten4 = __commonJS({
           outIdx >>>= 0
           assert(
             typeof str === "string",
-            `stringToUTF8Array expects a string (got ${typeof str})`,
+            `stringToUTF8Array expects a string (got ${typeof str})`
           )
           if (!(maxBytesToWrite > 0)) return 0
           var startIdx = outIdx
@@ -14662,7 +14662,7 @@ var require_emscripten4 = __commonJS({
                 warnOnce(
                   "Invalid Unicode code point " +
                     ptrToString(u) +
-                    " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF).",
+                    " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF)."
                 )
               heap[outIdx++ >>> 0] = 240 | (u >> 18)
               heap[outIdx++ >>> 0] = 128 | ((u >> 12) & 63)
@@ -14680,7 +14680,7 @@ var require_emscripten4 = __commonJS({
             stringy,
             u8array,
             0,
-            u8array.length,
+            u8array.length
           )
           if (dontAddNull) u8array.length = numBytesWritten
           return u8array
@@ -14772,7 +14772,7 @@ var require_emscripten4 = __commonJS({
                 buffer[offset + i] = result
               }
               if (bytesRead) {
-                stream.node.timestamp = Date.now()
+                stream.node.timestamp = datenow()
               }
               return bytesRead
             },
@@ -14788,7 +14788,7 @@ var require_emscripten4 = __commonJS({
                 throw new FS.ErrnoError(29)
               }
               if (length) {
-                stream.node.timestamp = Date.now()
+                stream.node.timestamp = datenow()
               }
               return i
             },
@@ -14869,7 +14869,7 @@ var require_emscripten4 = __commonJS({
               "/",
               16384 | 511,
               /* 0777 */
-              0,
+              0
             )
           },
           createNode(parent, name, mode, dev) {
@@ -14940,7 +14940,7 @@ var require_emscripten4 = __commonJS({
               node.node_ops = MEMFS.ops_table.chrdev.node
               node.stream_ops = MEMFS.ops_table.chrdev.stream
             }
-            node.timestamp = Date.now()
+            node.timestamp = datenow()
             if (parent) {
               parent.contents[name] = node
               parent.timestamp = node.timestamp
@@ -14961,7 +14961,7 @@ var require_emscripten4 = __commonJS({
               newCapacity,
               (prevCapacity *
                 (prevCapacity < CAPACITY_DOUBLING_MAX ? 2 : 1.125)) >>>
-                0,
+                0
             )
             if (prevCapacity != 0) newCapacity = Math.max(newCapacity, 256)
             var oldContents = node.contents
@@ -14979,7 +14979,7 @@ var require_emscripten4 = __commonJS({
               node.contents = new Uint8Array(newSize)
               if (oldContents) {
                 node.contents.set(
-                  oldContents.subarray(0, Math.min(newSize, node.usedBytes)),
+                  oldContents.subarray(0, Math.min(newSize, node.usedBytes))
                 )
               }
               node.usedBytes = newSize
@@ -15041,7 +15041,7 @@ var require_emscripten4 = __commonJS({
                 }
               }
               delete old_node.parent.contents[old_node.name]
-              old_node.parent.timestamp = Date.now()
+              old_node.parent.timestamp = datenow()
               old_node.name = new_name
               new_dir.contents[new_name] = old_node
               new_dir.timestamp = old_node.parent.timestamp
@@ -15049,7 +15049,7 @@ var require_emscripten4 = __commonJS({
             },
             unlink(parent, name) {
               delete parent.contents[name]
-              parent.timestamp = Date.now()
+              parent.timestamp = datenow()
             },
             rmdir(parent, name) {
               var node = FS.lookupNode(parent, name)
@@ -15057,7 +15057,7 @@ var require_emscripten4 = __commonJS({
                 throw new FS.ErrnoError(55)
               }
               delete parent.contents[name]
-              parent.timestamp = Date.now()
+              parent.timestamp = datenow()
             },
             readdir(node) {
               var entries = [".", ".."]
@@ -15071,7 +15071,7 @@ var require_emscripten4 = __commonJS({
                 parent,
                 newname,
                 511 /* 0777 */ | 40960,
-                0,
+                0
               )
               node.link = oldpath
               return node
@@ -15104,7 +15104,7 @@ var require_emscripten4 = __commonJS({
               }
               if (!length) return 0
               var node = stream.node
-              node.timestamp = Date.now()
+              node.timestamp = datenow()
               if (
                 buffer.subarray &&
                 (!node.contents || node.contents.subarray)
@@ -15112,7 +15112,7 @@ var require_emscripten4 = __commonJS({
                 if (canOwn) {
                   assert(
                     position === 0,
-                    "canOwn must imply no weird position inside the file",
+                    "canOwn must imply no weird position inside the file"
                   )
                   node.contents = buffer.subarray(offset, offset + length)
                   node.usedBytes = length
@@ -15124,7 +15124,7 @@ var require_emscripten4 = __commonJS({
                 } else if (position + length <= node.usedBytes) {
                   node.contents.set(
                     buffer.subarray(offset, offset + length),
-                    position,
+                    position
                   )
                   return length
                 }
@@ -15133,7 +15133,7 @@ var require_emscripten4 = __commonJS({
               if (node.contents.subarray && buffer.subarray) {
                 node.contents.set(
                   buffer.subarray(offset, offset + length),
-                  position,
+                  position
                 )
               } else {
                 for (var i = 0; i < length; i++) {
@@ -15161,7 +15161,7 @@ var require_emscripten4 = __commonJS({
               MEMFS.expandFileStorage(stream.node, offset + length)
               stream.node.usedBytes = Math.max(
                 stream.node.usedBytes,
-                offset + length,
+                offset + length
               )
             },
             mmap(stream, length, position, prot, flags) {
@@ -15182,7 +15182,7 @@ var require_emscripten4 = __commonJS({
                     contents = Array.prototype.slice.call(
                       contents,
                       position,
-                      position + length,
+                      position + length
                     )
                   }
                 }
@@ -15211,7 +15211,7 @@ var require_emscripten4 = __commonJS({
             arrayBuffer => {
               assert(
                 arrayBuffer,
-                `Loading data file "${url}" failed (no arrayBuffer).`,
+                `Loading data file "${url}" failed (no arrayBuffer).`
               )
               onload(new Uint8Array(arrayBuffer))
               if (dep) removeRunDependency(dep)
@@ -15222,7 +15222,7 @@ var require_emscripten4 = __commonJS({
               } else {
                 throw `Loading data file "${url}" failed.`
               }
-            },
+            }
           )
           if (dep) addRunDependency(dep)
         }
@@ -15232,7 +15232,7 @@ var require_emscripten4 = __commonJS({
           fileData,
           canRead,
           canWrite,
-          canOwn,
+          canOwn
         ) => {
           FS.createDataFile(parent, name, fileData, canRead, canWrite, canOwn)
         }
@@ -15241,7 +15241,7 @@ var require_emscripten4 = __commonJS({
           byteArray,
           fullname,
           finish,
-          onerror,
+          onerror
         ) => {
           if (typeof Browser != "undefined") Browser.init()
           var handled = false
@@ -15264,7 +15264,7 @@ var require_emscripten4 = __commonJS({
           onerror,
           dontCreateFile,
           canOwn,
-          preFinish,
+          preFinish
         ) => {
           var fullname = name
             ? PATH_FS.resolve(PATH.join2(parent, name))
@@ -15280,7 +15280,7 @@ var require_emscripten4 = __commonJS({
                   byteArray2,
                   canRead,
                   canWrite,
-                  canOwn,
+                  canOwn
                 )
               }
               onload?.()
@@ -15701,7 +15701,7 @@ var require_emscripten4 = __commonJS({
                   var link = FS.readlink(current_path)
                   current_path = PATH_FS.resolve(
                     PATH.dirname(current_path),
-                    link,
+                    link
                   )
                   var lookup = FS.lookupPath(current_path, {
                     recurse_count: opts.recurse_count + 1,
@@ -15952,7 +15952,7 @@ var require_emscripten4 = __commonJS({
             FS.syncFSRequests++
             if (FS.syncFSRequests > 1) {
               err(
-                `warning: ${FS.syncFSRequests} FS.syncfs operations in flight at once, probably just doing extra work`,
+                `warning: ${FS.syncFSRequests} FS.syncfs operations in flight at once, probably just doing extra work`
               )
             }
             var mounts = FS.getMounts(FS.root.mount)
@@ -16255,7 +16255,7 @@ var require_emscripten4 = __commonJS({
             }
             return PATH_FS.resolve(
               FS.getPath(link.parent),
-              link.node_ops.readlink(link),
+              link.node_ops.readlink(link)
             )
           },
           stat(path, dontFollow) {
@@ -16289,7 +16289,7 @@ var require_emscripten4 = __commonJS({
             }
             node.node_ops.setattr(node, {
               mode: (mode & 4095) | (node.mode & ~4095),
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           lchmod(path, mode) {
@@ -16313,7 +16313,7 @@ var require_emscripten4 = __commonJS({
               throw new FS.ErrnoError(63)
             }
             node.node_ops.setattr(node, {
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           lchown(path, uid, gid) {
@@ -16351,7 +16351,7 @@ var require_emscripten4 = __commonJS({
             }
             node.node_ops.setattr(node, {
               size: len,
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           ftruncate(fd, len) {
@@ -16506,7 +16506,7 @@ var require_emscripten4 = __commonJS({
               buffer,
               offset,
               length,
-              position,
+              position
             )
             if (!seeking) stream.position += bytesRead
             return bytesRead
@@ -16543,7 +16543,7 @@ var require_emscripten4 = __commonJS({
               offset,
               length,
               position,
-              canOwn,
+              canOwn
             )
             if (!seeking) stream.position += bytesWritten
             return bytesWritten
@@ -16592,7 +16592,7 @@ var require_emscripten4 = __commonJS({
               buffer,
               offset,
               length,
-              mmapFlags,
+              mmapFlags
             )
           },
           ioctl(stream, cmd, arg) {
@@ -16693,7 +16693,7 @@ var require_emscripten4 = __commonJS({
                     "fd",
                     16384 | 511,
                     /* 0777 */
-                    73,
+                    73
                   )
                   node.node_ops = {
                     lookup(parent, name) {
@@ -16716,7 +16716,7 @@ var require_emscripten4 = __commonJS({
                 },
               },
               {},
-              "/proc/self/fd",
+              "/proc/self/fd"
             )
           },
           createStandardStreams() {
@@ -16759,7 +16759,7 @@ var require_emscripten4 = __commonJS({
           init(input, output, error) {
             assert(
               !FS.init.initialized,
-              "FS.init was previously called. If you want to initialize later with custom parameters, remove any earlier calls (note that one is automatically added to the generated code)",
+              "FS.init was previously called. If you want to initialize later with custom parameters, remove any earlier calls (note that one is automatically added to the generated code)"
             )
             FS.init.initialized = true
             Module2["stdin"] = input || Module2["stdin"]
@@ -16841,7 +16841,7 @@ var require_emscripten4 = __commonJS({
           createFile(parent, name, properties, canRead, canWrite) {
             var path = PATH.join2(
               typeof parent == "string" ? parent : FS.getPath(parent),
-              name,
+              name
             )
             var mode = FS_getMode(canRead, canWrite)
             return FS.create(path, mode)
@@ -16871,7 +16871,7 @@ var require_emscripten4 = __commonJS({
           createDevice(parent, name, input, output) {
             var path = PATH.join2(
               typeof parent == "string" ? parent : FS.getPath(parent),
-              name,
+              name
             )
             var mode = FS_getMode(!!input, !!output)
             if (!FS.createDevice.major) FS.createDevice.major = 64
@@ -16902,7 +16902,7 @@ var require_emscripten4 = __commonJS({
                   buffer[offset + i] = result
                 }
                 if (bytesRead) {
-                  stream.node.timestamp = Date.now()
+                  stream.node.timestamp = datenow()
                 }
                 return bytesRead
               },
@@ -16915,7 +16915,7 @@ var require_emscripten4 = __commonJS({
                   }
                 }
                 if (length) {
-                  stream.node.timestamp = Date.now()
+                  stream.node.timestamp = datenow()
                 }
                 return i
               },
@@ -16927,7 +16927,7 @@ var require_emscripten4 = __commonJS({
               return true
             if (typeof XMLHttpRequest != "undefined") {
               throw new Error(
-                "Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread.",
+                "Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread."
               )
             } else if (read_) {
               try {
@@ -16968,7 +16968,7 @@ var require_emscripten4 = __commonJS({
                   )
                 )
                   throw new Error(
-                    "Couldn't load " + url + ". Status: " + xhr.status,
+                    "Couldn't load " + url + ". Status: " + xhr.status
                   )
                 var datalength = Number(xhr.getResponseHeader("Content-length"))
                 var header
@@ -16987,13 +16987,13 @@ var require_emscripten4 = __commonJS({
                         from +
                         ", " +
                         to +
-                        ") or no bytes requested!",
+                        ") or no bytes requested!"
                     )
                   if (to > datalength - 1)
                     throw new Error(
                       "only " +
                         datalength +
-                        " bytes available! programmer error!",
+                        " bytes available! programmer error!"
                     )
                   var xhr2 = new XMLHttpRequest()
                   xhr2.open("GET", url, false)
@@ -17011,12 +17011,12 @@ var require_emscripten4 = __commonJS({
                     )
                   )
                     throw new Error(
-                      "Couldn't load " + url + ". Status: " + xhr2.status,
+                      "Couldn't load " + url + ". Status: " + xhr2.status
                     )
                   if (xhr2.response !== void 0) {
                     return new Uint8Array(
                       /** @type{Array<number>} */
-                      xhr2.response || [],
+                      xhr2.response || []
                     )
                   }
                   return intArrayFromString(xhr2.responseText || "", true)
@@ -17038,7 +17038,7 @@ var require_emscripten4 = __commonJS({
                   datalength = this.getter(0).length
                   chunkSize = datalength
                   out(
-                    "LazyFiles on gzip forces download of the whole file when length is accessed",
+                    "LazyFiles on gzip forces download of the whole file when length is accessed"
                   )
                 }
                 this._length = datalength
@@ -17077,7 +17077,7 @@ var require_emscripten4 = __commonJS({
               name,
               properties,
               canRead,
-              canWrite,
+              canWrite
             )
             if (properties.contents) {
               node.contents = properties.contents
@@ -17138,7 +17138,7 @@ var require_emscripten4 = __commonJS({
           },
           absolutePath() {
             abort(
-              "FS.absolutePath has been removed; use PATH_FS.resolve instead",
+              "FS.absolutePath has been removed; use PATH_FS.resolve instead"
             )
           },
           createFolder() {
@@ -17152,12 +17152,12 @@ var require_emscripten4 = __commonJS({
           },
           mmapAlloc() {
             abort(
-              "FS.mmapAlloc has been replaced by the top level function mmapAlloc",
+              "FS.mmapAlloc has been replaced by the top level function mmapAlloc"
             )
           },
           standardizePath() {
             abort(
-              "FS.standardizePath has been removed; use PATH.normalize instead",
+              "FS.standardizePath has been removed; use PATH.normalize instead"
             )
           },
         }
@@ -17197,7 +17197,7 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -17215,7 +17215,7 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -17229,7 +17229,7 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -17243,7 +17243,7 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -17257,7 +17257,7 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -17438,7 +17438,7 @@ var require_emscripten4 = __commonJS({
         var stringToUTF8 = (str, outPtr, maxBytesToWrite) => {
           assert(
             typeof maxBytesToWrite == "number",
-            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!",
+            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!"
           )
           return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite)
         }
@@ -17605,7 +17605,7 @@ var require_emscripten4 = __commonJS({
         var stringToUTF8 = (str, outPtr, maxBytesToWrite) => {
           assert(
             typeof maxBytesToWrite == "number",
-            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!",
+            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!"
           )
           return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite)
         }
@@ -17689,7 +17689,7 @@ var require_emscripten4 = __commonJS({
             assert(flags === 0)
             path = SYSCALLS.calculateAt(dirfd, path, true)
             if (!times) {
-              var atime = Date.now()
+              var atime = datenow()
               var mtime = atime
             } else {
               var seconds = readI53FromI64(times)
@@ -17809,7 +17809,7 @@ var require_emscripten4 = __commonJS({
           var summerOffset = new Date(
             date.getFullYear(),
             6,
-            1,
+            1
           ).getTimezoneOffset()
           var winterOffset = start.getTimezoneOffset()
           var dst =
@@ -17829,7 +17829,7 @@ var require_emscripten4 = __commonJS({
               HEAP32[((tmPtr + 8) >>> 2) >>> 0],
               HEAP32[((tmPtr + 4) >>> 2) >>> 0],
               HEAP32[(tmPtr >>> 2) >>> 0],
-              0,
+              0
             )
             var dst = HEAP32[((tmPtr + 32) >>> 2) >>> 0]
             var guessedOffset = date.getTimezoneOffset()
@@ -17837,13 +17837,13 @@ var require_emscripten4 = __commonJS({
             var summerOffset = new Date(
               date.getFullYear(),
               6,
-              1,
+              1
             ).getTimezoneOffset()
             var winterOffset = start.getTimezoneOffset()
             var dstOffset = Math.min(winterOffset, summerOffset)
             if (dst < 0) {
               HEAP32[((tmPtr + 32) >>> 2) >>> 0] = Number(
-                summerOffset != winterOffset && dstOffset == guessedOffset,
+                summerOffset != winterOffset && dstOffset == guessedOffset
               )
             } else if (dst > 0 != (dstOffset == guessedOffset)) {
               var nonDstOffset = Math.max(winterOffset, summerOffset)
@@ -17872,9 +17872,9 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
-                : 0),
+                : 0)
             ),
             ret >>> 0
           )
@@ -17886,7 +17886,7 @@ var require_emscripten4 = __commonJS({
           flags,
           fd,
           offset_low,
-          offset_high,
+          offset_high
         ) {
           var offset = convertI32PairToI53Checked(offset_low, offset_high)
           try {
@@ -17925,11 +17925,11 @@ var require_emscripten4 = __commonJS({
           assert(summerName)
           assert(
             lengthBytesUTF8(winterName) <= 16,
-            `timezone name truncated to fit in TZNAME_MAX (${winterName})`,
+            `timezone name truncated to fit in TZNAME_MAX (${winterName})`
           )
           assert(
             lengthBytesUTF8(summerName) <= 16,
-            `timezone name truncated to fit in TZNAME_MAX (${summerName})`,
+            `timezone name truncated to fit in TZNAME_MAX (${summerName})`
           )
           if (summerOffset < winterOffset) {
             stringToUTF8(winterName, std_name, 17)
@@ -17939,7 +17939,7 @@ var require_emscripten4 = __commonJS({
             stringToUTF8(summerName, std_name, 17)
           }
         }
-        var _emscripten_date_now = () => Date.now()
+        var _emscripten_date_now = () => datenow()
         var getHeapMax = () => 4294901760
         function _emscripten_get_heap_max() {
           return getHeapMax()
@@ -17955,7 +17955,7 @@ var require_emscripten4 = __commonJS({
             return 1
           } catch (e) {
             err(
-              `growMemory: Attempted to grow heap from ${b.byteLength} bytes to ${size} bytes, but got error: ${e}`,
+              `growMemory: Attempted to grow heap from ${b.byteLength} bytes to ${size} bytes, but got error: ${e}`
             )
           }
         }
@@ -17966,7 +17966,7 @@ var require_emscripten4 = __commonJS({
           var maxHeapSize = getHeapMax()
           if (requestedSize > maxHeapSize) {
             err(
-              `Cannot enlarge memory, requested ${requestedSize} bytes, but the limit is ${maxHeapSize} bytes!`,
+              `Cannot enlarge memory, requested ${requestedSize} bytes, but the limit is ${maxHeapSize} bytes!`
             )
             return false
           }
@@ -17976,11 +17976,11 @@ var require_emscripten4 = __commonJS({
             var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown)
             overGrownHeapSize = Math.min(
               overGrownHeapSize,
-              requestedSize + 100663296,
+              requestedSize + 100663296
             )
             var newSize = Math.min(
               maxHeapSize,
-              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536),
+              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536)
             )
             var replacement = growMemory(newSize)
             if (replacement) {
@@ -17988,7 +17988,7 @@ var require_emscripten4 = __commonJS({
             }
           }
           err(
-            `Failed to grow the heap from ${oldSize} bytes to ${newSize} bytes, not enough memory!`,
+            `Failed to grow the heap from ${oldSize} bytes to ${newSize} bytes, not enough memory!`
           )
           return false
         }
@@ -18103,7 +18103,7 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -18116,7 +18116,7 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -18172,7 +18172,7 @@ var require_emscripten4 = __commonJS({
                 ? tempDouble > 0
                   ? +Math.floor(tempDouble / 4294967296) >>> 0
                   : ~~+Math.ceil(
-                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296,
+                      (tempDouble - +(~~tempDouble >>> 0)) / 4294967296
                     ) >>> 0
                 : 0),
             ]),
@@ -18274,7 +18274,7 @@ var require_emscripten4 = __commonJS({
         var writeArrayToMemory = (array, buffer) => {
           assert(
             array.length >= 0,
-            "writeArrayToMemory array must have a length (should be an array or typed array)",
+            "writeArrayToMemory array must have a length (should be an array or typed array)"
           )
           HEAP8.set(array, buffer >>> 0)
         }
@@ -18331,7 +18331,7 @@ var require_emscripten4 = __commonJS({
           for (var rule in EXPANSION_RULES_1) {
             pattern = pattern.replace(
               new RegExp(rule, "g"),
-              EXPANSION_RULES_1[rule],
+              EXPANSION_RULES_1[rule]
             )
           }
           var WEEKDAYS = [
@@ -18402,7 +18402,7 @@ var require_emscripten4 = __commonJS({
           function getWeekBasedYear(date2) {
             var thisDate = addDays(
               new Date(date2.tm_year + 1900, 0, 1),
-              date2.tm_yday,
+              date2.tm_yday
             )
             var janFourthThisYear = new Date(thisDate.getFullYear(), 0, 4)
             var janFourthNextYear = new Date(thisDate.getFullYear() + 1, 0, 4)
@@ -18445,9 +18445,9 @@ var require_emscripten4 = __commonJS({
                     isLeapYear(date2.tm_year + 1900)
                       ? MONTH_DAYS_LEAP
                       : MONTH_DAYS_REGULAR,
-                    date2.tm_mon - 1,
+                    date2.tm_mon - 1
                   ),
-                3,
+                3
               ),
             "%m": date2 => leadingNulls(date2.tm_mon + 1, 2),
             "%M": date2 => leadingNulls(date2.tm_min, 2),
@@ -18467,7 +18467,7 @@ var require_emscripten4 = __commonJS({
             },
             "%V": date2 => {
               var val = Math.floor(
-                (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7,
+                (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7
               )
               if ((date2.tm_wday + 371 - date2.tm_yday - 2) % 7 <= 2) {
                 val++
@@ -18510,7 +18510,7 @@ var require_emscripten4 = __commonJS({
             if (pattern.includes(rule)) {
               pattern = pattern.replace(
                 new RegExp(rule, "g"),
-                EXPANSION_RULES_2[rule](date),
+                EXPANSION_RULES_2[rule](date)
               )
             }
           }
@@ -18547,7 +18547,7 @@ var require_emscripten4 = __commonJS({
           if (e instanceof WebAssembly.RuntimeError) {
             if (_emscripten_stack_get_current() <= 0) {
               err(
-                "Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 41943040)",
+                "Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 41943040)"
               )
             }
           }
@@ -18565,7 +18565,7 @@ var require_emscripten4 = __commonJS({
         var callUserCallback = func => {
           if (ABORT) {
             err(
-              "user callback triggered after runtime exited or application aborted.  Ignoring.",
+              "user callback triggered after runtime exited or application aborted.  Ignoring."
             )
             return
           }
@@ -18605,7 +18605,7 @@ var require_emscripten4 = __commonJS({
                       !ignoredInvoke
                     ) {
                       throw new Error(
-                        `import ${x} was not in ASYNCIFY_IMPORTS, but changed the state`,
+                        `import ${x} was not in ASYNCIFY_IMPORTS, but changed the state`
                       )
                     }
                   }
@@ -18676,11 +18676,11 @@ var require_emscripten4 = __commonJS({
           whenDone() {
             assert(
               Asyncify.currData,
-              "Tried to wait for an async operation when none is in progress.",
+              "Tried to wait for an async operation when none is in progress."
             )
             assert(
               !Asyncify.asyncPromiseHandlers,
-              "Cannot have multiple async operations in flight at once",
+              "Cannot have multiple async operations in flight at once"
             )
             return new Promise((resolve, reject) => {
               Asyncify.asyncPromiseHandlers = {
@@ -18717,7 +18717,7 @@ var require_emscripten4 = __commonJS({
           handleSleep(startAsync) {
             assert(
               Asyncify.state !== Asyncify.State.Disabled,
-              "Asyncify cannot be done during or after the runtime exits",
+              "Asyncify cannot be done during or after the runtime exits"
             )
             if (ABORT) return
             if (Asyncify.state === Asyncify.State.Normal) {
@@ -18727,7 +18727,7 @@ var require_emscripten4 = __commonJS({
                 assert(
                   !handleSleepReturnValue ||
                     typeof handleSleepReturnValue == "number" ||
-                    typeof handleSleepReturnValue == "boolean",
+                    typeof handleSleepReturnValue == "boolean"
                 )
                 if (ABORT) return
                 Asyncify.handleSleepReturnValue = handleSleepReturnValue
@@ -18737,11 +18737,11 @@ var require_emscripten4 = __commonJS({
                 }
                 assert(
                   !Asyncify.exportCallStack.length,
-                  "Waking up (starting to rewind) must be done from JS, without compiled code on the stack.",
+                  "Waking up (starting to rewind) must be done from JS, without compiled code on the stack."
                 )
                 Asyncify.state = Asyncify.State.Rewinding
                 runAndAbortIfError(() =>
-                  _asyncify_start_rewind(Asyncify.currData),
+                  _asyncify_start_rewind(Asyncify.currData)
                 )
                 if (typeof Browser != "undefined" && Browser.mainLoop.func) {
                   Browser.mainLoop.resume()
@@ -18777,7 +18777,7 @@ var require_emscripten4 = __commonJS({
                   Browser.mainLoop.pause()
                 }
                 runAndAbortIfError(() =>
-                  _asyncify_start_unwind(Asyncify.currData),
+                  _asyncify_start_unwind(Asyncify.currData)
                 )
               }
             } else if (Asyncify.state === Asyncify.State.Rewinding) {
@@ -18803,7 +18803,7 @@ var require_emscripten4 = __commonJS({
             func,
             "Cannot call unknown function " +
               ident +
-              ", make sure it is exported",
+              ", make sure it is exported"
           )
           return func
         }
@@ -18863,17 +18863,17 @@ var require_emscripten4 = __commonJS({
           if (Asyncify.currData != previousAsync) {
             assert(
               !(previousAsync && Asyncify.currData),
-              "We cannot start an async operation when one is already flight",
+              "We cannot start an async operation when one is already flight"
             )
             assert(
               !(previousAsync && !Asyncify.currData),
-              "We cannot stop an async operation in flight",
+              "We cannot stop an async operation in flight"
             )
             assert(
               asyncMode,
               "The call to " +
                 ident +
-                " is running asynchronously. If this was intended, add the async option to the ccall/cwrap call.",
+                " is running asynchronously. If this was intended, add the async option to the ccall/cwrap call."
             )
             return Asyncify.whenDone().then(onDone)
           }
@@ -19011,13 +19011,13 @@ var require_emscripten4 = __commonJS({
         var _fflush = createExportWrapper("fflush", 1)
         var _emscripten_builtin_memalign = createExportWrapper(
           "emscripten_builtin_memalign",
-          2,
+          2
         )
         var _sbrk = createExportWrapper("sbrk", 1)
         var _setThrew = createExportWrapper("setThrew", 2)
         var __emscripten_tempret_set = createExportWrapper(
           "_emscripten_tempret_set",
-          1,
+          1
         )
         var _emscripten_stack_init = () =>
           (_emscripten_stack_init = wasmExports["emscripten_stack_init"])()
@@ -19035,86 +19035,86 @@ var require_emscripten4 = __commonJS({
             wasmExports["_emscripten_stack_restore"])(a0)
         var __emscripten_stack_alloc = a0 =>
           (__emscripten_stack_alloc = wasmExports["_emscripten_stack_alloc"])(
-            a0,
+            a0
           )
         var _emscripten_stack_get_current = () =>
           (_emscripten_stack_get_current =
             wasmExports["emscripten_stack_get_current"])()
         var ___cxa_is_pointer_type = createExportWrapper(
           "__cxa_is_pointer_type",
-          1,
+          1
         )
         var dynCall_iii = (Module2["dynCall_iii"] = createExportWrapper(
           "dynCall_iii",
-          3,
+          3
         ))
         var dynCall_vii = (Module2["dynCall_vii"] = createExportWrapper(
           "dynCall_vii",
-          3,
+          3
         ))
         var dynCall_ii = (Module2["dynCall_ii"] = createExportWrapper(
           "dynCall_ii",
-          2,
+          2
         ))
         var dynCall_iiii = (Module2["dynCall_iiii"] = createExportWrapper(
           "dynCall_iiii",
-          4,
+          4
         ))
         var dynCall_iiiii = (Module2["dynCall_iiiii"] = createExportWrapper(
           "dynCall_iiiii",
-          5,
+          5
         ))
         var dynCall_vi = (Module2["dynCall_vi"] = createExportWrapper(
           "dynCall_vi",
-          2,
+          2
         ))
         var dynCall_viii = (Module2["dynCall_viii"] = createExportWrapper(
           "dynCall_viii",
-          4,
+          4
         ))
         var dynCall_v = (Module2["dynCall_v"] = createExportWrapper(
           "dynCall_v",
-          1,
+          1
         ))
         var dynCall_jiii = (Module2["dynCall_jiii"] = createExportWrapper(
           "dynCall_jiii",
-          4,
+          4
         ))
         var dynCall_vij = (Module2["dynCall_vij"] = createExportWrapper(
           "dynCall_vij",
-          4,
+          4
         ))
         var dynCall_viij = (Module2["dynCall_viij"] = createExportWrapper(
           "dynCall_viij",
-          5,
+          5
         ))
         var dynCall_iiiiii = (Module2["dynCall_iiiiii"] = createExportWrapper(
           "dynCall_iiiiii",
-          6,
+          6
         ))
         var dynCall_viiiii = (Module2["dynCall_viiiii"] = createExportWrapper(
           "dynCall_viiiii",
-          6,
+          6
         ))
         var dynCall_viiiiii = (Module2["dynCall_viiiiii"] = createExportWrapper(
           "dynCall_viiiiii",
-          7,
+          7
         ))
         var dynCall_i = (Module2["dynCall_i"] = createExportWrapper(
           "dynCall_i",
-          1,
+          1
         ))
         var dynCall_viiii = (Module2["dynCall_viiii"] = createExportWrapper(
           "dynCall_viiii",
-          5,
+          5
         ))
         var dynCall_fi = (Module2["dynCall_fi"] = createExportWrapper(
           "dynCall_fi",
-          2,
+          2
         ))
         var dynCall_jii = (Module2["dynCall_jii"] = createExportWrapper(
           "dynCall_jii",
-          3,
+          3
         ))
         var dynCall_viiiiiii = (Module2["dynCall_viiiiiii"] =
           createExportWrapper("dynCall_viiiiiii", 8))
@@ -19128,69 +19128,69 @@ var require_emscripten4 = __commonJS({
           createExportWrapper("dynCall_viiiiiiiii", 10))
         var dynCall_vif = (Module2["dynCall_vif"] = createExportWrapper(
           "dynCall_vif",
-          3,
+          3
         ))
         var dynCall_iif = (Module2["dynCall_iif"] = createExportWrapper(
           "dynCall_iif",
-          3,
+          3
         ))
         var dynCall_iiff = (Module2["dynCall_iiff"] = createExportWrapper(
           "dynCall_iiff",
-          4,
+          4
         ))
         var dynCall_fiiii = (Module2["dynCall_fiiii"] = createExportWrapper(
           "dynCall_fiiii",
-          5,
+          5
         ))
         var dynCall_viifiii = (Module2["dynCall_viifiii"] = createExportWrapper(
           "dynCall_viifiii",
-          7,
+          7
         ))
         var dynCall_viiifiii = (Module2["dynCall_viiifiii"] =
           createExportWrapper("dynCall_viiifiii", 8))
         var dynCall_vifi = (Module2["dynCall_vifi"] = createExportWrapper(
           "dynCall_vifi",
-          4,
+          4
         ))
         var dynCall_viiiiiiiiii = (Module2["dynCall_viiiiiiiiii"] =
           createExportWrapper("dynCall_viiiiiiiiii", 11))
         var dynCall_fiif = (Module2["dynCall_fiif"] = createExportWrapper(
           "dynCall_fiif",
-          4,
+          4
         ))
         var dynCall_vifiiii = (Module2["dynCall_vifiiii"] = createExportWrapper(
           "dynCall_vifiiii",
-          7,
+          7
         ))
         var dynCall_jiji = (Module2["dynCall_jiji"] = createExportWrapper(
           "dynCall_jiji",
-          5,
+          5
         ))
         var dynCall_iidiiii = (Module2["dynCall_iidiiii"] = createExportWrapper(
           "dynCall_iidiiii",
-          7,
+          7
         ))
         var dynCall_viijii = (Module2["dynCall_viijii"] = createExportWrapper(
           "dynCall_viijii",
-          7,
+          7
         ))
         var dynCall_iiiiiiiii = (Module2["dynCall_iiiiiiiii"] =
           createExportWrapper("dynCall_iiiiiiiii", 9))
         var dynCall_iiiiiii = (Module2["dynCall_iiiiiii"] = createExportWrapper(
           "dynCall_iiiiiii",
-          7,
+          7
         ))
         var dynCall_iiiiij = (Module2["dynCall_iiiiij"] = createExportWrapper(
           "dynCall_iiiiij",
-          7,
+          7
         ))
         var dynCall_iiiiid = (Module2["dynCall_iiiiid"] = createExportWrapper(
           "dynCall_iiiiid",
-          6,
+          6
         ))
         var dynCall_iiiiijj = (Module2["dynCall_iiiiijj"] = createExportWrapper(
           "dynCall_iiiiijj",
-          9,
+          9
         ))
         var dynCall_iiiiiiii = (Module2["dynCall_iiiiiiii"] =
           createExportWrapper("dynCall_iiiiiiii", 8))
@@ -19198,19 +19198,19 @@ var require_emscripten4 = __commonJS({
           createExportWrapper("dynCall_iiiiiijj", 10))
         var _asyncify_start_unwind = createExportWrapper(
           "asyncify_start_unwind",
-          1,
+          1
         )
         var _asyncify_stop_unwind = createExportWrapper(
           "asyncify_stop_unwind",
-          0,
+          0
         )
         var _asyncify_start_rewind = createExportWrapper(
           "asyncify_start_rewind",
-          1,
+          1
         )
         var _asyncify_stop_rewind = createExportWrapper(
           "asyncify_stop_rewind",
-          0,
+          0
         )
         var ___start_em_js = (Module2["___start_em_js"] = 543408)
         var ___stop_em_js = (Module2["___stop_em_js"] = 543834)
@@ -19232,16 +19232,16 @@ var require_emscripten4 = __commonJS({
           wasmExports2["malloc"] = makeWrapper_pp(wasmExports2["malloc"])
           wasmExports2["sbrk"] = makeWrapper_pP(wasmExports2["sbrk"])
           wasmExports2["emscripten_stack_get_base"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_base"],
+            wasmExports2["emscripten_stack_get_base"]
           )
           wasmExports2["emscripten_stack_get_end"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_end"],
+            wasmExports2["emscripten_stack_get_end"]
           )
           wasmExports2["_emscripten_stack_alloc"] = makeWrapper_pp(
-            wasmExports2["_emscripten_stack_alloc"],
+            wasmExports2["_emscripten_stack_alloc"]
           )
           wasmExports2["emscripten_stack_get_current"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_current"],
+            wasmExports2["emscripten_stack_get_current"]
           )
           return wasmExports2
         }
@@ -19254,7 +19254,7 @@ var require_emscripten4 = __commonJS({
         function deterministicNow() {
           return TIME++
         }
-        Date.now = deterministicNow
+        datenow = deterministicNow
         Module2["thisProgram"] = "thisProgram"
         Module2["addRunDependency"] = addRunDependency
         Module2["removeRunDependency"] = removeRunDependency
@@ -19566,7 +19566,7 @@ var require_emscripten4 = __commonJS({
               Module2["onRuntimeInitialized"]()
             assert(
               !Module2["_main"],
-              'compiled without a main, but one is present. if you added it from JS, use Module["onRuntimeInitialized"]',
+              'compiled without a main, but one is present. if you added it from JS, use Module["onRuntimeInitialized"]'
             )
             postRun()
           }
@@ -19607,7 +19607,7 @@ var require_emscripten4 = __commonJS({
           err = oldErr
           if (has) {
             warnOnce(
-              "stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the Emscripten FAQ), or make sure to emit a newline when you printf etc.",
+              "stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the Emscripten FAQ), or make sure to emit a newline when you printf etc."
             )
           }
         }
@@ -19627,7 +19627,7 @@ var require_emscripten4 = __commonJS({
               configurable: true,
               get() {
                 abort(
-                  `Access to module property ('${prop}') is no longer possible via the module constructor argument; Instead, use the result of the module constructor.`,
+                  `Access to module property ('${prop}') is no longer possible via the module constructor argument; Instead, use the result of the module constructor.`
                 )
               },
             })
@@ -19688,13 +19688,13 @@ var require_wasm64_emscripten = __commonJS({
                 abort(
                   "You are getting " +
                     prop +
-                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
                 ),
               set: () =>
                 abort(
                   "You are setting " +
                     prop +
-                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js",
+                    " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"
                 ),
             })
           }
@@ -19709,7 +19709,7 @@ var require_wasm64_emscripten = __commonJS({
           !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_NODE && !ENVIRONMENT_IS_WORKER
         if (Module2["ENVIRONMENT"]) {
           throw new Error(
-            "Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -sENVIRONMENT=web or -sENVIRONMENT=node)",
+            "Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -sENVIRONMENT=web or -sENVIRONMENT=node)"
           )
         }
         if (ENVIRONMENT_IS_NODE) {
@@ -19736,7 +19736,7 @@ var require_wasm64_emscripten = __commonJS({
             process.release.name !== "node"
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           var nodeVersion = process.versions.node
           var numericVersion = nodeVersion.split(".").slice(0, 3)
@@ -19748,7 +19748,7 @@ var require_wasm64_emscripten = __commonJS({
             throw new Error(
               "This emscripten-generated code requires node v16.0.0 (detected v" +
                 nodeVersion +
-                ")",
+                ")"
             )
           }
           var fs = require("./fs")
@@ -19792,7 +19792,7 @@ var require_wasm64_emscripten = __commonJS({
             typeof importScripts == "function"
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
         } else if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
           if (ENVIRONMENT_IS_WORKER) {
@@ -19808,14 +19808,14 @@ var require_wasm64_emscripten = __commonJS({
           } else {
             scriptDirectory = scriptDirectory.substr(
               0,
-              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1,
+              scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1
             )
           }
           if (
             !(typeof window == "object" || typeof importScripts == "function")
           )
             throw new Error(
-              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)",
+              "not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)"
             )
           {
             read_ = url => {
@@ -19832,7 +19832,7 @@ var require_wasm64_emscripten = __commonJS({
                 xhr.send(null)
                 return new Uint8Array(
                   /** @type{!ArrayBuffer} */
-                  xhr.response,
+                  xhr.response
                 )
               }
             }
@@ -19867,39 +19867,39 @@ var require_wasm64_emscripten = __commonJS({
         legacyModuleProp("quit", "quit_")
         assert(
           typeof Module2["memoryInitializerPrefixURL"] == "undefined",
-          "Module.memoryInitializerPrefixURL option was removed, use Module.locateFile instead",
+          "Module.memoryInitializerPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["pthreadMainPrefixURL"] == "undefined",
-          "Module.pthreadMainPrefixURL option was removed, use Module.locateFile instead",
+          "Module.pthreadMainPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["cdInitializerPrefixURL"] == "undefined",
-          "Module.cdInitializerPrefixURL option was removed, use Module.locateFile instead",
+          "Module.cdInitializerPrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["filePackagePrefixURL"] == "undefined",
-          "Module.filePackagePrefixURL option was removed, use Module.locateFile instead",
+          "Module.filePackagePrefixURL option was removed, use Module.locateFile instead"
         )
         assert(
           typeof Module2["read"] == "undefined",
-          "Module.read option was removed (modify read_ in JS)",
+          "Module.read option was removed (modify read_ in JS)"
         )
         assert(
           typeof Module2["readAsync"] == "undefined",
-          "Module.readAsync option was removed (modify readAsync in JS)",
+          "Module.readAsync option was removed (modify readAsync in JS)"
         )
         assert(
           typeof Module2["readBinary"] == "undefined",
-          "Module.readBinary option was removed (modify readBinary in JS)",
+          "Module.readBinary option was removed (modify readBinary in JS)"
         )
         assert(
           typeof Module2["setWindowTitle"] == "undefined",
-          "Module.setWindowTitle option was removed (modify emscripten_set_window_title in JS)",
+          "Module.setWindowTitle option was removed (modify emscripten_set_window_title in JS)"
         )
         assert(
           typeof Module2["TOTAL_MEMORY"] == "undefined",
-          "Module.TOTAL_MEMORY has been renamed Module.INITIAL_MEMORY",
+          "Module.TOTAL_MEMORY has been renamed Module.INITIAL_MEMORY"
         )
         legacyModuleProp("asm", "wasmExports")
         legacyModuleProp("read", "read_")
@@ -19908,7 +19908,7 @@ var require_wasm64_emscripten = __commonJS({
         legacyModuleProp("setWindowTitle", "setWindowTitle")
         assert(
           !ENVIRONMENT_IS_SHELL,
-          "shell environment detected but not enabled at build time.  Add `shell` to `-sENVIRONMENT` to enable.",
+          "shell environment detected but not enabled at build time.  Add `shell` to `-sENVIRONMENT` to enable."
         )
         var wasmBinary
         if (Module2["wasmBinary"]) wasmBinary = Module2["wasmBinary"]
@@ -19964,22 +19964,22 @@ var require_wasm64_emscripten = __commonJS({
         }
         assert(
           !Module2["STACK_SIZE"],
-          "STACK_SIZE can no longer be set at runtime.  Use -sSTACK_SIZE at link time",
+          "STACK_SIZE can no longer be set at runtime.  Use -sSTACK_SIZE at link time"
         )
         assert(
           typeof Int32Array != "undefined" &&
             typeof Float64Array !== "undefined" &&
             Int32Array.prototype.subarray != void 0 &&
             Int32Array.prototype.set != void 0,
-          "JS engine does not provide full typed array support",
+          "JS engine does not provide full typed array support"
         )
         assert(
           !Module2["wasmMemory"],
-          "Use of `wasmMemory` detected.  Use -sIMPORTED_MEMORY to define wasmMemory externally",
+          "Use of `wasmMemory` detected.  Use -sIMPORTED_MEMORY to define wasmMemory externally"
         )
         assert(
           !Module2["INITIAL_MEMORY"],
-          "Detected runtime INITIAL_MEMORY setting.  Use -sIMPORTED_MEMORY to define wasmMemory dynamically",
+          "Detected runtime INITIAL_MEMORY setting.  Use -sIMPORTED_MEMORY to define wasmMemory dynamically"
         )
         function writeStackCookie() {
           var max = _emscripten_stack_get_end()
@@ -20001,12 +20001,12 @@ var require_wasm64_emscripten = __commonJS({
           var cookie2 = HEAPU32[(max + 4) / 4]
           if (cookie1 != 34821223 || cookie2 != 2310721022) {
             abort(
-              `Stack overflow! Stack cookie has been overwritten at ${ptrToString(max)}, expected hex dwords 0x89BACDFE and 0x2135467, but received ${ptrToString(cookie2)} ${ptrToString(cookie1)}`,
+              `Stack overflow! Stack cookie has been overwritten at ${ptrToString(max)}, expected hex dwords 0x89BACDFE and 0x2135467, but received ${ptrToString(cookie2)} ${ptrToString(cookie1)}`
             )
           }
           if (HEAPU32[0 / 4] != 1668509029) {
             abort(
-              "Runtime error: The application has corrupted its heap memory area (address zero)!",
+              "Runtime error: The application has corrupted its heap memory area (address zero)!"
             )
           }
         }
@@ -20062,19 +20062,19 @@ var require_wasm64_emscripten = __commonJS({
         }
         assert(
           Math.imul,
-          "This browser does not support Math.imul(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.imul(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.fround,
-          "This browser does not support Math.fround(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.fround(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.clz32,
-          "This browser does not support Math.clz32(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.clz32(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         assert(
           Math.trunc,
-          "This browser does not support Math.trunc(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill",
+          "This browser does not support Math.trunc(), build with LEGACY_VM_SUPPORT or POLYFILL_OLD_MATH_FUNCTIONS to add in a polyfill"
         )
         var runDependencies = 0
         var runDependencyWatcher = null
@@ -20162,13 +20162,13 @@ var require_wasm64_emscripten = __commonJS({
           return (...args) => {
             assert(
               runtimeInitialized,
-              `native function \`${name}\` called before runtime initialization`,
+              `native function \`${name}\` called before runtime initialization`
             )
             var f = wasmExports[name]
             assert(f, `exported native function \`${name}\` not found`)
             assert(
               args.length <= nargs,
-              `native function \`${name}\` called with ${args.length} args but expects ${nargs}`,
+              `native function \`${name}\` called with ${args.length} args but expects ${nargs}`
             )
             return f(...args)
           }
@@ -20211,10 +20211,10 @@ var require_wasm64_emscripten = __commonJS({
                     resolve(
                       new Uint8Array(
                         /** @type{!ArrayBuffer} */
-                        response,
-                      ),
+                        response
+                      )
                     ),
-                  reject,
+                  reject
                 )
               })
             }
@@ -20228,7 +20228,7 @@ var require_wasm64_emscripten = __commonJS({
               err(`failed to asynchronously prepare wasm: ${reason}`)
               if (isFileURI(wasmBinaryFile)) {
                 err(
-                  `warning: Loading from a file URI (${wasmBinaryFile}) is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing`,
+                  `warning: Loading from a file URI (${wasmBinaryFile}) is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing`
                 )
               }
               abort(reason)
@@ -20289,7 +20289,7 @@ var require_wasm64_emscripten = __commonJS({
           function receiveInstantiationResult(result) {
             assert(
               Module2 === trueModule,
-              "the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?",
+              "the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?"
             )
             trueModule = null
             receiveInstance(result["instance"])
@@ -20307,7 +20307,7 @@ var require_wasm64_emscripten = __commonJS({
             wasmBinary,
             wasmBinaryFile,
             info,
-            receiveInstantiationResult,
+            receiveInstantiationResult
           ).catch(readyPromiseReject)
           return {}
         }
@@ -20321,7 +20321,7 @@ var require_wasm64_emscripten = __commonJS({
                   : ""
                 abort(
                   `\`Module.${prop}\` has been replaced by \`${newName}\`` +
-                    extra,
+                    extra
                 )
               },
             })
@@ -20330,7 +20330,7 @@ var require_wasm64_emscripten = __commonJS({
         function ignoredModuleProp(prop) {
           if (Object.getOwnPropertyDescriptor(Module2, prop)) {
             abort(
-              `\`Module.${prop}\` was supplied but \`${prop}\` not included in INCOMING_MODULE_JS_API`,
+              `\`Module.${prop}\` was supplied but \`${prop}\` not included in INCOMING_MODULE_JS_API`
             )
           }
         }
@@ -20352,7 +20352,7 @@ var require_wasm64_emscripten = __commonJS({
               configurable: true,
               get() {
                 warnOnce(
-                  `\`${sym}\` is not longer defined by emscripten. ${msg}`,
+                  `\`${sym}\` is not longer defined by emscripten. ${msg}`
                 )
                 return void 0
               },
@@ -20488,7 +20488,7 @@ var require_wasm64_emscripten = __commonJS({
                 warnOnce(
                   "Invalid UTF-8 leading byte " +
                     ptrToString(u0) +
-                    " encountered when deserializing a UTF-8 string in wasm memory to a JS string!",
+                    " encountered when deserializing a UTF-8 string in wasm memory to a JS string!"
                 )
               u0 =
                 ((u0 & 7) << 18) |
@@ -20502,7 +20502,7 @@ var require_wasm64_emscripten = __commonJS({
               var ch = u0 - 65536
               str += String.fromCharCode(
                 55296 | (ch >> 10),
-                56320 | (ch & 1023),
+                56320 | (ch & 1023)
               )
             }
           }
@@ -20511,7 +20511,7 @@ var require_wasm64_emscripten = __commonJS({
         var UTF8ToString = (ptr, maxBytesToRead) => {
           assert(
             typeof ptr == "number",
-            `UTF8ToString expects a number (got ${typeof ptr})`,
+            `UTF8ToString expects a number (got ${typeof ptr})`
           )
           return ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead) : ""
         }
@@ -20525,7 +20525,7 @@ var require_wasm64_emscripten = __commonJS({
                 filename ? UTF8ToString(filename) : "unknown filename",
                 line,
                 func ? UTF8ToString(func) : "unknown function",
-              ],
+              ]
           )
         }
         class ExceptionInfo {
@@ -20592,7 +20592,7 @@ var require_wasm64_emscripten = __commonJS({
           uncaughtExceptionCount++
           assert(
             false,
-            "Exception thrown, but exception catching is not enabled. Compile with -sNO_DISABLE_EXCEPTION_CATCHING or -sEXCEPTION_CATCHING_ALLOWED=[..] to catch.",
+            "Exception thrown, but exception catching is not enabled. Compile with -sNO_DISABLE_EXCEPTION_CATCHING or -sEXCEPTION_CATCHING_ALLOWED=[..] to catch."
           )
         }
         var PATH = {
@@ -20628,7 +20628,7 @@ var require_wasm64_emscripten = __commonJS({
               trailingSlash = path.substr(-1) === "/"
             path = PATH.normalizeArray(
               path.split("/").filter(p => !!p),
-              !isAbsolute,
+              !isAbsolute
             ).join("/")
             if (!path && !isAbsolute) {
               path = "."
@@ -20679,7 +20679,7 @@ var require_wasm64_emscripten = __commonJS({
             } catch (e) {}
           }
           abort(
-            "no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: (array) => { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };",
+            "no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: (array) => { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };"
           )
         }
         var randomFill = view => (randomFill = initRandomFill())(view)
@@ -20699,7 +20699,7 @@ var require_wasm64_emscripten = __commonJS({
             }
             resolvedPath = PATH.normalizeArray(
               resolvedPath.split("/").filter(p => !!p),
-              !resolvedAbsolute,
+              !resolvedAbsolute
             ).join("/")
             return (resolvedAbsolute ? "/" : "") + resolvedPath || "."
           },
@@ -20757,7 +20757,7 @@ var require_wasm64_emscripten = __commonJS({
         var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
           assert(
             typeof str === "string",
-            `stringToUTF8Array expects a string (got ${typeof str})`,
+            `stringToUTF8Array expects a string (got ${typeof str})`
           )
           if (!(maxBytesToWrite > 0)) return 0
           var startIdx = outIdx
@@ -20786,7 +20786,7 @@ var require_wasm64_emscripten = __commonJS({
                 warnOnce(
                   "Invalid Unicode code point " +
                     ptrToString(u) +
-                    " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF).",
+                    " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF)."
                 )
               heap[outIdx++] = 240 | (u >> 18)
               heap[outIdx++] = 128 | ((u >> 12) & 63)
@@ -20804,7 +20804,7 @@ var require_wasm64_emscripten = __commonJS({
             stringy,
             u8array,
             0,
-            u8array.length,
+            u8array.length
           )
           if (dontAddNull) u8array.length = numBytesWritten
           return u8array
@@ -20896,7 +20896,7 @@ var require_wasm64_emscripten = __commonJS({
                 buffer[offset + i] = result
               }
               if (bytesRead) {
-                stream.node.timestamp = Date.now()
+                stream.node.timestamp = datenow()
               }
               return bytesRead
             },
@@ -20912,7 +20912,7 @@ var require_wasm64_emscripten = __commonJS({
                 throw new FS.ErrnoError(29)
               }
               if (length) {
-                stream.node.timestamp = Date.now()
+                stream.node.timestamp = datenow()
               }
               return i
             },
@@ -20993,7 +20993,7 @@ var require_wasm64_emscripten = __commonJS({
               "/",
               16384 | 511,
               /* 0777 */
-              0,
+              0
             )
           },
           createNode(parent, name, mode, dev) {
@@ -21064,7 +21064,7 @@ var require_wasm64_emscripten = __commonJS({
               node.node_ops = MEMFS.ops_table.chrdev.node
               node.stream_ops = MEMFS.ops_table.chrdev.stream
             }
-            node.timestamp = Date.now()
+            node.timestamp = datenow()
             if (parent) {
               parent.contents[name] = node
               parent.timestamp = node.timestamp
@@ -21085,7 +21085,7 @@ var require_wasm64_emscripten = __commonJS({
               newCapacity,
               (prevCapacity *
                 (prevCapacity < CAPACITY_DOUBLING_MAX ? 2 : 1.125)) >>>
-                0,
+                0
             )
             if (prevCapacity != 0) newCapacity = Math.max(newCapacity, 256)
             var oldContents = node.contents
@@ -21103,7 +21103,7 @@ var require_wasm64_emscripten = __commonJS({
               node.contents = new Uint8Array(newSize)
               if (oldContents) {
                 node.contents.set(
-                  oldContents.subarray(0, Math.min(newSize, node.usedBytes)),
+                  oldContents.subarray(0, Math.min(newSize, node.usedBytes))
                 )
               }
               node.usedBytes = newSize
@@ -21165,7 +21165,7 @@ var require_wasm64_emscripten = __commonJS({
                 }
               }
               delete old_node.parent.contents[old_node.name]
-              old_node.parent.timestamp = Date.now()
+              old_node.parent.timestamp = datenow()
               old_node.name = new_name
               new_dir.contents[new_name] = old_node
               new_dir.timestamp = old_node.parent.timestamp
@@ -21173,7 +21173,7 @@ var require_wasm64_emscripten = __commonJS({
             },
             unlink(parent, name) {
               delete parent.contents[name]
-              parent.timestamp = Date.now()
+              parent.timestamp = datenow()
             },
             rmdir(parent, name) {
               var node = FS.lookupNode(parent, name)
@@ -21181,7 +21181,7 @@ var require_wasm64_emscripten = __commonJS({
                 throw new FS.ErrnoError(55)
               }
               delete parent.contents[name]
-              parent.timestamp = Date.now()
+              parent.timestamp = datenow()
             },
             readdir(node) {
               var entries = [".", ".."]
@@ -21195,7 +21195,7 @@ var require_wasm64_emscripten = __commonJS({
                 parent,
                 newname,
                 511 /* 0777 */ | 40960,
-                0,
+                0
               )
               node.link = oldpath
               return node
@@ -21228,7 +21228,7 @@ var require_wasm64_emscripten = __commonJS({
               }
               if (!length) return 0
               var node = stream.node
-              node.timestamp = Date.now()
+              node.timestamp = datenow()
               if (
                 buffer.subarray &&
                 (!node.contents || node.contents.subarray)
@@ -21236,7 +21236,7 @@ var require_wasm64_emscripten = __commonJS({
                 if (canOwn) {
                   assert(
                     position === 0,
-                    "canOwn must imply no weird position inside the file",
+                    "canOwn must imply no weird position inside the file"
                   )
                   node.contents = buffer.subarray(offset, offset + length)
                   node.usedBytes = length
@@ -21248,7 +21248,7 @@ var require_wasm64_emscripten = __commonJS({
                 } else if (position + length <= node.usedBytes) {
                   node.contents.set(
                     buffer.subarray(offset, offset + length),
-                    position,
+                    position
                   )
                   return length
                 }
@@ -21257,7 +21257,7 @@ var require_wasm64_emscripten = __commonJS({
               if (node.contents.subarray && buffer.subarray) {
                 node.contents.set(
                   buffer.subarray(offset, offset + length),
-                  position,
+                  position
                 )
               } else {
                 for (var i = 0; i < length; i++) {
@@ -21285,7 +21285,7 @@ var require_wasm64_emscripten = __commonJS({
               MEMFS.expandFileStorage(stream.node, offset + length)
               stream.node.usedBytes = Math.max(
                 stream.node.usedBytes,
-                offset + length,
+                offset + length
               )
             },
             mmap(stream, length, position, prot, flags) {
@@ -21306,7 +21306,7 @@ var require_wasm64_emscripten = __commonJS({
                     contents = Array.prototype.slice.call(
                       contents,
                       position,
-                      position + length,
+                      position + length
                     )
                   }
                 }
@@ -21335,7 +21335,7 @@ var require_wasm64_emscripten = __commonJS({
             arrayBuffer => {
               assert(
                 arrayBuffer,
-                `Loading data file "${url}" failed (no arrayBuffer).`,
+                `Loading data file "${url}" failed (no arrayBuffer).`
               )
               onload(new Uint8Array(arrayBuffer))
               if (dep) removeRunDependency(dep)
@@ -21346,7 +21346,7 @@ var require_wasm64_emscripten = __commonJS({
               } else {
                 throw `Loading data file "${url}" failed.`
               }
-            },
+            }
           )
           if (dep) addRunDependency(dep)
         }
@@ -21356,7 +21356,7 @@ var require_wasm64_emscripten = __commonJS({
           fileData,
           canRead,
           canWrite,
-          canOwn,
+          canOwn
         ) => {
           FS.createDataFile(parent, name, fileData, canRead, canWrite, canOwn)
         }
@@ -21365,7 +21365,7 @@ var require_wasm64_emscripten = __commonJS({
           byteArray,
           fullname,
           finish,
-          onerror,
+          onerror
         ) => {
           if (typeof Browser != "undefined") Browser.init()
           var handled = false
@@ -21388,7 +21388,7 @@ var require_wasm64_emscripten = __commonJS({
           onerror,
           dontCreateFile,
           canOwn,
-          preFinish,
+          preFinish
         ) => {
           var fullname = name
             ? PATH_FS.resolve(PATH.join2(parent, name))
@@ -21404,7 +21404,7 @@ var require_wasm64_emscripten = __commonJS({
                   byteArray2,
                   canRead,
                   canWrite,
-                  canOwn,
+                  canOwn
                 )
               }
               onload?.()
@@ -21825,7 +21825,7 @@ var require_wasm64_emscripten = __commonJS({
                   var link = FS.readlink(current_path)
                   current_path = PATH_FS.resolve(
                     PATH.dirname(current_path),
-                    link,
+                    link
                   )
                   var lookup = FS.lookupPath(current_path, {
                     recurse_count: opts.recurse_count + 1,
@@ -22076,7 +22076,7 @@ var require_wasm64_emscripten = __commonJS({
             FS.syncFSRequests++
             if (FS.syncFSRequests > 1) {
               err(
-                `warning: ${FS.syncFSRequests} FS.syncfs operations in flight at once, probably just doing extra work`,
+                `warning: ${FS.syncFSRequests} FS.syncfs operations in flight at once, probably just doing extra work`
               )
             }
             var mounts = FS.getMounts(FS.root.mount)
@@ -22379,7 +22379,7 @@ var require_wasm64_emscripten = __commonJS({
             }
             return PATH_FS.resolve(
               FS.getPath(link.parent),
-              link.node_ops.readlink(link),
+              link.node_ops.readlink(link)
             )
           },
           stat(path, dontFollow) {
@@ -22413,7 +22413,7 @@ var require_wasm64_emscripten = __commonJS({
             }
             node.node_ops.setattr(node, {
               mode: (mode & 4095) | (node.mode & ~4095),
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           lchmod(path, mode) {
@@ -22437,7 +22437,7 @@ var require_wasm64_emscripten = __commonJS({
               throw new FS.ErrnoError(63)
             }
             node.node_ops.setattr(node, {
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           lchown(path, uid, gid) {
@@ -22475,7 +22475,7 @@ var require_wasm64_emscripten = __commonJS({
             }
             node.node_ops.setattr(node, {
               size: len,
-              timestamp: Date.now(),
+              timestamp: datenow(),
             })
           },
           ftruncate(fd, len) {
@@ -22630,7 +22630,7 @@ var require_wasm64_emscripten = __commonJS({
               buffer,
               offset,
               length,
-              position,
+              position
             )
             if (!seeking) stream.position += bytesRead
             return bytesRead
@@ -22667,7 +22667,7 @@ var require_wasm64_emscripten = __commonJS({
               offset,
               length,
               position,
-              canOwn,
+              canOwn
             )
             if (!seeking) stream.position += bytesWritten
             return bytesWritten
@@ -22716,7 +22716,7 @@ var require_wasm64_emscripten = __commonJS({
               buffer,
               offset,
               length,
-              mmapFlags,
+              mmapFlags
             )
           },
           ioctl(stream, cmd, arg) {
@@ -22817,7 +22817,7 @@ var require_wasm64_emscripten = __commonJS({
                     "fd",
                     16384 | 511,
                     /* 0777 */
-                    73,
+                    73
                   )
                   node.node_ops = {
                     lookup(parent, name) {
@@ -22840,7 +22840,7 @@ var require_wasm64_emscripten = __commonJS({
                 },
               },
               {},
-              "/proc/self/fd",
+              "/proc/self/fd"
             )
           },
           createStandardStreams() {
@@ -22883,7 +22883,7 @@ var require_wasm64_emscripten = __commonJS({
           init(input, output, error) {
             assert(
               !FS.init.initialized,
-              "FS.init was previously called. If you want to initialize later with custom parameters, remove any earlier calls (note that one is automatically added to the generated code)",
+              "FS.init was previously called. If you want to initialize later with custom parameters, remove any earlier calls (note that one is automatically added to the generated code)"
             )
             FS.init.initialized = true
             Module2["stdin"] = input || Module2["stdin"]
@@ -22965,7 +22965,7 @@ var require_wasm64_emscripten = __commonJS({
           createFile(parent, name, properties, canRead, canWrite) {
             var path = PATH.join2(
               typeof parent == "string" ? parent : FS.getPath(parent),
-              name,
+              name
             )
             var mode = FS_getMode(canRead, canWrite)
             return FS.create(path, mode)
@@ -22995,7 +22995,7 @@ var require_wasm64_emscripten = __commonJS({
           createDevice(parent, name, input, output) {
             var path = PATH.join2(
               typeof parent == "string" ? parent : FS.getPath(parent),
-              name,
+              name
             )
             var mode = FS_getMode(!!input, !!output)
             if (!FS.createDevice.major) FS.createDevice.major = 64
@@ -23026,7 +23026,7 @@ var require_wasm64_emscripten = __commonJS({
                   buffer[offset + i] = result
                 }
                 if (bytesRead) {
-                  stream.node.timestamp = Date.now()
+                  stream.node.timestamp = datenow()
                 }
                 return bytesRead
               },
@@ -23039,7 +23039,7 @@ var require_wasm64_emscripten = __commonJS({
                   }
                 }
                 if (length) {
-                  stream.node.timestamp = Date.now()
+                  stream.node.timestamp = datenow()
                 }
                 return i
               },
@@ -23051,7 +23051,7 @@ var require_wasm64_emscripten = __commonJS({
               return true
             if (typeof XMLHttpRequest != "undefined") {
               throw new Error(
-                "Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread.",
+                "Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread."
               )
             } else if (read_) {
               try {
@@ -23092,7 +23092,7 @@ var require_wasm64_emscripten = __commonJS({
                   )
                 )
                   throw new Error(
-                    "Couldn't load " + url + ". Status: " + xhr.status,
+                    "Couldn't load " + url + ". Status: " + xhr.status
                   )
                 var datalength = Number(xhr.getResponseHeader("Content-length"))
                 var header
@@ -23111,13 +23111,13 @@ var require_wasm64_emscripten = __commonJS({
                         from +
                         ", " +
                         to +
-                        ") or no bytes requested!",
+                        ") or no bytes requested!"
                     )
                   if (to > datalength - 1)
                     throw new Error(
                       "only " +
                         datalength +
-                        " bytes available! programmer error!",
+                        " bytes available! programmer error!"
                     )
                   var xhr2 = new XMLHttpRequest()
                   xhr2.open("GET", url, false)
@@ -23135,12 +23135,12 @@ var require_wasm64_emscripten = __commonJS({
                     )
                   )
                     throw new Error(
-                      "Couldn't load " + url + ". Status: " + xhr2.status,
+                      "Couldn't load " + url + ". Status: " + xhr2.status
                     )
                   if (xhr2.response !== void 0) {
                     return new Uint8Array(
                       /** @type{Array<number>} */
-                      xhr2.response || [],
+                      xhr2.response || []
                     )
                   }
                   return intArrayFromString(xhr2.responseText || "", true)
@@ -23162,7 +23162,7 @@ var require_wasm64_emscripten = __commonJS({
                   datalength = this.getter(0).length
                   chunkSize = datalength
                   out(
-                    "LazyFiles on gzip forces download of the whole file when length is accessed",
+                    "LazyFiles on gzip forces download of the whole file when length is accessed"
                   )
                 }
                 this._length = datalength
@@ -23201,7 +23201,7 @@ var require_wasm64_emscripten = __commonJS({
               name,
               properties,
               canRead,
-              canWrite,
+              canWrite
             )
             if (properties.contents) {
               node.contents = properties.contents
@@ -23262,7 +23262,7 @@ var require_wasm64_emscripten = __commonJS({
           },
           absolutePath() {
             abort(
-              "FS.absolutePath has been removed; use PATH_FS.resolve instead",
+              "FS.absolutePath has been removed; use PATH_FS.resolve instead"
             )
           },
           createFolder() {
@@ -23276,12 +23276,12 @@ var require_wasm64_emscripten = __commonJS({
           },
           mmapAlloc() {
             abort(
-              "FS.mmapAlloc has been replaced by the top level function mmapAlloc",
+              "FS.mmapAlloc has been replaced by the top level function mmapAlloc"
             )
           },
           standardizePath() {
             abort(
-              "FS.standardizePath has been removed; use PATH.normalize instead",
+              "FS.standardizePath has been removed; use PATH.normalize instead"
             )
           },
         }
@@ -23503,7 +23503,7 @@ var require_wasm64_emscripten = __commonJS({
         var stringToUTF8 = (str, outPtr, maxBytesToWrite) => {
           assert(
             typeof maxBytesToWrite == "number",
-            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!",
+            "stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!"
           )
           return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite)
         }
@@ -23758,7 +23758,7 @@ var require_wasm64_emscripten = __commonJS({
             assert(flags === 0)
             path = SYSCALLS.calculateAt(dirfd, path, true)
             if (!times) {
-              var atime = Date.now()
+              var atime = datenow()
               var mtime = atime
             } else {
               var seconds = readI53FromI64(times)
@@ -23878,7 +23878,7 @@ var require_wasm64_emscripten = __commonJS({
           var summerOffset = new Date(
             date.getFullYear(),
             6,
-            1,
+            1
           ).getTimezoneOffset()
           var winterOffset = start.getTimezoneOffset()
           var dst =
@@ -23897,7 +23897,7 @@ var require_wasm64_emscripten = __commonJS({
               HEAP32[(tmPtr + 8) / 4],
               HEAP32[(tmPtr + 4) / 4],
               HEAP32[tmPtr / 4],
-              0,
+              0
             )
             var dst = HEAP32[(tmPtr + 32) / 4]
             var guessedOffset = date.getTimezoneOffset()
@@ -23905,13 +23905,13 @@ var require_wasm64_emscripten = __commonJS({
             var summerOffset = new Date(
               date.getFullYear(),
               6,
-              1,
+              1
             ).getTimezoneOffset()
             var winterOffset = start.getTimezoneOffset()
             var dstOffset = Math.min(winterOffset, summerOffset)
             if (dst < 0) {
               HEAP32[(tmPtr + 32) / 4] = Number(
-                summerOffset != winterOffset && dstOffset == guessedOffset,
+                summerOffset != winterOffset && dstOffset == guessedOffset
               )
             } else if (dst > 0 != (dstOffset == guessedOffset)) {
               var nonDstOffset = Math.max(winterOffset, summerOffset)
@@ -23975,11 +23975,11 @@ var require_wasm64_emscripten = __commonJS({
           assert(summerName)
           assert(
             lengthBytesUTF8(winterName) <= 16,
-            `timezone name truncated to fit in TZNAME_MAX (${winterName})`,
+            `timezone name truncated to fit in TZNAME_MAX (${winterName})`
           )
           assert(
             lengthBytesUTF8(summerName) <= 16,
-            `timezone name truncated to fit in TZNAME_MAX (${summerName})`,
+            `timezone name truncated to fit in TZNAME_MAX (${summerName})`
           )
           if (summerOffset < winterOffset) {
             stringToUTF8(winterName, std_name, 17)
@@ -23989,7 +23989,7 @@ var require_wasm64_emscripten = __commonJS({
             stringToUTF8(summerName, std_name, 17)
           }
         }
-        var _emscripten_date_now = () => Date.now()
+        var _emscripten_date_now = () => datenow()
         function _emscripten_err(str) {
           str = bigintToI53Checked(str)
           return err(UTF8ToString(str))
@@ -24007,7 +24007,7 @@ var require_wasm64_emscripten = __commonJS({
             return 1
           } catch (e) {
             err(
-              `growMemory: Attempted to grow heap from ${b.byteLength} bytes to ${size} bytes, but got error: ${e}`,
+              `growMemory: Attempted to grow heap from ${b.byteLength} bytes to ${size} bytes, but got error: ${e}`
             )
           }
         }
@@ -24018,7 +24018,7 @@ var require_wasm64_emscripten = __commonJS({
           var maxHeapSize = getHeapMax()
           if (requestedSize > maxHeapSize) {
             err(
-              `Cannot enlarge memory, requested ${requestedSize} bytes, but the limit is ${maxHeapSize} bytes!`,
+              `Cannot enlarge memory, requested ${requestedSize} bytes, but the limit is ${maxHeapSize} bytes!`
             )
             return false
           }
@@ -24028,11 +24028,11 @@ var require_wasm64_emscripten = __commonJS({
             var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown)
             overGrownHeapSize = Math.min(
               overGrownHeapSize,
-              requestedSize + 100663296,
+              requestedSize + 100663296
             )
             var newSize = Math.min(
               maxHeapSize,
-              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536),
+              alignUp(Math.max(requestedSize, overGrownHeapSize), 65536)
             )
             var replacement = growMemory(newSize)
             if (replacement) {
@@ -24040,7 +24040,7 @@ var require_wasm64_emscripten = __commonJS({
             }
           }
           err(
-            `Failed to grow the heap from ${oldSize} bytes to ${newSize} bytes, not enough memory!`,
+            `Failed to grow the heap from ${oldSize} bytes to ${newSize} bytes, not enough memory!`
           )
           return false
         }
@@ -24291,7 +24291,7 @@ var require_wasm64_emscripten = __commonJS({
         var writeArrayToMemory = (array, buffer) => {
           assert(
             array.length >= 0,
-            "writeArrayToMemory array must have a length (should be an array or typed array)",
+            "writeArrayToMemory array must have a length (should be an array or typed array)"
           )
           HEAP8.set(array, buffer)
         }
@@ -24350,7 +24350,7 @@ var require_wasm64_emscripten = __commonJS({
             for (var rule in EXPANSION_RULES_1) {
               pattern = pattern.replace(
                 new RegExp(rule, "g"),
-                EXPANSION_RULES_1[rule],
+                EXPANSION_RULES_1[rule]
               )
             }
             var WEEKDAYS = [
@@ -24424,7 +24424,7 @@ var require_wasm64_emscripten = __commonJS({
             function getWeekBasedYear(date2) {
               var thisDate = addDays(
                 new Date(date2.tm_year + 1900, 0, 1),
-                date2.tm_yday,
+                date2.tm_yday
               )
               var janFourthThisYear = new Date(thisDate.getFullYear(), 0, 4)
               var janFourthNextYear = new Date(thisDate.getFullYear() + 1, 0, 4)
@@ -24467,9 +24467,9 @@ var require_wasm64_emscripten = __commonJS({
                       isLeapYear(date2.tm_year + 1900)
                         ? MONTH_DAYS_LEAP
                         : MONTH_DAYS_REGULAR,
-                      date2.tm_mon - 1,
+                      date2.tm_mon - 1
                     ),
-                  3,
+                  3
                 ),
               "%m": date2 => leadingNulls(date2.tm_mon + 1, 2),
               "%M": date2 => leadingNulls(date2.tm_min, 2),
@@ -24489,7 +24489,7 @@ var require_wasm64_emscripten = __commonJS({
               },
               "%V": date2 => {
                 var val = Math.floor(
-                  (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7,
+                  (date2.tm_yday + 7 - ((date2.tm_wday + 6) % 7)) / 7
                 )
                 if ((date2.tm_wday + 371 - date2.tm_yday - 2) % 7 <= 2) {
                   val++
@@ -24532,7 +24532,7 @@ var require_wasm64_emscripten = __commonJS({
               if (pattern.includes(rule)) {
                 pattern = pattern.replace(
                   new RegExp(rule, "g"),
-                  EXPANSION_RULES_2[rule](date),
+                  EXPANSION_RULES_2[rule](date)
                 )
               }
             }
@@ -24572,7 +24572,7 @@ var require_wasm64_emscripten = __commonJS({
           if (e instanceof WebAssembly.RuntimeError) {
             if (_emscripten_stack_get_current() <= 0) {
               err(
-                "Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 41943040)",
+                "Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 41943040)"
               )
             }
           }
@@ -24590,7 +24590,7 @@ var require_wasm64_emscripten = __commonJS({
         var callUserCallback = func => {
           if (ABORT) {
             err(
-              "user callback triggered after runtime exited or application aborted.  Ignoring.",
+              "user callback triggered after runtime exited or application aborted.  Ignoring."
             )
             return
           }
@@ -24631,7 +24631,7 @@ var require_wasm64_emscripten = __commonJS({
                       !ignoredInvoke
                     ) {
                       throw new Error(
-                        `import ${x} was not in ASYNCIFY_IMPORTS, but changed the state`,
+                        `import ${x} was not in ASYNCIFY_IMPORTS, but changed the state`
                       )
                     }
                   }
@@ -24654,7 +24654,7 @@ var require_wasm64_emscripten = __commonJS({
                   Asyncify.exportCallStack.push(x)
                   try {
                     return original(
-                      ...Asyncify.saveOrRestoreRewindArguments(x, args),
+                      ...Asyncify.saveOrRestoreRewindArguments(x, args)
                     )
                   } finally {
                     if (!ABORT) {
@@ -24711,11 +24711,11 @@ var require_wasm64_emscripten = __commonJS({
           whenDone() {
             assert(
               Asyncify.currData,
-              "Tried to wait for an async operation when none is in progress.",
+              "Tried to wait for an async operation when none is in progress."
             )
             assert(
               !Asyncify.asyncPromiseHandlers,
-              "Cannot have multiple async operations in flight at once",
+              "Cannot have multiple async operations in flight at once"
             )
             return new Promise((resolve, reject) => {
               Asyncify.asyncPromiseHandlers = {
@@ -24752,7 +24752,7 @@ var require_wasm64_emscripten = __commonJS({
           handleSleep(startAsync) {
             assert(
               Asyncify.state !== Asyncify.State.Disabled,
-              "Asyncify cannot be done during or after the runtime exits",
+              "Asyncify cannot be done during or after the runtime exits"
             )
             if (ABORT) return
             if (Asyncify.state === Asyncify.State.Normal) {
@@ -24762,7 +24762,7 @@ var require_wasm64_emscripten = __commonJS({
                 assert(
                   !handleSleepReturnValue ||
                     typeof handleSleepReturnValue == "number" ||
-                    typeof handleSleepReturnValue == "boolean",
+                    typeof handleSleepReturnValue == "boolean"
                 )
                 if (ABORT) return
                 Asyncify.handleSleepReturnValue = handleSleepReturnValue
@@ -24772,11 +24772,11 @@ var require_wasm64_emscripten = __commonJS({
                 }
                 assert(
                   !Asyncify.exportCallStack.length,
-                  "Waking up (starting to rewind) must be done from JS, without compiled code on the stack.",
+                  "Waking up (starting to rewind) must be done from JS, without compiled code on the stack."
                 )
                 Asyncify.state = Asyncify.State.Rewinding
                 runAndAbortIfError(() =>
-                  _asyncify_start_rewind(Asyncify.currData),
+                  _asyncify_start_rewind(Asyncify.currData)
                 )
                 if (typeof Browser != "undefined" && Browser.mainLoop.func) {
                   Browser.mainLoop.resume()
@@ -24812,7 +24812,7 @@ var require_wasm64_emscripten = __commonJS({
                   Browser.mainLoop.pause()
                 }
                 runAndAbortIfError(() =>
-                  _asyncify_start_unwind(Asyncify.currData),
+                  _asyncify_start_unwind(Asyncify.currData)
                 )
               }
             } else if (Asyncify.state === Asyncify.State.Rewinding) {
@@ -24838,7 +24838,7 @@ var require_wasm64_emscripten = __commonJS({
             func,
             "Cannot call unknown function " +
               ident +
-              ", make sure it is exported",
+              ", make sure it is exported"
           )
           return func
         }
@@ -24901,17 +24901,17 @@ var require_wasm64_emscripten = __commonJS({
           if (Asyncify.currData != previousAsync) {
             assert(
               !(previousAsync && Asyncify.currData),
-              "We cannot start an async operation when one is already flight",
+              "We cannot start an async operation when one is already flight"
             )
             assert(
               !(previousAsync && !Asyncify.currData),
-              "We cannot stop an async operation in flight",
+              "We cannot stop an async operation in flight"
             )
             assert(
               asyncMode,
               "The call to " +
                 ident +
-                " is running asynchronously. If this was intended, add the async option to the ccall/cwrap call.",
+                " is running asynchronously. If this was intended, add the async option to the ccall/cwrap call."
             )
             return Asyncify.whenDone()
               .then(onDone)
@@ -25055,7 +25055,7 @@ var require_wasm64_emscripten = __commonJS({
         var _fflush = createExportWrapper("fflush", 1)
         var _emscripten_builtin_memalign = createExportWrapper(
           "emscripten_builtin_memalign",
-          2,
+          2
         )
         var _sbrk = createExportWrapper("sbrk", 1)
         var _setThrew = createExportWrapper("setThrew", 2)
@@ -25075,366 +25075,366 @@ var require_wasm64_emscripten = __commonJS({
             wasmExports["_emscripten_stack_restore"])(a0)
         var __emscripten_stack_alloc = a0 =>
           (__emscripten_stack_alloc = wasmExports["_emscripten_stack_alloc"])(
-            a0,
+            a0
           )
         var _emscripten_stack_get_current = () =>
           (_emscripten_stack_get_current =
             wasmExports["emscripten_stack_get_current"])()
         var ___cxa_is_pointer_type = createExportWrapper(
           "__cxa_is_pointer_type",
-          1,
+          1
         )
         var dynCall_ij = (Module2["dynCall_ij"] = createExportWrapper(
           "dynCall_ij",
-          2,
+          2
         ))
         var dynCall_vi = (Module2["dynCall_vi"] = createExportWrapper(
           "dynCall_vi",
-          2,
+          2
         ))
         var dynCall_vjj = (Module2["dynCall_vjj"] = createExportWrapper(
           "dynCall_vjj",
-          3,
+          3
         ))
         var dynCall_jjj = (Module2["dynCall_jjj"] = createExportWrapper(
           "dynCall_jjj",
-          3,
+          3
         ))
         var dynCall_jjjj = (Module2["dynCall_jjjj"] = createExportWrapper(
           "dynCall_jjjj",
-          4,
+          4
         ))
         var dynCall_jjjjj = (Module2["dynCall_jjjjj"] = createExportWrapper(
           "dynCall_jjjjj",
-          5,
+          5
         ))
         var dynCall_ijij = (Module2["dynCall_ijij"] = createExportWrapper(
           "dynCall_ijij",
-          4,
+          4
         ))
         var dynCall_ijjjj = (Module2["dynCall_ijjjj"] = createExportWrapper(
           "dynCall_ijjjj",
-          5,
+          5
         ))
         var dynCall_vjij = (Module2["dynCall_vjij"] = createExportWrapper(
           "dynCall_vjij",
-          4,
+          4
         ))
         var dynCall_vj = (Module2["dynCall_vj"] = createExportWrapper(
           "dynCall_vj",
-          2,
+          2
         ))
         var dynCall_ijijij = (Module2["dynCall_ijijij"] = createExportWrapper(
           "dynCall_ijijij",
-          6,
+          6
         ))
         var dynCall_iji = (Module2["dynCall_iji"] = createExportWrapper(
           "dynCall_iji",
-          3,
+          3
         ))
         var dynCall_vjijjj = (Module2["dynCall_vjijjj"] = createExportWrapper(
           "dynCall_vjijjj",
-          6,
+          6
         ))
         var dynCall_ijijj = (Module2["dynCall_ijijj"] = createExportWrapper(
           "dynCall_ijijj",
-          5,
+          5
         ))
         var dynCall_i = (Module2["dynCall_i"] = createExportWrapper(
           "dynCall_i",
-          1,
+          1
         ))
         var dynCall_ji = (Module2["dynCall_ji"] = createExportWrapper(
           "dynCall_ji",
-          2,
+          2
         ))
         var dynCall_ijjjiji = (Module2["dynCall_ijjjiji"] = createExportWrapper(
           "dynCall_ijjjiji",
-          7,
+          7
         ))
         var dynCall_vjjj = (Module2["dynCall_vjjj"] = createExportWrapper(
           "dynCall_vjjj",
-          4,
+          4
         ))
         var dynCall_ijj = (Module2["dynCall_ijj"] = createExportWrapper(
           "dynCall_ijj",
-          3,
+          3
         ))
         var dynCall_ijiji = (Module2["dynCall_ijiji"] = createExportWrapper(
           "dynCall_ijiji",
-          5,
+          5
         ))
         var dynCall_ijiij = (Module2["dynCall_ijiij"] = createExportWrapper(
           "dynCall_ijiij",
-          5,
+          5
         ))
         var dynCall_ijjji = (Module2["dynCall_ijjji"] = createExportWrapper(
           "dynCall_ijjji",
-          5,
+          5
         ))
         var dynCall_ijjjjj = (Module2["dynCall_ijjjjj"] = createExportWrapper(
           "dynCall_ijjjjj",
-          6,
+          6
         ))
         var dynCall_vjjjij = (Module2["dynCall_vjjjij"] = createExportWrapper(
           "dynCall_vjjjij",
-          6,
+          6
         ))
         var dynCall_iijj = (Module2["dynCall_iijj"] = createExportWrapper(
           "dynCall_iijj",
-          4,
+          4
         ))
         var dynCall_jj = (Module2["dynCall_jj"] = createExportWrapper(
           "dynCall_jj",
-          2,
+          2
         ))
         var dynCall_vjjii = (Module2["dynCall_vjjii"] = createExportWrapper(
           "dynCall_vjjii",
-          5,
+          5
         ))
         var dynCall_ijijiii = (Module2["dynCall_ijijiii"] = createExportWrapper(
           "dynCall_ijijiii",
-          7,
+          7
         ))
         var dynCall_ijjj = (Module2["dynCall_ijjj"] = createExportWrapper(
           "dynCall_ijjj",
-          4,
+          4
         ))
         var dynCall_ijjij = (Module2["dynCall_ijjij"] = createExportWrapper(
           "dynCall_ijjij",
-          5,
+          5
         ))
         var dynCall_vjjji = (Module2["dynCall_vjjji"] = createExportWrapper(
           "dynCall_vjjji",
-          5,
+          5
         ))
         var dynCall_vjjjj = (Module2["dynCall_vjjjj"] = createExportWrapper(
           "dynCall_vjjjj",
-          5,
+          5
         ))
         var dynCall_vjjij = (Module2["dynCall_vjjij"] = createExportWrapper(
           "dynCall_vjjij",
-          5,
+          5
         ))
         var dynCall_ijjjij = (Module2["dynCall_ijjjij"] = createExportWrapper(
           "dynCall_ijjjij",
-          6,
+          6
         ))
         var dynCall_ijji = (Module2["dynCall_ijji"] = createExportWrapper(
           "dynCall_ijji",
-          4,
+          4
         ))
         var dynCall_ijiiij = (Module2["dynCall_ijiiij"] = createExportWrapper(
           "dynCall_ijiiij",
-          6,
+          6
         ))
         var dynCall_ijiii = (Module2["dynCall_ijiii"] = createExportWrapper(
           "dynCall_ijiii",
-          5,
+          5
         ))
         var dynCall_ijii = (Module2["dynCall_ijii"] = createExportWrapper(
           "dynCall_ijii",
-          4,
+          4
         ))
         var dynCall_ii = (Module2["dynCall_ii"] = createExportWrapper(
           "dynCall_ii",
-          2,
+          2
         ))
         var dynCall_iij = (Module2["dynCall_iij"] = createExportWrapper(
           "dynCall_iij",
-          3,
+          3
         ))
         var dynCall_iiij = (Module2["dynCall_iiij"] = createExportWrapper(
           "dynCall_iiij",
-          4,
+          4
         ))
         var dynCall_jijj = (Module2["dynCall_jijj"] = createExportWrapper(
           "dynCall_jijj",
-          4,
+          4
         ))
         var dynCall_iii = (Module2["dynCall_iii"] = createExportWrapper(
           "dynCall_iii",
-          3,
+          3
         ))
         var dynCall_iiii = (Module2["dynCall_iiii"] = createExportWrapper(
           "dynCall_iiii",
-          4,
+          4
         ))
         var dynCall_jjjiiij = (Module2["dynCall_jjjiiij"] = createExportWrapper(
           "dynCall_jjjiiij",
-          7,
+          7
         ))
         var dynCall_ijjijjj = (Module2["dynCall_ijjijjj"] = createExportWrapper(
           "dynCall_ijjijjj",
-          7,
+          7
         ))
         var dynCall_jji = (Module2["dynCall_jji"] = createExportWrapper(
           "dynCall_jji",
-          3,
+          3
         ))
         var dynCall_ijid = (Module2["dynCall_ijid"] = createExportWrapper(
           "dynCall_ijid",
-          4,
+          4
         ))
         var dynCall_dji = (Module2["dynCall_dji"] = createExportWrapper(
           "dynCall_dji",
-          3,
+          3
         ))
         var dynCall_ijjijj = (Module2["dynCall_ijjijj"] = createExportWrapper(
           "dynCall_ijjijj",
-          6,
+          6
         ))
         var dynCall_ijjiijjjj = (Module2["dynCall_ijjiijjjj"] =
           createExportWrapper("dynCall_ijjiijjjj", 9))
         var dynCall_ijjjjjj = (Module2["dynCall_ijjjjjj"] = createExportWrapper(
           "dynCall_ijjjjjj",
-          7,
+          7
         ))
         var dynCall_j = (Module2["dynCall_j"] = createExportWrapper(
           "dynCall_j",
-          1,
+          1
         ))
         var dynCall_vjijj = (Module2["dynCall_vjijj"] = createExportWrapper(
           "dynCall_vjijj",
-          5,
+          5
         ))
         var dynCall_vjd = (Module2["dynCall_vjd"] = createExportWrapper(
           "dynCall_vjd",
-          3,
+          3
         ))
         var dynCall_vjji = (Module2["dynCall_vjji"] = createExportWrapper(
           "dynCall_vjji",
-          4,
+          4
         ))
         var dynCall_vji = (Module2["dynCall_vji"] = createExportWrapper(
           "dynCall_vji",
-          3,
+          3
         ))
         var dynCall_jijjj = (Module2["dynCall_jijjj"] = createExportWrapper(
           "dynCall_jijjj",
-          5,
+          5
         ))
         var dynCall_ijjjjjjjjj = (Module2["dynCall_ijjjjjjjjj"] =
           createExportWrapper("dynCall_ijjjjjjjjj", 10))
         var dynCall_v = (Module2["dynCall_v"] = createExportWrapper(
           "dynCall_v",
-          1,
+          1
         ))
         var dynCall_dj = (Module2["dynCall_dj"] = createExportWrapper(
           "dynCall_dj",
-          2,
+          2
         ))
         var dynCall_ijjjjjij = (Module2["dynCall_ijjjjjij"] =
           createExportWrapper("dynCall_ijjjjjij", 8))
         var dynCall_ijjii = (Module2["dynCall_ijjii"] = createExportWrapper(
           "dynCall_ijjii",
-          5,
+          5
         ))
         var dynCall_vij = (Module2["dynCall_vij"] = createExportWrapper(
           "dynCall_vij",
-          3,
+          3
         ))
         var dynCall_iijji = (Module2["dynCall_iijji"] = createExportWrapper(
           "dynCall_iijji",
-          5,
+          5
         ))
         var dynCall_ijjiijjjjj = (Module2["dynCall_ijjiijjjjj"] =
           createExportWrapper("dynCall_ijjiijjjjj", 10))
         var dynCall_ijijji = (Module2["dynCall_ijijji"] = createExportWrapper(
           "dynCall_ijijji",
-          6,
+          6
         ))
         var dynCall_vijj = (Module2["dynCall_vijj"] = createExportWrapper(
           "dynCall_vijj",
-          4,
+          4
         ))
         var dynCall_ijijjj = (Module2["dynCall_ijijjj"] = createExportWrapper(
           "dynCall_ijijjj",
-          6,
+          6
         ))
         var dynCall_ijijjji = (Module2["dynCall_ijijjji"] = createExportWrapper(
           "dynCall_ijijjji",
-          7,
+          7
         ))
         var dynCall_vjjjji = (Module2["dynCall_vjjjji"] = createExportWrapper(
           "dynCall_vjjjji",
-          6,
+          6
         ))
         var dynCall_ijjiijj = (Module2["dynCall_ijjiijj"] = createExportWrapper(
           "dynCall_ijjiijj",
-          7,
+          7
         ))
         var dynCall_vjii = (Module2["dynCall_vjii"] = createExportWrapper(
           "dynCall_vjii",
-          4,
+          4
         ))
         var dynCall_ijjiijjjjjj = (Module2["dynCall_ijjiijjjjjj"] =
           createExportWrapper("dynCall_ijjiijjjjjj", 11))
         var dynCall_jjjjij = (Module2["dynCall_jjjjij"] = createExportWrapper(
           "dynCall_jjjjij",
-          6,
+          6
         ))
         var dynCall_ijjjjji = (Module2["dynCall_ijjjjji"] = createExportWrapper(
           "dynCall_ijjjjji",
-          7,
+          7
         ))
         var dynCall_jjjji = (Module2["dynCall_jjjji"] = createExportWrapper(
           "dynCall_jjjji",
-          5,
+          5
         ))
         var dynCall_dd = (Module2["dynCall_dd"] = createExportWrapper(
           "dynCall_dd",
-          2,
+          2
         ))
         var dynCall_ddd = (Module2["dynCall_ddd"] = createExportWrapper(
           "dynCall_ddd",
-          3,
+          3
         ))
         var dynCall_jiii = (Module2["dynCall_jiii"] = createExportWrapper(
           "dynCall_jiii",
-          4,
+          4
         ))
         var dynCall_jjii = (Module2["dynCall_jjii"] = createExportWrapper(
           "dynCall_jjii",
-          4,
+          4
         ))
         var dynCall_ijiijj = (Module2["dynCall_ijiijj"] = createExportWrapper(
           "dynCall_ijiijj",
-          6,
+          6
         ))
         var dynCall_ijjijij = (Module2["dynCall_ijjijij"] = createExportWrapper(
           "dynCall_ijjijij",
-          7,
+          7
         ))
         var dynCall_jjji = (Module2["dynCall_jjji"] = createExportWrapper(
           "dynCall_jjji",
-          4,
+          4
         ))
         var dynCall_ijdiiii = (Module2["dynCall_ijdiiii"] = createExportWrapper(
           "dynCall_ijdiiii",
-          7,
+          7
         ))
         var dynCall_vjjjii = (Module2["dynCall_vjjjii"] = createExportWrapper(
           "dynCall_vjjjii",
-          6,
+          6
         ))
         var dynCall_ijjjjjjjj = (Module2["dynCall_ijjjjjjjj"] =
           createExportWrapper("dynCall_ijjjjjjjj", 9))
         var dynCall_jjjjjjj = (Module2["dynCall_jjjjjjj"] = createExportWrapper(
           "dynCall_jjjjjjj",
-          7,
+          7
         ))
         var dynCall_jjjjii = (Module2["dynCall_jjjjii"] = createExportWrapper(
           "dynCall_jjjjii",
-          6,
+          6
         ))
         var dynCall_jjjjid = (Module2["dynCall_jjjjid"] = createExportWrapper(
           "dynCall_jjjjid",
-          6,
+          6
         ))
         var dynCall_jjjjijj = (Module2["dynCall_jjjjijj"] = createExportWrapper(
           "dynCall_jjjjijj",
-          7,
+          7
         ))
         var dynCall_jjjjjjjii = (Module2["dynCall_jjjjjjjii"] =
           createExportWrapper("dynCall_jjjjjjjii", 9))
@@ -25446,41 +25446,41 @@ var require_wasm64_emscripten = __commonJS({
           createExportWrapper("dynCall_jjjijijj", 8))
         var dynCall_jjjijij = (Module2["dynCall_jjjijij"] = createExportWrapper(
           "dynCall_jjjijij",
-          7,
+          7
         ))
         var dynCall_vjjjiij = (Module2["dynCall_vjjjiij"] = createExportWrapper(
           "dynCall_vjjjiij",
-          7,
+          7
         ))
         var dynCall_vjjjjii = (Module2["dynCall_vjjjjii"] = createExportWrapper(
           "dynCall_vjjjjii",
-          7,
+          7
         ))
         var dynCall_ifj = (Module2["dynCall_ifj"] = createExportWrapper(
           "dynCall_ifj",
-          3,
+          3
         ))
         var dynCall_vijjjjjji = (Module2["dynCall_vijjjjjji"] =
           createExportWrapper("dynCall_vijjjjjji", 9))
         var dynCall_vjjjjj = (Module2["dynCall_vjjjjj"] = createExportWrapper(
           "dynCall_vjjjjj",
-          6,
+          6
         ))
         var _asyncify_start_unwind = createExportWrapper(
           "asyncify_start_unwind",
-          1,
+          1
         )
         var _asyncify_stop_unwind = createExportWrapper(
           "asyncify_stop_unwind",
-          0,
+          0
         )
         var _asyncify_start_rewind = createExportWrapper(
           "asyncify_start_rewind",
-          1,
+          1
         )
         var _asyncify_stop_rewind = createExportWrapper(
           "asyncify_stop_rewind",
-          0,
+          0
         )
         var ___start_em_js = (Module2["___start_em_js"] = 543408)
         var ___stop_em_js = (Module2["___stop_em_js"] = 543834)
@@ -25525,33 +25525,33 @@ var require_wasm64_emscripten = __commonJS({
           wasmExports2["free"] = makeWrapper__p(wasmExports2["free"])
           wasmExports2["fflush"] = makeWrapper__p(wasmExports2["fflush"])
           wasmExports2["emscripten_builtin_memalign"] = makeWrapper_ppp(
-            wasmExports2["emscripten_builtin_memalign"],
+            wasmExports2["emscripten_builtin_memalign"]
           )
           wasmExports2["sbrk"] = makeWrapper_pP(wasmExports2["sbrk"])
           wasmExports2["setThrew"] = makeWrapper__p(wasmExports2["setThrew"])
           wasmExports2["emscripten_stack_get_base"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_base"],
+            wasmExports2["emscripten_stack_get_base"]
           )
           wasmExports2["emscripten_stack_get_end"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_end"],
+            wasmExports2["emscripten_stack_get_end"]
           )
           wasmExports2["_emscripten_stack_restore"] = makeWrapper__p(
-            wasmExports2["_emscripten_stack_restore"],
+            wasmExports2["_emscripten_stack_restore"]
           )
           wasmExports2["_emscripten_stack_alloc"] = makeWrapper_pp(
-            wasmExports2["_emscripten_stack_alloc"],
+            wasmExports2["_emscripten_stack_alloc"]
           )
           wasmExports2["emscripten_stack_get_current"] = makeWrapper_p(
-            wasmExports2["emscripten_stack_get_current"],
+            wasmExports2["emscripten_stack_get_current"]
           )
           wasmExports2["__cxa_is_pointer_type"] = makeWrapper__p(
-            wasmExports2["__cxa_is_pointer_type"],
+            wasmExports2["__cxa_is_pointer_type"]
           )
           wasmExports2["asyncify_start_unwind"] = makeWrapper__p(
-            wasmExports2["asyncify_start_unwind"],
+            wasmExports2["asyncify_start_unwind"]
           )
           wasmExports2["asyncify_start_rewind"] = makeWrapper__p(
-            wasmExports2["asyncify_start_rewind"],
+            wasmExports2["asyncify_start_rewind"]
           )
           return wasmExports2
         }
@@ -25564,7 +25564,7 @@ var require_wasm64_emscripten = __commonJS({
         function deterministicNow() {
           return TIME++
         }
-        Date.now = deterministicNow
+        datenow = deterministicNow
         Module2["thisProgram"] = "thisProgram"
         Module2["addRunDependency"] = addRunDependency
         Module2["removeRunDependency"] = removeRunDependency
@@ -25879,7 +25879,7 @@ var require_wasm64_emscripten = __commonJS({
               Module2["onRuntimeInitialized"]()
             assert(
               !Module2["_main"],
-              'compiled without a main, but one is present. if you added it from JS, use Module["onRuntimeInitialized"]',
+              'compiled without a main, but one is present. if you added it from JS, use Module["onRuntimeInitialized"]'
             )
             postRun()
           }
@@ -25920,7 +25920,7 @@ var require_wasm64_emscripten = __commonJS({
           err = oldErr
           if (has) {
             warnOnce(
-              "stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the Emscripten FAQ), or make sure to emit a newline when you printf etc.",
+              "stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the Emscripten FAQ), or make sure to emit a newline when you printf etc."
             )
           }
         }
@@ -25940,7 +25940,7 @@ var require_wasm64_emscripten = __commonJS({
               configurable: true,
               get() {
                 abort(
-                  `Access to module property ('${prop}') is no longer possible via the module constructor argument; Instead, use the result of the module constructor.`,
+                  `Access to module property ('${prop}') is no longer possible via the module constructor argument; Instead, use the result of the module constructor.`
                 )
               },
             })
@@ -26385,7 +26385,7 @@ var require_bn = __commonJS({
       BN.prototype.toArrayLike = function toArrayLike(
         ArrayType,
         endian,
-        length,
+        length
       ) {
         var byteLength = this.byteLength()
         var reqLength = length || Math.max(1, byteLength)
@@ -27414,7 +27414,7 @@ var require_bn = __commonJS({
         rtws,
         itws,
         N,
-        rbt,
+        rbt
       ) {
         this.permute(rbt, rws, iws, rtws, itws, N)
         for (var s = 1; s < N; s <<= 1) {
@@ -28386,7 +28386,7 @@ var require_bn = __commonJS({
         MPrime.call(
           this,
           "k256",
-          "ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff fffffffe fffffc2f",
+          "ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff fffffffe fffffc2f"
         )
       }
       inherits(K256, MPrime)
@@ -28440,7 +28440,7 @@ var require_bn = __commonJS({
         MPrime.call(
           this,
           "p224",
-          "ffffffff ffffffff ffffffff ffffffff 00000000 00000000 00000001",
+          "ffffffff ffffffff ffffffff ffffffff 00000000 00000000 00000001"
         )
       }
       inherits(P224, MPrime)
@@ -28448,7 +28448,7 @@ var require_bn = __commonJS({
         MPrime.call(
           this,
           "p192",
-          "ffffffff ffffffff ffffffff fffffffe ffffffff ffffffff",
+          "ffffffff ffffffff ffffffff fffffffe ffffffff ffffffff"
         )
       }
       inherits(P192, MPrime)
@@ -28456,7 +28456,7 @@ var require_bn = __commonJS({
         MPrime.call(
           this,
           "25519",
-          "7fffffffffffffff ffffffffffffffff ffffffffffffffff ffffffffffffffed",
+          "7fffffffffffffff ffffffffffffffff ffffffffffffffff ffffffffffffffed"
         )
       }
       inherits(P25519, MPrime)
@@ -29030,7 +29030,7 @@ var require_buffer_pipe2 = __commonJS({
 var require_immediates = __commonJS({
   "node_modules/@permaweb/wasm-json-toolkit/immediates.json"(
     exports2,
-    module2,
+    module2
   ) {
     module2.exports = {
       block: "block_type",
@@ -30232,7 +30232,7 @@ var require_iterator = __commonJS({
             Buffer2.from([this._type]),
             leb128.encode(bodyAndCount.length),
             bodyAndCount,
-          ]),
+          ])
         )
       }
     }
@@ -30253,7 +30253,7 @@ var require_wasm_json_toolkit = __commonJS({
 var require_defaultCostTable = __commonJS({
   "node_modules/@permaweb/wasm-metering/defaultCostTable.json"(
     exports2,
-    module2,
+    module2
   ) {
     module2.exports = {
       start: 0,
@@ -30372,7 +30372,7 @@ var require_wasm_metering = __commonJS({
     function meterCodeEntry(entry, costTable, meterFuncIndex, meterType, cost) {
       function meteringStatement(cost2, meteringImportIndex) {
         return text2json(
-          `${meterType}.const ${cost2} call ${meteringImportIndex}`,
+          `${meterType}.const ${cost2} call ${meteringImportIndex}`
         )
       }
       function remapOp(op, funcIndex) {
@@ -30384,7 +30384,7 @@ var require_wasm_metering = __commonJS({
         const code2 = meteringStatement(0, 0)
         return code2.reduce(
           (sum, op) => sum + getCost(op.name, costTable.code),
-          0,
+          0
         )
       }
       const branchingOps = /* @__PURE__ */ new Set([
@@ -30415,7 +30415,7 @@ var require_wasm_metering = __commonJS({
         if (cost !== 0) {
           cost += meteringOverHead
           meteredCode = meteredCode.concat(
-            meteringStatement(cost, meterFuncIndex),
+            meteringStatement(cost, meterFuncIndex)
           )
         }
         meteredCode = meteredCode.concat(code.slice(0, i))
@@ -30498,7 +30498,7 @@ var require_wasm_metering = __commonJS({
           case "element":
             for (const entry of section.entries) {
               entry.elements = entry.elements.map(el =>
-                el >= funcIndex ? ++el : el,
+                el >= funcIndex ? ++el : el
               )
             }
             break
