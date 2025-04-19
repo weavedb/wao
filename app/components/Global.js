@@ -223,12 +223,60 @@ export default function Global({}) {
     if (block) block = clone(block)
     return { proc, msg, tags: _tags, t, tx, block }
   }
+  g.getAccount = id => {
+    if (g.ao.mem.wasms[id]) {
+      g.getModule(id)
+    } else if (g.ao.mem.env[id]) {
+      g.getProcess(id)
+    } else if (!g.ao.mem.msgs[id] && !g.ao.mem.txs[id]) {
+      let a = {
+        type: "Account",
+        id,
+        outgoing: [],
+        incoming: [],
+        tokens: [{ ticker: "AO", balance: "0" }],
+        spawn: [],
+      }
+      let mmap = {}
+      for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
 
+      for (let k in g.ao.mem.env) {
+        const pr = g.ao.mem.env[k]
+        let { proc, msg, tags, t, tx, block } = g.msg(k)
+        if (pr.owner === id) {
+          a.spawn.push({
+            name: t.Name,
+            id: k,
+            module: mmap[pr.module],
+            incoming: proc?.results.length,
+            timestamp: block?.timestamp,
+          })
+        }
+      }
+      for (let k in g.ao.mem.msgs) {
+        const msg = g.ao.mem.msgs[k]
+        if (msg?.msg?.From === id) {
+          let { proc, msg, tags, t, tx, block } = g.msg(k)
+          a.outgoing.push({
+            id: k,
+            act: t.Action,
+            from: msg?.msg?.From,
+            to: msg?.msg?.Target,
+          })
+        }
+      }
+      console.log(a)
+      setEntity(a)
+      setTab("Entity")
+    } else {
+      console.log("tx or msg", id)
+    }
+  }
   g.getMessage = id => {
     let { proc, msg, tags, t, tx, block } = g.msg(id)
     let m = {
-      from: msg.msg.From,
-      to: msg.msg.Target,
+      from: msg?.msg?.From,
+      to: msg?.msg?.Target,
       ...msg,
       name: t.Name ?? null,
       tags,
@@ -261,7 +309,7 @@ export default function Global({}) {
         slot: i,
         id: v,
         timestamp: block?.timestamp ?? 0,
-        act: (i === 0 ? "Spawn" : t.Action) ?? null,
+        act: t.Action,
       })
       i++
     }
@@ -365,7 +413,7 @@ export default function Global({}) {
           to: msg?.msg?.Target,
           id: m,
           timestamp: block?.timestamp ?? 0,
-          act: i === 0 ? "Spawn" : t.Action,
+          act: t.Action,
         })
         i++
       }

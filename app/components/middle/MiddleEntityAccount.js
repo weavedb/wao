@@ -3,12 +3,12 @@ import { map, clone } from "ramda"
 import g from "/lib/global"
 import use from "/lib/use"
 import { useState } from "react"
-import { fromNow } from "/lib/utils"
+import { short, fromNow } from "/lib/utils"
 
 export default function MiddleEntityProcess() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
-  const subtabs = ["Metadata", "Incoming"]
+  const subtabs = ["Metadata", "Outgoing", "Processes"]
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -57,9 +57,6 @@ export default function MiddleEntityProcess() {
   let meta = []
   if (entity) {
     meta.push({ name: "ID", value: entity.id })
-    meta.push({ name: "Module", value: entity.module, link: true })
-    meta.push({ name: "Owner", value: entity.owner, link: true })
-    meta.push({ name: "Timestamp", value: fromNow(entity.timestamp) })
   }
   return (
     <Box w="100%" h="100%">
@@ -73,17 +70,7 @@ export default function MiddleEntityProcess() {
                   <Box fontWeight="bold" color="#5137c5" fontSize="12px" mb={1}>
                     {v.name}
                   </Box>
-                  <Box
-                    css={{
-                      cursor: v.link ? "pointer" : "default",
-                      _hover: { opacity: v.link ? 0.75 : 1 },
-                    }}
-                    onClick={() => {
-                      if (v.link) g.getAccount(v.value)
-                    }}
-                  >
-                    {v.value}
-                  </Box>
+                  <Box>{v.value}</Box>
                 </Flex>
               )
             })(meta)}
@@ -96,7 +83,7 @@ export default function MiddleEntityProcess() {
             h="calc(100vh - 120px)"
           >
             <Flex mb={2} fontWeight="bold" color="#5137C5" fontSize="14px">
-              Tags
+              Tokens
             </Flex>
             {map(v => (
               <Flex my={2} align="center">
@@ -108,24 +95,27 @@ export default function MiddleEntityProcess() {
                   mr={4}
                   css={{ borderRadius: "3px" }}
                 >
-                  {v.name}
+                  {v.ticker}
                 </Box>
-                <Box>{v.value}</Box>
+                <Box>{v.balance}</Box>
               </Flex>
-            ))(entity.tags)}
+            ))(entity?.tokens || [])}
           </Box>
         </Flex>
-      ) : subtab === "Incoming" ? (
+      ) : subtab === "Outgoing" ? (
         <>
           <Flex h="30px" bg="#eee" align="center" fontSize="10px">
-            <Box px={3} fontSize="10px" w="80px">
-              Slot
-            </Box>
             <Box px={3} fontSize="10px" w="120px">
               Action
             </Box>
             <Box px={3} fontSize="10px" w="300px">
-              TxID
+              ID
+            </Box>
+            <Box px={3} fontSize="10px" w="150px">
+              From
+            </Box>
+            <Box px={3} fontSize="10px" w="150px">
+              To
             </Box>
             <Box px={3} fontSize="10px" flex={1}>
               Timestamp
@@ -145,20 +135,76 @@ export default function MiddleEntityProcess() {
               className="group"
               onClick={() => g.getMessage(v.id)}
             >
-              <Box px={3} fontSize="10px" w="80px">
-                {v.slot}
-              </Box>
               <Box px={3} fontSize="10px" w="120px">
                 {v.act}
               </Box>
               <Box px={3} fontSize="10px" w="300px">
                 {v.id}
               </Box>
+              <Box px={3} fontSize="10px" w="150px">
+                {short(v.from)}
+              </Box>
+              <Box px={3} fontSize="10px" w="150px">
+                {short(v.to)}
+              </Box>
+
               <Box px={3} fontSize="10px" flex={1}>
                 {fromNow(v.timestamp)}
               </Box>
             </Flex>
-          ))(entity.incoming || [])}
+          ))(entity.outgoing || [])}
+        </>
+      ) : subtab === "Processes" ? (
+        <>
+          <Flex h="30px" bg="#eee" align="center" fontSize="10px">
+            <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+              Name
+            </Box>
+            <Box px={3} fontSize="10px" w="300px">
+              ID
+            </Box>
+            <Box px={3} fontSize="10px" w="120px">
+              Module
+            </Box>
+            <Box px={3} fontSize="10px" w="80px">
+              Messages
+            </Box>
+            <Box px={3} fontSize="10px" flex={1}>
+              Timestamp
+            </Box>
+          </Flex>
+          {map(v => (
+            <Flex
+              fontSize="10px"
+              h="30px"
+              align="center"
+              css={{
+                borderBottom: "1px solid #ddd",
+                cursor: "pointer",
+                _hover: { color: "#ddd", bg: "#5137C5" },
+              }}
+              className="group"
+              onClick={() => {
+                g.getProcess(v.id)
+              }}
+            >
+              <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+                {v.name}
+              </Box>
+              <Box px={3} fontSize="10px" w="300px">
+                {v.id}
+              </Box>
+              <Box px={3} fontSize="10px" w="120px">
+                {v.module}
+              </Box>
+              <Box px={3} fontSize="10px" w="80px">
+                {v.incoming}
+              </Box>
+              <Box px={3} fontSize="10px" flex={1}>
+                {fromNow(v.timestamp)}
+              </Box>
+            </Flex>
+          ))(entity.spawn || [])}
         </>
       ) : null}
     </Box>
