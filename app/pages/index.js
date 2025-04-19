@@ -41,7 +41,12 @@ export default function Home({}) {
           <Flex w="60px" h="calc(100vh - 60px)">
             <Sidebar />
           </Flex>
-          {includes(tab, ["Modules", "Processes", "Entity"]) ? null : (
+          {includes(tab, [
+            "Modules",
+            "Processes",
+            "Messages",
+            "Entity",
+          ]) ? null : (
             <Flex w="315px" h="calc(100vh - 60px)">
               <Left />
             </Flex>
@@ -57,6 +62,7 @@ export default function Home({}) {
                 "Projects",
                 "Modules",
                 "Processes",
+                "Messages",
                 "Entity",
               ]) ? (
                 <>

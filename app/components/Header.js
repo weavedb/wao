@@ -18,7 +18,7 @@ export default function Header() {
   const [message, setMessage] = use("message")
   const [messages, setMessages] = use("messages")
   const [wallet, setWallet] = use("wallet")
-  const modmap = indexBy(prop("txid"))(modules ?? [])
+  const modmap = indexBy(prop("id"))(modules ?? [])
   const [search, setSearch] = useState("")
   const [modal, setModal] = useState(false)
   const [results, setResults] = useState(null)
