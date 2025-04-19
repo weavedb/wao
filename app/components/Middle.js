@@ -7,6 +7,7 @@ import MiddleProcesses from "/components/middle/MiddleProcesses"
 import MiddleMessages from "/components/middle/MiddleMessages"
 import MiddleNetworks from "/components/middle/MiddleNetworks"
 import MiddleEntity from "/components/middle/MiddleEntity"
+import MiddleBlocks from "/components/middle/MiddleBlocks"
 
 export default function Middle() {
   const [tab, setTab] = use("tab")
@@ -26,6 +27,8 @@ export default function Middle() {
         return <MiddleMessages />
       case "Networks":
         return <MiddleNetworks />
+      case "Blocks":
+        return <MiddleBlocks />
       case "Entity":
         return <MiddleEntity />
     }

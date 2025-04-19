@@ -26,6 +26,7 @@ export default store({
   test: null,
   tests: [],
   modules: [],
+  blocks: [],
   procs: [],
   module: null,
   messages: [],
