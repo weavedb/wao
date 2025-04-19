@@ -128,7 +128,11 @@ const filterProjects = filter(v => v.id !== "2")
 const short = (addr, len = 8) => {
   return !addr ? "" : addr.slice(0, len) + "..." + addr.slice(-len)
 }
+const fromNow = ts => {
+  return dayjs(ts).fromNow()
+}
 export {
+  fromNow,
   short,
   filterProjects,
   filterFiles,
