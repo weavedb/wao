@@ -309,6 +309,7 @@ export default function Global({}) {
       }
     }
   }
+
   g.getMessage = id => {
     let { proc, msg, tags, t, tx, block } = g.msg(id)
     let m = {
