@@ -4,10 +4,10 @@ import g from "/lib/global"
 import use from "/lib/use"
 import { useState } from "react"
 
-export default function MiddleEntityProcess() {
+export default function MiddleEntityMessage() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
-  const subtabs = ["Metadata", "Incoming"]
+  const subtabs = ["Metadata"]
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -56,7 +56,7 @@ export default function MiddleEntityProcess() {
   let meta = []
   if (entity) {
     meta.push({ name: "ID", value: entity.id })
-    meta.push({ name: "Module", value: entity.module })
+    meta.push({ name: "Process", value: entity.process })
     meta.push({ name: "Timestamp", value: entity.timestamp })
   }
   return (
@@ -100,53 +100,45 @@ export default function MiddleEntityProcess() {
                 <Box>{v.value}</Box>
               </Flex>
             ))(entity.tags)}
+            <Flex mt={4} fontWeight="bold" mb={2} color="#5137C5">
+              Data
+            </Flex>
+            <code>
+              <Box
+                as="pre"
+                bg="#eee"
+                p={4}
+                css={{
+                  borderRadius: "3px",
+                  wordBreak: "break-word",
+                  whiteSpace: "pre-wrap",
+                  overflow: "auto",
+                }}
+              >
+                {entity.data}
+              </Box>
+            </code>
+
+            <Flex mt={4} mb={2} fontWeight="bold" color="#5137C5">
+              Result
+            </Flex>
+            <code>
+              <Box
+                as="pre"
+                bg="#eee"
+                p={4}
+                css={{
+                  borderRadius: "3px",
+                  wordBreak: "break-word",
+                  whiteSpace: "pre-wrap",
+                  overflow: "auto",
+                }}
+              >
+                {!entity.res ? "" : JSON.stringify(entity.res, undefined, 2)}
+              </Box>
+            </code>
           </Box>
         </Flex>
-      ) : subtab === "Incoming" ? (
-        <>
-          <Flex h="30px" bg="#eee" align="center" fontSize="10px">
-            <Box px={3} fontSize="10px" w="80px">
-              Slot
-            </Box>
-            <Box px={3} fontSize="10px" w="120px">
-              Action
-            </Box>
-            <Box px={3} fontSize="10px" w="300px">
-              TxID
-            </Box>
-            <Box px={3} fontSize="10px" flex={1}>
-              Timestamp
-            </Box>
-          </Flex>
-
-          {map(v => (
-            <Flex
-              fontSize="10px"
-              h="30px"
-              align="center"
-              css={{
-                borderBottom: "1px solid #ddd",
-                cursor: "pointer",
-                _hover: { color: "#ddd", bg: "#5137C5" },
-              }}
-              className="group"
-              onClick={() => g.getMessage(v.id)}
-            >
-              <Box px={3} fontSize="10px" w="80px">
-                {v.slot}
-              </Box>
-              <Box px={3} fontSize="10px" w="120px">
-                {v.act}
-              </Box>
-              <Box px={3} fontSize="10px" w="300px">
-                {v.id}
-              </Box>
-              <Box px={3} fontSize="10px" flex={1}>
-                {v.timestamp}
-              </Box>
-            </Flex>
-          ))(entity.incoming || [])}
-        </>
       ) : null}
     </Box>
   )

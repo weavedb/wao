@@ -61,14 +61,14 @@ export default function Middle() {
           }}
           className="group"
           onClick={() => {
-            g.getModule(v.txid)
+            g.getModule(v.id)
           }}
         >
           <Box px={3} w="120px" _groupHover={{ color: "white" }}>
             {v.name ?? v.module}
           </Box>
           <Box px={3} fontSize="10px" w="300px">
-            {v.txid}
+            {v.id}
           </Box>
           <Box px={3} fontSize="10px" w="270px">
             {v.format}
