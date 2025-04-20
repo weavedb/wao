@@ -331,6 +331,7 @@ export default function Global({}) {
       g.getAssignment(id)
     }
   }
+
   g.refmap = () => {
     let refs = {}
     let xrefs = {}
@@ -349,6 +350,7 @@ export default function Global({}) {
     }
     return { refs, xrefs }
   }
+
   g.getMessage = id => {
     let { proc, msg, tags: _tags, t, tx, block } = g.msg(id)
     let m = {
@@ -364,37 +366,77 @@ export default function Global({}) {
       linked: [],
     }
     const r = g.refmap()
-    const getM = v => {
-      const t2 = tags(v.Tags)
-      const id = r.refs[m.process]?.[t2.Reference]?.id
-      if (id) {
-        let { t, msg, block } = g.msg(id)
-        return {
-          type: t.Type,
-          from: msg.from,
-          to: msg?.msg?.Target ?? msg.target,
-          id,
-          timestamp: block?.timestamp ?? 0,
-          act: t.Action,
-        }
+    const _getM = id => {
+      let { t, msg, block } = g.msg(id)
+      console.log("getting:", id, msg)
+      return {
+        type: t.Type,
+        from: msg?.msg?.From ?? msg.from,
+        to: msg?.msg?.Target ?? msg.target,
+        id,
+        timestamp: block?.timestamp ?? 0,
+        act: t.Action,
+        res: msg.res,
       }
+    }
+    const getM = (v, pr) => {
+      const t2 = tags(v.Tags)
+      const id = r.refs[pr]?.[t2.Reference]?.id
+      if (id) return _getM(id)
       return null
     }
     if (m.res) {
       if (t.Type === "Process") m.process = id
       for (let v of m.res.Messages || []) {
-        const m2 = getM(v)
+        const m2 = getM(v, m.process)
         if (m2) m.resulted.unshift(m2)
       }
       for (let v of m.res.Assignments || []) {
-        const m2 = getM(v)
+        const m2 = getM(v, m.process)
         if (m2) m.resulted.unshift(m2)
       }
       for (let v of m.res.Spawns || []) {
-        const m2 = getM(v)
+        const m2 = getM(v, m.process)
         if (m2) m.resulted.unshift(m2)
       }
     }
+
+    const getLinked = (_m, depth) => {
+      if (depth > 4) return
+      if (_m.res) {
+        if (t.Type === "Process") _m.process = id
+        for (let v of _m.res.Messages || []) {
+          const m2 = getM(v, _m.process ?? _m.to)
+          m2.depth = depth
+          if (m2) m.linked.push(m2)
+          getLinked(m2, depth + 1)
+        }
+        for (let v of _m.res.Assignments || []) {
+          const m2 = getM(v, _m.process ?? _m.to)
+          m2.depth = depth
+          if (m2) m.linkedu.push(m2)
+        }
+        for (let v of _m.res.Spawns || []) {
+          const m2 = getM(v, _m.process ?? _m.to)
+          m2.depth = depth
+          if (m2) m.linked.push(m2)
+          getLinked(m2, depth + 1)
+        }
+      }
+    }
+    let depth = 0
+    if (t.Reference) {
+      const from = t["From-Process"]
+      const mid = t["Pushed-For"]
+      let m2 = _getM(mid)
+      m2.depth = 0
+      depth = 1
+      m.linked.push(m2)
+    }
+    let m2 = _getM(id)
+    m2.depth = depth
+    m.linked.push(m2)
+    getLinked(m2, depth + 1)
     setEntity(m)
     setTab("Entity")
   }
