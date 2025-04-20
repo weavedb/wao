@@ -10,8 +10,7 @@ export default function MiddleEntityProcess() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
   const [terminal, setTerminal] = use("terminal")
-
-  const subtabs = ["Metadata", "Incoming", "Outgoing"]
+  const subtabs = ["Metadata", "Incoming", "Outgoing", "Spawn"]
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -211,6 +210,63 @@ export default function MiddleEntityProcess() {
               </Box>
             </Flex>
           ))(entity.incoming || [])}
+        </>
+      ) : subtab === "Spawn" ? (
+        <>
+          <Flex h="30px" bg="#eee" align="center">
+            <Box
+              px={3}
+              w="120px"
+              _groupHover={{ color: "white" }}
+              fontSize="10px"
+            >
+              Name
+            </Box>
+            <Box px={3} fontSize="10px" w="300px">
+              ID
+            </Box>
+            <Box px={3} fontSize="10px" w="120px">
+              Module
+            </Box>
+            <Box px={3} fontSize="10px" w="80px">
+              Messages
+            </Box>
+            <Box px={3} fontSize="10px" flex={1}>
+              Timestamp
+            </Box>
+          </Flex>
+          {map(v => (
+            <Flex
+              fontSize="10px"
+              h="30px"
+              align="center"
+              css={{
+                borderBottom: "1px solid #ddd",
+                cursor: "pointer",
+                _hover: { color: "#ddd", bg: "#5137C5" },
+              }}
+              className="group"
+              onClick={() => {
+                g.getProcess(v.id)
+              }}
+            >
+              <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+                {v.name}
+              </Box>
+              <Box px={3} fontSize="10px" w="300px">
+                {v.id}
+              </Box>
+              <Box px={3} fontSize="10px" w="120px">
+                {v.module}
+              </Box>
+              <Box px={3} fontSize="10px" w="80px">
+                {v.incoming}
+              </Box>
+              <Box px={3} fontSize="10px" flex={1}>
+                {fromNow(v.timestamp)}
+              </Box>
+            </Flex>
+          ))(entity.spawn || [])}
         </>
       ) : subtab === "Outgoing" ? (
         <>
