@@ -231,90 +231,102 @@ export default function Global({}) {
     return { proc, msg, tags: _tags, t, tx, block }
   }
 
+  g.getEOS = id => {
+    let a = {
+      type: "Account",
+      id,
+      outgoing: [],
+      incoming: [],
+      tokens: [{ ticker: "AO", balance: "0" }],
+      spawn: [],
+    }
+    let mmap = {}
+    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
+
+    for (let k in g.ao.mem.env) {
+      const pr = g.ao.mem.env[k]
+      let { proc, msg, tags, t, tx, block } = g.msg(k)
+      if (pr.owner === id) {
+        a.spawn.push({
+          name: t.Name,
+          id: k,
+          module: mmap[pr.module],
+          incoming: proc?.results.length,
+          timestamp: block?.timestamp,
+        })
+      }
+    }
+    for (let k in g.ao.mem.msgs) {
+      const msg = g.ao.mem.msgs[k]
+      if (msg?.msg?.From === id) {
+        let { proc, msg, tags, t, tx, block } = g.msg(k)
+        a.outgoing.push({
+          id: k,
+          act: t.Action,
+          from: msg?.msg?.From,
+          to: msg?.msg?.Target ?? msg.target,
+        })
+      } else if (msg?.msg?.Target === id || msg.target === id) {
+        let { proc, msg, tags, t, tx, block } = g.msg(k)
+        a.incoming.push({
+          id: k,
+          act: t.Action,
+          from: msg?.msg?.From,
+          to: msg?.msg?.Target ?? msg.target,
+        })
+      }
+    }
+    setEntity(a)
+    setTab("Entity")
+  }
+
+  g.getAssignment = id => {
+    try {
+      if (g.ao.mem.txs[id].bundle) {
+        const tx = g.ao.mem.txs[g.ao.mem.txs[id].bundle]
+        const items = new Bundle(tx.data).items
+        for (let v of items) {
+          if (v.id === id) {
+            const t = tags(v.tags)
+            const addr = toAddr(v.owner)
+            const block = g.ao.mem.blockmap[tx.block]
+            const a = {
+              id,
+              tags: v.tags,
+              target: v.target,
+              from: addr,
+              timestamp: block.timestamp,
+              type: "Assignment",
+            }
+            setEntity(a)
+            setTab("Entity")
+            break
+          }
+        }
+      }
+    } catch (e) {
+      console.log(e)
+    }
+  }
+
+  g.getTx = id => {
+    setEntity({ ...g.ao.mem.txs[id], type: "Tx" })
+    setTab("Entity")
+  }
+
   g.getAccount = id => {
     if (g.ao.mem.wasms[id]) {
       g.getModule(id)
     } else if (g.ao.mem.env[id]) {
       g.getProcess(id)
     } else if (!g.ao.mem.msgs[id] && !g.ao.mem.txs[id]) {
-      let a = {
-        type: "Account",
-        id,
-        outgoing: [],
-        incoming: [],
-        tokens: [{ ticker: "AO", balance: "0" }],
-        spawn: [],
-      }
-      let mmap = {}
-      for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
-
-      for (let k in g.ao.mem.env) {
-        const pr = g.ao.mem.env[k]
-        let { proc, msg, tags, t, tx, block } = g.msg(k)
-        if (pr.owner === id) {
-          a.spawn.push({
-            name: t.Name,
-            id: k,
-            module: mmap[pr.module],
-            incoming: proc?.results.length,
-            timestamp: block?.timestamp,
-          })
-        }
-      }
-      for (let k in g.ao.mem.msgs) {
-        const msg = g.ao.mem.msgs[k]
-        if (msg?.msg?.From === id) {
-          let { proc, msg, tags, t, tx, block } = g.msg(k)
-          a.outgoing.push({
-            id: k,
-            act: t.Action,
-            from: msg?.msg?.From,
-            to: msg?.msg?.Target ?? msg.target,
-          })
-        } else if (msg?.msg?.Target === id || msg.target === id) {
-          let { proc, msg, tags, t, tx, block } = g.msg(k)
-          a.incoming.push({
-            id: k,
-            act: t.Action,
-            from: msg?.msg?.From,
-            to: msg?.msg?.Target ?? msg.target,
-          })
-        }
-      }
-      setEntity(a)
-      setTab("Entity")
+      g.getEOS(id)
     } else if (g.ao.mem.msgs[id]) {
       g.getMessage(id)
     } else if (g.ao.mem.txs[id] && !g.ao.mem.txs[id].bundle) {
-      setEntity({ ...g.ao.mem.txs[id], type: "Tx" })
-      setTab("Entity")
+      g.getTx(id)
     } else {
-      try {
-        if (g.ao.mem.txs[id].bundle) {
-          const tx = g.ao.mem.txs[g.ao.mem.txs[id].bundle]
-          const items = new Bundle(tx.data).items
-          for (let v of items) {
-            if (v.id === id) {
-              const t = tags(v.tags)
-              const addr = toAddr(v.owner)
-              const block = g.ao.mem.blockmap[tx.block]
-              const a = {
-                id,
-                tags: v.tags,
-                target: v.target,
-                from: addr,
-                timestamp: block.timestamp,
-                type: "Assignment",
-              }
-              setEntity(a)
-              setTab("Entity")
-              break
-            }
-          }
-        }
-      } catch (e) {
-        console.log(e)
-      }
+      g.getAssignment(id)
     }
   }
 
@@ -337,16 +349,17 @@ export default function Global({}) {
   }
 
   g.getProcess = id => {
-    let { proc, msg, tags, t, tx, block } = g.msg(id)
+    let { proc, msg, tags: _tags, t, tx, block } = g.msg(id)
     const p = {
       ...proc,
       name: t.Name ?? null,
-      tags,
+      tags: _tags,
       id,
       type: "Process",
       timestamp: block?.timestamp ?? null,
       incoming: [],
       outgoing: [],
+      spawn: [],
     }
     let i = 0
     for (let v of proc.results) {
@@ -356,8 +369,36 @@ export default function Global({}) {
         id: v,
         timestamp: block?.timestamp ?? 0,
         act: t.Action,
+        from: msg?.msg?.From,
+        to: msg?.msg?.Target ?? msg.target,
       })
       i++
+    }
+    for (let k in g.ao.mem.msgs) {
+      const m = g.ao.mem.msgs[k]
+      const t = tags(m.tags)
+
+      if (t["From-Process"] === id) {
+        if (t.Type === "Message") {
+          let { msg, tags, t, tx, block } = g.msg(k)
+          p.outgoing.push({
+            id: k,
+            timestamp: block?.timestamp ?? 0,
+            act: t.Action,
+            to: msg?.msg?.Target ?? msg.target,
+            from: msg?.msg?.From,
+          })
+        } else if (t.Type === "Process") {
+          let { msg, tags, t, tx, block } = g.msg(k)
+          p.spawn.push({
+            id: k,
+            timestamp: block?.timestamp ?? 0,
+            act: t.Action,
+            to: msg?.msg?.Target ?? msg.target,
+            from: msg?.msg?.From,
+          })
+        }
+      }
     }
     setEntity(p)
     setTab("Entity")
@@ -808,6 +849,7 @@ export default function Global({}) {
     if (!v.dir) continue
     dirmap[`${v.pid}${v.path}${v.id}/`] = v.open ?? false
   }
+
   const isShow = v => {
     if (!pmap[v.pid]) return false
     const path = `${v.pid}${v.path}`
@@ -826,6 +868,7 @@ export default function Global({}) {
     }
     return pmap[v.pid].open && ok
   }
+
   g.getFiles = () => {
     let dirs = []
     let dmap = {}
@@ -848,12 +891,14 @@ export default function Global({}) {
     }
     return pdirs
   }
+
   g.log = (desc, toast, opt = {}) => {
     let log = { desc, ...opt }
     log.date ??= Date.now()
     setLogs([...logs, log])
     if (toast) toaster.create(toast)
   }
+
   g.logSpawn = pid => {
     g.log(`Process Spawned: ${pid}`, {
       title: "Process Spawned!",
@@ -861,6 +906,7 @@ export default function Global({}) {
       description: pid.slice(0, 30) + "...",
     })
   }
+
   g.logMsg = mid => {
     g.log(`New Message: ${mid}`, {
       title: "New Message!",

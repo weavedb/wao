@@ -3,7 +3,7 @@ import { map, clone } from "ramda"
 import g from "/lib/global"
 import use from "/lib/use"
 import { useState } from "react"
-import { fromNow } from "/lib/utils"
+import { short, fromNow } from "/lib/utils"
 import Tags from "/components/Tags"
 
 export default function MiddleEntityProcess() {
@@ -11,7 +11,7 @@ export default function MiddleEntityProcess() {
   const [entity, setEntity] = use("entity")
   const [terminal, setTerminal] = use("terminal")
 
-  const subtabs = ["Metadata", "Incoming"]
+  const subtabs = ["Metadata", "Incoming", "Outgoing"]
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -173,6 +173,9 @@ export default function MiddleEntityProcess() {
             <Box px={3} fontSize="10px" w="300px">
               TxID
             </Box>
+            <Box px={3} fontSize="10px" w="150px">
+              From
+            </Box>
             <Box px={3} fontSize="10px" flex={1}>
               Timestamp
             </Box>
@@ -200,11 +203,60 @@ export default function MiddleEntityProcess() {
               <Box px={3} fontSize="10px" w="300px">
                 {v.id}
               </Box>
+              <Box px={3} fontSize="10px" w="150px">
+                {short(v.from)}
+              </Box>
               <Box px={3} fontSize="10px" flex={1}>
                 {fromNow(v.timestamp)}
               </Box>
             </Flex>
           ))(entity.incoming || [])}
+        </>
+      ) : subtab === "Outgoing" ? (
+        <>
+          <Flex h="30px" bg="#eee" align="center" fontSize="10px">
+            <Box px={3} fontSize="10px" w="120px">
+              Action
+            </Box>
+            <Box px={3} fontSize="10px" w="300px">
+              TxID
+            </Box>
+            <Box px={3} fontSize="10px" w="150px">
+              To
+            </Box>
+            <Box px={3} fontSize="10px" flex={1}>
+              Timestamp
+            </Box>
+          </Flex>
+
+          {map(v => (
+            <Flex
+              fontSize="10px"
+              h="30px"
+              align="center"
+              css={{
+                borderBottom: "1px solid #ddd",
+                cursor: "pointer",
+                _hover: { color: "#ddd", bg: "#5137C5" },
+              }}
+              className="group"
+              onClick={() => g.getMessage(v.id)}
+            >
+              <Box px={3} fontSize="10px" w="120px">
+                {v.act}
+              </Box>
+              <Box px={3} fontSize="10px" w="300px">
+                {v.id}
+              </Box>
+              <Box px={3} fontSize="10px" w="150px">
+                {short(v.to)}
+              </Box>
+
+              <Box px={3} fontSize="10px" flex={1}>
+                {fromNow(v.timestamp)}
+              </Box>
+            </Flex>
+          ))(entity.outgoing || [])}
         </>
       ) : null}
     </Box>
