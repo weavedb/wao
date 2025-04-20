@@ -88,7 +88,7 @@ export default function Global({}) {
   const [preview, setPreview] = use("preview")
   const [selDir, setSelDir] = use("selDir")
   const [networks, setNetworks] = use("networks")
-
+  const [terminal, setTerminal] = use("terminal")
   useEffect(() => {
     g.dryrun = true
     g.peer2 = {}
@@ -96,7 +96,7 @@ export default function Global({}) {
 
   useEffect(() => {
     ;(async () => {
-      if (proc && g.ao) await g.connectProc(proc)
+      if (proc && g.ao && proc.id !== terminal) await g.connectProc(proc)
       //if (proc) g.updateMsgs()
     })()
   }, [proc])
@@ -269,7 +269,15 @@ export default function Global({}) {
             id: k,
             act: t.Action,
             from: msg?.msg?.From,
-            to: msg?.msg?.Target,
+            to: msg?.msg?.Target ?? msg.target,
+          })
+        } else if (msg?.msg?.Target === id || msg.target === id) {
+          let { proc, msg, tags, t, tx, block } = g.msg(k)
+          a.incoming.push({
+            id: k,
+            act: t.Action,
+            from: msg?.msg?.From,
+            to: msg?.msg?.Target ?? msg.target,
           })
         }
       }
@@ -314,7 +322,7 @@ export default function Global({}) {
     let { proc, msg, tags, t, tx, block } = g.msg(id)
     let m = {
       from: msg?.msg?.From,
-      to: msg?.msg?.Target,
+      to: msg?.msg?.Target ?? msg.target,
       ...msg,
       name: t.Name ?? null,
       tags,
@@ -449,7 +457,6 @@ export default function Global({}) {
     let _blocks = []
     for (let v of g.ao.mem.blocks) {
       const block = g.ao.mem.blockmap[v]
-      console.log(block)
       _blocks.push({
         id: v,
         timestamp: block.timestamp,
@@ -500,19 +507,15 @@ export default function Global({}) {
 
   g.listMessages = () => {
     let msgs = []
-    for (let k in g.ao.mem.env) {
-      let i = 0
-      for (let m of g.ao.mem.env[k].results) {
-        let { proc, msg, tags, t, tx, block } = g.msg(m)
-        msgs.unshift({
-          from: msg?.msg?.From,
-          to: msg?.msg?.Target,
-          id: m,
-          timestamp: block?.timestamp ?? 0,
-          act: t.Action,
-        })
-        i++
-      }
+    for (let k in g.ao.mem.msgs) {
+      let { proc, msg, tags, t, tx, block } = g.msg(k)
+      msgs.unshift({
+        from: msg?.msg?.From,
+        to: msg?.msg?.Target ?? msg.target,
+        id: k,
+        timestamp: block?.timestamp ?? 0,
+        act: t.Action,
+      })
     }
     setMessages(msgs)
   }
@@ -711,6 +714,7 @@ export default function Global({}) {
   }
 
   g.connectProc = async proc => {
+    setTerminal(proc.id)
     g.setDryrun = setDryrun
     g.proc = proc
     g.stats = async (txt, wallet) => {
