@@ -2,14 +2,17 @@ import { Box, Flex } from "@chakra-ui/react"
 import { map, clone } from "ramda"
 import g from "/lib/global"
 import use from "/lib/use"
-import { useState } from "react"
-import { fromNow } from "/lib/utils"
+import { useEffect, useState } from "react"
+import { short, fromNow } from "/lib/utils"
 import Tags from "/components/Tags"
 
 export default function MiddleEntityMessage() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
-  const subtabs = ["Metadata"]
+  const subtabs = ["Metadata", "Resulted", "Linked"]
+  useEffect(() => {
+    setSubtab("Metadata")
+  }, [entity])
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -66,7 +69,65 @@ export default function MiddleEntityMessage() {
   return (
     <Box w="100%" h="100%">
       {buttons}
-      {subtab === "Metadata" ? (
+      {subtab === "Resulted" ? (
+        <>
+          <Flex h="30px" bg="#eee" align="center" fontSize="10px">
+            <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+              Type
+            </Box>
+            <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+              Action
+            </Box>
+            <Box px={3} w="300px">
+              ID
+            </Box>
+            <Box px={3} w="150px">
+              From
+            </Box>
+            <Box px={3} w="150px">
+              To
+            </Box>
+            <Box px={3} flex={1}>
+              Timestamp
+            </Box>
+          </Flex>
+          {map(v => (
+            <Flex
+              fontSize="10px"
+              h="30px"
+              align="center"
+              css={{
+                borderBottom: "1px solid #ddd",
+                cursor: "pointer",
+                _hover: { color: "#ddd", bg: "#5137C5" },
+              }}
+              className="group"
+              onClick={() => {
+                g.getAccount(v.id)
+              }}
+            >
+              <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+                {v.type}
+              </Box>
+              <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+                {v.act}
+              </Box>
+              <Box px={3} fontSize="10px" w="300px">
+                {v.id}
+              </Box>
+              <Box px={3} fontSize="10px" w="150px">
+                {short(v.from)}
+              </Box>
+              <Box px={3} fontSize="10px" w="150px">
+                {short(v.to)}
+              </Box>
+              <Box px={3} fontSize="10px" flex={1}>
+                {fromNow(v.timestamp)}
+              </Box>
+            </Flex>
+          ))(entity.resulted || [])}
+        </>
+      ) : subtab === "Metadata" ? (
         <Flex h="100%">
           <Box fontSize="10px" w="315px" py={2}>
             {map(v => {
