@@ -28,7 +28,7 @@ const tabmap = {
   Processes: { icon: <FaCodeCompare /> },
   Messages: { icon: <FaEnvelopesBulk /> },
   Blocks: { icon: <FaCubes /> },
-  //Accounts: { icon: <FaWallet /> },
+  Entity: { icon: <FaWallet /> },
   //    Tokens: { icon: <FaCoins /> },
   //    Storage: { icon: <FaHardDrive /> },
   //    Database: { icon: <FaDatabase /> },

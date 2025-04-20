@@ -144,7 +144,11 @@ export default function MiddleEntityMessage() {
                   overflow: "auto",
                 }}
               >
-                {!entity.res ? "" : JSON.stringify(entity.res, undefined, 2)}
+                {!entity.process
+                  ? "This message was sent to a non process account."
+                  : !entity.res
+                    ? ""
+                    : JSON.stringify(entity.res, undefined, 2)}
               </Box>
             </code>
           </Box>
