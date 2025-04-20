@@ -8,7 +8,7 @@ import { short, fromNow } from "/lib/utils"
 export default function MiddleEntityAccount() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
-  const subtabs = ["Metadata", "Outgoing", "Processes"]
+  const subtabs = ["Metadata", "Outgoing", "Incoming", "Processes"]
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -153,6 +153,58 @@ export default function MiddleEntityAccount() {
               </Box>
             </Flex>
           ))(entity.outgoing || [])}
+        </>
+      ) : subtab === "Incoming" ? (
+        <>
+          <Flex h="30px" bg="#eee" align="center" fontSize="10px">
+            <Box px={3} fontSize="10px" w="120px">
+              Action
+            </Box>
+            <Box px={3} fontSize="10px" w="300px">
+              ID
+            </Box>
+            <Box px={3} fontSize="10px" w="150px">
+              From
+            </Box>
+            <Box px={3} fontSize="10px" w="150px">
+              To
+            </Box>
+            <Box px={3} fontSize="10px" flex={1}>
+              Timestamp
+            </Box>
+          </Flex>
+
+          {map(v => (
+            <Flex
+              fontSize="10px"
+              h="30px"
+              align="center"
+              css={{
+                borderBottom: "1px solid #ddd",
+                cursor: "pointer",
+                _hover: { color: "#ddd", bg: "#5137C5" },
+              }}
+              className="group"
+              onClick={() => g.getMessage(v.id)}
+            >
+              <Box px={3} fontSize="10px" w="120px">
+                {v.act}
+              </Box>
+              <Box px={3} fontSize="10px" w="300px">
+                {v.id}
+              </Box>
+              <Box px={3} fontSize="10px" w="150px">
+                {short(v.from)}
+              </Box>
+              <Box px={3} fontSize="10px" w="150px">
+                {short(v.to)}
+              </Box>
+
+              <Box px={3} fontSize="10px" flex={1}>
+                {fromNow(v.timestamp)}
+              </Box>
+            </Flex>
+          ))(entity.incoming || [])}
         </>
       ) : subtab === "Processes" ? (
         <>
