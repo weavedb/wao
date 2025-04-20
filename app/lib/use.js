@@ -51,4 +51,5 @@ export default store({
   su: null,
   acc: null,
   entity: null,
+  terminal: null,
 })
