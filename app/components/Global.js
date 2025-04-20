@@ -230,7 +230,11 @@ export default function Global({}) {
     if (block) block = clone(block)
     return { proc, msg, tags: _tags, t, tx, block }
   }
-
+  g.mmap = () => {
+    let mmap = {}
+    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
+    return mmap
+  }
   g.getEOS = id => {
     let a = {
       type: "Account",
@@ -240,9 +244,7 @@ export default function Global({}) {
       tokens: [{ ticker: "AO", balance: "0" }],
       spawn: [],
     }
-    let mmap = {}
-    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
-
+    let mmap = g.mmap()
     for (let k in g.ao.mem.env) {
       const pr = g.ao.mem.env[k]
       let { proc, msg, tags, t, tx, block } = g.msg(k)
@@ -374,10 +376,10 @@ export default function Global({}) {
       })
       i++
     }
+    const mmap = g.mmap()
     for (let k in g.ao.mem.msgs) {
       const m = g.ao.mem.msgs[k]
       const t = tags(m.tags)
-
       if (t["From-Process"] === id) {
         if (t.Type === "Message") {
           let { msg, tags, t, tx, block } = g.msg(k)
@@ -389,13 +391,21 @@ export default function Global({}) {
             from: msg?.msg?.From,
           })
         } else if (t.Type === "Process") {
-          let { msg, tags, t, tx, block } = g.msg(k)
+          let { proc, msg, tags, t, tx, block } = g.msg(k)
+          let name = null
+          name = t.Name ?? null
+          let timestamp = null
+          if (tx.bundle) {
+            const bdl = g.ao.mem.txs[tx.bundle]
+            const block = g.ao.mem.blockmap[bdl.block]
+            timestamp = block.timestamp
+          }
           p.spawn.push({
             id: k,
-            timestamp: block?.timestamp ?? 0,
-            act: t.Action,
-            to: msg?.msg?.Target ?? msg.target,
-            from: msg?.msg?.From,
+            name,
+            module: mmap[proc.module],
+            timestamp,
+            incoming: g.ao.mem.env[k]?.results.length,
           })
         }
       }
@@ -405,8 +415,7 @@ export default function Global({}) {
   }
 
   g.getModule = id => {
-    let mmap = {}
-    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
+    let mmap = g.mmap()
     let _procs = []
     let mod = clone(g.ao.mem.txs[id])
     mod.name = mmap[id]
@@ -531,8 +540,7 @@ export default function Global({}) {
 
   g.listProcesses = () => {
     let _procs = []
-    let mmap = {}
-    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
+    let mmap = g.mmap()
     for (let k in g.ao.mem.env) {
       let { proc, msg, tags, t, tx, block } = g.msg(k)
       _procs.unshift({
@@ -683,8 +691,7 @@ export default function Global({}) {
   }
 
   g._setModule = id => {
-    let mmap = {}
-    for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
+    let mmap = g.mmap()
     let _procs = []
     let mod = clone(g.ao.mem.txs[id])
     if (mod) {
