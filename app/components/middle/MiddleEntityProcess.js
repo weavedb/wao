@@ -170,7 +170,7 @@ export default function MiddleEntityProcess() {
               Action
             </Box>
             <Box px={3} fontSize="10px" w="300px">
-              TxID
+              ID
             </Box>
             <Box px={3} fontSize="10px" w="150px">
               From
@@ -275,7 +275,7 @@ export default function MiddleEntityProcess() {
               Action
             </Box>
             <Box px={3} fontSize="10px" w="300px">
-              TxID
+              ID
             </Box>
             <Box px={3} fontSize="10px" w="150px">
               To
