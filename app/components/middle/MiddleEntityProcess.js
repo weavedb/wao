@@ -10,7 +10,7 @@ export default function MiddleEntityProcess() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
   const [terminal, setTerminal] = use("terminal")
-  const subtabs = ["Metadata", "Incoming", "Outgoing", "Spawn"]
+  const subtabs = ["Metadata", "Incoming", "Outgoing", "Spawned"]
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -211,7 +211,7 @@ export default function MiddleEntityProcess() {
             </Flex>
           ))(entity.incoming || [])}
         </>
-      ) : subtab === "Spawn" ? (
+      ) : subtab === "Spawned" ? (
         <>
           <Flex h="30px" bg="#eee" align="center">
             <Box
