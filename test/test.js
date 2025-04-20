@@ -512,7 +512,7 @@ end)
 })
 
 describe("user target messages", () => {
-  it.only("should be stored on Arweave", async () => {
+  it("should be stored on Arweave", async () => {
     const src_data = `
 Handlers.add("Timestamp", "Timestamp", function (msg)
   msg.reply({ Data = msg.Timestamp })
@@ -527,5 +527,23 @@ end)
       if (ao.mem.msgs[k].target === acc[0].addr) exist = true
     }
     assert(exist)
+  })
+  it.only("should work with process to process", async () => {
+    const src_data = `Handlers.add("Hello", "Hello", function (msg)
+  Send({ Target = msg.To, Action = "Hello", Data = "WAO" })
+  msg.reply({ Data = "Hello, World!" })
+end)`
+    const src_data2 = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello" })
+end)
+`
+    const ao = await new AO({}).init(acc[0])
+    const { p, pid } = await ao.deploy({ src_data })
+    const { p: p2, pid: pid2 } = await ao.deploy({ src_data: src_data2 })
+    const { mid } = await p.msg("Hello", { To: pid2 })
+    for (let k in ao.mem.msgs) {
+      console.log(k, ao.mem.msgs[k])
+    }
   })
 })
