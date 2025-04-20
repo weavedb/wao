@@ -9,6 +9,8 @@ import Tags from "/components/Tags"
 export default function MiddleEntityProcess() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
+  const [terminal, setTerminal] = use("terminal")
+
   const subtabs = ["Metadata", "Incoming"]
   const buttons = !entity ? null : (
     <Flex
@@ -52,6 +54,66 @@ export default function MiddleEntityProcess() {
             </Flex>
           )
         })(subtabs)}
+        <Box flex={1} />
+        <Flex
+          mr={4}
+          py={1}
+          px={4}
+          fontSize="10px"
+          color="#ddd"
+          bg="#5137C5"
+          css={{
+            borderRadius: "5px",
+            cursor: "pointer",
+            _hover: { opacity: 0.75 },
+          }}
+          onClick={async () => {
+            const p = g.ao.p(entity.id)
+            const lua = g.editorRef.current.getValue()
+            const jwk = await g.getWallet()
+            //if (!jwk) return alert("wallet not connected")
+            const res = await p.msg("Eval", { data: lua, jwk })
+            g.logMsg(res.mid)
+            g.addMsg(res.mid)
+          }}
+        >
+          Eval
+        </Flex>
+        {terminal === entity.id ? (
+          <Flex
+            mr={4}
+            py={1}
+            px={4}
+            fontSize="10px"
+            bg="white"
+            color="#5137C5"
+            css={{
+              border: "1px solid #5317c5",
+              borderRadius: "5px",
+            }}
+          >
+            Connected
+          </Flex>
+        ) : (
+          <Flex
+            mr={4}
+            py={1}
+            px={4}
+            fontSize="10px"
+            color="#ddd"
+            bg="#5137C5"
+            css={{
+              borderRadius: "5px",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={async () => {
+              g._setProcess(entity.id)
+            }}
+          >
+            Connect
+          </Flex>
+        )}
       </Flex>
     </Flex>
   )

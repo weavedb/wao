@@ -10,6 +10,7 @@ export default function MiddleEntityModule() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
   const subtabs = ["Metadata", "Processes"]
+  const [tab, setTab] = use("tab")
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -52,6 +53,30 @@ export default function MiddleEntityModule() {
             </Flex>
           )
         })(subtabs)}
+        <Box flex={1} />
+        <Flex
+          py={1}
+          px={3}
+          mx={3}
+          fontSize="10px"
+          color="#ddd"
+          bg="#5137C5"
+          css={{
+            borderRadius: "5px",
+            cursor: "pointer",
+            _hover: { opacity: 0.75 },
+          }}
+          onClick={async () => {
+            const jwk = await g.getWallet()
+            const { pid, p } = await g.ao.deploy({ module: entity.id, jwk })
+            g.logSpawn(pid)
+            g._setModule(entity.id)
+            g._setProcess(pid)
+            setTab("Processes")
+          }}
+        >
+          Spawn
+        </Flex>
       </Flex>
     </Flex>
   )
