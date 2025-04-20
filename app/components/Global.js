@@ -331,21 +331,70 @@ export default function Global({}) {
       g.getAssignment(id)
     }
   }
-
+  g.refmap = () => {
+    let refs = {}
+    let xrefs = {}
+    for (let k in g.ao.mem.msgs) {
+      const m = g.ao.mem.msgs[k]
+      const t = tags(m.tags)
+      const tar = m.target ?? m?.msg?.Target
+      if (t.Reference) {
+        refs[m.from] ??= {}
+        refs[m.from][t.Reference] = { id: k, to: tar, from: m.from }
+      }
+      if (t["X-Reference"]) {
+        xrefs[m.from] ??= {}
+        xrefs[m.from][t["X-Reference"]] = { id: k, to: tar, from: m.from }
+      }
+    }
+    return { refs, xrefs }
+  }
   g.getMessage = id => {
-    let { proc, msg, tags, t, tx, block } = g.msg(id)
+    let { proc, msg, tags: _tags, t, tx, block } = g.msg(id)
     let m = {
       from: msg?.msg?.From,
       to: msg?.msg?.Target ?? msg.target,
       ...msg,
       name: t.Name ?? null,
-      tags,
+      tags: _tags,
       id,
       type: "Message",
       timestamp: block?.timestamp ?? null,
-      outgoing: [],
+      resulted: [],
+      linked: [],
     }
-    if (t.Type === "Process") m.process = id
+    const r = g.refmap()
+    const getM = v => {
+      const t2 = tags(v.Tags)
+      const id = r.refs[m.process]?.[t2.Reference]?.id
+      if (id) {
+        let { t, msg, block } = g.msg(id)
+        return {
+          type: t.Type,
+          from: msg.from,
+          to: msg?.msg?.Target ?? msg.target,
+          id,
+          timestamp: block?.timestamp ?? 0,
+          act: t.Action,
+        }
+      }
+      return null
+    }
+    if (m.res) {
+      if (t.Type === "Process") m.process = id
+      for (let v of m.res.Messages || []) {
+        const m2 = getM(v)
+        if (m2) m.resulted.unshift(m2)
+      }
+      for (let v of m.res.Assignments || []) {
+        const m2 = getM(v)
+        if (m2) m.resulted.unshift(m2)
+      }
+      for (let v of m.res.Spawns || []) {
+        const m2 = getM(v)
+        if (m2) m.resulted.unshift(m2)
+      }
+    }
     setEntity(m)
     setTab("Entity")
   }
