@@ -108,165 +108,41 @@ const term = g => {
   g.history = []
   g.historyIndex = -1
   g.savedInput = null
-  const stats = () => {
-    const cols = g.term.cols
-    const x = g.term.buffer.active.cursorX
-    const len = g.inputRef.current.length
-    const plen = g.plen
-    let y = 1
-    if (g.cur > x) y = Math.ceil((len + plen - x) / cols)
-    const rows = Math.ceil((plen + len) / cols)
-    return { cols, x, len, y, plen, rows, cur: g.cur }
-  }
   g.term.onData(async d => {
     if (on) return
-    if (d === k.ctrlF) {
-      if (g.cur < g.inputRef.current.length) {
-        const cursorX = g.term.buffer.active.cursorX
-        const cols = g.term.cols
-        if (cursorX === cols - 1) {
-          g.term.write(k.down())
-          g.term.write("\r")
-        } else g.term.write(k.right())
-        g.cur++
-      }
-    } else if (d === k.altD) {
-      if (g.cur < g.inputRef.current.length) {
-        const isWordChar = c => /\w/.test(c)
-        const text = g.inputRef.current
-        let end = g.cur
-        while (end < text.length && text[end] === " ") end++
-        const first = isWordChar(text[end])
-        while (
-          end < text.length &&
-          (isWordChar(text[end]) === first || (!first && text[end] === " "))
-        ) {
-          end++
-        }
-        const left = text.slice(0, g.cur)
-        const right = text.slice(end)
-        g.inputRef.current = left + right
-        g.term.write(right + " ".repeat(end - g.cur))
-        g.term.write(k.left(right.length + (end - g.cur)))
-      }
-    } else if (d === k.ctrlD) {
-      if (g.cur < g.inputRef.current.length) {
-        const left = g.inputRef.current.slice(0, g.cur)
-        const right = g.inputRef.current.slice(g.cur + 1)
-        g.inputRef.current = left + right
-        g.term.write(right + " ")
-        g.term.write(k.left(right.length + 1))
-      }
-    } else if (d === k.ctrlB) {
-      if (g.cur > 0) {
-        const cursorX = g.term.buffer.active.cursorX
-        if (cursorX === 0 && g.cur > 0) {
-          const cols = g.term.cols
-          g.term.write(k.up())
-          g.term.write(k.x(cols))
-        } else g.term.write(k.left())
-        g.cur--
-      }
-    } else if (d === k.ctrlA) {
-      if (g.cur > 0) {
-        const { plen, len, x, cols, y } = stats()
-        if (g.cur < x) g.term.write(k.left(g.cur))
-        else {
-          g.term.write(k.up(y))
-          if (plen - x > 0) g.term.write(k.right(plen - x))
-          else if (plen - x < 0) g.term.write(k.left(x - plen))
-        }
-        g.cur = 0
-      }
-    } else if (d === k.ctrlE) {
-      if (g.cur < g.inputRef.current.length) {
-        const { len, x, cols, y, plen, rows } = stats()
-        const lastLine = (plen + len) % cols
-        const linesDown = rows - y - 1
-        if (linesDown > 0) g.term.write(k.down(linesDown))
-        if (lastLine - x > 0) g.term.write(k.right(lastLine - x))
-        else if (lastLine - x < 0) g.term.write(k.left(x - lastLine))
-        g.cur = len
-      }
-    } else if (d === k.ctrlK) {
-      const { x, y, rows } = stats()
-      const left = g.inputRef.current.slice(0, g.cur)
-      const right = g.inputRef.current.slice(g.cur)
-      g.inputRef.current = left
-      g.term.write(" ".repeat(right.length))
-      g.term.write(k.x(x + 1))
-      if (rows - y > 0) g.term.write(k.up(rows - y))
-    } else if (d === k.ctrlV) {
-      navigator.clipboard
-        .readText()
-        .then(paste => {
-          for (const ch of paste) {
-            const left = g.inputRef.current.slice(0, g.cur)
-            const right = g.inputRef.current.slice(g.cur)
-            g.inputRef.current = left + ch + right
-            g.term.write(ch)
-            g.cur++
-            g.term.write(right)
-            if (right.length > 0) g.term.write(k.left(right.length))
-          }
-        })
-        .catch(err => {
-          console.error("Clipboard read failed:", err)
-        })
-    } else if (d.startsWith("\x1b")) {
-      if (d === k.left()) {
-        if (g.cur > 0) {
-          const cursorX = g.term.buffer.active.cursorX
-          if (cursorX === 0 && g.cur > 0) {
-            const cols = g.term.cols
-            g.term.write(k.up())
-            g.term.write(k.x(cols))
-          } else g.term.write(k.left())
-          g.cur--
-        }
-      } else if (d === k.right()) {
-        if (g.cur < g.inputRef.current.length) {
-          const cursorX = g.term.buffer.active.cursorX
-          const cols = g.term.cols
-          if (cursorX === cols - 1) {
-            g.term.write(k.down())
-            g.term.write("\r")
-          } else g.term.write(k.right())
-          g.cur++
-        }
-      } else if (d === k.up()) {
-        if (g.history.length > 0) {
-          if (g.historyIndex === g.history.length) {
-            g.savedInput = g.inputRef.current
-          }
-          if (g.historyIndex > 0) {
-            g.historyIndex--
-            updateInput(g, g.history[g.historyIndex])
-          }
-        }
-      } else if (d === k.down()) {
-        if (g.historyIndex < g.history.length - 1) {
-          g.historyIndex++
-          updateInput(g, g.history[g.historyIndex])
-        } else if (g.historyIndex === g.history.length - 1) {
-          g.historyIndex++
-          updateInput(g, g.savedInput ?? "")
-          g.savedInput = null
-        }
-      } else if (d === k.del) {
-        if (g.cur < g.inputRef.current.length) {
-          const left = g.inputRef.current.slice(0, g.cur)
-          const right = g.inputRef.current.slice(g.cur + 1)
-          g.inputRef.current = left + right
-          g.term.write(right + " ")
-          g.term.write(k.left(right.length + 1))
-        }
-      }
-      return
-    }
-
     const code = d.charCodeAt(0)
-    if (code === 13) {
+    if (d === k.ctrlF) k.moveR()
+    else if (d === k.altD) k.cutW()
+    else if (d === k.ctrlD) k.delete()
+    else if (d === k.ctrlB) k.moveL()
+    else if (d === k.ctrlA) k.top()
+    else if (d === k.ctrlE) k.end()
+    else if (d === k.ctrlK) k.cut()
+    else if (d === k.ctrlV) k.paste()
+    else if (d === k.left()) k.moveL()
+    else if (d === k.right()) k.moveR()
+    else if (d === k.del) k.delete()
+    else if (d === k.up()) {
+      if (g.history.length > 0) {
+        if (g.historyIndex === g.history.length) {
+          g.savedInput = g.inputRef.current
+        }
+        if (g.historyIndex > 0) {
+          g.historyIndex--
+          updateInput(g, g.history[g.historyIndex])
+        }
+      }
+    } else if (d === k.down()) {
+      if (g.historyIndex < g.history.length - 1) {
+        g.historyIndex++
+        updateInput(g, g.history[g.historyIndex])
+      } else if (g.historyIndex === g.history.length - 1) {
+        g.historyIndex++
+        updateInput(g, g.savedInput ?? "")
+        g.savedInput = null
+      }
+    } else if (d.startsWith("\x1b")) return
+    else if (code === 13) {
       on = true
       if (await exec(g)) g.cur = 0
       on = false
@@ -280,10 +156,7 @@ const term = g => {
         g.term.write(right + " ")
         g.term.write(k.left(right.length + 1))
       }
-    } else if (code < 32) {
-      // Ignore other control characters
-      return
-    } else {
+    } else if (code >= 32) {
       for (const ch of d) {
         const left = g.inputRef.current.slice(0, g.cur)
         const right = g.inputRef.current.slice(g.cur)
