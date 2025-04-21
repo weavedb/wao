@@ -11,8 +11,6 @@ const config = {
   fontFamily: "monospace",
   theme: { background: "#1E1E1E" },
   convertEol: true,
-  //cols: 110,
-  //rows: 11,
 }
 
 const init = g => {
@@ -60,8 +58,10 @@ const aoeval = async (data, g) => {
     }
     if (res?.Error) g.term.write(`${res.Error}\r\n`)
     const prompt = res?.Output?.prompt ?? res?.Output?.data?.prompt
-    if (prompt) g.term.write(`${prompt}`)
-    else await g.prompt(false)
+    if (prompt) {
+      g.term.write(`${prompt}`)
+      setTimeout(() => (g.plen = g.term.buffer.active.cursorX), 0)
+    } else await g.prompt(false)
   } catch (e) {
     g.term.write(`${e.toString()}\r\n`)
     await g.prompt(false)
@@ -107,7 +107,16 @@ const term = g => {
   g.history = []
   g.historyIndex = -1
   g.savedInput = null
-
+  const stats = () => {
+    const cols = g.term.cols
+    const x = g.term.buffer.active.cursorX
+    const len = g.inputRef.current.length
+    const plen = g.plen
+    let y = 0
+    if (g.cur > x) y = Math.ceil((len - x) / cols)
+    const rows = Math.ceil((plen + len) / cols)
+    return { cols, x, len, y, plen, rows, cur: g.cur }
+  }
   g.term.onData(async d => {
     if (on) return
     if (d === "\x06") {
@@ -116,12 +125,11 @@ const term = g => {
         g.cur++
       }
     } else if (d === "\x1bd") {
-      // Alt-D
       if (g.cur < g.inputRef.current.length) {
         const isWordChar = c => /\w/.test(c)
         const text = g.inputRef.current
         let end = g.cur
-        while (end < text.length && text[end] === " ") end++ // skip spaces
+        while (end < text.length && text[end] === " ") end++
         const first = isWordChar(text[end])
         while (
           end < text.length &&
@@ -150,20 +158,29 @@ const term = g => {
       }
     } else if (d === "\x01") {
       if (g.cur > 0) {
-        g.term.write(`\x1b[${g.cur}D`)
+        const { plen, len, x, cols, y } = stats()
+        if (g.cur < x) g.term.write(`\x1b[${g.cur}D`)
+        else {
+          g.term.write(`\x1b[${y}A`)
+          if (plen - x > 0) g.term.write(`\x1b[${plen - x}C`)
+          else if (plen - x < 0) g.term.write(`\x1b[${x - plen}D`)
+        }
         g.cur = 0
       }
     } else if (d === "\x05") {
-      const move = g.inputRef.current.length - g.cur
-      if (move > 0) {
-        g.term.write(`\x1b[${move}C`)
-        g.cur = g.inputRef.current.length
+      if (g.cur < g.inputRef.current.length) {
+        const { len, x, cols, y, plen, rows } = stats()
+        const lastLine = (plen + len) % cols
+        const linesDown = rows - y - 1
+        if (linesDown > 0) g.term.write(`\x1b[${linesDown}B`)
+        if (lastLine - x > 0) g.term.write(`\x1b[${lastLine - x}C`)
+        else if (lastLine - x < 0) g.term.write(`\x1b[${x - lastLine}D`)
+        g.cur = len
       }
     } else if (d === "\x0b") {
       const left = g.inputRef.current.slice(0, g.cur)
       const right = g.inputRef.current.slice(g.cur)
       g.inputRef.current = left
-
       g.term.write(" ".repeat(right.length))
       g.term.write(`\x1b[${right.length}D`)
     } else if (d === "\x16") {
@@ -186,12 +203,22 @@ const term = g => {
     } else if (d.startsWith("\x1b")) {
       if (d === "\x1b[D") {
         if (g.cur > 0) {
-          g.term.write("\x1b[D")
+          const cursorX = g.term.buffer.active.cursorX
+          if (cursorX === 0 && g.cur > 0) {
+            const cols = g.term.cols
+            g.term.write("\x1b[A")
+            g.term.write(`\x1b[${cols}G`)
+          } else g.term.write("\x1b[D")
           g.cur--
         }
       } else if (d === "\x1b[C") {
         if (g.cur < g.inputRef.current.length) {
-          g.term.write("\x1b[C")
+          const cursorX = g.term.buffer.active.cursorX
+          const cols = g.term.cols
+          if (cursorX === cols - 1) {
+            g.term.write("\x1b[B")
+            g.term.write("\r")
+          } else g.term.write("\x1b[C")
           g.cur++
         }
       } else if (d === "\x1b[A") {
