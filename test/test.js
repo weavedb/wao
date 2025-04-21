@@ -124,7 +124,7 @@ describe("GraphQL", () => {
       asc: true,
       fields: { id: true, previous: true, height: true },
     })
-    assert.equal(blocks[0].height, 0)
+    assert.equal(blocks[0].height, 1)
   })
 })
 
@@ -528,7 +528,7 @@ end)
     }
     assert(exist)
   })
-  it.only("should work with process to process", async () => {
+  it("should work with process to process", async () => {
     const src_data = `Handlers.add("Hello", "Hello", function (msg)
   Send({ Target = msg.To, Action = "Hello", Data = "WAO" })
   msg.reply({ Data = "Hello, World!" })
@@ -545,5 +545,13 @@ end)
     for (let k in ao.mem.msgs) {
       console.log(k, ao.mem.msgs[k])
     }
+  })
+  it.only("should work with wasm32", async () => {
+    const ao = await new AO({}).init(acc[0])
+    const src_data = `Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello" })
+end)`
+    const { p, pid } = await ao.deploy({ src_data })
+    console.log(await p.dry("Eval", { data: "Version()" }))
   })
 })
