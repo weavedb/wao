@@ -138,7 +138,21 @@ export default function Global({}) {
     document.addEventListener("click", handler)
     return () => document.removeEventListener("click", handler)
   }, [])
-
+  useEffect(() => {
+    if (init) {
+      switch (tab) {
+        case "Processes":
+          g.listProcesses()
+        case "Modules":
+          g.listModules()
+        case "Blocks":
+          g.listBlocks()
+        case "Messages":
+          g.listMessages()
+      }
+      console.log(tab)
+    }
+  }, [tab, init])
   useEffect(() => {
     ;(async () => {
       const _wallet = await lf.getItem("wallet")
