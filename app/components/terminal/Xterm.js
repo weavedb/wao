@@ -6,6 +6,8 @@ import "@xterm/xterm/css/xterm.css"
 import { FitAddon } from "/lib/addon-fit"
 import XtermStyle from "/components/styles/XtermStyle"
 import { k } from "/lib/utils"
+import g from "/lib/global"
+
 const config = {
   cursorBlink: true,
   fontSize: 12,
@@ -90,17 +92,6 @@ const exec = async g => {
   return false
 }
 
-const updateInput = (g, newInput) => {
-  const oldLen = g.inputRef.current.length
-  const newLen = newInput.length
-  const cur = g.cur
-  if (cur > 0) g.term.write(k.left(cur))
-  g.term.write(" ".repeat(oldLen))
-  if (oldLen > 0) g.term.write(k.left(oldLen))
-  g.inputRef.current = newInput
-  g.cur = newLen
-  g.term.write(newInput)
-}
 const term = g => {
   init(g)
   let on = false
@@ -122,41 +113,15 @@ const term = g => {
     else if (d === k.left()) k.moveL()
     else if (d === k.right()) k.moveR()
     else if (d === k.del) k.delete()
-    else if (d === k.up()) {
-      if (g.history.length > 0) {
-        if (g.historyIndex === g.history.length) {
-          g.savedInput = g.inputRef.current
-        }
-        if (g.historyIndex > 0) {
-          g.historyIndex--
-          updateInput(g, g.history[g.historyIndex])
-        }
-      }
-    } else if (d === k.down()) {
-      if (g.historyIndex < g.history.length - 1) {
-        g.historyIndex++
-        updateInput(g, g.history[g.historyIndex])
-      } else if (g.historyIndex === g.history.length - 1) {
-        g.historyIndex++
-        updateInput(g, g.savedInput ?? "")
-        g.savedInput = null
-      }
-    } else if (d.startsWith("\x1b")) return
-    else if (code === 13) {
+    else if (d === k.up()) k.upH()
+    else if (d === k.down()) k.downH()
+    else if (d.startsWith("\x1b")) return
+    else if (code === k.enter) {
       on = true
       if (await exec(g)) g.cur = 0
       on = false
-    } else if (code === 127) {
-      if (g.cur > 0) {
-        const left = g.inputRef.current.slice(0, g.cur - 1)
-        const right = g.inputRef.current.slice(g.cur)
-        g.inputRef.current = left + right
-        g.cur--
-        g.term.write("\b")
-        g.term.write(right + " ")
-        g.term.write(k.left(right.length + 1))
-      }
-    } else if (code >= 32) {
+    } else if (code === k.bs) k.backspace()
+    else if (code >= 32) {
       for (const ch of d) {
         const left = g.inputRef.current.slice(0, g.cur)
         const right = g.inputRef.current.slice(g.cur)
