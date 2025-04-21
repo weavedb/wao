@@ -110,6 +110,10 @@ export default class ArMemBase {
     this.msgs = {}
 
     this.wasms = {
+      "WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g": {
+        file: "aos2_0_4_32",
+        format: "wasm32-unknown-emscripten4",
+      },
       "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g": { file: "aos2_0_3" },
       "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM": { file: "aos2_0_1" },
       ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw: { file: "sqlite" },
@@ -118,9 +122,10 @@ export default class ArMemBase {
       this.wasms[k].format ??= "wasm64-unknown-emscripten-draft_2024_02_15"
       this.modules[this.wasms[k].file] = k
     }
+
     let txs = []
-    for (const k in this.modules) {
-      const key = this.modules[k]
+    for (const key in this.wasms) {
+      const w = this.wasms[key]
       txs.push(key)
       this.txs[key] = {
         id: key,
@@ -129,12 +134,13 @@ export default class ArMemBase {
           "Data-Protocol": "ao",
           Variant: this.variant ?? "ao.TN.1",
           Type: "Module",
-          "Module-Format": "wasm64-unknown-emscripten-draft_2024_02_15",
-          "Input-Encoding": "JSON-V1",
-          "Output-Encoding": "JSON-V1",
-          "Memory-Limit": "1-gb",
-          "Compute-Limit": "9000000000000",
-          Extension: "WeaveDrive",
+          "Module-Format":
+            w.format ?? "wasm64-unknown-emscripten-draft_2024_02_15",
+          "Input-Encoding": w.input_encoding ?? "JSON-V1",
+          "Output-Encoding": w.output_encoding ?? "JSON-V1",
+          "Memory-Limit": w.memory_limit ?? "1-gb",
+          "Compute-Limit": w.compute_limit ?? "9000000000000",
+          Extension: w.extension ?? "WeaveDrive",
         }),
       }
     }
