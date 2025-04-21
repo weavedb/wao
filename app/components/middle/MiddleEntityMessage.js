@@ -105,7 +105,6 @@ export default function MiddleEntityMessage() {
     return nodes
   }
   const linked = computeSlots(entity.linked)
-  console.log(linked)
   return (
     <Box w="100%" h="100%">
       {buttons}
@@ -201,26 +200,80 @@ export default function MiddleEntityMessage() {
                   </Box>
                 )
               })(v.slots)}
-              <Box pr={3} fontSize="10px" w="300px">
+              <Box
+                pr={3}
+                fontSize="10px"
+                w="300px"
+                css={{
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {v.id}
               </Box>
               {map(v2 => {
                 return <Box h="30px" w="30px"></Box>
               })(range(0, 4 - v.depth))}
-              <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+              <Box
+                px={3}
+                w="120px"
+                _groupHover={{ color: "white" }}
+                css={{
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {v.act}
               </Box>
-              <Box px={3} w="120px" _groupHover={{ color: "white" }}>
+              <Box
+                px={3}
+                w="120px"
+                _groupHover={{ color: "white" }}
+                css={{
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {v.type}
               </Box>
 
-              <Box px={3} fontSize="10px" w="150px">
+              <Box
+                px={3}
+                fontSize="10px"
+                w="150px"
+                css={{
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {short(v.from)}
               </Box>
-              <Box px={3} fontSize="10px" w="150px">
+              <Box
+                px={3}
+                fontSize="10px"
+                w="150px"
+                css={{
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {short(v.to)}
               </Box>
-              <Box px={3} fontSize="10px" flex={1}>
+              <Box
+                px={3}
+                fontSize="10px"
+                flex={1}
+                css={{
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {fromNow(v.timestamp)}
               </Box>
             </Flex>

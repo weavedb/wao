@@ -26,6 +26,6 @@ const ctypes = [
   },
 ]
 const hb_url = "http://localhost:10001"
-const mod = "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g"
+const mod = "WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g"
 
 export { ctypes, hb_url, mod }
