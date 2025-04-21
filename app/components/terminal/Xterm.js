@@ -5,6 +5,7 @@ import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { FitAddon } from "/lib/addon-fit"
 import XtermStyle from "/components/styles/XtermStyle"
+import { k } from "/lib/utils"
 const config = {
   cursorBlink: true,
   fontSize: 12,
@@ -93,9 +94,9 @@ const updateInput = (g, newInput) => {
   const oldLen = g.inputRef.current.length
   const newLen = newInput.length
   const cur = g.cur
-  if (cur > 0) g.term.write(`\x1b[${cur}D`)
+  if (cur > 0) g.term.write(k.left(cur))
   g.term.write(" ".repeat(oldLen))
-  if (oldLen > 0) g.term.write(`\x1b[${oldLen}D`)
+  if (oldLen > 0) g.term.write(k.left(oldLen))
   g.inputRef.current = newInput
   g.cur = newLen
   g.term.write(newInput)
@@ -112,19 +113,24 @@ const term = g => {
     const x = g.term.buffer.active.cursorX
     const len = g.inputRef.current.length
     const plen = g.plen
-    let y = 0
-    if (g.cur > x) y = Math.ceil((len - x) / cols)
+    let y = 1
+    if (g.cur > x) y = Math.ceil((len + plen - x) / cols)
     const rows = Math.ceil((plen + len) / cols)
     return { cols, x, len, y, plen, rows, cur: g.cur }
   }
   g.term.onData(async d => {
     if (on) return
-    if (d === "\x06") {
+    if (d === k.ctrlF) {
       if (g.cur < g.inputRef.current.length) {
-        g.term.write("\x1b[C")
+        const cursorX = g.term.buffer.active.cursorX
+        const cols = g.term.cols
+        if (cursorX === cols - 1) {
+          g.term.write(k.down())
+          g.term.write("\r")
+        } else g.term.write(k.right())
         g.cur++
       }
-    } else if (d === "\x1bd") {
+    } else if (d === k.altD) {
       if (g.cur < g.inputRef.current.length) {
         const isWordChar = c => /\w/.test(c)
         const text = g.inputRef.current
@@ -141,49 +147,56 @@ const term = g => {
         const right = text.slice(end)
         g.inputRef.current = left + right
         g.term.write(right + " ".repeat(end - g.cur))
-        g.term.write(`\x1b[${right.length + (end - g.cur)}D`)
+        g.term.write(k.left(right.length + (end - g.cur)))
       }
-    } else if (d === "\x04") {
+    } else if (d === k.ctrlD) {
       if (g.cur < g.inputRef.current.length) {
         const left = g.inputRef.current.slice(0, g.cur)
         const right = g.inputRef.current.slice(g.cur + 1)
         g.inputRef.current = left + right
         g.term.write(right + " ")
-        g.term.write(`\x1b[${right.length + 1}D`)
+        g.term.write(k.left(right.length + 1))
       }
-    } else if (d === "\x02") {
+    } else if (d === k.ctrlB) {
       if (g.cur > 0) {
-        g.term.write("\x1b[D")
+        const cursorX = g.term.buffer.active.cursorX
+        if (cursorX === 0 && g.cur > 0) {
+          const cols = g.term.cols
+          g.term.write(k.up())
+          g.term.write(k.x(cols))
+        } else g.term.write(k.left())
         g.cur--
       }
-    } else if (d === "\x01") {
+    } else if (d === k.ctrlA) {
       if (g.cur > 0) {
         const { plen, len, x, cols, y } = stats()
-        if (g.cur < x) g.term.write(`\x1b[${g.cur}D`)
+        if (g.cur < x) g.term.write(k.left(g.cur))
         else {
-          g.term.write(`\x1b[${y}A`)
-          if (plen - x > 0) g.term.write(`\x1b[${plen - x}C`)
-          else if (plen - x < 0) g.term.write(`\x1b[${x - plen}D`)
+          g.term.write(k.up(y))
+          if (plen - x > 0) g.term.write(k.right(plen - x))
+          else if (plen - x < 0) g.term.write(k.left(x - plen))
         }
         g.cur = 0
       }
-    } else if (d === "\x05") {
+    } else if (d === k.ctrlE) {
       if (g.cur < g.inputRef.current.length) {
         const { len, x, cols, y, plen, rows } = stats()
         const lastLine = (plen + len) % cols
         const linesDown = rows - y - 1
-        if (linesDown > 0) g.term.write(`\x1b[${linesDown}B`)
-        if (lastLine - x > 0) g.term.write(`\x1b[${lastLine - x}C`)
-        else if (lastLine - x < 0) g.term.write(`\x1b[${x - lastLine}D`)
+        if (linesDown > 0) g.term.write(k.down(linesDown))
+        if (lastLine - x > 0) g.term.write(k.right(lastLine - x))
+        else if (lastLine - x < 0) g.term.write(k.left(x - lastLine))
         g.cur = len
       }
-    } else if (d === "\x0b") {
+    } else if (d === k.ctrlK) {
+      const { x, y, rows } = stats()
       const left = g.inputRef.current.slice(0, g.cur)
       const right = g.inputRef.current.slice(g.cur)
       g.inputRef.current = left
       g.term.write(" ".repeat(right.length))
-      g.term.write(`\x1b[${right.length}D`)
-    } else if (d === "\x16") {
+      g.term.write(k.x(x + 1))
+      if (rows - y > 0) g.term.write(k.up(rows - y))
+    } else if (d === k.ctrlV) {
       navigator.clipboard
         .readText()
         .then(paste => {
@@ -194,34 +207,34 @@ const term = g => {
             g.term.write(ch)
             g.cur++
             g.term.write(right)
-            if (right.length > 0) g.term.write(`\x1b[${right.length}D`)
+            if (right.length > 0) g.term.write(k.left(right.length))
           }
         })
         .catch(err => {
           console.error("Clipboard read failed:", err)
         })
     } else if (d.startsWith("\x1b")) {
-      if (d === "\x1b[D") {
+      if (d === k.left()) {
         if (g.cur > 0) {
           const cursorX = g.term.buffer.active.cursorX
           if (cursorX === 0 && g.cur > 0) {
             const cols = g.term.cols
-            g.term.write("\x1b[A")
-            g.term.write(`\x1b[${cols}G`)
-          } else g.term.write("\x1b[D")
+            g.term.write(k.up())
+            g.term.write(k.x(cols))
+          } else g.term.write(k.left())
           g.cur--
         }
-      } else if (d === "\x1b[C") {
+      } else if (d === k.right()) {
         if (g.cur < g.inputRef.current.length) {
           const cursorX = g.term.buffer.active.cursorX
           const cols = g.term.cols
           if (cursorX === cols - 1) {
-            g.term.write("\x1b[B")
+            g.term.write(k.down())
             g.term.write("\r")
-          } else g.term.write("\x1b[C")
+          } else g.term.write(k.right())
           g.cur++
         }
-      } else if (d === "\x1b[A") {
+      } else if (d === k.up()) {
         if (g.history.length > 0) {
           if (g.historyIndex === g.history.length) {
             g.savedInput = g.inputRef.current
@@ -231,7 +244,7 @@ const term = g => {
             updateInput(g, g.history[g.historyIndex])
           }
         }
-      } else if (d === "\x1b[B") {
+      } else if (d === k.down()) {
         if (g.historyIndex < g.history.length - 1) {
           g.historyIndex++
           updateInput(g, g.history[g.historyIndex])
@@ -240,13 +253,13 @@ const term = g => {
           updateInput(g, g.savedInput ?? "")
           g.savedInput = null
         }
-      } else if (d === "\x1b[3~") {
+      } else if (d === k.del) {
         if (g.cur < g.inputRef.current.length) {
           const left = g.inputRef.current.slice(0, g.cur)
           const right = g.inputRef.current.slice(g.cur + 1)
           g.inputRef.current = left + right
           g.term.write(right + " ")
-          g.term.write(`\x1b[${right.length + 1}D`)
+          g.term.write(k.left(right.length + 1))
         }
       }
       return
@@ -265,7 +278,7 @@ const term = g => {
         g.cur--
         g.term.write("\b")
         g.term.write(right + " ")
-        g.term.write(`\x1b[${right.length + 1}D`)
+        g.term.write(k.left(right.length + 1))
       }
     } else if (code < 32) {
       // Ignore other control characters
@@ -278,7 +291,7 @@ const term = g => {
         g.term.write(ch)
         g.cur++
         g.term.write(right)
-        if (right.length > 0) g.term.write(`\x1b[${right.length}D`)
+        if (right.length > 0) g.term.write(k.left(right.length))
       }
     }
   })
