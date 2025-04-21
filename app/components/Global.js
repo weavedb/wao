@@ -919,13 +919,14 @@ export default function Global({}) {
         }
         g.term.write(txt)
         g.term.write(prompt)
-
         // Reprint current input
         g.term.write(g.inputRef.current)
 
         // Restore cursor position
         const tail = g.inputRef.current.slice(g.cur)
         if (tail.length > 0) g.term.write(`\x1b[${tail.length}D`)
+        g.plen = g.term.buffer.active.cursorX
+        setTimeout(() => (g.plen = g.term.buffer.active.cursorX), 0)
       }
     }
     await g.prompt()
