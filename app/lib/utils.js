@@ -152,7 +152,24 @@ function b64urlDecode(str) {
 
 const toAddr = pub => b64urlEncode(sha256(b64urlDecode(pub)))
 
+const k = {
+  down: (n = 0) => `\x1b[${n === 0 ? "" : n}B`,
+  up: (n = 0) => `\x1b[${n === 0 ? "" : n}A`,
+  right: (n = 0) => `\x1b[${n === 0 ? "" : n}C`,
+  left: (n = 0) => `\x1b[${n === 0 ? "" : n}D`,
+  x: (n = 0) => `\x1b[${n === 0 ? "" : n}G`,
+  ctrlA: "\x01",
+  ctrlE: "\x05",
+  ctrlF: "\x06",
+  ctrlB: "\x02",
+  del: "\x1b[3~",
+  ctrlK: "\x0b",
+  ctrlV: "\x16",
+  ctrlD: "\x04",
+  altD: "\x1bd",
+}
 export {
+  k,
   toAddr,
   fromNow,
   short,
