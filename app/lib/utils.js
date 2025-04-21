@@ -169,6 +169,8 @@ const k = {
   ctrlV: "\x16",
   ctrlD: "\x04",
   altD: "\x1bd",
+  enter: 13,
+  bs: 127,
   moveL: () => {
     if (g.cur > 0) {
       const cursorX = g.term.buffer.active.cursorX
@@ -201,6 +203,12 @@ const k = {
     const rows = Math.ceil((plen + len) / cols)
     return { cols, x, len, y, plen, rows, cur: g.cur }
   },
+  backspace: () => {
+    if (g.cur > 0) {
+      k.moveL()
+      setTimeout(() => k.delete(), 0)
+    }
+  },
   delete: () => {
     const { x, y, rows, cur, len } = k.stats()
     if (cur < len) {
@@ -212,6 +220,38 @@ const k = {
       g.term.write(k.x(x + 1))
       if (rows - y > 0) g.term.write(k.up(rows - y))
     }
+  },
+  downH: () => {
+    if (g.historyIndex < g.history.length - 1) {
+      g.historyIndex++
+      k.history(g.history[g.historyIndex])
+    } else if (g.historyIndex === g.history.length - 1) {
+      g.historyIndex++
+      k.history(g.savedInput ?? "")
+      g.savedInput = null
+    }
+  },
+  upH: () => {
+    if (g.history.length > 0) {
+      if (g.historyIndex === g.history.length) {
+        g.savedInput = g.inputRef.current
+      }
+      if (g.historyIndex > 0) {
+        g.historyIndex--
+        k.history(g.history[g.historyIndex])
+      }
+    }
+  },
+  history: newInput => {
+    const oldLen = g.inputRef.current.length
+    const newLen = newInput.length
+    const cur = g.cur
+    if (cur > 0) g.term.write(k.left(cur))
+    g.term.write(" ".repeat(oldLen))
+    if (oldLen > 0) g.term.write(k.left(oldLen))
+    g.inputRef.current = newInput
+    g.cur = newLen
+    g.term.write(newInput)
   },
   cutW: () => {
     if (g.cur < g.inputRef.current.length) {
