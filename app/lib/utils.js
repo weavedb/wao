@@ -8,6 +8,8 @@ import { toHtml } from "hast-util-to-html"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import { v4 } from "uuid"
+import g from "/lib/global"
+
 dayjs.extend(relativeTime)
 
 function generateId() {
@@ -167,6 +169,120 @@ const k = {
   ctrlV: "\x16",
   ctrlD: "\x04",
   altD: "\x1bd",
+  moveL: () => {
+    if (g.cur > 0) {
+      const cursorX = g.term.buffer.active.cursorX
+      if (cursorX === 0 && g.cur > 0) {
+        const cols = g.term.cols
+        g.term.write(k.up())
+        g.term.write(k.x(cols))
+      } else g.term.write(k.left())
+      g.cur--
+    }
+  },
+  moveR: () => {
+    if (g.cur < g.inputRef.current.length) {
+      const cursorX = g.term.buffer.active.cursorX
+      const cols = g.term.cols
+      if (cursorX === cols - 1) {
+        g.term.write(k.down())
+        g.term.write("\r")
+      } else g.term.write(k.right())
+      g.cur++
+    }
+  },
+  stats: () => {
+    const cols = g.term.cols
+    const x = g.term.buffer.active.cursorX
+    const len = g.inputRef.current.length
+    const plen = g.plen
+    let y = 1
+    if (g.cur > x) y = Math.ceil((len + plen - x) / cols)
+    const rows = Math.ceil((plen + len) / cols)
+    return { cols, x, len, y, plen, rows, cur: g.cur }
+  },
+  delete: () => {
+    const { x, y, rows, cur, len } = k.stats()
+    if (cur < len) {
+      const left = g.inputRef.current.slice(0, g.cur)
+      const right = g.inputRef.current.slice(g.cur + 1)
+      g.inputRef.current = left + right
+      g.term.write(right + " ")
+      g.term.write(k.left(right.length + 1))
+      g.term.write(k.x(x + 1))
+      if (rows - y > 0) g.term.write(k.up(rows - y))
+    }
+  },
+  cutW: () => {
+    if (g.cur < g.inputRef.current.length) {
+      const isWordChar = c => /\w/.test(c)
+      const text = g.inputRef.current
+      let end = g.cur
+      while (end < text.length && text[end] === " ") end++
+      const first = isWordChar(text[end])
+      while (
+        end < text.length &&
+        (isWordChar(text[end]) === first || (!first && text[end] === " "))
+      ) {
+        end++
+      }
+      const left = text.slice(0, g.cur)
+      const right = text.slice(end)
+      g.inputRef.current = left + right
+      g.term.write(right + " ".repeat(end - g.cur))
+      g.term.write(k.left(right.length + (end - g.cur)))
+    }
+  },
+  cut: () => {
+    const { x, y, rows } = k.stats()
+    const left = g.inputRef.current.slice(0, g.cur)
+    const right = g.inputRef.current.slice(g.cur)
+    g.inputRef.current = left
+    g.term.write(" ".repeat(right.length))
+    g.term.write(k.x(x + 1))
+    if (rows - y > 0) g.term.write(k.up(rows - y))
+  },
+  paste: () => {
+    navigator.clipboard
+      .readText()
+      .then(paste => {
+        for (const ch of paste) {
+          const left = g.inputRef.current.slice(0, g.cur)
+          const right = g.inputRef.current.slice(g.cur)
+          g.inputRef.current = left + ch + right
+          g.term.write(ch)
+          g.cur++
+          g.term.write(right)
+          if (right.length > 0) g.term.write(k.left(right.length))
+        }
+      })
+      .catch(err => {
+        console.error("Clipboard read failed:", err)
+      })
+  },
+  end: () => {
+    if (g.cur < g.inputRef.current.length) {
+      const { len, x, cols, y, plen, rows } = k.stats()
+      const lastLine = (plen + len) % cols
+      const linesDown = rows - y - 1
+      if (linesDown > 0) g.term.write(k.down(linesDown))
+      if (lastLine - x > 0) g.term.write(k.right(lastLine - x))
+      else if (lastLine - x < 0) g.term.write(k.left(x - lastLine))
+      g.cur = len
+    }
+  },
+  top: () => {
+    if (g.cur > 0) {
+      const { plen, len, x, cols, y } = k.stats()
+      if (g.cur < x) g.term.write(k.left(g.cur))
+      else {
+        g.term.write(k.up(y))
+        if (plen - x > 0) g.term.write(k.right(plen - x))
+        else if (plen - x < 0) g.term.write(k.left(x - plen))
+      }
+      g.cur = 0
+    }
+  },
 }
 export {
   k,
