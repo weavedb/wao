@@ -147,7 +147,7 @@ class AO {
       this.unmonitor = unmonitor
     }
     if (this.wao) {
-      this.module = srcs.module_wao
+      this.module = module ?? srcs.module_wao
       this.scheduler = srcs.scheduler_wao
       this.authority = srcs.authority_wao
     } else {
