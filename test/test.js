@@ -546,12 +546,21 @@ end)
       console.log(k, ao.mem.msgs[k])
     }
   })
-  it.only("should work with wasm32", async () => {
+  it("should work with wasm32", async () => {
     const ao = await new AO({}).init(acc[0])
     const src_data = `Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello" })
 end)`
     const { p, pid } = await ao.deploy({ src_data })
     console.log(await p.dry("Eval", { data: "Version()" }))
+  })
+  it.only("should log", async () => {
+    const ao = await new AO({}).init(acc[0])
+    const src_data = `Handlers.add("Hello", "Hello", function (msg)
+ao.log("abc")
+  msg.reply({ Data = "Hello" })
+end)`
+    const { p, pid } = await ao.deploy({ src_data })
+    console.log(await p.dry("Hello", false))
   })
 })
