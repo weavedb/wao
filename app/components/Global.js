@@ -54,6 +54,8 @@ import { AO, acc } from "wao/web"
 // guide
 import { bps, bfiles } from "/lib/guide"
 
+const tg = m => m?.msg?.Tags ?? m.tags ?? m.Tags ?? []
+
 export default function Global({}) {
   g.filesRef = useRef(null)
   g.openFilesRef = useRef(null)
@@ -239,7 +241,7 @@ export default function Global({}) {
     }
     let msg = g.ao.mem.msgs[id] ?? null
     if (msg) msg = clone(msg)
-    const _tags = clone(msg?.tags ?? [])
+    const _tags = clone(tg(msg))
     const t = tags(_tags)
     let tx = g.ao.mem.txs[id] ?? null
     if (tx.bundle) tx = g.ao.mem.txs[tx.bundle]
@@ -307,12 +309,12 @@ export default function Global({}) {
         const items = new Bundle(tx.data).items
         for (let v of items) {
           if (v.id === id) {
-            const t = tags(v.tags)
+            const t = tags(tg(v))
             const addr = toAddr(v.owner)
             const block = g.ao.mem.blockmap[tx.block]
             const a = {
               id,
-              tags: v.tags,
+              tags: tg(v),
               target: v.target,
               from: addr,
               timestamp: block.timestamp,
@@ -355,7 +357,7 @@ export default function Global({}) {
     let xrefs = {}
     for (let k in g.ao.mem.msgs) {
       const m = g.ao.mem.msgs[k]
-      const t = tags(m.tags)
+      const t = tags(tg(m))
       const tar = m.target ?? m?.msg?.Target
       if (t.Reference) {
         refs[m.from] ??= {}
@@ -397,7 +399,7 @@ export default function Global({}) {
       }
     }
     const getM = (v, pr) => {
-      const t2 = tags(v.Tags)
+      const t2 = tags(tg(v))
       const id = r.refs[pr]?.[t2.Reference]?.id
       if (id) return _getM(id)
       return null
@@ -424,17 +426,20 @@ export default function Global({}) {
         if (t.Type === "Process") _m.process = id
         for (let v of _m.res.Messages || []) {
           const m2 = getM(v, _m.process ?? _m.to)
+          if (!m2) return
           m2.depth = depth
           if (m2) m.linked.push(m2)
           getLinked(m2, depth + 1)
         }
         for (let v of _m.res.Assignments || []) {
           const m2 = getM(v, _m.process ?? _m.to)
+          if (!m2) return
           m2.depth = depth
           if (m2) m.linkedu.push(m2)
         }
         for (let v of _m.res.Spawns || []) {
           const m2 = getM(v, _m.process ?? _m.to)
+          if (!m2) return
           m2.depth = depth
           if (m2) m.linked.push(m2)
           getLinked(m2, depth + 1)
@@ -487,7 +492,7 @@ export default function Global({}) {
     const mmap = g.mmap()
     for (let k in g.ao.mem.msgs) {
       const m = g.ao.mem.msgs[k]
-      const t = tags(m.tags)
+      const t = tags(tg(m))
       if (t["From-Process"] === id) {
         if (t.Type === "Message") {
           let { msg, tags, t, tx, block } = g.msg(k)
@@ -536,12 +541,12 @@ export default function Global({}) {
       mod.timestamp = block?.timestamp ?? 0
       mod.processes = []
       for (let k in g.ao.mem.env) {
-        for (let v of g.ao.mem.msgs[k]?.tags ?? []) {
+        for (let v of tg(g.ao.mem.msgs[k])) {
           if (v.name === "Module" && v.value === mod.id) {
             const val = g.ao.mem.env[k]
             let name = null
             if (g.ao.mem.msgs[k]) {
-              name = tags(g.ao.mem.msgs[k].tags).Name ?? null
+              name = tags(tg(g.ao.mem.msgs[k])).Name ?? null
             }
             const tx = g.ao.mem.txs[k]
             let timestamp = null
@@ -597,7 +602,7 @@ export default function Global({}) {
         const bd = new Bundle(g.ao.mem.txs[k].data)
         for (let v of bd.items) {
           const id = v.id
-          const t = tags(v.tags)
+          const t = tags(tg(v))
           tmap[id] = t.Type
         }
       } catch (e) {}
@@ -632,7 +637,7 @@ export default function Global({}) {
       const txid = g.ao.mem.modules[k]
       const tx = g.ao.mem.txs[txid]
       const block = g.ao.mem.blockmap[tx.block]
-      const t = tags(tx.tags)
+      const t = tags(tg(tx))
       _modules.push({
         name: k,
         id: txid,
@@ -805,12 +810,12 @@ export default function Global({}) {
     if (mod) {
       mod.processes = []
       for (let k in g.ao.mem.env) {
-        for (let v of g.ao.mem.msgs[k]?.tags ?? []) {
+        for (let v of tg(g.ao.mem.msgs[k])) {
           if (v.name === "Module" && v.value === mod.id) {
             const val = g.ao.mem.env[k]
             let name = null
             if (g.ao.mem.msgs[k]) {
-              name = tags(g.ao.mem.msgs[k].tags).Name ?? null
+              name = tags(tg(g.ao.mem.msgs[k])).Name ?? null
             }
             mod.processes.push({ id: k, name, module: mmap[val.module] })
             _procs.push({ id: k, module: mmap[val.module] })
@@ -825,7 +830,7 @@ export default function Global({}) {
     let _proc = clone(g.ao.mem.env[id])
     if (_proc) {
       delete _proc.memory
-      _proc.tags = clone(g.ao.mem.msgs[id]?.tags ?? [])
+      _proc.tags = clone(tg(g.ao.mem.msgs[id]))
       _proc.id = id
       setProc(_proc)
       g.listProcesses()
