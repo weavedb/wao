@@ -5,7 +5,7 @@ import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { FitAddon } from "/lib/addon-fit"
 import XtermStyle from "/components/styles/XtermStyle"
-import { k } from "/lib/utils"
+import { k, wait } from "/lib/utils"
 import g from "/lib/global"
 
 const config = {
@@ -99,11 +99,16 @@ const term = g => {
   g.history = []
   g.historyIndex = -1
   g.savedInput = null
-  g.term.onData(async d => {
-    if (on) return
+  let que = []
+  let qon = false
+  const next = async (force = false) => {
+    if (!force && qon) return
+    qon = true
+    await wait(0)
+    const d = que.shift()
     const code = d.charCodeAt(0)
     if (d === k.ctrlF) k.moveR()
-    else if (d === k.altD) k.cutW()
+    //else if (d === k.altD) k.cutW()
     else if (d === k.ctrlD) k.delete()
     else if (d === k.ctrlB) k.moveL()
     else if (d === k.ctrlA) k.top()
@@ -115,23 +120,20 @@ const term = g => {
     else if (d === k.del) k.delete()
     else if (d === k.up()) k.upH()
     else if (d === k.down()) k.downH()
-    else if (d.startsWith("\x1b")) return
+    else if (d.startsWith("\x1b")) k.void()
+    else if (code === k.bs) k.backspace()
     else if (code === k.enter) {
       on = true
       if (await exec(g)) g.cur = 0
       on = false
-    } else if (code === k.bs) k.backspace()
-    else if (code >= 32) {
-      for (const ch of d) {
-        const left = g.inputRef.current.slice(0, g.cur)
-        const right = g.inputRef.current.slice(g.cur)
-        g.inputRef.current = left + ch + right
-        g.term.write(ch)
-        g.cur++
-        g.term.write(right)
-        if (right.length > 0) g.term.write(k.left(right.length))
-      }
-    }
+    } else if (code >= 32) k.write(d)
+    if (que.length === 0) qon = false
+    else next(true)
+  }
+  g.term.onData(async d => {
+    if (on) return
+    que.push(d)
+    next()
   })
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { hash as sha256 } from "fast-sha256"
-import { fromPairs, map, filter, includes } from "ramda"
+import { splitEvery, fromPairs, map, filter, includes } from "ramda"
 import { common, createStarryNight } from "@wooorm/starry-night"
 import markdownIt from "markdown-it"
 import * as cheerio from "cheerio"
@@ -198,8 +198,8 @@ const k = {
     const x = g.term.buffer.active.cursorX
     const len = g.inputRef.current.length
     const plen = g.plen
-    let y = 1
-    if (g.cur > x) y = Math.ceil((len + plen - x) / cols)
+    let y = 0
+    if (g.cur > x) y = Math.floor((g.cur + plen - x) / cols)
     const rows = Math.ceil((plen + len) / cols)
     return { cols, x, len, y, plen, rows, cur: g.cur }
   },
@@ -218,9 +218,10 @@ const k = {
       g.term.write(right + " ")
       g.term.write(k.left(right.length + 1))
       g.term.write(k.x(x + 1))
-      if (rows - y > 0) g.term.write(k.up(rows - y))
+      if (rows - y - 1 > 0) g.term.write(k.up(rows - y - 1))
     }
   },
+  void: () => {},
   downH: () => {
     if (g.historyIndex < g.history.length - 1) {
       g.historyIndex++
@@ -280,21 +281,51 @@ const k = {
     g.inputRef.current = left
     g.term.write(" ".repeat(right.length))
     g.term.write(k.x(x + 1))
-    if (rows - y > 0) g.term.write(k.up(rows - y))
+    if (rows - y - 1 > 0) g.term.write(k.up(rows - y - 1))
+  },
+  write: txt => {
+    const { len, x, cols, y, plen, rows } = k.stats()
+    const left = g.inputRef.current.slice(0, g.cur)
+    const right = g.inputRef.current.slice(g.cur)
+    let txt2 = txt + right
+    let rlen = right.length
+    g.term.write(txt2)
+    if (rlen > 0) {
+      const get = (x, txt) => {
+        const pad = cols - x
+        let x2 = 0
+        let up = 0
+        if (txt.length <= pad) {
+          x2 = x + txt.length
+        } else {
+          let txt3 = txt.slice(pad)
+          while (txt3.length > 0) {
+            up++
+            x2 = txt3.length
+            txt3 = txt3.slice(cols)
+          }
+        }
+        return { newx: x2, up }
+      }
+      let { newx } = get(x, txt)
+      let { up } = get(newx, right)
+      if (x === cols - 1 && txt.length === 1) {
+        newx = -1
+        up -= 1
+      }
+      g.term.write(k.x(newx + 1))
+      if (up > 0) g.term.write(k.up(up))
+      if (up < 0) g.term.write(k.down(up * -1))
+    }
+
+    g.inputRef.current = left + txt + right
+    g.cur += txt.length
   },
   paste: () => {
     navigator.clipboard
       .readText()
       .then(paste => {
-        for (const ch of paste) {
-          const left = g.inputRef.current.slice(0, g.cur)
-          const right = g.inputRef.current.slice(g.cur)
-          g.inputRef.current = left + ch + right
-          g.term.write(ch)
-          g.cur++
-          g.term.write(right)
-          if (right.length > 0) g.term.write(k.left(right.length))
-        }
+        k.write(paste)
       })
       .catch(err => {
         console.error("Clipboard read failed:", err)
@@ -316,7 +347,7 @@ const k = {
       const { plen, len, x, cols, y } = k.stats()
       if (g.cur < x) g.term.write(k.left(g.cur))
       else {
-        g.term.write(k.up(y))
+        if (y > 0) g.term.write(k.up(y))
         if (plen - x > 0) g.term.write(k.right(plen - x))
         else if (plen - x < 0) g.term.write(k.left(x - plen))
       }
