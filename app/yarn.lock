@@ -8815,10 +8815,10 @@ vscode-textmate@^9.0.0:
   resolved "https://registry.yarnpkg.com/vscode-textmate/-/vscode-textmate-9.2.0.tgz#be2b04b3f8853135b2d67274670540215c5bb92b"
   integrity sha512-rkvG4SraZQaPSN/5XjwKswdU0OP9MF28QjrYzUBbhb8QyG3ljB1Ky996m++jiI7KdiAP2CkBiQZd9pqEDTClqA==
 
-wao@^0.18.9:
-  version "0.18.9"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.18.9.tgz#f53ccae7134727ed7f8b13d04be25af83e959a29"
-  integrity sha512-L53SBKASie48qqzxMsv5AowpoJj0wVRYFttUSOG7RgohfTigZQbiyX7QI28yRSQ0VMYK5uOQg8HFLApaiC8IzA==
+wao@^0.18.10:
+  version "0.18.10"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.18.10.tgz#4b6f3acce5c156a3fefffc1b994dd18e1046569d"
+  integrity sha512-Y2TUs4W0vDSF65DEmawbBpiMnequhSyC52n1RAnmB6vv3FrgX3fFaNaAMEaAvwZqpfITsgCHDR7tnH8+OZYjDA==
   dependencies:
     "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"
