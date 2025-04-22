@@ -153,7 +153,6 @@ export default function Global({}) {
         case "Messages":
           g.listMessages()
       }
-      console.log(tab)
     }
   }, [tab, init])
   useEffect(() => {
@@ -196,9 +195,11 @@ export default function Global({}) {
   useEffect(() => {
     ;(async () => {
       try {
-        g.ao = await new AO({ variant: cache, cache, hb_url }).init(acc[0])
+        g.ao = await new AO({ variant: cache, cache, hb_url, log: false }).init(
+          acc[0]
+        )
       } catch (e) {
-        g.ao = await new AO({ variant: cache, cache }).init(acc[0])
+        g.ao = await new AO({ variant: cache, cache, log: false }).init(acc[0])
       }
       await g.ao.mem.init()
       g.listModules()
@@ -385,7 +386,6 @@ export default function Global({}) {
     const r = g.refmap()
     const _getM = id => {
       let { t, msg, block } = g.msg(id)
-      console.log("getting:", id, msg)
       return {
         type: t.Type,
         from: msg?.msg?.From ?? msg.from,

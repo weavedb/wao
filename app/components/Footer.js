@@ -17,7 +17,7 @@ export default function Footer() {
       css={{ borderTop: "1px solid #ddd" }}
     >
       <Box w="200px">LOCALNET v 1.0.0</Box>
-      {!wasm64 ? (
+      {wasm64 ? (
         <Flex justify="center" flex={1}>
           Only possible on Arweave and AO
         </Flex>
