@@ -10,7 +10,9 @@ export default function MiddleEntityProcess() {
   const [subtab, setSubtab] = useState("Metadata")
   const [entity, setEntity] = use("entity")
   const [terminal, setTerminal] = use("terminal")
+  const [file] = use("file")
   const subtabs = ["Metadata", "Incoming", "Outgoing", "Spawned"]
+  const isEval = file?.ext === "lua"
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -60,13 +62,14 @@ export default function MiddleEntityProcess() {
           px={4}
           fontSize="10px"
           color="#ddd"
-          bg="#5137C5"
+          bg={isEval ? "#5137C5" : "#999"}
           css={{
             borderRadius: "5px",
             cursor: "pointer",
             _hover: { opacity: 0.75 },
           }}
           onClick={async () => {
+            if (!isEval) return alert("Select a lua file.")
             const p = g.ao.p(entity.id)
             const lua = g.editorRef.current.getValue()
             const jwk = await g.getWallet()
