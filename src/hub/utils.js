@@ -1,4 +1,5 @@
-const { keys, omit, isNil } = require("ramda")
+import { keys, omit, isNil } from "ramda"
+
 function generateId() {
   return Math.random().toString(36).substring(2, 15)
 }
@@ -60,4 +61,4 @@ function parseSignatureInput(input) {
   return { label, fields, alg, keyid }
 }
 
-module.exports = { toANS104Request, parseSignatureInput, generateId }
+export { toANS104Request, parseSignatureInput, generateId }

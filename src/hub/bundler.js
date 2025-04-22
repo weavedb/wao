@@ -1,10 +1,10 @@
-const express = require("express")
-const cors = require("cors")
-const bodyParser = require("body-parser")
-const _Arweave = require("arweave")
+import express from "express"
+import cors from "cors"
+import bodyParser from "body-parser"
+import _Arweave from "arweave"
 const Arweave = _Arweave.default ?? _Arweave
 const arweave = Arweave.init()
-const { generateId, toANS104Request, parseSignatureInput } = require("./utils")
+import { generateId, toANS104Request, parseSignatureInput } from "./utils.js"
 
 // todo: bundler is unusable due to incorrect ids and signature
 const bundler = (sus, cbs, hbs) => {
@@ -120,4 +120,4 @@ const bundler = (sus, cbs, hbs) => {
 
   const server = app.listen(4001, () => console.log(`BD on port 4001`))
 }
-module.exports = bundler
+export default bundler

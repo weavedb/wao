@@ -1,8 +1,8 @@
-const express = require("express")
-const cors = require("cors")
-const bodyParser = require("body-parser")
+import express from "express"
+import cors from "cors"
+import bodyParser from "body-parser"
 const app2 = express()
-const { generateId, toANS104Request, parseSignatureInput } = require("./utils")
+import { generateId, toANS104Request, parseSignatureInput } from "./utils.js"
 
 const cu = (sus, cbs) => {
   app2.use(cors())
@@ -71,4 +71,4 @@ const cu = (sus, cbs) => {
   }
 }
 
-module.exports = cu
+export default cu

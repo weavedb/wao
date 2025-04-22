@@ -1,15 +1,16 @@
-const chokidar = require("chokidar")
-const { generateId } = require("./utils")
-const WebSocket = require("ws")
+import chokidar from "chokidar"
+import { generateId } from "./utils.js"
+import WebSocket from "ws"
 const ws_server = new WebSocket.Server({ port: 9090 })
-const { keys, omit, isNil, mergeLeft } = require("ramda")
-const { resolve } = require("path")
-const { writeFileSync, readFileSync } = require("fs")
+import { keys, omit, isNil, mergeLeft } from "ramda"
+import { resolve } from "path"
+import { writeFileSync, readFileSync } from "fs"
 const _dir = process.argv[2] ?? "./"
 let sus = {}
 let cbs = {}
 let dir = null
 let _socket = null
+const cwd = process.cwd()
 ws_server.on("connection", socket => {
   _socket = socket
   const clientId = generateId()
@@ -25,12 +26,12 @@ ws_server.on("connection", socket => {
     const data = JSON.parse(message)
     if (data.type === "save") {
       writeFileSync(
-        resolve(__dirname, _dir, data.path.replace(/^\//, "")),
+        resolve(cwd, _dir, data.path.replace(/^\//, "")),
         data.content
       )
     } else if (data.type === "data") {
       const content = readFileSync(
-        resolve(__dirname, _dir, data.path.replace(/^\//, "")),
+        resolve(cwd, _dir, data.path.replace(/^\//, "")),
         "utf8"
       )
       socket.send(
@@ -70,24 +71,25 @@ const sendContent = (content, path) => {
 }
 
 console.log("WAO FS running on port 9090")
-const wd = resolve(__dirname, _dir)
+const wd = resolve(cwd, _dir)
+console.log("Directory:", wd)
 chokidar
   .watch(wd, {
     ignored: (e, stats) => {
-      const _e = resolve(__dirname, e)
+      const _e = resolve(cwd, e)
       return new RegExp(wd + "/node_modules").test(_e)
     },
   })
   .on("change", (e, p) => {
-    const _e = resolve(__dirname, e)
+    const _e = resolve(cwd, e)
     const rel = _e.replace(new RegExp(wd + "/"), "")
     let paths = rel.split("/")
     let _dir = dir
-    const content = readFileSync(resolve(__dirname, _dir, _e), "utf8")
+    const content = readFileSync(resolve(cwd, _dir, _e), "utf8")
     sendContent(content, e.replace(wd, ""))
   })
   .on("add", (e, p) => {
-    const _e = resolve(__dirname, e)
+    const _e = resolve(cwd, e)
     const rel = _e.replace(new RegExp(wd + "/"), "")
     let paths = rel.split("/")
     let _dir = dir
@@ -102,7 +104,7 @@ chokidar
     sendDir()
   })
   .on("addDir", (e, p) => {
-    const _e = resolve(__dirname, e)
+    const _e = resolve(cwd, e)
     if (_e === wd) {
       dir = {}
       return
@@ -118,7 +120,7 @@ chokidar
     sendDir()
   })
   .on("unlink", (e, p) => {
-    const _e = resolve(__dirname, e)
+    const _e = resolve(cwd, e)
     const rel = _e.replace(new RegExp(wd + "/"), "")
     let paths = rel.split("/")
     let _dir = dir
@@ -133,7 +135,7 @@ chokidar
     sendDir()
   })
   .on("unlinkDir", (e, p) => {
-    const _e = resolve(__dirname, e)
+    const _e = resolve(cwd, e)
     if (_e === wd) {
       dir = null
       return null

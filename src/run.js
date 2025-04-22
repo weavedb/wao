@@ -10,6 +10,7 @@ let {
   db = ".cache",
   hb,
 } = yargs(process.argv.slice(2)).argv
+
 db = memory ? null : resolve(process.cwd(), db)
 if (reset) {
   try {
