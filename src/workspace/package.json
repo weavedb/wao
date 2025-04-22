@@ -1,0 +1,13 @@
+{
+  "name": "wao-workspace",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-wasm-memory64",
+    "test-only": "node --experimental-wasm-memory64 --test-only",
+    "deploy": "node scripts/deploy.js"
+  },
+  "dependencies": {
+    "wao": "^0.19.6"
+  }
+}
