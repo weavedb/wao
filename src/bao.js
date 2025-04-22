@@ -52,6 +52,7 @@ class AO extends MAO {
   constructor(opt = {}) {
     if (opt.hb_url) opt.hb = new HB({ url: opt.hb_url })
     super({ ...opt, in_memory: true })
+    this.log = opt.log ?? true
     this.in_memory = true
     this.createDataItemSigner = opt.createDataItemSigner ?? createDataItemSigner
     this.hb = opt.hb
@@ -82,6 +83,7 @@ class AO extends MAO {
         await wait(100) // todo: why do we need to wait?
         res = await result(...opt)
       }
+      if (res) renderLogs(res.Output)
       return res
     }
 
@@ -89,12 +91,14 @@ class AO extends MAO {
     this.message = message
     this.spawn = async (...opt) => {
       const res = await spawn(...opt)
-      if (!opt[0].http_msg) {
-        await this.load({ data: log, pid: res })
-      }
+      if (!opt[0].http_msg && this.log) await this.load({ data: log, pid: res })
       return res
     }
-    this.dryrun = async (...opt) => await dryrun(...opt)
+    this.dryrun = async (...opt) => {
+      const res = await dryrun(...opt)
+      if (res) renderLogs(res.Output)
+      return res
+    }
 
     this.monitor = monitor
     this.unmonitor = unmonitor
