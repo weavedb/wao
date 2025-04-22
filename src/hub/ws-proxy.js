@@ -1,12 +1,12 @@
-const yargs = require("yargs")
+import yargs from "yargs"
 let { port = 7000 } = yargs(process.argv.slice(2)).argv
-const { Server } = require("wao/test")
-const { generateId } = require("./utils")
-const WebSocket = require("ws")
+import { Server } from "../test.js"
+import { generateId } from "./utils.js"
+import WebSocket from "ws"
 const ws_server = new WebSocket.Server({ port: 7070 })
-const { keys, omit, isNil, mergeLeft } = require("ramda")
-const { resolve } = require("path")
-const { writeFileSync, readFileSync } = require("fs")
+import { keys, omit, isNil, mergeLeft } from "ramda"
+import { resolve } from "path"
+import { writeFileSync, readFileSync } from "fs"
 let sus = {}
 let cbs = {}
 let _socket = null

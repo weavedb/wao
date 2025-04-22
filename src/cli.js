@@ -4,6 +4,21 @@ import { dirname } from "./utils.js"
 import { resolve } from "path"
 const args = process.argv.slice(2)
 
+const cmds = {
+  wao: { script: "run.js" },
+  hub: { script: "hub/index.js" },
+  fs: { script: "hub/fs.js" },
+  proxy: { script: "hub/ws-proxy.js" },
+}
+
+const cmd = cmds[args[0]] ?? cmds["wao"]
+if (cmds[args[0]]) args.shift()
+
+if (!cmd) {
+  console.log("The wrong command")
+  process.exit()
+}
+
 pm2.connect(false, async err => {
   if (err) {
     console.error("Error connecting to PM2:", err)
@@ -12,7 +27,7 @@ pm2.connect(false, async err => {
 
   pm2.start(
     {
-      script: resolve(await dirname(), "run.js"),
+      script: resolve(await dirname(), cmd.script),
       nodeArgs: "--experimental-wasm-memory64",
       instances: 1,
       force: true,
@@ -26,7 +41,7 @@ pm2.connect(false, async err => {
         pm2.disconnect()
         process.exit(2)
       }
-    },
+    }
   )
   pm2.streamLogs("all", 0, false)
 })

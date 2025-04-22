@@ -1,12 +1,12 @@
-const express = require("express")
-const cors = require("cors")
-const bodyParser = require("body-parser")
-const { keys, omit, isNil, mergeLeft } = require("ramda")
-const { generateId, toANS104Request, parseSignatureInput } = require("./utils")
-const bundler = require("./bundler")
-const cu = require("./cu")
+import express from "express"
+import cors from "cors"
+import bodyParser from "body-parser"
+import { keys, omit, isNil, mergeLeft } from "ramda"
+import { generateId, toANS104Request, parseSignatureInput } from "./utils.js"
+import bundler from "./bundler.js"
+import cu from "./cu.js"
 
-const WebSocket = require("ws")
+import WebSocket from "ws"
 const ws_server = new WebSocket.Server({ port: 8080 })
 
 let sus = {}
