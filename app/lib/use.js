@@ -52,4 +52,5 @@ export default store({
   acc: null,
   entity: null,
   terminal: null,
+  wasm64: false,
 })
