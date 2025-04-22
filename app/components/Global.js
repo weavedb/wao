@@ -54,7 +54,7 @@ import { AO, acc } from "wao/web"
 // guide
 import { bps, bfiles } from "/lib/guide"
 
-const tg = m => m?.msg?.Tags ?? m.tags ?? m.Tags ?? []
+const tg = m => m?.msg?.Tags ?? m?.tags ?? m?.tags ?? []
 
 export default function Global({}) {
   g.filesRef = useRef(null)
