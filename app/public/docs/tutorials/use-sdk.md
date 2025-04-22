@@ -18,7 +18,7 @@ describe("WAO", function () {
   it("should spawn a process and send messages", async () => {
     const ao = await new AO().init(acc[0])
     const { p } = await ao.deploy({ src_data })
-    assert.equal(await p.d("Hello", "Hello, World!")
+    assert.equal(await p.d("Hello", false), "Hello, World!")
   })
 })
 ```
