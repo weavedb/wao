@@ -11,6 +11,12 @@ export default function MiddleEntityModule() {
   const [entity, setEntity] = use("entity")
   const subtabs = ["Metadata", "Processes"]
   const [tab, setTab] = use("tab")
+  const [wasm64] = use("wasm64")
+  let iswasm = false
+  try {
+    iswasm =
+      g.ao.mem.wasms[entity.id]?.format.split("-")[0] !== "wasm64" || wasm64
+  } catch (e) {}
   const buttons = !entity ? null : (
     <Flex
       h="60px"
@@ -60,19 +66,23 @@ export default function MiddleEntityModule() {
           mx={3}
           fontSize="10px"
           color="#ddd"
-          bg="#5137C5"
+          bg={!iswasm ? "#999" : "#5137C5"}
           css={{
             borderRadius: "5px",
             cursor: "pointer",
             _hover: { opacity: 0.75 },
           }}
           onClick={async () => {
-            const jwk = await g.getWallet()
-            const { pid, p } = await g.ao.deploy({ module: entity.id, jwk })
-            g.logSpawn(pid)
-            g._setModule(entity.id)
-            g._setProcess(pid)
-            setTab("Processes")
+            if (!iswasm) {
+              alert("Wasm64 modules are not supported with your browser.")
+            } else {
+              const jwk = await g.getWallet()
+              const { pid, p } = await g.ao.deploy({ module: entity.id, jwk })
+              g.logSpawn(pid)
+              g._setModule(entity.id)
+              g._setProcess(pid)
+              setTab("Processes")
+            }
           }}
         >
           Spawn

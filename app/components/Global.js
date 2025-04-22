@@ -31,6 +31,7 @@ import {
   resolvePath,
   tags,
   toAddr,
+  isWasm64,
 } from "/lib/utils"
 
 import g from "/lib/global"
@@ -89,7 +90,9 @@ export default function Global({}) {
   const [selDir, setSelDir] = use("selDir")
   const [networks, setNetworks] = use("networks")
   const [terminal, setTerminal] = use("terminal")
+  const [wasm64, setWasm64] = use("wasm64")
   useEffect(() => {
+    isWasm64().then(support => setWasm64(support))
     g.dryrun = true
     g.peer2 = {}
   }, [])

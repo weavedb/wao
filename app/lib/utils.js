@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { AO, acc } from "wao/web"
 import { hash as sha256 } from "fast-sha256"
 import { splitEvery, fromPairs, map, filter, includes } from "ramda"
 import { common, createStarryNight } from "@wooorm/starry-night"
@@ -355,7 +356,19 @@ const k = {
     }
   },
 }
+async function isWasm64() {
+  try {
+    const ao = await new AO({ cache: "__wasm__" }).init(acc[0])
+    const { pid } = await ao.spwn({
+      module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
+    })
+    return pid !== null
+  } catch (e) {
+    return false
+  }
+}
 export {
+  isWasm64,
   k,
   toAddr,
   fromNow,
