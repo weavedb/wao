@@ -3,6 +3,20 @@ const pm2 = require("pm2")
 
 const args = process.argv.slice(2)
 
+const cmds = {
+  wao: { script: "./src/run.js" },
+  hub: { script: "./hub/index.js" },
+  fs: { script: "./hub/fs.js" },
+  proxy: { script: "./hub/ws-proxy.js" },
+}
+
+const cmd = cmds[args[0]] ?? cmds["wao"]
+if (cmds[args[0]]) args.shift()
+if (!cmd) {
+  console.log("The wrong command")
+  process.exit()
+}
+
 pm2.connect(false, err => {
   if (err) {
     console.error("Error connecting to PM2:", err)
@@ -25,7 +39,7 @@ pm2.connect(false, err => {
         pm2.disconnect()
         process.exit(2)
       }
-    },
+    }
   )
   pm2.streamLogs("all", 0, false)
 })
