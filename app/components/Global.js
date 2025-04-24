@@ -250,11 +250,13 @@ export default function Global({}) {
     if (block) block = clone(block)
     return { proc, msg, tags: _tags, t, tx, block }
   }
+
   g.mmap = () => {
     let mmap = {}
     for (let k in g.ao.mem.modules) mmap[g.ao.mem.modules[k]] = k
     return mmap
   }
+
   g.getEOS = id => {
     let a = {
       type: "Account",
@@ -302,6 +304,23 @@ export default function Global({}) {
     setTab("Entity")
   }
 
+  g.searchAssignment = id => {
+    try {
+      if (g.ao.mem.txs[id].bundle) {
+        const tx = g.ao.mem.txs[g.ao.mem.txs[id].bundle]
+        const items = new Bundle(tx.data).items
+        for (let v of items) {
+          if (v.id === id) {
+            const t = tags(tg(v))
+            if (t.Assignment === "Assingment") return true
+          }
+        }
+      }
+    } catch (e) {
+      console.log(e)
+    }
+    return null
+  }
   g.getAssignment = id => {
     try {
       if (g.ao.mem.txs[id].bundle) {
@@ -336,7 +355,8 @@ export default function Global({}) {
     setTab("Entity")
   }
 
-  g.getAccount = id => {
+  g.getAccount = (id, type) => {
+    console.log(id, type)
     if (g.ao.mem.wasms[id]) {
       g.getModule(id)
     } else if (g.ao.mem.env[id]) {
