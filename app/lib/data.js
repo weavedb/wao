@@ -4,7 +4,7 @@ const ctypes = [
     name: "HyperBEAM Nodes",
     desc: "WS subscriptions to remote HyperBEAM nodes",
   },
-  {
+  /*{
     key: "su",
     name: "Scheduler Units ( SUs )",
     desc: "Connections to browser SUs via WebRTC",
@@ -23,7 +23,7 @@ const ctypes = [
     key: "hub",
     name: "WAO Hubs",
     desc: "Websocket connections to WAO hubs",
-  },
+  },*/
 ]
 const hb_url = "http://localhost:10001"
 const mod = "WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g"
