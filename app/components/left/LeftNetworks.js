@@ -98,7 +98,7 @@ export default function Left() {
           >
             HUB : {hubPort}
           </Flex>
-        ) : (
+        ) : true ? null : (
           <Flex
             fontSize="10px"
             color="white"
@@ -416,9 +416,7 @@ export default function Left() {
             direction="column"
             justify="center"
             onClick={() => {
-              if (!includes(v.key, ["hb"])) {
-                return alert("Coming Soon!")
-              }
+              if (!includes(v.key, [])) return alert("Coming Soon!")
               setCtype(v.key)
             }}
             css={{
