@@ -23,11 +23,11 @@ describe("WAO", function () {
 
   // WAO Proxy must be running on your computer => "npx wao proxy"
   it("should spawn a process and send messages to the browser", async () => {
-    // connect with 7000 - 7004 ports
-    const ao = await new WAO(7000).init(acc[0])
+    // connect with 4000 - 4004 ports
+    const ao = await new WAO(4000).init(acc[0])
 
     // post Scheduler-Location (acc[0])
-    const { res, id } = await ao.postScheduler({ url: "http://localhost:7003" })
+    const { res, id } = await ao.postScheduler({ url: "http://localhost:4003" })
 
     const { p, pid } = await ao.deploy({
       src_data,
