@@ -323,7 +323,7 @@ export default function Left() {
               }
             }}
           >
-            PROXY : 7070
+            PROXY : 4005
           </Flex>
         ) : (
           <Flex
@@ -340,7 +340,7 @@ export default function Left() {
             }}
             onClick={async () => {
               const adaptor = new Adaptor({ hb_url, aoconnect: g.ao.mem })
-              g.hub1 = new Hub("ws://localhost:7070")
+              g.hub1 = new Hub("ws://localhost:4005")
               g.hub1.onMsg = async obj => {
                 console.log("New PX Msg:", obj)
                 adaptor.get(obj.req, res => {

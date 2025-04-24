@@ -5,9 +5,10 @@ import { keys, omit, isNil, mergeLeft } from "ramda"
 import { generateId, toANS104Request, parseSignatureInput } from "./utils.js"
 import bundler from "./bundler.js"
 import cu from "./cu.js"
-
+import yargs from "yargs"
+let { port = 8080 } = yargs(process.argv.slice(2)).argv
 import WebSocket from "ws"
-const ws_server = new WebSocket.Server({ port: 8080 })
+const ws_server = new WebSocket.Server({ port })
 
 let sus = {}
 let cbs = {}
