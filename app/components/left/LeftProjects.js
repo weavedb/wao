@@ -204,7 +204,7 @@ export default function Left() {
               }
             }}
           >
-            FS : 9090
+            FS : 4006
           </Flex>
         ) : (
           <Flex
@@ -257,7 +257,7 @@ export default function Left() {
                 ls(_localFS)
                 setLocalFS(_files)
               }
-              g.hub1 = new Hub("ws://localhost:9090")
+              g.hub1 = new Hub("ws://localhost:4006")
               g.hub1.onMsg = async obj => {
                 console.log("New FS Msg:", obj)
                 if (obj.subtype === "content") {
