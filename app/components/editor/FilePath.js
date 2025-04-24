@@ -5,9 +5,18 @@ import use from "/lib/use"
 
 export default function FilePath({}) {
   const [file] = use("file")
+  const [localFS, setLocalFS] = use("localFS")
+  const [localFSOpen, setLocalFSOpen] = use("localFSOpen")
   const [projects] = use("projects")
   if (!file) return null
-  const pmap = indexBy(prop("id"))(projects)
+  const _projects = [
+    ...(localFS.length > 0
+      ? [{ id: "2", name: "Local Computer", open: localFSOpen }]
+      : []),
+    ...projects,
+  ]
+
+  const pmap = indexBy(prop("id"))(_projects)
   let html = []
   html.push(<Box>{pmap[file.pid].name}</Box>)
   for (let v of file.path.split("/")) {

@@ -115,7 +115,6 @@ export default function FSModal() {
             }
 
             g.hub1.onRegister = msg => {
-              console.log("are we here??")
               setWSID(msg.id)
               let lfs = null
               setFSPort(port)
