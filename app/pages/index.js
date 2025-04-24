@@ -24,6 +24,7 @@ import CreateFileModal from "/components/modals/CreateFileModal"
 import CreateFolderModal from "/components/modals/CreateFolderModal"
 import LaunchNetworkModal from "/components/modals/LaunchNetworkModal"
 import CreateProjectModal from "/components/modals/CreateProjectModal"
+import ProxyModal from "/components/modals/ProxyModal"
 
 export default function Home({}) {
   const [tab, setTab] = use("tab")
@@ -107,6 +108,7 @@ export default function Home({}) {
       <LaunchNetworkModal />
       <CreateProjectModal />
       <CreateFolderModal />
+      <ProxyModal />
       <Toaster />
     </>
   )
