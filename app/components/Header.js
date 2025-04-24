@@ -10,6 +10,7 @@ import { prop, indexBy, map, clone } from "ramda"
 import { getAct, tags } from "/lib/utils"
 
 export default function Header() {
+  const [path, setPath] = use("path")
   const [proc, setProc] = use("proc")
   const [module, setModule] = use("module")
   const [modules, setModules] = use("modules")
@@ -88,74 +89,41 @@ export default function Header() {
             }}
             onClick={() => setTab("Networks")}
           >
-            <Box mr={2} css={{ borderRadius: "3px" }}>
-              {cache}
-            </Box>
+            <Box css={{ borderRadius: "3px" }}>{cache}</Box>
           </Flex>
-          {!module ? null : (
-            <>
-              <Icon size="sm" color="#5137C5" mb="1px">
-                <FaAngleRight />
-              </Icon>
-              <Flex
-                ml={2}
-                align="center"
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={() => setTab("Modules")}
-              >
-                <Box mr={2} css={{ borderRadius: "3px" }}>
-                  {modmap[module.id].name}
+          {map(v => {
+            return (
+              <>
+                <Icon size="sm" color="#5137C5" mb="1px" ml={2}>
+                  <FaAngleRight />
+                </Icon>
+                {v.action ? (
+                  <Flex ml={2} px={2} bg="#eee" css={{ borderRadius: "3px" }}>
+                    {v.action}
+                  </Flex>
+                ) : null}
+                <Box
+                  css={{ cursor: "pointer", _hover: { opacity: 0.75 } }}
+                  ml={2}
+                  onClick={() => {
+                    switch (v.type) {
+                      case "module":
+                        g.getModule(v.id)
+                        break
+                      case "process":
+                        g.getProcess(v.id)
+                        break
+                      case "message":
+                        g.getMessage(v.id)
+                        break
+                    }
+                  }}
+                >
+                  {v.name ?? v.id}
                 </Box>
-              </Flex>
-            </>
-          )}
-          {!proc ? null : (
-            <>
-              <Icon size="sm" color="#5137C5" mb="1px">
-                <FaAngleRight />
-              </Icon>
-              <Flex
-                align="center"
-                ml={2}
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={() => setTab("Processes")}
-              >
-                <Box mr={2}>{proc?.id}</Box>
-              </Flex>
-            </>
-          )}
-          {!message ? null : (
-            <>
-              <Icon size="sm" color="#5137C5" mb="1px">
-                <FaAngleRight />
-              </Icon>
-              <Flex
-                align="center"
-                ml={2}
-                css={{
-                  cursor: "pointer",
-                  _hover: { opacity: 0.75 },
-                }}
-                onClick={() => setTab("Messages")}
-              >
-                <Flex mr={4}>
-                  <Box px={2} bg="#bbb" css={{ borderRadius: "3px 0 0 3px" }}>
-                    {message.slot}
-                  </Box>
-                  <Box px={2} bg="#ddd" css={{ borderRadius: "0 3px 3px 0" }}>
-                    {getAct(message)}
-                  </Box>
-                  <Box ml={3}>{message?.id}</Box>
-                </Flex>
-              </Flex>
-            </>
-          )}
+              </>
+            )
+          })(path)}
         </Flex>
         <Flex flex={1} />
         {wallet ? (

@@ -60,4 +60,5 @@ export default store({
   proxyPort: null,
   fsPort: null,
   hubPort: null,
+  path: [],
 })

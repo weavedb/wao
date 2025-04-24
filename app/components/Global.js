@@ -67,6 +67,7 @@ export default function Global({}) {
   g.fileInputRef = useRef(null)
 
   const { width, height } = useResizeObserver(g.containerRef)
+  const [path, setPath] = use("path")
   const [blocks, setBlocks] = use("blocks")
   const [entity, setEntity] = use("entity")
   const [projects, setProjects] = use("projects")
@@ -245,10 +246,13 @@ export default function Global({}) {
     const _tags = clone(tg(msg))
     const t = tags(_tags)
     let tx = g.ao.mem.txs[id] ?? null
-    if (tx.bundle) tx = g.ao.mem.txs[tx.bundle]
-    if (tx) tx = clone(tx)
-    let block = g.ao.mem.blockmap[tx.block] ?? null
-    if (block) block = clone(block)
+    let block = null
+    if (tx) {
+      if (tx.bundle) tx = g.ao.mem.txs[tx.bundle]
+      if (tx) tx = clone(tx)
+      block = g.ao.mem.blockmap[tx.block] ?? null
+      if (block) block = clone(block)
+    }
     return { proc, msg, tags: _tags, t, tx, block }
   }
 
@@ -392,7 +396,26 @@ export default function Global({}) {
   }
 
   g.getMessage = id => {
-    let { proc, msg, tags: _tags, t, tx, block } = g.msg(id)
+    let _path = []
+    const mmap = g.mmap()
+    let { msg, tags: _tags, t, tx, block } = g.msg(id)
+    let { proc, t: t2 } = g.msg(msg.process)
+    _path.push({
+      type: "module",
+      id: proc?.module,
+      name: mmap[proc?.module],
+    })
+    _path.push({
+      type: "process",
+      id: msg.process,
+      name: t2.Name,
+    })
+    _path.push({
+      type: "message",
+      id,
+      action: t.Action,
+      name: t.Name,
+    })
     let m = {
       from: msg?.msg?.From,
       to: msg?.msg?.Target ?? msg.target,
@@ -479,12 +502,25 @@ export default function Global({}) {
     m2.depth = depth
     m.linked.push(m2)
     getLinked(m2, depth + 1)
+    setPath(_path)
     setEntity(m)
     setTab("Entity")
   }
 
   g.getProcess = id => {
+    let _path = []
+    const mmap = g.mmap()
     let { proc, msg, tags: _tags, t, tx, block } = g.msg(id)
+    _path.push({
+      type: "module",
+      id: proc?.module,
+      name: mmap[proc?.module],
+    })
+    _path.push({
+      type: "process",
+      id,
+      name: t.Name,
+    })
     const p = {
       ...proc,
       name: t.Name ?? null,
@@ -509,7 +545,7 @@ export default function Global({}) {
       })
       i++
     }
-    const mmap = g.mmap()
+
     for (let k in g.ao.mem.msgs) {
       const m = g.ao.mem.msgs[k]
       const t = tags(tg(m))
@@ -543,11 +579,13 @@ export default function Global({}) {
         }
       }
     }
+    setPath(_path)
     setEntity(p)
     setTab("Entity")
   }
 
   g.getModule = id => {
+    let _path = []
     let mmap = g.mmap()
     let _procs = []
     let mod = clone(g.ao.mem.txs[id])
@@ -589,6 +627,8 @@ export default function Global({}) {
           }
         }
       }
+      _path.push({ type: "module", id: mod.id, name: mod.name })
+      setPath(_path)
       setEntity(mod)
       setTab("Entity")
     }
