@@ -28,12 +28,14 @@ export default function Header() {
       const wasm = g.ao.mem.wasms[search]
       results.push({ id: search, type: "Module" })
     }
-    if (g.ao.mem.env[search]) {
-      results.push({ id: search, type: "Process" })
+    if (g.ao.mem.env[search]) results.push({ id: search, type: "Process" })
+    if (g.ao.mem.msgs[search]) results.push({ id: search, type: "Message" })
+    const assignment = g.searchAssignment(search)
+    if (assignment) results.push({ id: search, type: "Assignment" })
+    if (g.ao.mem.txs[search] && !g.ao.mem.txs[search].bundle) {
+      results.push({ id: search, type: "Tx" })
     }
-    if (g.ao.mem.msgs[search]) {
-      results.push({ id: search, type: "Message" })
-    }
+    if (results.length === 0) results.push({ id: search, type: "Account" })
     setResults(results)
   }
   return (
@@ -289,51 +291,25 @@ export default function Header() {
                       direction="column"
                       justify="center"
                       onClick={() => {
-                        if (v.type === "Module") {
-                          g._setModule(v.id)
-                          setProc(null)
-                          setMessages([])
-                          setMessage(null)
-                          setTab("Modules")
-                        } else if (v.type === "Process") {
-                          let _proc = clone(g.ao.mem.env[v.id])
-                          delete _proc.memory
-                          _proc.tags = clone(g.ao.mem.msgs[v.id]?.tags ?? [])
-                          _proc.id = v.id
-                          setProc(_proc)
-                          setMessage(null)
-                          setTab("Processes")
-                          g._setModule(_proc.module)
-                        } else if (v.type === "Message") {
-                          let _msg = clone(g.ao.mem.msgs[v.id])
-                          _msg.id = v.id
-                          if (_msg.http_msg) setMessage(_msg)
-                          else {
-                            if (!_msg.tags) {
-                              _msg.tags = new DataItem(_msg.item.binary).tags
-                            }
-                            setMessage({
-                              item: v.item,
-                              res: _msg.res,
-                              http_msg: _msg,
-                              id: _msg.id,
-                              slot: v.slot,
-                            })
-                          }
-                          let t = tags(_msg.tags)
-                          let pid = null
-                          if (t.Type === "Process") {
-                            pid = _msg.id
-                          } else {
-                            pid = _msg.process
-                          }
-                          let _proc = clone(g.ao.mem.env[pid])
-                          delete _proc.memory
-                          _proc.tags = clone(g.ao.mem.msgs[pid]?.tags ?? [])
-                          _proc.id = pid
-                          setProc(_proc)
-                          g._setModule(_proc.module)
-                          setTab("Messages")
+                        switch (v.type) {
+                          case "Module":
+                            g.getModule(v.id)
+                            break
+                          case "Process":
+                            g.getProcess(v.id)
+                            break
+                          case "Message":
+                            g.getMessage(v.id)
+                            break
+                          case "Tx":
+                            g.getTx(v.id)
+                            break
+                          case "Assignment":
+                            g.getAssingment(v.id)
+                            break
+                          case "Account":
+                            g.getEOS(v.id)
+                            break
                         }
                         setModal(false)
                       }}
