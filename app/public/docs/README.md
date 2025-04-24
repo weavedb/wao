@@ -28,7 +28,7 @@ npx wao proxy
 
 #### 3. Connect the Browser to the Proxy
 
-Go to [the web app](https://wao-localnet.vercel.app/) and open `Networks`, then click `Proxy`.
+Go to [the web app](https://preview.wao.eco/) and open `Networks`, then click `Proxy`.
 
 #### 4. Run Test
 
