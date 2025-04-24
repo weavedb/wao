@@ -1,7 +1,9 @@
 import chokidar from "chokidar"
 import { generateId } from "./utils.js"
 import WebSocket from "ws"
-const ws_server = new WebSocket.Server({ port: 9090 })
+import yargs from "yargs"
+let { port = 4006 } = yargs(process.argv.slice(2)).argv
+const ws_server = new WebSocket.Server({ port })
 import { keys, omit, isNil, mergeLeft } from "ramda"
 import { resolve } from "path"
 import { writeFileSync, readFileSync } from "fs"
@@ -70,7 +72,7 @@ const sendContent = (content, path) => {
   }
 }
 
-console.log("WAO FS running on port 9090")
+console.log(`WAO FS running on port ${port}`)
 const wd = resolve(cwd, _dir)
 console.log("Directory:", wd)
 chokidar

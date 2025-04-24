@@ -186,7 +186,7 @@ describe("ArMem", () => {
     return
   })
   it.only("should connect with web-proxy", async () => {
-    const port = 7000
+    const port = 4000
     let ao = await new AO({
       variant: "ao.WLN.1",
       ar: { port: port },
@@ -197,7 +197,7 @@ Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })
 end)
 `
-    const { res, id } = await ao.postScheduler({ url: "http://localhost:7003" })
+    const { res, id } = await ao.postScheduler({ url: "http://localhost:4003" })
     console.log("scheduler posted:", id)
     const { pid, p } = await ao.deploy({
       scheduler: acc[0].addr,
