@@ -27,6 +27,7 @@ import CreateProjectModal from "/components/modals/CreateProjectModal"
 import ProxyModal from "/components/modals/ProxyModal"
 import FSModal from "/components/modals/FSModal"
 import ImportModal from "/components/modals/ImportModal"
+import RenameFileModal from "/components/modals/RenameFileModal"
 
 export default function Home({}) {
   const [tab, setTab] = use("tab")
@@ -110,6 +111,7 @@ export default function Home({}) {
       <LaunchNetworkModal />
       <CreateProjectModal />
       <CreateFolderModal />
+      <RenameFileModal />
       <ImportModal />
       <ProxyModal />
       <FSModal />
