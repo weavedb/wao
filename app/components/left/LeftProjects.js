@@ -31,6 +31,7 @@ export default function Left() {
   const [modal3, setModal3] = use("modal3")
   const [modal4, setModal4] = use("modal4")
   const [modal6, setModal6] = use("modal6")
+  const [modal7, setModal7] = use("modal7")
   const [openFiles, setOpenFiles] = use("openFiles")
   const [preview, setPreview] = use("preview")
   const [previewContent, setPreviewContent] = use("previewContent")
@@ -159,30 +160,55 @@ export default function Left() {
           </Flex>
         </Tooltip>
         <Box flex={1} />
-
-        <Flex
-          ml={2}
-          py={1}
-          px={3}
-          fontSize="10px"
-          color="#ddd"
-          bg="#5137C5"
-          css={{
-            borderRadius: "5px",
-            cursor: "pointer",
-            _hover: { opacity: 0.75 },
-          }}
-          onClick={handleImportClick}
-        >
-          <input
-            type="file"
-            ref={g.fileInputRef}
-            onChange={handleFileChange}
-            accept=".lua, .js, .json, .md, .ts"
-            style={{ display: "none" }}
-          />
-          Import
-        </Flex>
+        {true ? (
+          <Flex
+            ml={2}
+            py={1}
+            px={3}
+            fontSize="10px"
+            color="#ddd"
+            bg="#5137C5"
+            css={{
+              borderRadius: "5px",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={() => setModal7(true)}
+          >
+            <input
+              type="file"
+              ref={g.fileInputRef}
+              onChange={handleFileChange}
+              accept=".lua, .js, .json, .md, .ts"
+              style={{ display: "none" }}
+            />
+            Import
+          </Flex>
+        ) : (
+          <Flex
+            ml={2}
+            py={1}
+            px={3}
+            fontSize="10px"
+            color="#ddd"
+            bg="#5137C5"
+            css={{
+              borderRadius: "5px",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={handleImportClick}
+          >
+            <input
+              type="file"
+              ref={g.fileInputRef}
+              onChange={handleFileChange}
+              accept=".lua, .js, .json, .md, .ts"
+              style={{ display: "none" }}
+            />
+            Import
+          </Flex>
+        )}
         {wsid ? (
           <Flex
             ml={3}
