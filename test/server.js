@@ -185,27 +185,37 @@ describe("ArMem", () => {
     await server.end()
     return
   })
+
   it.only("should connect with web-proxy", async () => {
-    const port = 4000
-    let ao = await new AO({
-      variant: "ao.WLN.1",
-      ar: { port: port },
-      aoconnect: optAO(port),
-    }).init(acc[0])
-    const src_data = `
+    let ao = await new AO(4000).init(acc[0])
+    const src_data = `local count = 0
+
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = "Incremented!" })
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+
 Handlers.add("Hello", "Hello", function (msg)
   msg.reply({ Data = "Hello, World!" })
-end)
-`
+end)`
     const { res, id } = await ao.postScheduler({ url: "http://localhost:4003" })
     console.log("scheduler posted:", id)
+
     const { pid, p } = await ao.deploy({
       scheduler: acc[0].addr,
       src_data,
-      module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
+      module: "WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
     })
     console.log("process deployed:", pid)
-    console.log(await p.msg("Hello", false))
+
+    assert.equal(await p.d("Hello", false), "Hello, World!")
+    assert.equal(await p.d("Get"), "0")
+    assert.equal(await p.m("Inc", false), "Incremented!")
+    assert.equal(await p.d("Get"), "1")
     return
   })
 })
