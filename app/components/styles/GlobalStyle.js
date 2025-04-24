@@ -1,6 +1,10 @@
 export default function GlobalStyle() {
   return (
     <style jsx global>{`
+      body {
+        background: white;
+        color: #222;
+      }
       .markdown-body nav[style*="justify-content:space-between"] {
         display: flex;
         justify-content: space-between;
