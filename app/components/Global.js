@@ -1044,7 +1044,7 @@ export default function Global({}) {
     g.log(`Process Spawned: ${pid}`, {
       title: "Process Spawned!",
       type: "success",
-      description: pid.slice(0, 251) + "...",
+      description: pid.slice(0, 25) + "...",
       action: {
         label: "View",
         onClick: () => g.getProcess(pid),
