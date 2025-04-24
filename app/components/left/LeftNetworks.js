@@ -41,7 +41,9 @@ export default function Left() {
   const [clients, setClients] = use("clients")
   const [suid, setSUID] = use("suid")
   const [psid, setPSID] = use("psid")
-
+  const [hubPort, setHubPort] = use("hubPort")
+  const [proxyPort, setProxyPort] = use("proxyPort")
+  const [modal5, setModal5] = use("modal5")
   const buttons = (
     <Flex
       h="60px"
@@ -94,7 +96,7 @@ export default function Left() {
               }
             }}
           >
-            HUB : 8080
+            HUB : {hubPort}
           </Flex>
         ) : (
           <Flex
@@ -323,7 +325,7 @@ export default function Left() {
               }
             }}
           >
-            PROXY : 4005
+            PROXY : {proxyPort}
           </Flex>
         ) : (
           <Flex
@@ -339,47 +341,7 @@ export default function Left() {
               _hover: { opacity: 0.75 },
             }}
             onClick={async () => {
-              const adaptor = new Adaptor({ hb_url, aoconnect: g.ao.mem })
-              g.hub1 = new Hub("ws://localhost:4005")
-              g.hub1.onMsg = async obj => {
-                console.log("New PX Msg:", obj)
-                adaptor.get(obj.req, res => {
-                  if (obj.req.device === "mu" && obj.req.path === "/") {
-                    try {
-                      let body = obj.req.body
-                      if (
-                        obj.req.body.type === "Buffer" &&
-                        Array.isArray(obj.req.body.data)
-                      ) {
-                        body = new Uint8Array(body.data)
-                      }
-
-                      const _tags = new DataItem(body).tags
-                      if (tags(_tags).Type === "Process") {
-                        g.logSpawn(res.json.id)
-                      } else {
-                        g.logMsg(res.json.id)
-                        g.addMsg(res.json.id)
-                      }
-                    } catch (e) {
-                      console.log(e)
-                    }
-                  }
-                  g.hub1.socket.send(
-                    JSON.stringify({
-                      type: "msg",
-                      id: obj.id,
-                      res: res ?? { status: 404, error: "not found" },
-                    })
-                  )
-                })
-              }
-
-              g.hub1.onClose = () => {
-                setPSID(null)
-              }
-              g.hub1.onRegister = msg => setPSID(msg.id)
-              g.hub1.connect()
+              setModal5(true)
             }}
           >
             PROXY
