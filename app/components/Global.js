@@ -46,6 +46,7 @@ import {
   mergeLeft,
   addIndex,
   prepend,
+  sortBy,
 } from "ramda"
 
 // wao sdk
@@ -356,7 +357,6 @@ export default function Global({}) {
   }
 
   g.getAccount = (id, type) => {
-    console.log(id, type)
     if (g.ao.mem.wasms[id]) {
       g.getModule(id)
     } else if (g.ao.mem.env[id]) {
@@ -647,7 +647,7 @@ export default function Global({}) {
         height: block.height,
       })
     }
-    setBlocks(_blocks)
+    setBlocks(sortBy(v => v.timestamp * -1)(_blocks))
   }
 
   g.listModules = () => {
