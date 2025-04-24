@@ -25,6 +25,10 @@ export default function Editor({}) {
   const [files, setFiles] = use("files")
   const [tests, setTests] = use("tests")
   const [test, setTest] = use("test")
+  const [modal8, setModal8] = use("modal8")
+  const [renameFileName, setRenameFileName] = use("renameFikeName")
+  const [renameFileExt, setRenameFileExt] = use("renameFikeExt")
+
   const EditorBtns = () => (
     <Flex
       shrink="0"
@@ -76,51 +80,68 @@ export default function Editor({}) {
           Save
         </Flex>
       ) : file?.nodel ? null : (
-        <Flex
-          py={1}
-          px={4}
-          color="#5137C5"
-          css={{
-            borderRadius: "5px",
-            cursor: "pointer",
-            _hover: { opacity: 0.75 },
-          }}
-          onClick={async () => {
-            if (confirm("Would you like to delete the file?")) {
-              g.editorRef.current.setValue("")
-              await lf.removeItem(`file-${file.id}`)
-              const _files = filter(v => file.id !== v.id)(files)
-              const _openFiles = filter(v => file.id !== v.id)(openFiles)
-              await lf.setItem(`files`, filterFiles(_files))
-              setFiles(_files)
-              setOpenFiles(_openFiles)
-              let exists = false
-              for (let v of _openFiles) {
-                exists = true
-                setFile(v)
-                g.setType(v.ext)
-                g.editorRef.current.setValue(
-                  (await lf.getItem(`file-${v.id}`)) ?? ""
-                )
-                break
+        <>
+          <Flex
+            py={1}
+            px={4}
+            color="#5137C5"
+            css={{
+              borderRadius: "5px",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={async () => {
+              setModal8(true)
+            }}
+          >
+            Rename
+          </Flex>
+          <Flex
+            py={1}
+            px={4}
+            color="#5137C5"
+            css={{
+              borderRadius: "5px",
+              cursor: "pointer",
+              _hover: { opacity: 0.75 },
+            }}
+            onClick={async () => {
+              if (confirm("Would you like to delete the file?")) {
+                g.editorRef.current.setValue("")
+                await lf.removeItem(`file-${file.id}`)
+                const _files = filter(v => file.id !== v.id)(files)
+                const _openFiles = filter(v => file.id !== v.id)(openFiles)
+                await lf.setItem(`files`, filterFiles(_files))
+                setFiles(_files)
+                setOpenFiles(_openFiles)
+                let exists = false
+                for (let v of _openFiles) {
+                  exists = true
+                  setFile(v)
+                  g.setType(v.ext)
+                  g.editorRef.current.setValue(
+                    (await lf.getItem(`file-${v.id}`)) ?? ""
+                  )
+                  break
+                }
+                if (!exists) {
+                  setFile(bfiles[0])
+                  setOpenFiles([bfiles[0]])
+                  g.setType(bfiles[0].ext)
+                  fetch("/docs/README.md")
+                    .then(r => r.text())
+                    .then(txt => {
+                      g.editorRef.current.setValue(txt)
+                      setPreview(true)
+                      getPreview(txt).then(setPreviewContent)
+                    })
+                }
               }
-              if (!exists) {
-                setFile(bfiles[0])
-                setOpenFiles([bfiles[0]])
-                g.setType(bfiles[0].ext)
-                fetch("/docs/README.md")
-                  .then(r => r.text())
-                  .then(txt => {
-                    g.editorRef.current.setValue(txt)
-                    setPreview(true)
-                    getPreview(txt).then(setPreviewContent)
-                  })
-              }
-            }
-          }}
-        >
-          Delete
-        </Flex>
+            }}
+          >
+            Delete
+          </Flex>
+        </>
       )}
     </Flex>
   )

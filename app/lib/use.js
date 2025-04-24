@@ -19,6 +19,7 @@ export default store({
   modal5: false,
   modal6: false,
   modal7: false,
+  modal8: false,
   files: [...bfiles, ...bps],
   openFiles: [bfiles[0]],
   selDir: { pid: "1", path: "/" },
