@@ -17,6 +17,7 @@ describe("WAO", function () {
     const ao = await new AO().init(acc[0])
     const { p, pid } = await ao.deploy({ src_data, scheduler: acc[0].addr })
 
+    assert.equal(await p.d("Hello", false), "Hello, World!")
     assert.equal(await p.m("Inc", false), "Incremented!")
     assert.equal(await p.d("Get", false), "1")
   })
@@ -35,6 +36,7 @@ describe("WAO", function () {
       module: "WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g", // use wasm32 module
     })
 
+    assert.equal(await p.d("Hello", false), "Hello, World!")
     assert.equal(await p.m("Inc", false), "Incremented!")
     assert.equal(await p.d("Get", false), "1")
   })
