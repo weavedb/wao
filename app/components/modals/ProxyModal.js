@@ -16,12 +16,6 @@ import { toaster } from "@/components/ui/toaster"
 export default function ProxyModal() {
   const [modal5, setModal5] = use("modal5")
   const [port, setPort] = useState("4005")
-  const [fileext, setFileext] = useState("js")
-  const [files, setFiles] = use("files")
-  const [file, setFile] = use("file")
-  const [openFiles, setOpenFiles] = use("openFiles")
-  const [preview, setPreview] = use("preview")
-  const [selDir, setSelDir] = use("selDir")
   const [psid, setPSID] = use("psid")
   const [proxyPort, setProxyPort] = use("proxyPort")
 
@@ -58,7 +52,7 @@ export default function ProxyModal() {
           }}
           onClick={async () => {
             const adaptor = new Adaptor({ hb_url, aoconnect: g.ao.mem })
-            g.hub1 = new Hub("ws://localhost:4005")
+            g.hub1 = new Hub(`ws://localhost:${port}`)
             g.hub1.onMsg = async obj => {
               console.log("New PX Msg:", obj)
               adaptor.get(obj.req, res => {
@@ -116,12 +110,7 @@ export default function ProxyModal() {
                 description: "Failed to connect",
               })
             }
-
-            try {
-              g.hub1.connect()
-            } catch (e) {
-              console.log(e)
-            }
+            g.hub1.connect()
           }}
         >
           Connect
