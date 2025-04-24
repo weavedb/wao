@@ -8,3 +8,7 @@ end)
 Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = tostring(count) })
 end)
+
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)
