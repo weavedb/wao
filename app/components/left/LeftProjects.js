@@ -30,6 +30,7 @@ export default function Left() {
   const [modal2, setModal2] = use("modal2")
   const [modal3, setModal3] = use("modal3")
   const [modal4, setModal4] = use("modal4")
+  const [modal6, setModal6] = use("modal6")
   const [openFiles, setOpenFiles] = use("openFiles")
   const [preview, setPreview] = use("preview")
   const [previewContent, setPreviewContent] = use("previewContent")
@@ -59,7 +60,6 @@ export default function Left() {
           ext: fileext,
         }
         const _files = prepend(_file, files)
-        console.log(_files)
         await lf.setItem("files", filterFiles(_files))
         await lf.setItem(`file-${id}`, txt)
         setFiles(_files)
@@ -219,73 +219,7 @@ export default function Left() {
               cursor: "pointer",
               _hover: { opacity: 0.75 },
             }}
-            onClick={async () => {
-              const getP = v => {
-                if (v.p.length === 0) {
-                  return "/" + v.name
-                } else {
-                  return "/" + v.p.join("/") + "/" + v.name
-                }
-              }
-              const dirmap = indexBy(prop("id"), localFS)
-              const updateDir = _localFS => {
-                const _files = []
-                const ls = (fs, p = [], dpath = []) => {
-                  for (let k in fs) {
-                    const path = `/${p.length === 0 ? "" : p.join("/") + "/"}`
-                    const _dpath = `/${dpath.length === 0 ? "" : dpath.join("/") + "/"}`
-                    const id = md5(
-                      `2${_dpath}${k}`.replace(new RegExp("/", "g"), "#")
-                    )
-                    _files.push({
-                      dir: typeof fs[k] === "object",
-                      open: dirmap[id]?.open ?? false,
-                      name: k,
-                      pid: "2",
-                      p,
-                      ext:
-                        typeof fs[k] === "object" ? null : k.split(".").pop(),
-                      id,
-                      path,
-                      local: true,
-                      filename: `${_dpath}${k}`,
-                    })
-                    if (typeof fs[k] === "object")
-                      ls(fs[k], [...p, id], [...dpath, k])
-                  }
-                }
-                ls(_localFS)
-                setLocalFS(_files)
-              }
-              g.hub1 = new Hub("ws://localhost:4006")
-              g.hub1.onMsg = async obj => {
-                console.log("New FS Msg:", obj)
-                if (obj.subtype === "content") {
-                  const ext = obj.path.split(".").pop()
-                  const file = g.fileRef.current
-                  const id = md5(
-                    `2${obj.path}`.replace(new RegExp("/", "g"), "#")
-                  )
-                  await lf.setItem(`file-${id}`, obj.content)
-                  if (file?.id === id) {
-                    setTimeout(() => {
-                      g.setType(ext)
-                      g.editorRef.current.setValue(obj.content)
-                    }, 100)
-                  }
-                } else if (obj.subtype === "dir_change") {
-                  updateDir(obj.dir)
-                }
-              }
-              g.hub1.onClose = () => setWSID(null)
-
-              g.hub1.onRegister = msg => {
-                setWSID(msg.id)
-                let lfs = null
-                updateDir(msg.dir)
-              }
-              g.hub1.connect()
-            }}
+            onClick={async () => setModal6(true)}
           >
             Local FS
           </Flex>
