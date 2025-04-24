@@ -1044,7 +1044,11 @@ export default function Global({}) {
     g.log(`Process Spawned: ${pid}`, {
       title: "Process Spawned!",
       type: "success",
-      description: pid.slice(0, 30) + "...",
+      description: pid.slice(0, 251) + "...",
+      action: {
+        label: "View",
+        onClick: () => g.getProcess(pid),
+      },
     })
   }
 
@@ -1052,7 +1056,11 @@ export default function Global({}) {
     g.log(`New Message: ${mid}`, {
       title: "New Message!",
       type: "success",
-      description: mid.slice(0, 30) + "...",
+      description: mid.slice(0, 25) + "...",
+      action: {
+        label: "View",
+        onClick: () => g.getMessage(mid),
+      },
     })
   }
 
