@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/cjs/index.js",
   "module": "dist/src/index.js",
+  "types": "./types/index.d.ts",
   "scripts": {
     "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs && cp src/waosm-node/waosm_bg.wasm dist/cjs/waosm-node/ && rm -rf dist/cjs/workspace && cp -rf src/workspace dist/cjs/",
     "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/ && cp src/lua/* dist/cjs/lua -rf && rm -rf dist/esm/workspace && cp -rf src/workspace dist/esm/",
