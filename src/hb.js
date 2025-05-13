@@ -1,4 +1,5 @@
-import { connect, createSigner } from "aoconnect-wao"
+//import { connect, createSigner } from "aoconnect-wao"
+import { connect, createSigner } from "@permaweb/aoconnect"
 import { last, isNotNil, mergeLeft } from "ramda"
 import { buildTags } from "./utils.js"
 
