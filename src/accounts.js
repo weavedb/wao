@@ -1,5 +1,5 @@
-import { createDataItemSigner } from "@permaweb/aoconnect"
-
+import { createDataItemSigner } from "@permaweb/aoconnect-69"
+import { ArweaveSigner } from "arbundles"
 const acc = [
   {
     jwk: {
