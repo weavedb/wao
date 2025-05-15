@@ -72,6 +72,13 @@ describe("SDK", function () {
     })
     assert.equal(edges2[0].node.cursor, cursor)
   })
+  it.only("should run server", async () => {
+    const port = 4000
+    let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
+      acc[0]
+    )
+    console.log(await fetch("http://localhost:4003"))
+  })
   it("should run server", async () => {
     const port = 4000
     let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
@@ -186,7 +193,7 @@ describe("ArMem", () => {
     return
   })
 
-  it.only("should connect with web-proxy", async () => {
+  it("should connect with web-proxy", async () => {
     let ao = await new AO(4000).init(acc[0])
     const src_data = `local count = 0
 

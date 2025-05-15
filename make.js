@@ -16,7 +16,7 @@ json.bin = {
 json.scripts = {
   server: "node --experimental-wasm-memory64 cjs/run.js",
 }
-console.log(json)
+
 writeFileSync(packageJsonDist, JSON.stringify(json, undefined, 2))
 
 const json2 = {
