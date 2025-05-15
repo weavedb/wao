@@ -38,6 +38,9 @@ class Adaptor {
       unmonitor,
       recover,
     } = connect(aoconnect, { log, cache: db, hb })
+    this.su_signer = su
+    this.cu_signer = cu
+    this.mu_signer = mu
     this.recover = recover
     this.monitor = monitor
     this.unmonitor = unmonitor
@@ -266,7 +269,7 @@ class Adaptor {
   }
 
   async cu_get_root({ query, params, body, headers, method }) {
-    return { json: { timestamp: Date.now(), address: cu.addr } }
+    return { json: { timestamp: Date.now(), address: this.cu_signer.addr } }
   }
 
   async cu_get_state({ query, params, body, headers, method }) {
@@ -341,7 +344,7 @@ class Adaptor {
       json: {
         Unit: "Scheduler",
         Timestamp: Date.now(),
-        Address: su.addr,
+        Address: this.su_signer.addr,
         Processes: keys(this.mem.env),
       },
     }
