@@ -72,7 +72,7 @@ describe("SDK", function () {
     })
     assert.equal(edges2[0].node.cursor, cursor)
   })
-  it.only("should run server", async () => {
+  it("should run server", async () => {
     const port = 4000
     let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
       acc[0]
@@ -224,5 +224,41 @@ end)`
     assert.equal(await p.m("Inc", false), "Incremented!")
     assert.equal(await p.d("Get"), "1")
     return
+  })
+})
+
+describe("Remote Processes", () => {
+  it.only("should spawn a message from a handler with receive", async () => {
+    const src_data = `Handlers.add("Hello2", "Hello2", function (msg)
+  local name = Send({ Target = msg.To, Action = "Reply", To = msg.To2, __Scheduler__ = msg.Scheduler, To_Scheduler = msg.Scheduler2 }).receive().Data
+  msg.reply({ Data = "Hello, " .. name .. "!" })
+end)`
+    const src_data2 = `Handlers.add("Reply", "Reply", function (msg)
+  Send({ Target = msg.To, ["X-Reference"] = msg.Reference, Data = "Japan", __Scheduler__ = msg.To_Scheduler })
+end)`
+    const server = new Server({ port: 5000, log: true })
+    let ao = await new AO({ port: 5000 }).init(acc[0])
+
+    let ao2 = await new AO({ port: 4000 }).init(acc[1])
+    const server2 = new Server({ port: 4000, log: true })
+
+    const { p, pid } = await ao.deploy({ boot: true, src_data })
+    const { pid: pid2 } = await ao2.deploy({ boot: true, src_data: src_data2 })
+
+    assert.equal(
+      await p.m(
+        "Hello2",
+        {
+          To: pid2,
+          To2: pid,
+          Scheduler: `http://localhost:4003`,
+          Scheduler2: `http://localhost:5003`,
+        },
+        { get: false, timeout: 3000 }
+      ),
+      "Hello, Japan!"
+    )
+    server.end()
+    server2.end()
   })
 })
