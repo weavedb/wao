@@ -293,7 +293,7 @@ class Adaptor {
       return { json: res2 }
     }
   }
-  async cu_post_results({ query, params, body, headers, method }) {
+  async cu_get_results({ query, params, body, headers, method }) {
     const pid = params.pid
     const { from = null, to = null, sort = "ASC", limit = 25 } = query
     let results = this.mem.env[pid]?.results ?? []
