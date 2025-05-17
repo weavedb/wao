@@ -7,6 +7,8 @@ const { DataItem } = pkg
 import crypto from "crypto"
 import base64url from "base64url"
 import { wait } from "./utils.js"
+import AO from "./ao.js"
+
 import {
   tags,
   action,
@@ -27,6 +29,7 @@ import {
   dissoc,
   o,
   reverse,
+  includes,
 } from "ramda"
 
 let onRecovery = {}
@@ -319,6 +322,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         if (_opt.item) {
           data = base64url.decode(_opt.item.data)
           _tags = _opt.item.tags
+          const t = tags(_tags)
+          if (t["From-Process"]) from = t["From-Process"]
           if (!from) {
             from = await arweave.wallets.jwkToAddress({
               kty: "RSA",
@@ -369,14 +374,44 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
               target: v.Target,
             })
           } else {
-            await record({
-              for: opt.message,
-              tags: v.Tags,
-              data: v.Data,
-              signer: mu.signer,
-              from: opt.process,
-              target: v.Target,
-            })
+            const t = tags(v.Tags)
+            // this behaviour is different from AOS (temporary hack for remote tests)
+            if (t.__Scheduler__) {
+              const sch = t.__Scheduler__
+              const tar = v.Target
+              const procs =
+                (await fetch(sch).then(r => r.json()))?.Processes ?? []
+              const ao = await new AO({ port: sch.split(":").pop() - 3 }).init(
+                mu.jwk
+              )
+              try {
+                let _tags = {
+                  ...t,
+                  "From-Process": opt.process,
+                  "Pushed-For": id,
+                }
+                const pr = (await mem.getTx(opt.process))?.tags ?? []
+                const module = tags(pr).Module
+                if (module) _tags["From-Module"] = module
+                const { mid } = await ao.msg({
+                  act: _tags["Action"] ?? null,
+                  pid: tar,
+                  tags: _tags,
+                  data: v.Data ?? "",
+                })
+              } catch (e) {
+                console.log(e)
+              }
+            } else {
+              await record({
+                for: opt.message,
+                tags: v.Tags,
+                data: v.Data,
+                signer: mu.signer,
+                from: opt.process,
+                target: v.Target,
+              })
+            }
           }
         }
         for (const v of res.Spawns ?? []) {
