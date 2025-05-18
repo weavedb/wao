@@ -405,18 +405,18 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
                   scheduler: info.address,
                 }
                 ;({ slot } = await request(_tags))
-                const {
-                  results: {
-                    json: { body },
-                  },
-                } = await fetchHB(`/${v.Target}~process@1.0/compute`, {
+                const res = await fetchHB(`/${v.Target}~process@1.0/compute`, {
                   params: `slot=${slot}`,
                 })
-                result = JSON.parse(body).Output.data
+                const {
+                  results: { data },
+                } = res
+                result = data
               } catch (e) {
                 console.log(e)
               }
               if (result) {
+                /*
                 await message({
                   for: slot,
                   process: opt.process,
@@ -427,7 +427,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
                   signer: mu.signer,
                   from: v.Target,
                   target: opt.process,
-                })
+                })*/
               }
             } else if (t.__Scheduler__) {
               const sch = t.__Scheduler__
