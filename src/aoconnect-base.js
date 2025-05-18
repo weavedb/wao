@@ -8,6 +8,7 @@ import crypto from "crypto"
 import base64url from "base64url"
 import { wait } from "./utils.js"
 import AO from "./ao.js"
+import { connect, createSigner } from "@permaweb/aoconnect"
 
 import {
   tags,
@@ -376,7 +377,59 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           } else {
             const t = tags(v.Tags)
             // this behaviour is different from AOS (temporary hack for remote tests)
-            if (t.__Scheduler__) {
+            if (t.__HyperBEAM__) {
+              let result = null
+              let slot = null
+              try {
+                const fetchHB = async (
+                  path,
+                  { json = true, params = "" } = {}
+                ) => {
+                  return await fetch(
+                    `${t.__HyperBEAM__}${path}${json ? "/serialize~json@1.0" : ""}${params ? "?" + params : ""}`
+                  ).then(r => r[json ? "json" : "text"]())
+                }
+                const info = await fetchHB("/~meta@1.0/info")
+                const { request } = connect({
+                  MODE: "mainnet",
+                  URL: t.__HyperBEAM__,
+                  device: "",
+                  signer: createSigner(mu.jwk),
+                })
+                let _tags = {
+                  ...t,
+                  "From-Process": opt.process,
+                  "Pushed-For": id,
+                  method: "POST",
+                  path: `/${v.Target}/schedule`,
+                  scheduler: info.address,
+                }
+                ;({ slot } = await request(_tags))
+                const {
+                  results: {
+                    json: { body },
+                  },
+                } = await fetchHB(`/${v.Target}~process@1.0/compute`, {
+                  params: `slot=${slot}`,
+                })
+                result = JSON.parse(body).Output.data
+              } catch (e) {
+                console.log(e)
+              }
+              if (result) {
+                await message({
+                  for: slot,
+                  process: opt.process,
+                  tags: buildTags({
+                    "X-Reference": t.Reference,
+                  }),
+                  data: JSON.stringify(result),
+                  signer: mu.signer,
+                  from: v.Target,
+                  target: opt.process,
+                })
+              }
+            } else if (t.__Scheduler__) {
               const sch = t.__Scheduler__
               const tar = v.Target
               const procs =
