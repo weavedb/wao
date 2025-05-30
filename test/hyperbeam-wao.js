@@ -8,6 +8,7 @@ import { resolve } from "path"
 import { readFileSync } from "fs"
 import { exec } from "child_process"
 import { send, verify, createRequest } from "../src/signer.js"
+import { run } from "../src/hyperbeam-server.js"
 
 const _env = {
   //DIAGNOSTIC: "1",
@@ -38,7 +39,7 @@ const deploy = (_eval, env = {}, cwd = "../HyperBEAM") => {
 }
 
 describe("HyperBEAM", function () {
-  it.only("should sign http message", async () => {
+  it("should sign http message", async () => {
     const port = 10001
     const hbeam = deploy(genEval(port), _env)
     await wait(5000)
@@ -85,5 +86,28 @@ describe("HyperBEAM", function () {
     )
     assert.equal(addr, addr2)
     hbeam.kill("SIGKILL")
+  })
+  it.only("should use relay device", async () => {
+    const port = 10001
+    const hbeam = deploy(genEval(port), _env)
+    await wait(5000)
+    const server = run()
+    const signer = createSigner(acc[0].jwk, "http://localhost:10001")
+    const request = createRequest({ signer })
+
+    // In your test, pass the URL in the body
+    const msg = await request({
+      path: "/~relay@1.0/call",
+      method: "POST",
+      "relay-path": "http://localhost:4000/relay",
+      "relay-method": "POST",
+      "relay-body": "test",
+    })
+    assert.deepEqual(JSON.parse((await send(msg)).body), {
+      success: true,
+      body: "test",
+    })
+    hbeam.kill("SIGKILL")
+    server.close()
   })
 })
