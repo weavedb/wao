@@ -1,38 +1,14 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc } from "../src/test.js"
+import { wait, toAddr } from "../src/utils.js"
 import { connect, createSigner } from "@permaweb/aoconnect"
 import { spawn } from "child_process"
 import { resolve } from "path"
 import { readFileSync } from "fs"
 import { exec } from "child_process"
-import sha256 from "fast-sha256"
-function base64urlDecode(str) {
-  str = str.replace(/-/g, "+").replace(/_/g, "/")
-  const pad = str.length % 4
-  if (pad === 2) str += "=="
-  else if (pad === 3) str += "="
-  else if (pad !== 0) throw new Error("Invalid base64url string")
-  const bin = atob(str)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return bytes
-}
+import { send, verify, createRequest } from "../src/signer.js"
 
-function base64urlEncode(bytes) {
-  let bin = ""
-  for (const b of bytes) bin += String.fromCharCode(b)
-  let b64 = btoa(bin)
-  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")
-}
-
-function toAddr(n) {
-  const pubBytes = base64urlDecode(n)
-  const hash = sha256(pubBytes)
-  return base64urlEncode(hash)
-}
-
-const wait = ms => new Promise(res => setTimeout(() => res(), ms))
 const _env = {
   //DIAGNOSTIC: "1",
   CMAKE_POLICY_VERSION_MINIMUM: "3.5",
@@ -62,7 +38,24 @@ const deploy = (_eval, env = {}, cwd = "../HyperBEAM") => {
 }
 
 describe("HyperBEAM", function () {
-  it.only("should query wao device", async () => {
+  it.only("should sign http message", async () => {
+    const port = 10001
+    const hbeam = deploy(genEval(port), _env)
+    await wait(5000)
+    const signer = createSigner(acc[0].jwk, "http://localhost:10001")
+    const request = createRequest({ signer })
+    const msg = await request({
+      path: "/~wao@1.0/info",
+      method: "POST",
+      data: "test",
+    })
+    console.log(msg)
+    assert((await verify(msg)).verified)
+    const version = (await send(msg)).version
+    hbeam.kill("SIGKILL")
+  })
+
+  it("should query wao device", async () => {
     const port = 10001
     const hbeam = deploy(genEval(port), _env)
     await wait(5000)
