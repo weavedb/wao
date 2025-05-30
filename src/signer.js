@@ -40,6 +40,12 @@ const httpSigName = address => {
  * Join URL parts
  */
 const joinUrl = ({ url, path }) => {
+  // If path is already a full URL, return it as-is
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path
+  }
+
+  // Otherwise, join the base URL with the path
   return url.endsWith("/") ? url.slice(0, -1) + path : url + path
 }
 
@@ -202,13 +208,12 @@ export function createRequest(config) {
       }
     }
 
-    // Use lowercase field names for signing
-    const signingFields = ["data-protocol", "type", "variant"]
-
-    // Add content-digest to signing fields if there's a body
-    if (encoded.body) {
-      signingFields.push("content-digest")
-    }
+    // Get all header keys for signing (excluding any you might want to skip)
+    const signingFields = Object.keys(headersObj).filter(key => {
+      // Optionally exclude headers that shouldn't be signed
+      // For now, include everything
+      return true
+    })
 
     // Sign the request
     const signedRequest = await toHttpSigner(signer)({
