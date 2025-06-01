@@ -1,6 +1,6 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
 import { last, isNotNil, mergeLeft } from "ramda"
-import { buildTags } from "./utils.js"
+import { toAddr, buildTags } from "./utils.js"
 import { send as _send, verify, createRequest } from "./signer.js"
 
 const seed = num => {
@@ -12,6 +12,7 @@ class HB {
   constructor({ url = "http://localhost:10001", jwk } = {}) {
     this.url = url
     this.signer = createSigner(jwk, this.url)
+    this.addr = toAddr(jwk.n)
     this._request2 = createRequest({ signer: this.signer })
     const { request } = connect({
       MODE: "mainnet",
@@ -32,13 +33,14 @@ class HB {
   }
 
   async getImage() {
-    const target = JSON.parse(
-      (await this.send({ path: "/~wao@1.0/spawn", method: "POST" })).body
-    ).process
-    return (
-      await this.send({ path: `/~cache@1.0/read`, method: "GET", target })
-    ).headers.get("image")
+    const result = await this.send({
+      path: "/~wao@1.0/cache_wasm_image",
+      method: "POST",
+      filename: "test/aos-2-pure-xs.wasm",
+    })
+    return result.headers.get("image")
   }
+
   async messageAOS(action = "Eval", tags = {}, data) {
     let _tags = mergeLeft(tags, {
       device: "process@1.0",
@@ -54,15 +56,26 @@ class HB {
     const slot = res.headers.get("slot")
     return { slot, outbox: await this.computeAOS(this.pid, slot) }
   }
+
+  path(dev = "meta", path, json = true) {
+    if (!/@/.test(dev)) dev += "@1.0"
+    return `${this.url}/~${dev}/${path}${json ? "/serialize~json@1.0" : ""}`
+  }
+
+  async fetch(url, json = true) {
+    return await fetch(url).then(r => (json ? r.json() : r.text()))
+  }
+
   async computeAOS(pid, slot) {
     return await fetch(
       `${this.url}/${pid}/compute/results/outbox/serialize~json@1.0?slot=${slot}`
     ).then(r => r.json())
   }
 
-  async spawnAOS() {
+  async spawnAOS(image) {
     const addr = await this.getAddr()
     this.scheduler ??= addr
+    image ??= this.image ?? (await this.getImage())
     const res = await this.send({
       device: "process@1.0",
       path: "/schedule",
@@ -73,7 +86,7 @@ class HB {
       Authority: this.scheduler,
       "random-seed": seed(16),
       Type: "Process",
-      image: await this.getImage(),
+      image,
       "scheduler-device": "scheduler@1.0",
       "execution-device": "stack@1.0",
       "device-stack": [
@@ -161,7 +174,7 @@ class HB {
       data,
       Type: "Process",
       "Data-Protocol": "ao",
-      Variant: "ao.N.1",
+      Variant: "ao.TN.1",
       scheduler: this._info.address,
       authority: this._info.address,
       "scheduler-location": this.info.address,
