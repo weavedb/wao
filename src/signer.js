@@ -247,8 +247,13 @@ async function encode(obj = {}) {
   const h = new Headers()
   headerKeys.forEach(key => h.append(key, flattened[key]))
 
+  // Handle both data and body fields
   if (h.has("data")) {
     bodyKeys.push("data")
+  }
+
+  if (h.has("body")) {
+    bodyKeys.push("body")
   }
 
   let body = undefined
@@ -295,7 +300,6 @@ async function encode(obj = {}) {
 
   return { headers: h, body }
 }
-
 /**
  * Create HTTP signer wrapper
  */
