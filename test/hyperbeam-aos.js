@@ -6,7 +6,7 @@ import { prepare, getJWK } from "./test-utils.js"
 import { acc } from "../src/test.js"
 import AR from "../src/ar.js"
 import HB from "../src/hb.js"
-import HyperBEAM from "../src/HyperBEAM"
+import HyperBEAM from "../src/hyperbeam.js"
 
 import { resolve } from "path"
 import { readFileSync } from "fs"
@@ -113,11 +113,15 @@ class HB2 {
 describe("HyperBEAM Template", function () {
   let hb, hbeam
   before(async () => {
-    hb = await new HB2().init(getJWK("../HyperBEAM/hyperbeam-key.json"))
+    hbeam = new HyperBEAM({ c: "12", cmake: "3.5", gateway: 4000 })
+    hb = await new HB2({ port: hbeam.port }).init(
+      getJWK("../HyperBEAM/hyperbeam-key.json")
+    )
   })
   after(async () => {
-    hb.hbeam.kill("SIGKILL")
+    hbeam.kill()
     hb.server.close()
+    process.exit()
   })
   it.only("should handle counter with Add and Get handlers", async () => {
     const pid = await hb.spawn()
