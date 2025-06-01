@@ -50,32 +50,251 @@ const joinUrl = ({ url, path }) => {
 }
 
 /**
- * Encode fields to headers and body
+ * HyperBEAM Encoding Logic
  */
-function encode(fields) {
-  const headers = {}
-  const body = fields.data || ""
+const MAX_HEADER_LENGTH = 4096
 
-  // Convert all fields to headers except data and body
-  Object.entries(fields).forEach(([key, value]) => {
-    if (key !== "data" && key !== "body") {
-      headers[key] = String(value)
-    }
-  })
+async function hasNewline(value) {
+  if (typeof value === "string") return value.includes("\n")
+  if (value instanceof Blob) {
+    value = await value.text()
+    return value.includes("\n")
+  }
+  if (isBytes(value)) return Buffer.from(value).includes("\n")
+  return false
+}
 
-  // Set content headers
-  if (body) {
-    headers["Content-Type"] = "application/octet-stream"
-    headers["Content-Length"] = String(body.length)
+async function sha256(data) {
+  return crypto.subtle.digest("SHA-256", data)
+}
 
-    // Add content-digest for body integrity
-    const bodyBuffer =
-      typeof body === "string" ? new TextEncoder().encode(body) : body
-    const digest = crypto.createHash("sha256").update(bodyBuffer).digest()
-    headers["Content-Digest"] = `sha-256=:${digest.toString("base64")}:`
+function isBytes(value) {
+  return value instanceof ArrayBuffer || ArrayBuffer.isView(value)
+}
+
+function isPojo(value) {
+  return (
+    !isBytes(value) &&
+    !Array.isArray(value) &&
+    !(value instanceof Blob) &&
+    typeof value === "object" &&
+    value !== null
+  )
+}
+
+function hbEncodeValue(value) {
+  if (isBytes(value)) {
+    if (value.byteLength === 0) return hbEncodeValue("")
+    return [undefined, value]
   }
 
-  return { headers, body }
+  if (typeof value === "string") {
+    if (value.length === 0) return [undefined, "empty-binary"]
+    return [undefined, value]
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return ["empty-list", undefined]
+    // For structured fields, just join the string values
+    const encoded = value
+      .map(v => {
+        if (typeof v === "string") {
+          // Escape quotes and backslashes
+          const escaped = v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+          return `"${escaped}"`
+        }
+        return `"${String(v)}"`
+      })
+      .join(", ")
+    return ["list", encoded]
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isInteger(value)) return ["float", `${value}`]
+    return ["integer", String(value)]
+  }
+
+  if (typeof value === "symbol") {
+    return ["atom", value.description]
+  }
+
+  throw new Error(`Cannot encode value: ${value.toString()}`)
+}
+
+function hbEncodeLift(obj, parent = "", top = {}) {
+  const [flattened, types] = Object.entries({ ...obj }).reduce(
+    (acc, [key, value]) => {
+      const flatK = (parent ? `${parent}/${key}` : key).toLowerCase()
+
+      // skip nullish values
+      if (value == null) return acc
+
+      // list of objects
+      if (Array.isArray(value) && value.some(isPojo)) {
+        value = value.reduce(
+          (indexedObj, v, idx) => Object.assign(indexedObj, { [idx]: v }),
+          {}
+        )
+      }
+
+      // first/second lift object
+      if (isPojo(value)) {
+        hbEncodeLift(value, flatK, top)
+        return acc
+      }
+
+      // leaf encode value
+      const [type, encoded] = hbEncodeValue(value)
+      if (encoded !== undefined) {
+        if (Buffer.from(String(encoded)).byteLength > MAX_HEADER_LENGTH) {
+          top[flatK] = String(encoded)
+        } else {
+          // For integers, keep them as numbers in the headers, not strings
+          if (type === "integer" && typeof value === "number") {
+            acc[0][key] = String(value)
+          } else {
+            acc[0][key] = encoded
+          }
+        }
+      }
+      if (type) acc[1][key] = type
+      return acc
+    },
+    [{}, {}]
+  )
+
+  if (Object.keys(flattened).length === 0) return top
+
+  if (Object.keys(types).length > 0) {
+    // Format as structured fields dictionary: key="value", key2="value2"
+    const aoTypeItems = Object.entries(types).map(([key, value]) => {
+      // Escape the key if needed (structured fields tokens)
+      const safeKey = key
+        .toLowerCase()
+        .replace(
+          /[^a-z0-9_-]/g,
+          c => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")
+        )
+      return `${safeKey}="${value}"`
+    })
+    aoTypeItems.sort() // CRITICAL: This sort is required for deterministic ordering
+    const aoTypes = aoTypeItems.join(", ")
+
+    if (Buffer.from(aoTypes).byteLength > MAX_HEADER_LENGTH) {
+      const flatK = parent ? `${parent}/ao-types` : "ao-types"
+      top[flatK] = aoTypes
+    } else flattened["ao-types"] = aoTypes
+  }
+
+  if (parent) top[parent] = flattened
+  else Object.assign(top, flattened)
+  return top
+}
+
+function encodePart(name, { headers, body }) {
+  const parts = Object.entries(Object.fromEntries(headers)).reduce(
+    (acc, [name, value]) => {
+      acc.push(`${name}: `, value, "\r\n")
+      return acc
+    },
+    [`content-disposition: form-data;name="${name}"\r\n`]
+  )
+
+  if (body) parts.push("\r\n", body)
+
+  return new Blob(parts)
+}
+
+async function encode(obj = {}) {
+  if (Object.keys(obj).length === 0) return
+
+  // Keep reference to original object for data field
+  const originalObj = obj
+  const flattened = hbEncodeLift(obj)
+
+  const bodyKeys = []
+  const headerKeys = []
+  await Promise.all(
+    Object.keys(flattened).map(async key => {
+      const value = flattened[key]
+
+      if (isPojo(value)) {
+        const subPart = await encode(value)
+        if (!subPart) return
+
+        bodyKeys.push(key)
+        flattened[key] = encodePart(key, subPart)
+        return
+      }
+
+      if (
+        (await hasNewline(value)) ||
+        key.includes("/") ||
+        Buffer.from(value).byteLength > MAX_HEADER_LENGTH
+      ) {
+        bodyKeys.push(key)
+        flattened[key] = new Blob([
+          `content-disposition: form-data;name="${key}"\r\n\r\n`,
+          value,
+        ])
+        return
+      }
+
+      headerKeys.push(key)
+      flattened[key] = value
+    })
+  )
+
+  const h = new Headers()
+  headerKeys.forEach(key => h.append(key, flattened[key]))
+
+  if (h.has("data")) {
+    bodyKeys.push("data")
+  }
+
+  let body = undefined
+  if (bodyKeys.length > 0) {
+    if (bodyKeys.length === 1) {
+      // If there is only one element, promote it to be the full body and set the
+      // `inline-body-key` such that the server knows its name.
+      body = new Blob([obj[bodyKeys[0]]])
+      h.set("inline-body-key", bodyKeys[0])
+      h.delete(bodyKeys[0])
+    } else {
+      // Multiple body fields - create multipart
+      const bodyParts = await Promise.all(
+        bodyKeys.map(name => {
+          return flattened[name].arrayBuffer()
+        })
+      )
+
+      const base = new Blob(
+        bodyParts.flatMap((p, i, arr) =>
+          i < arr.length - 1 ? [p, "\r\n"] : [p]
+        )
+      )
+      const hash = await sha256(await base.arrayBuffer())
+      const boundary = base64url.encode(Buffer.from(hash))
+
+      const blobParts = bodyParts.flatMap(p => [`--${boundary}\r\n`, p, "\r\n"])
+
+      blobParts.push(`--${boundary}--`)
+
+      h.set("Content-Type", `multipart/form-data; boundary="${boundary}"`)
+      body = new Blob(blobParts)
+    }
+
+    if (body) {
+      const finalContent = await body.arrayBuffer()
+      const contentDigest = await sha256(finalContent)
+      const base64 = base64url.toBase64(base64url.encode(contentDigest))
+
+      h.set("Content-Digest", `sha-256=:${base64}:`)
+      h.set("Content-Length", String(finalContent.byteLength))
+    }
+  }
+
+  return { headers: h, body }
 }
 
 /**
@@ -189,31 +408,32 @@ export function createRequest(config) {
       ...restFields,
     }
 
-    // Encode fields to headers and body
-    const { headers, body } = encode(aoFields)
+    // Use the HyperBEAM encode function
+    const encoded = await encode(aoFields)
 
-    // Create request with proper headers
-    const encoded = encode(aoFields)
+    // If no encoding needed (empty object)
+    if (!encoded) {
+      throw new Error("No fields to encode")
+    }
+
     const url = joinUrl({ url: HB_URL, path })
 
-    // Ensure all headers are lowercase for HyperBEAM compatibility
+    // Convert Headers object to plain object and ensure lowercase
     const headersObj = {}
-    if (encoded.headers instanceof Headers) {
-      for (const [key, value] of encoded.headers.entries()) {
-        headersObj[key.toLowerCase()] = value
-      }
-    } else {
-      for (const [key, value] of Object.entries(encoded.headers)) {
-        headersObj[key.toLowerCase()] = value
+    for (const [key, value] of encoded.headers.entries()) {
+      headersObj[key.toLowerCase()] = value
+    }
+
+    // Add Content-Length if body exists
+    if (encoded.body) {
+      const bodySize = encoded.body.size || encoded.body.byteLength || 0
+      if (bodySize > 0) {
+        headersObj["content-length"] = String(bodySize)
       }
     }
 
-    // Get all header keys for signing (excluding any you might want to skip)
-    const signingFields = Object.keys(headersObj).filter(key => {
-      // Optionally exclude headers that shouldn't be signed
-      // For now, include everything
-      return true
-    })
+    // Get all header keys for signing
+    const signingFields = Object.keys(headersObj)
 
     // Sign the request
     const signedRequest = await toHttpSigner(signer)({
@@ -222,12 +442,18 @@ export function createRequest(config) {
     })
 
     // Return the signed message (no fetch!)
-    return {
+    const result = {
       url,
       method,
       headers: signedRequest.headers,
-      body: encoded.body,
     }
+
+    // Only add body if it exists
+    if (encoded.body) {
+      result.body = encoded.body
+    }
+
+    return result
   }
 }
 
@@ -257,12 +483,21 @@ export async function getMessageId(signedMessage) {
 }
 
 export async function send(signedMsg, fetchImpl = fetch) {
-  const response = await fetchImpl(signedMsg.url, {
+  const fetchOptions = {
     method: signedMsg.method,
     headers: signedMsg.headers,
-    body: signedMsg.body,
     redirect: "follow",
-  })
+  }
+
+  // Only add body if it exists and method supports it
+  if (
+    signedMsg.body !== undefined &&
+    signedMsg.method !== "GET" &&
+    signedMsg.method !== "HEAD"
+  ) {
+    fetchOptions.body = signedMsg.body
+  }
+  const response = await fetchImpl(signedMsg.url, fetchOptions)
 
   if (response.status >= 400) {
     throw new Error(`${response.status}: ${await response.text()}`)
