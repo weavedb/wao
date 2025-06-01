@@ -1,5 +1,5 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
-import { last, isNotNil, mergeLeft } from "ramda"
+import { isEmpty, last, isNotNil, mergeLeft } from "ramda"
 import { toAddr, buildTags } from "./utils.js"
 import { send as _send, verify, createRequest } from "./signer.js"
 
@@ -13,7 +13,7 @@ class HB {
     this.url = url
     this.signer = createSigner(jwk, this.url)
     this.addr = toAddr(jwk.n)
-    this._request2 = createRequest({ signer: this.signer })
+    this._request2 = createRequest({ signer: this.signer, url: this.url })
     const { request } = connect({
       MODE: "mainnet",
       URL: this.url,
@@ -21,6 +21,24 @@ class HB {
       signer: this.signer,
     })
     this._request = request
+    this.meta = {
+      info: async (args = {}) => {
+        let { method = "GET", json = true, key } = args
+        if (method.toLowerCase() === "post") {
+          return await this.send({ path: "/~meta@1.0/info", ...args })
+        } else {
+          return key
+            ? await this.fetch(
+                this.path("meta", `info/${key}`, args.json ?? false),
+                args.json ?? false
+              )
+            : await this.fetch(this.path("meta", "info", json))
+        }
+      },
+      build: async () => {
+        return await this.fetch(this.path("meta", "build"))
+      },
+    }
   }
 
   async send(args) {
@@ -57,9 +75,17 @@ class HB {
     return { slot, outbox: await this.computeAOS(this.pid, slot) }
   }
 
-  path(dev = "meta", path, json = true) {
+  path(dev = "meta", path = "info", json = true, params = {}) {
     if (!/@/.test(dev)) dev += "@1.0"
-    return `${this.url}/~${dev}/${path}${json ? "/serialize~json@1.0" : ""}`
+    let _params = ""
+    if (!isEmpty(params)) {
+      let i = 0
+      for (const k in params) {
+        _params += `${i === 0 ? "?" : "&"}${k}=${params[k]}`
+        i++
+      }
+    }
+    return `${this.url}/~${dev}/${path}${json ? "/serialize~json@1.0" : ""}${_params}`
   }
 
   async fetch(url, json = true) {
