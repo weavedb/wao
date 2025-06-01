@@ -37,7 +37,7 @@ describe("HyperBEAM", function () {
     assert.equal((await hb.messageAOS("Get")).outbox["1"].data, "3")
   })
 
-  it.only("should cache", async () => {
+  it("should cache", async () => {
     const result = await hb.send({
       path: "/~wao@1.0/cache_wasm_image",
       method: "POST",
@@ -48,5 +48,12 @@ describe("HyperBEAM", function () {
     await hb.messageAOS("Eval", {}, src_data)
     await hb.messageAOS("Add", { Plus: "3" })
     assert.equal((await hb.messageAOS("Get")).outbox["1"].data, "3")
+  })
+  it.only("should query meta device", async () => {
+    await hb.meta.info({ method: "post", abc: "def" })
+    const info = await hb2.meta.info()
+    assert.equal(info.abc, "def")
+    const build = await hb2.meta.build()
+    assert.equal(build.node, "HyperBEAM")
   })
 })

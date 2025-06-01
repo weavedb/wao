@@ -386,7 +386,7 @@ const toHttpSigner = signer => {
  * @returns {Function} Request function that takes tags and returns signed message
  */
 export function createRequest(config) {
-  const { signer, HB_URL = "http://localhost:10000" } = config
+  const { signer, url = "http://localhost:10001" } = config
 
   if (!signer) {
     throw new Error("Signer is required for mainnet mode")
@@ -404,12 +404,7 @@ export function createRequest(config) {
     const { path = "/relay/process", method = "POST", ...restFields } = fields
 
     // Add default AO fields
-    const aoFields = {
-      "Data-Protocol": "ao",
-      Type: "Message",
-      Variant: "ao.N.1",
-      ...restFields,
-    }
+    const aoFields = { ...restFields }
 
     // Use the HyperBEAM encode function
     const encoded = await encode(aoFields)
@@ -419,7 +414,7 @@ export function createRequest(config) {
       throw new Error("No fields to encode")
     }
 
-    const url = joinUrl({ url: HB_URL, path })
+    const _url = joinUrl({ url, path })
 
     // Convert Headers object to plain object and ensure lowercase
     const headersObj = {}
@@ -446,7 +441,7 @@ export function createRequest(config) {
 
     // Return the signed message (no fetch!)
     const result = {
-      url,
+      url: _url,
       method,
       headers: signedRequest.headers,
     }
