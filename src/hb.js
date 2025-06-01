@@ -11,7 +11,6 @@ class HB {
   constructor({ url = "http://localhost:10001" } = {}) {
     this.url = url
   }
-
   async metrics() {
     const txt = await fetch(`${this.url}/~hyperbuddy@1.0/metrics`).then(r =>
       r.text()
