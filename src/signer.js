@@ -3,7 +3,6 @@ import crypto from "crypto"
 import { httpbis } from "http-message-signatures"
 import { parseItem, serializeList } from "structured-headers"
 const { verifyMessage } = httpbis
-
 const {
   augmentHeaders,
   createSignatureBase,
@@ -461,7 +460,7 @@ export function createRequest(config) {
  * Utility function to extract the message ID from a signed message
  * Based on the original code's hash calculation
  */
-export async function getMessageId(signedMessage) {
+async function getMessageId(signedMessage) {
   // Extract signature from the Signature header
   const signatureHeader =
     signedMessage.headers.Signature || signedMessage.headers.signature
@@ -740,19 +739,7 @@ export async function verify(signedMessage, publicKey) {
  * @param {Object} signedMessage - The signed message
  * @returns {Buffer|null} The public key buffer or null
  */
-export function extractPublicKeyFromMessage(signedMessage) {
+function extractPublicKeyFromMessage(signedMessage) {
   const signatureName = extractSignatureName(signedMessage.headers)
   return extractPublicKeyFromHeaders(signedMessage.headers, signatureName)
-}
-
-/**
- * Simple verification helper that returns just true/false
- *
- * @param {Object} signedMessage - The signed message
- * @param {string|Buffer} [publicKey] - Optional public key
- * @returns {Promise<boolean>} True if valid, false otherwise
- */
-export async function isValidSignature(signedMessage, publicKey) {
-  const result = await verify(signedMessage, publicKey)
-  return result.valid
 }

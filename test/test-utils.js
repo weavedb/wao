@@ -22,5 +22,9 @@ const prepare = async (port = 10001, port2 = 4000, jwk) => {
 const getJWK = file => {
   return JSON.parse(readFileSync(resolve(import.meta.dirname, file), "utf8"))
 }
+const seed = num => {
+  const array = new Uint8Array(num)
+  return crypto.getRandomValues(array)
+}
 
-export { prepare, getJWK }
+export { prepare, getJWK, seed }
