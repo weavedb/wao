@@ -28,6 +28,20 @@ class HB {
         )
       },
     }
+    this.json = {
+      commit: async args => {
+        return await this.send({ path: "/~json@1.0/commit", ...args })
+      },
+      verify: async args => {
+        return await this.send({ path: "/~json@1.0/verify", ...args })
+      },
+      deserialize: async args => {
+        return await this.send({ path: "/~json@1.0/deserialize", ...args })
+      },
+      serialize: async args => {
+        return await this.send({ path: "/~json@1.0/serialize", ...args })
+      },
+    }
     this.meta = {
       info: async (args = {}) => {
         let { method = "GET", json = true, key } = args
