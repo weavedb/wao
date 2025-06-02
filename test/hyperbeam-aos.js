@@ -6,6 +6,7 @@ import HB from "../src/hb.js"
 import HyperBEAM from "../src/hyperbeam.js"
 import { resolve } from "path"
 import { readFileSync } from "fs"
+
 const src_data = `
 local count = 0
 Handlers.add("Add", "Add", function (msg)
@@ -50,7 +51,7 @@ describe("HyperBEAM", function () {
     assert.equal((await hb.messageAOS("Get")).outbox["1"].data, "3")
   })
 
-  it.only("should query meta device", async () => {
+  it("should query meta device", async () => {
     await hb.meta.info({ method: "post", abc: "def" })
     const info = await hb.meta.info()
     assert.equal(info.abc, "def")
@@ -58,5 +59,16 @@ describe("HyperBEAM", function () {
     assert.equal(build.node, "HyperBEAM")
     const metrics = await hb.hyperbuddy.metrics({})
     console.log(metrics)
+  })
+
+  it.only("should deserialize json", async () => {
+    assert.equal(
+      (
+        await hb.json.deserialize({
+          body: JSON.stringify({ a: 3 }),
+        })
+      ).status,
+      200
+    )
   })
 })
