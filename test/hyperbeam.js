@@ -27,10 +27,10 @@ describe("Hyperbeam Legacynet", function () {
     const hb = await new HB({ url: "http://localhost:10001" }).init(jwk)
     const process = await hb.process({ tags: { authority: mu.addr } })
     console.log("[PID]", process)
-    const slot = await hb.schedule({ process, data })
-    const r = await hb.compute({ process, slot })
-    const slot2 = await hb.schedule({ process, action: "Inc" })
-    const r2 = await hb.compute({ process, slot: slot2 })
+    const { slot } = await hb.schedule({ pid: process, data })
+    const r = await hb.compute(process, slot)
+    const { slot: slot2 } = await hb.schedule({ pid: process, action: "Inc" })
+    const r2 = await hb.compute(process, slot2)
     assert.equal(r2.Messages[0].Data, "Count: 1")
     const r3 = await hb.dryrun({ process, action: "Get" })
     assert.equal(r3.Messages[0].Data, "Count: 1")
@@ -42,13 +42,13 @@ describe("Hyperbeam Legacynet", function () {
     const address = res
     assert.equal(address, hb._info.address)
     const process = await hb.process()
-    const slot = await hb.schedule({ process, data })
-    const r = await hb.compute({ process, slot })
+    const { slot } = await hb.schedule({ pid: process, data })
+    const r = await hb.compute(process, slot)
     assert.equal(r.Output.data, "")
     let i = 0
     while (i < 10) {
-      const slot2 = await hb.schedule({ process, action: "Inc" })
-      const r3 = await hb.compute({ process, slot: slot2 })
+      const { slot: slot2 } = await hb.schedule({ pid: process, action: "Inc" })
+      const r3 = await hb.compute(process, slot2)
       assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
     }
     const res4 = await hb.messages({ target: process, from: 0 })
@@ -66,8 +66,8 @@ describe("Hyperbeam Legacynet", function () {
 
     // add 2 messages
     while (i < 12) {
-      const slot2 = await hb.schedule({ process, action: "Inc" })
-      const r3 = await hb.compute({ process, slot: slot2 })
+      const { slot: slot2 } = await hb.schedule({ pid: process, action: "Inc" })
+      const r3 = await hb.compute(process, slot2)
       assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
     }
     // continue recovery from the last message
@@ -77,8 +77,8 @@ describe("Hyperbeam Legacynet", function () {
 
     // restart a new server and check recovery
     const server2 = new Server({ port: 4000, log: true, hb_url: URL })
-    const slot2 = await hb.schedule({ process, action: "Inc" })
-    const r3 = await hb.compute({ process, slot: slot2 })
+    const { slot: slot2 } = await hb.schedule({ pid: process, action: "Inc" })
+    const r3 = await hb.compute(process, slot2)
     assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
   })
 
@@ -88,14 +88,14 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(address, hb._info.address)
     const p = await hb.process()
     const process = await p.process.text()
-    const slot = await hb.schedule({ process, data })
-    const r = await hb.compute({ process, slot })
+    const { slot } = await hb.schedule({ pid: process, data })
+    const r = await hb.compute(process, slot)
     assert.equal(r.Output.data, "")
-    const slot2 = await hb.schedule({ process, action: "Inc" })
-    const r3 = await hb.compute({ process, slot: slot2 })
+    const { slot: slot2 } = await hb.schedule({ pid: process, action: "Inc" })
+    const r3 = await hb.compute(process, slot2)
     assert.equal(r3.Messages[0].Data, "Count: 1")
-    const slot3 = await hb.schedule({ process, action: "Inc" })
-    const r4 = await hb.compute({ process, slot: slot3 })
+    const { slot: slot3 } = await hb.schedule({ pid: process, action: "Inc" })
+    const r4 = await hb.compute(process, slot3)
     assert.equal(r4.Messages[0].Data, "Count: 2")
     const d4 = await hb.dryrun({ process, action: "Get" })
     assert.equal(d4.Messages[0].Data, "Count: 2")
