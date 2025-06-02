@@ -61,7 +61,7 @@ describe("HyperBEAM", function () {
     console.log(metrics)
   })
 
-  it.only("should deserialize json", async () => {
+  it("should deserialize json", async () => {
     assert.equal(
       (
         await hb.json.deserialize({
@@ -70,5 +70,12 @@ describe("HyperBEAM", function () {
       ).status,
       200
     )
+  })
+
+  it.only("should query wao device", async () => {
+    assert.equal(await hb.text("wao", "info/version"), "1.0")
+    const { pid } = await hb.spawn()
+    const { slot, res } = await hb.message({})
+    assert.equal((await hb.messages({ target: pid })).edges.length, 2)
   })
 })
