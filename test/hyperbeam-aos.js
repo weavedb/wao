@@ -27,9 +27,9 @@ describe("HyperBEAM", function () {
     hb = new HB({ jwk })
     hb2 = new HB({ jwk: jwk2 })
   })
-  after(async () => {
-    hbeam.kill()
-  })
+
+  after(async () => hbeam.kill())
+
   it("should handle counter with Add and Get handlers", async () => {
     const pid = await hb.spawnAOS()
     await hb.messageAOS("Eval", {}, src_data)
@@ -49,11 +49,14 @@ describe("HyperBEAM", function () {
     await hb.messageAOS("Add", { Plus: "3" })
     assert.equal((await hb.messageAOS("Get")).outbox["1"].data, "3")
   })
+
   it.only("should query meta device", async () => {
     await hb.meta.info({ method: "post", abc: "def" })
-    const info = await hb2.meta.info()
+    const info = await hb.meta.info()
     assert.equal(info.abc, "def")
-    const build = await hb2.meta.build()
+    const build = await hb.meta.build()
     assert.equal(build.node, "HyperBEAM")
+    const metrics = await hb.hyperbuddy.metrics({})
+    console.log(metrics)
   })
 })

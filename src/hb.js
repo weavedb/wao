@@ -21,6 +21,13 @@ class HB {
       signer: this.signer,
     })
     this._request = request
+    this.hyperbuddy = {
+      metrics: async (args = {}) => {
+        return this.parseMetrics(
+          await this.fetch(this.path("hyperbuddy", "metrics", false), false)
+        )
+      },
+    }
     this.meta = {
       info: async (args = {}) => {
         let { method = "GET", json = true, key } = args
@@ -130,11 +137,7 @@ class HB {
     this.pid ??= pid
     return pid
   }
-
-  async metrics() {
-    const txt = await fetch(`${this.url}/~hyperbuddy@1.0/metrics`).then(r =>
-      r.text()
-    )
+  parseMetrics(txt) {
     const parts = txt.split(/\r?\n/)
     let index = 0
     let _metrics = {}
@@ -164,18 +167,6 @@ class HB {
       }
     }
     return _metrics
-  }
-
-  async info() {
-    const txt = await fetch(
-      `${this.url}/~meta@1.0/info/serialize~json@1.0`
-    ).then(r => r.json())
-    return txt
-  }
-
-  async init() {
-    this._info = await this.info()
-    return this
   }
 
   async messages({ target, from, to, limit } = {}) {
