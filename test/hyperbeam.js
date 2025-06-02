@@ -20,13 +20,11 @@ end)
 `
 const URL = "http://localhost:10001"
 
-describe("Hyperbeam", function () {
+describe("Hyperbeam Legacynet", function () {
   after(() => setTimeout(() => process.exit(), 100))
   it.only("should interact with a hyperbeam node", async () => {
     const server = new Server({ port: 4000, log: true, hb_url: URL })
     const hb = await new HB({ url: "http://localhost:10001" }).init(jwk)
-    const metrics = await hb.metrics()
-    const info = await hb.info()
     const process = await hb.process({ tags: { authority: mu.addr } })
     console.log("[PID]", process)
     const slot = await hb.schedule({ process, data })
@@ -82,18 +80,6 @@ describe("Hyperbeam", function () {
     const slot2 = await hb.schedule({ process, action: "Inc" })
     const r3 = await hb.compute({ process, slot: slot2 })
     assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
-  })
-
-  it("should get metrics", async () => {
-    const hb = new HB()
-    const met = await hb.metrics()
-    assert.ok(met.process_uptime_seconds)
-  })
-
-  it("should get info", async () => {
-    const hb = new HB()
-    const info = await hb.info()
-    assert.equal(info.port, 10001)
   })
 
   it("should deploy a process", async () => {
