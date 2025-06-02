@@ -14,13 +14,16 @@ class HB {
     this.signer = createSigner(jwk, this.url)
     this.addr = toAddr(jwk.n)
     this._request2 = createRequest({ signer: this.signer, url: this.url })
+
     const { request } = connect({
       MODE: "mainnet",
       URL: this.url,
       device: "",
       signer: this.signer,
     })
+
     this._request = request
+
     this.hyperbuddy = {
       metrics: async (args = {}) => {
         return this.parseMetrics(
@@ -28,6 +31,7 @@ class HB {
         )
       },
     }
+
     this.json = {
       commit: async args => {
         return await this.send({ path: "/~json@1.0/commit", ...args })
@@ -42,6 +46,7 @@ class HB {
         return await this.send({ path: "/~json@1.0/serialize", ...args })
       },
     }
+
     this.meta = {
       info: async (args = {}) => {
         let { method = "GET", json = true, key } = args
@@ -64,11 +69,6 @@ class HB {
 
   async send(args) {
     return await _send(await this._request2(args))
-  }
-
-  async getAddr() {
-    return (await this.send({ path: "/~meta@1.0/info/address", method: "GET" }))
-      .body
   }
 
   async getImage() {
@@ -108,7 +108,12 @@ class HB {
     }
     return `${this.url}/~${dev}/${path}${json ? "/serialize~json@1.0" : ""}${_params}`
   }
-
+  async text(dev, path) {
+    return await this.fetch(this.path(dev, path, false), false)
+  }
+  async json(dev, path) {
+    return await this.fetch(this.path(dev, path))
+  }
   async fetch(url, json = true) {
     return await fetch(url).then(r => (json ? r.json() : r.text()))
   }
@@ -119,8 +124,57 @@ class HB {
     ).then(r => r.json())
   }
 
+  async compute(pid, slot) {
+    return await fetch(
+      `${this.url}/${pid}/compute/serialize~json@1.0?slot=${slot}`
+    ).then(r => r.json())
+  }
+
+  async spawn(tags = {}) {
+    const addr = await this.meta.info({ key: "address" })
+    this.scheduler ??= addr
+    const spawned = await this.send(
+      mergeLeft(tags, {
+        device: "process@1.0",
+        path: "/schedule",
+        scheduler: this.scheduler,
+        "random-seed": seed(16),
+        Type: "Process",
+        "scheduler-device": "scheduler@1.0",
+        "execution-device": "wao@1.0",
+      })
+    )
+    const pid = spawned.headers.get("process")
+    this.pid ??= pid
+    const res = await this.compute(pid, 0)
+    return { spawned: res, pid, res }
+  }
+
+  async message(...args) {
+    const { pid, slot, res: scheduled } = await this.schedule(...args)
+    const res = await this.compute(pid, slot)
+    return { slot, pid, res, scheduled }
+  }
+
+  async schedule({ pid, tags = {}, data, scheduler } = {}) {
+    pid ??= this.pid
+    scheduler ??= this.scheduler
+    let _tags = mergeLeft(tags, {
+      device: "process@1.0",
+      method: "POST",
+      path: `/${pid}/schedule`,
+      scheduler,
+      Type: "Message",
+      Target: pid,
+    })
+    if (data) _tags.data = data
+    let res = await this.send(_tags)
+    const slot = res.headers.get("slot")
+    return { slot, res, pid }
+  }
+
   async spawnAOS(image) {
-    const addr = await this.getAddr()
+    const addr = await this.meta.info({ key: "address" })
     this.scheduler ??= addr
     image ??= this.image ?? (await this.getImage())
     const res = await this.send({
@@ -151,6 +205,7 @@ class HB {
     this.pid ??= pid
     return pid
   }
+
   parseMetrics(txt) {
     const parts = txt.split(/\r?\n/)
     let index = 0
@@ -219,7 +274,8 @@ class HB {
     return await res.process.text()
   }
 
-  async schedule({ tags = {}, data, process, action = "Eval" } = {}) {
+  /*
+  async scheduleLegacy({ tags = {}, data, process, action = "Eval" } = {}) {
     tags = mergeLeft(tags, {
       path: `${process}/schedule`,
       type: "Message",
@@ -230,13 +286,7 @@ class HB {
     })
     return (await this.post({ tags })).slot.text()
   }
-
-  async compute({ tags = {}, process, slot } = {}) {
-    return await this.request({
-      method: "GET",
-      path: `/${process}/compute&slot+integer=${slot}/results/json`,
-    })
-  }
+  */
 
   async dryrun({ tags = {}, process, action, data } = {}) {
     if (typeof action === "string") tags.Action = action
