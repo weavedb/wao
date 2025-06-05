@@ -338,7 +338,9 @@ class Adaptor {
     const res2 = await this.result({ message, process })
     return { json: res2 }
   }
-
+  async cu_post_result(...args) {
+    return await this.cu_get_result(...args)
+  }
   async su_get_root({ query, params, body, headers, method }) {
     return {
       json: {
@@ -477,7 +479,7 @@ class Adaptor {
       const edges = map(v => ({ node: v, cursor: v.cursor }), res2)
       return {
         json: {
-          data: { transactions: { pageInfo: { hasNextPage: true }, edges } },
+          data: { [tar]: { pageInfo: { hasNextPage: true }, edges } },
         },
       }
     } catch (e) {
