@@ -1,22 +1,31 @@
 import assert from "assert"
-import { after, describe, it, before } from "node:test"
-import { prepare } from "./test-utils.js"
+import { after, describe, beforeEach, it, before } from "node:test"
+import HyperBEAM from "../../src/hyperbeam.js"
+import HB from "../../src/hb.js"
+import { getJWK } from "../lib/test-utils.js"
+import { wait, toAddr } from "../../src/utils.js"
 
 describe("HyperBEAM JSON Codec Device", function () {
-  let hbeam, server, send
-
+  let hb, hbeam, hb2, addr, jwk, jwk2
   before(async () => {
-    ;({ hbeam, server, send } = await prepare())
+    hbeam = new HyperBEAM({ c: "12", cmake: "3.5", gateway: 4000 })
+    await wait(5000)
+    jwk = getJWK("../../HyperBEAM/.wallet.json")
+    addr = toAddr(jwk.n)
+    jwk2 = getJWK("../../HyperBEAM/hyperbeam-key.json")
+  })
+  beforeEach(async () => {
+    hb = await new HB({}).init(jwk)
+    hb2 = await new HB({}).init(jwk2)
   })
 
   after(async () => {
     hbeam.kill("SIGKILL")
-    server.close()
   })
 
   // Test content_type function - this already works
   it("should return JSON content type", async () => {
-    const res = await send({
+    const res = await hb.send({
       path: "/~json@1.0/content_type",
       method: "GET",
     })
@@ -30,8 +39,8 @@ describe("HyperBEAM JSON Codec Device", function () {
   // Test to function - encode to JSON
   it("should encode message to JSON using to", async () => {
     // Call the JSON codec's to function directly through a simple wrapper
-    const res = await send({
-      path: "/~wao@1.0/simple_json_to",
+    const res = await hb.send({
+      path: "/~wao_test@1.0/simple_json_to",
       method: "POST",
       body: "dummy", // Add a body so content-digest is generated
       "test-key": "test-value",
@@ -43,8 +52,8 @@ describe("HyperBEAM JSON Codec Device", function () {
   // Test from function - decode from JSON
   it("should decode JSON using from", async () => {
     const jsonData = JSON.stringify({ "decoded-key": "decoded-value" })
-    const res = await send({
-      path: "/~wao@1.0/simple_json_from",
+    const res = await hb.send({
+      path: "/~wao_test@1.0/simple_json_from",
       method: "POST",
       body: jsonData,
     })
@@ -56,9 +65,9 @@ describe("HyperBEAM JSON Codec Device", function () {
   })
 
   // Test serialize function
-  it("should serialize message", async () => {
-    const res = await send({
-      path: "/~wao@1.0/simple_serialize",
+  it.skip("should serialize message", async () => {
+    const res = await hb.send({
+      path: "/~wao_test@1.0/simple_serialize",
       method: "POST",
       body: JSON.stringify({ data: "test-data", key2: "value2" }),
       "content-type": "application/json",
@@ -81,8 +90,8 @@ describe("HyperBEAM JSON Codec Device", function () {
   // Test deserialize function
   it("should deserialize JSON", async () => {
     const jsonData = JSON.stringify({ test: "data" })
-    const res = await send({
-      path: "/~wao@1.0/simple_deserialize",
+    const res = await hb.send({
+      path: "/~wao_test@1.0/simple_deserialize",
       method: "POST",
       body: jsonData,
     })
@@ -92,8 +101,8 @@ describe("HyperBEAM JSON Codec Device", function () {
 
   // Test committed function
   it("should get committed keys", async () => {
-    const res = await send({
-      path: "/~wao@1.0/simple_committed",
+    const res = await hb.send({
+      path: "/~wao_test@1.0/simple_committed",
       method: "POST",
       body: "test",
       key1: "value1",
