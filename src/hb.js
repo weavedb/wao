@@ -11,7 +11,6 @@ const seed = num => {
 class HB {
   constructor({ url = "http://localhost:10001", jwk } = {}) {
     this.url = url
-    if (jwk) this.init(jwk)
     this.hyperbuddy = {
       metrics: async (args = {}) => {
         return this.parseMetrics(
@@ -52,6 +51,7 @@ class HB {
         return await this.fetch(this.path("meta", "build"))
       },
     }
+    if (jwk) this.init(jwk)
   }
   _init(jwk) {
     this.signer = createSigner(jwk, this.url)
