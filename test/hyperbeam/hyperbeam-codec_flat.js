@@ -1,22 +1,31 @@
 import assert from "assert"
-import { after, describe, it, before } from "node:test"
-import { prepare } from "./test-utils.js"
+import { after, describe, beforeEach, it, before } from "node:test"
+import HyperBEAM from "../../src/hyperbeam.js"
+import HB from "../../src/hb.js"
+import { getJWK } from "../lib/test-utils.js"
+import { wait, toAddr } from "../../src/utils.js"
 
 describe("HyperBEAM flat@1.0 codec", function () {
-  let hbeam, server, send
-
+  let hb, hbeam, hb2, addr, jwk, jwk2
   before(async () => {
-    ;({ hbeam, server, send } = await prepare())
+    hbeam = new HyperBEAM({ c: "12", cmake: "3.5", gateway: 4000 })
+    await wait(5000)
+    jwk = getJWK("../../HyperBEAM/.wallet.json")
+    addr = toAddr(jwk.n)
+    jwk2 = getJWK("../../HyperBEAM/hyperbeam-key.json")
+  })
+  beforeEach(async () => {
+    hb = await new HB({}).init(jwk)
+    hb2 = await new HB({}).init(jwk2)
   })
 
   after(async () => {
     hbeam.kill("SIGKILL")
-    server.close()
   })
 
   // Test if flat device is accessible
   it("should access flat device", async () => {
-    const res = await send({
+    const res = await hb.send({
       path: "/~flat@1.0",
       method: "GET",
     })
@@ -25,7 +34,7 @@ describe("HyperBEAM flat@1.0 codec", function () {
 
   // Test serialize function - this one works!
   it("should serialize data", async () => {
-    const res = await send({
+    const res = await hb.send({
       path: "/~flat@1.0/serialize",
       method: "GET",
       key1: "value1",
@@ -38,7 +47,7 @@ describe("HyperBEAM flat@1.0 codec", function () {
 
   // Test commit function - this works too
   it("should handle commit function", async () => {
-    const res = await send({
+    const res = await hb.send({
       path: "/~flat@1.0/commit",
       method: "GET",
     })
@@ -47,7 +56,7 @@ describe("HyperBEAM flat@1.0 codec", function () {
 
   // Test committed function - also works
   it("should handle committed function", async () => {
-    const res = await send({
+    const res = await hb.send({
       path: "/~flat@1.0/committed",
       method: "GET",
     })

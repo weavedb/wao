@@ -433,34 +433,30 @@ export function createRequest(config) {
     // Use the HyperBEAM encode function
     const encoded = await encode(aoFields)
 
-    // If no encoding needed (empty object)
-    if (!encoded) {
-      throw new Error("No fields to encode")
-    }
+    // If no encoding needed, create minimal structure
+    const headersObj = encoded ? encoded.headers : {}
+    const body = encoded ? encoded.body : undefined
 
     const _url = joinUrl({ url, path })
 
-    // Headers are already a plain object with correct casing
-    const headersObj = encoded.headers
-
-    // Add Content-Length if body exists (now lowercase to match)
-    if (encoded.body && !headersObj["content-length"]) {
-      const bodySize = encoded.body.size || encoded.body.byteLength || 0
+    // Add Content-Length if body exists
+    if (body && !headersObj["content-length"]) {
+      const bodySize = body.size || body.byteLength || 0
       if (bodySize > 0) {
         headersObj["content-length"] = String(bodySize)
       }
     }
 
-    // Get all header keys for signing
+    // Get all header keys for signing (might be empty)
     const signingFields = Object.keys(headersObj)
 
-    // Sign the request
+    // Sign the request (even with no fields)
     const signedRequest = await toHttpSigner(signer)({
       request: { url, method, headers: headersObj },
       fields: signingFields,
     })
 
-    // Return the signed message (no fetch!)
+    // Return the signed message
     const result = {
       url: _url,
       method,
@@ -468,8 +464,8 @@ export function createRequest(config) {
     }
 
     // Only add body if it exists
-    if (encoded.body) {
-      result.body = encoded.body
+    if (body) {
+      result.body = body
     }
 
     return result
