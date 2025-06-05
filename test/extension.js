@@ -54,7 +54,7 @@ describe("WeaveDrive", function () {
     )
     const { id } = await ao.ar.post({ data: "Hello" })
     await ao.attest({ id })
-    assert.equal(await p.d("Data", { id }), "Hello")
+    assert.equal(await p.d("Data", { id }, false), "Hello")
     assert.equal((await p.d("Block", { height: "2" })).height, 2)
     assert.equal((await p.d("Tx", { id })).id, id)
     assert.equal((await p.d("Tx2", { id: mid })).id, mid)

@@ -21,7 +21,7 @@ Llama.logLevel = 4
 Handlers.add("Hello", "Hello", function (msg)
   io.stderr:write("Loaded! Setting prompt")
   Llama.load("/data/" .. msg.ModelID)
-  msg.reply({ Data = true })
+  msg.reply({ Data = "true" })
 end)
 
 Handlers.add("Ask", "Ask", function (msg)
@@ -49,6 +49,7 @@ describe("LLM", function () {
     })
     await ao.attest({ id })
     await p.m("Hello", { ModelID: id })
-    console.log(await p.d("Ask", { Q: "How are you?" }))
+    console.log(await p.d("Ask", { Q: "How are you?" }, false))
+    return
   })
 })
