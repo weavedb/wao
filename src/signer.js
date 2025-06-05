@@ -123,7 +123,10 @@ function hbEncodeValue(value) {
 function hbEncodeLift(obj, parent = "", top = {}) {
   const [flattened, types] = Object.entries({ ...obj }).reduce(
     (acc, [key, value]) => {
-      const flatK = (parent ? `${parent}/${key}` : key).toLowerCase()
+      // For nested paths, use lowercase. For top-level, also use lowercase for HTTP headers
+      const storageKey = parent
+        ? `${parent}/${key}`.toLowerCase()
+        : key.toLowerCase()
 
       // skip nullish values
       if (value == null) return acc
@@ -138,7 +141,7 @@ function hbEncodeLift(obj, parent = "", top = {}) {
 
       // first/second lift object
       if (isPojo(value)) {
-        hbEncodeLift(value, flatK, top)
+        hbEncodeLift(value, storageKey, top)
         return acc
       }
 
@@ -146,17 +149,20 @@ function hbEncodeLift(obj, parent = "", top = {}) {
       const [type, encoded] = hbEncodeValue(value)
       if (encoded !== undefined) {
         if (Buffer.from(String(encoded)).byteLength > MAX_HEADER_LENGTH) {
-          top[flatK] = String(encoded)
+          top[storageKey] = String(encoded)
         } else {
-          // For integers, keep them as numbers in the headers, not strings
+          // Store with lowercase key for HTTP compatibility
+          const httpKey = key.toLowerCase()
           if (type === "integer" && typeof value === "number") {
-            acc[0][key] = String(value)
+            acc[0][httpKey] = String(value)
           } else {
-            acc[0][key] = encoded
+            acc[0][httpKey] = encoded
           }
         }
       }
-      if (type) acc[1][key] = type
+      if (type) {
+        acc[1][key.toLowerCase()] = type
+      }
       return acc
     },
     [{}, {}]
@@ -165,9 +171,8 @@ function hbEncodeLift(obj, parent = "", top = {}) {
   if (Object.keys(flattened).length === 0) return top
 
   if (Object.keys(types).length > 0) {
-    // Format as structured fields dictionary: key="value", key2="value2"
+    // Format as structured fields dictionary
     const aoTypeItems = Object.entries(types).map(([key, value]) => {
-      // Escape the key if needed (structured fields tokens)
       const safeKey = key
         .toLowerCase()
         .replace(
@@ -176,17 +181,23 @@ function hbEncodeLift(obj, parent = "", top = {}) {
         )
       return `${safeKey}="${value}"`
     })
-    aoTypeItems.sort() // CRITICAL: This sort is required for deterministic ordering
+    aoTypeItems.sort()
     const aoTypes = aoTypeItems.join(", ")
 
     if (Buffer.from(aoTypes).byteLength > MAX_HEADER_LENGTH) {
       const flatK = parent ? `${parent}/ao-types` : "ao-types"
       top[flatK] = aoTypes
-    } else flattened["ao-types"] = aoTypes
+    } else {
+      flattened["ao-types"] = aoTypes
+    }
   }
 
-  if (parent) top[parent] = flattened
-  else Object.assign(top, flattened)
+  if (parent) {
+    top[parent] = flattened
+  } else {
+    Object.assign(top, flattened)
+  }
+
   return top
 }
 
@@ -213,6 +224,8 @@ async function encode(obj = {}) {
 
   const bodyKeys = []
   const headerKeys = []
+
+  // Process all flattened keys
   await Promise.all(
     Object.keys(flattened).map(async key => {
       const value = flattened[key]
@@ -226,10 +239,12 @@ async function encode(obj = {}) {
         return
       }
 
+      // Check if this should be a body field
+      const valueStr = String(value)
       if (
-        (await hasNewline(value)) ||
+        (await hasNewline(valueStr)) ||
         key.includes("/") ||
-        Buffer.from(value).byteLength > MAX_HEADER_LENGTH
+        Buffer.from(valueStr).byteLength > MAX_HEADER_LENGTH
       ) {
         bodyKeys.push(key)
         flattened[key] = new Blob([
@@ -239,36 +254,44 @@ async function encode(obj = {}) {
         return
       }
 
+      // It's a header
       headerKeys.push(key)
-      flattened[key] = value
     })
   )
 
-  const h = new Headers()
-  headerKeys.forEach(key => h.append(key, flattened[key]))
+  // Build headers object with all header keys
+  const headers = {}
+  headerKeys.forEach(key => {
+    headers[key] = flattened[key]
+  })
 
-  // Handle both data and body fields
-  if (h.has("data")) {
+  // Special handling for data and body fields
+  if ("data" in originalObj && !bodyKeys.includes("data")) {
     bodyKeys.push("data")
+    delete headers["data"] // Remove from headers if it was there
   }
 
-  if (h.has("body")) {
+  if ("body" in originalObj && !bodyKeys.includes("body")) {
     bodyKeys.push("body")
+    delete headers["body"] // Remove from headers if it was there
   }
 
   let body = undefined
   if (bodyKeys.length > 0) {
     if (bodyKeys.length === 1) {
-      // If there is only one element, promote it to be the full body and set the
-      // `inline-body-key` such that the server knows its name.
-      body = new Blob([obj[bodyKeys[0]]])
-      h.set("inline-body-key", bodyKeys[0])
-      h.delete(bodyKeys[0])
+      // If there is only one element, promote it to be the full body
+      const bodyKey = bodyKeys[0]
+      body = new Blob([originalObj[bodyKey] || flattened[bodyKey]])
+      headers["inline-body-key"] = bodyKey
     } else {
       // Multiple body fields - create multipart
       const bodyParts = await Promise.all(
         bodyKeys.map(name => {
-          return flattened[name].arrayBuffer()
+          if (flattened[name] instanceof Blob) {
+            return flattened[name].arrayBuffer()
+          }
+          // For raw values, create a blob
+          return new Blob([originalObj[name] || ""]).arrayBuffer()
         })
       )
 
@@ -281,10 +304,9 @@ async function encode(obj = {}) {
       const boundary = base64url.encode(Buffer.from(hash))
 
       const blobParts = bodyParts.flatMap(p => [`--${boundary}\r\n`, p, "\r\n"])
-
       blobParts.push(`--${boundary}--`)
 
-      h.set("Content-Type", `multipart/form-data; boundary="${boundary}"`)
+      headers["content-type"] = `multipart/form-data; boundary="${boundary}"`
       body = new Blob(blobParts)
     }
 
@@ -293,13 +315,15 @@ async function encode(obj = {}) {
       const contentDigest = await sha256(finalContent)
       const base64 = base64url.toBase64(base64url.encode(contentDigest))
 
-      h.set("Content-Digest", `sha-256=:${base64}:`)
-      h.set("Content-Length", String(finalContent.byteLength))
+      // Use lowercase to match what's in the other headers
+      headers["content-digest"] = `sha-256=:${base64}:`
+      headers["content-length"] = String(finalContent.byteLength)
     }
   }
 
-  return { headers: h, body }
+  return { headers, body }
 }
+
 /**
  * Create HTTP signer wrapper
  */
@@ -416,14 +440,11 @@ export function createRequest(config) {
 
     const _url = joinUrl({ url, path })
 
-    // Convert Headers object to plain object and ensure lowercase
-    const headersObj = {}
-    for (const [key, value] of encoded.headers.entries()) {
-      headersObj[key.toLowerCase()] = value
-    }
+    // Headers are already a plain object with correct casing
+    const headersObj = encoded.headers
 
-    // Add Content-Length if body exists
-    if (encoded.body) {
+    // Add Content-Length if body exists (now lowercase to match)
+    if (encoded.body && !headersObj["content-length"]) {
       const bodySize = encoded.body.size || encoded.body.byteLength || 0
       if (bodySize > 0) {
         headersObj["content-length"] = String(bodySize)

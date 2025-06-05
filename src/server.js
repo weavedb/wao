@@ -74,16 +74,18 @@ class Server {
       delete: ["/monitor/:pid"],
     })
   }
+
   su() {
     const app = express()
     app.use(bodyParser.json())
     this.launch("SU", app, { get: ["/", "/timestamp", "/:pid"] })
   }
+
   cu() {
     const app = express()
     app.use(bodyParser.json())
     this.launch("CU", app, {
-      get: ["/", "/result/:mid", "/state/:pid", "/results/:pid"],
+      get: ["/", "/result/:mid", "/state/:pid", "/results/:pid", "/dry-run"],
       post: ["/result/:mid", "/dry-run"],
     })
   }
@@ -100,6 +102,7 @@ class Server {
       }
     }
   }
+
   req(req, device, path) {
     return {
       path,

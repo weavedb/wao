@@ -14,7 +14,7 @@ import {
   dryrun,
   monitor,
   unmonitor,
-} from "@permaweb/aoconnect"
+} from "@permaweb/aoconnect-69"
 
 import {
   dissoc,

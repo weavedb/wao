@@ -40,7 +40,14 @@ end)
 `
 
 describe("SDK", function () {
-  after(() => setTimeout(() => process.exit(), 100))
+  let server
+  before(() => {
+    server = new Server({ port: 4000, log: true })
+  })
+  after(() => {
+    server.end()
+    setTimeout(() => process.exit(), 100)
+  })
 
   it("should dump wasm memory", async () => {
     let ao = await new AO(4000).init(acc[0])
@@ -53,7 +60,7 @@ describe("SDK", function () {
     assert.notEqual(memory, null)
   })
 
-  it.skip("should work with aoconnect results", async () => {
+  it("should work with aoconnect results", async () => {
     let ao = await new AO(4000).init(acc[0])
     const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
     const { mid } = await p.msg("Add", { Plus: 3 })
@@ -72,6 +79,7 @@ describe("SDK", function () {
     })
     assert.equal(edges2[0].node.cursor, cursor)
   })
+
   it("should run server", async () => {
     const port = 4000
     let ao = await new AO({ ar: { port: port }, aoconnect: optAO(port) }).init(
@@ -97,7 +105,9 @@ end)
     console.log(await p.m("Hello"))
     return
   })
+
   it("should run server", async () => {
+    const server = new Server({ port: 4000, log: true })
     let ao = await new AO({ ar: { port: 4000 }, aoconnect: optAO(4000) }).init(
       acc[0]
     )
@@ -105,7 +115,6 @@ end)
     console.log(await p.m("Get"))
     await p.m("Add", { Plus: 3 })
     assert.equal(await p.d("Get"), "3")
-    return
     let ao2 = await new AO({
       ar: { port: 4000 },
       aoconnect: optAO(4000),
@@ -114,6 +123,7 @@ end)
     assert.equal(await p2.d("Get"), "3")
     await p2.m("Add", { Plus: 2 })
     assert.equal(await p2.d("Get"), "5")
+    server.end()
   })
 
   it("should connect with aoconnect", async () => {
@@ -228,7 +238,7 @@ end)`
 })
 
 describe("Remote Processes", () => {
-  it.only("should spawn a message from a handler with receive", async () => {
+  it("should spawn a message from a handler with receive", async () => {
     const src_data = `Handlers.add("Hello2", "Hello2", function (msg)
   local name = Send({ Target = msg.To, Action = "Reply", To = msg.To2, __Scheduler__ = msg.Scheduler, To_Scheduler = msg.Scheduler2 }).receive().Data
   msg.reply({ Data = "Hello, " .. name .. "!" })

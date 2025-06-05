@@ -1,6 +1,6 @@
 import { AR, AO } from "./index.js"
 import assert from "assert"
-import { createDataItemSigner, connect } from "@permaweb/aoconnect"
+import { connect } from "@permaweb/aoconnect"
 //import { connect } from "aoconnect-wao"
 import { dirname as _dirname, resolve } from "path"
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from "fs"
