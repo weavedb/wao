@@ -341,8 +341,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           module: p.module,
         })
         if (!p.handle) {
-          const { format, mod, wasm } = await mem.getWasm(p.modulea)
-          const wdrive = extensions[p.extention]
+          const { format, mod, wasm } = await mem.getWasm(p.module)
+          const wdrive = extensions[p.extension]
           p.handle = await AoLoader(wasm, {
             format,
             WeaveDrive: wdrive,
@@ -570,8 +570,8 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             module: p.module,
           })
           if (!p.handle) {
-            const { format, mod, wasm } = await mem.getWasm(p.modulea)
-            const wdrive = extensions[p.extention]
+            const { format, mod, wasm } = await mem.getWasm(p.module)
+            const wdrive = extensions[p.extension]
             p.handle = await AoLoader(wasm, {
               format,
               WeaveDrive: wdrive,
@@ -793,7 +793,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           }
           if (!p.handle) {
             const { format, mod, wasm } = await mem.getWasm(p.module)
-            const wdrive = extensions[p.extention]
+            const wdrive = extensions[p.extension]
             p.handle = await AoLoader(wasm, {
               format,
               WeaveDrive: wdrive,
