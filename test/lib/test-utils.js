@@ -1,8 +1,8 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
-import { send as _send, verify, createRequest } from "../src/signer.js"
-import { wait, toAddr } from "../src/utils.js"
-import { acc } from "../src/test.js"
-import { run } from "../src/hyperbeam-server.js"
+import { send as _send, verify, createRequest } from "../../src/signer.js"
+import { wait, toAddr } from "../../src/utils.js"
+import { acc } from "../../src/test.js"
+import { run } from "../../src/hyperbeam-server.js"
 import { resolve } from "path"
 import { readFileSync } from "fs"
 

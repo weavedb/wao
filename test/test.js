@@ -85,7 +85,8 @@ end)
 `
 
 describe("GraphQL", () => {
-  it.skip("should query with graphql", async () => {
+  it("should query with graphql", async () => {
+    const server = new Server({ port: 4000, log: true })
     const gql = new GQL({ url: "http://localhost:4000/graphql" })
     const height = (await gql.blocks({ first: 1 }))[0].height
     const ar = new AR({ port: 4000 })
@@ -93,11 +94,12 @@ describe("GraphQL", () => {
       tags: { test: 2, "Content-Type": "text/plain" },
     })
     const height2 = (await gql.blocks({ first: 1 }))[0].height
-    assert.equal(height, height2 - 2)
+    assert.equal(height, height2 - 1)
     const id2 = (
       await gql.txs({ first: 1, tags: { test: "2" }, fields: ["id"] })
     )[0].id
     assert.equal(id, id2)
+    server.end()
   })
 
   it("should query with in-memory graphql", async () => {
@@ -554,7 +556,7 @@ end)`
     const { p, pid } = await ao.deploy({ src_data })
     console.log(await p.dry("Eval", { data: "Version()" }))
   })
-  it.only("should log", async () => {
+  it("should log", async () => {
     const ao = await new AO({}).init(acc[0])
     const src_data = `Handlers.add("Hello", "Hello", function (msg)
 ao.log("abc")

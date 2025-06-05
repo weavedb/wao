@@ -35,6 +35,7 @@ class AR extends MAR {
     }
     return false
   }
+
   async httpmsg(msg) {
     const tags = t(msg.tags)
     let owner = null
@@ -47,11 +48,13 @@ class AR extends MAR {
     await this.mem.set(msg, "txs", msg.id)
     return { item: msg, id: tags.id, tags, owner }
   }
+
   async owner(di) {
     return base64url.encode(
       Buffer.from(await crypto.subtle.digest("SHA-256", di.rawOwner))
     )
   }
+
   async dataitem({ target = "", data = "1984", tags = {}, signer, item }) {
     let di = item
     if (!di) {

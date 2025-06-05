@@ -1,5 +1,5 @@
 import MAO from "./ao.js"
-import { createDataItemSigner } from "@permaweb/aoconnect"
+import { createDataItemSigner } from "@permaweb/aoconnect-69"
 import { srcs, buildTags } from "./utils.js"
 import { mergeLeft, is, map } from "ramda"
 import HB from "./hb.js"

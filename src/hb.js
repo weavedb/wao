@@ -11,19 +11,7 @@ const seed = num => {
 class HB {
   constructor({ url = "http://localhost:10001", jwk } = {}) {
     this.url = url
-    this.signer = createSigner(jwk, this.url)
-    this.addr = toAddr(jwk.n)
-    this._request2 = createRequest({ signer: this.signer, url: this.url })
-
-    const { request } = connect({
-      MODE: "mainnet",
-      URL: this.url,
-      device: "",
-      signer: this.signer,
-    })
-
-    this._request = request
-
+    if (jwk) this.init(jwk)
     this.hyperbuddy = {
       metrics: async (args = {}) => {
         return this.parseMetrics(
@@ -46,7 +34,6 @@ class HB {
         return await this.send({ path: "/~json@1.0/serialize", ...args })
       },
     }
-
     this.meta = {
       info: async (args = {}) => {
         let { method = "GET", json = true, key } = args
@@ -66,7 +53,25 @@ class HB {
       },
     }
   }
+  _init(jwk) {
+    this.signer = createSigner(jwk, this.url)
+    this.addr = toAddr(jwk.n)
+    this._request2 = createRequest({ signer: this.signer, url: this.url })
 
+    const { request } = connect({
+      MODE: "mainnet",
+      URL: this.url,
+      device: "",
+      signer: this.signer,
+    })
+
+    this._request = request
+  }
+  async init(jwk) {
+    this._init(jwk)
+    this._info = await this.meta.info({})
+    return this
+  }
   async send(args) {
     return await _send(await this._request2(args))
   }
@@ -91,6 +96,7 @@ class HB {
       Target: this.pid,
     })
     if (data) _tags.data = data
+    console.log(_tags)
     let res = await this.send(_tags)
     const slot = res.headers.get("slot")
     return { slot, outbox: await this.computeAOS(this.pid, slot) }
@@ -108,12 +114,15 @@ class HB {
     }
     return `${this.url}/~${dev}/${path}${json ? "/serialize~json@1.0" : ""}${_params}`
   }
+
   async text(dev, path) {
     return await this.fetch(this.path(dev, path, false), false)
   }
+
   async json(dev, path) {
     return await this.fetch(this.path(dev, path))
   }
+
   async fetch(url, json = true) {
     return await fetch(url).then(r => (json ? r.json() : r.text()))
   }
@@ -128,6 +137,11 @@ class HB {
     return await fetch(
       `${this.url}/${pid}/compute/serialize~json@1.0?slot=${slot}`
     ).then(r => r.json())
+  }
+  async computeLegacy(pid, slot) {
+    const json = await this.compute(pid, slot)
+    console.log(json)
+    return JSON.parse(json.results.json.body)
   }
 
   async spawn(tags = {}) {
@@ -157,6 +171,7 @@ class HB {
   }
 
   async schedule({ pid, tags = {}, data, scheduler } = {}) {
+    console.log(pid)
     pid ??= this.pid
     scheduler ??= this.scheduler
     let _tags = mergeLeft(tags, {
@@ -175,8 +190,10 @@ class HB {
 
   async spawnAOS(image) {
     const addr = await this.meta.info({ key: "address" })
+    console.log("this is addr", addr)
     this.scheduler ??= addr
     image ??= this.image ?? (await this.getImage())
+    console.log("this is image", image)
     const res = await this.send({
       device: "process@1.0",
       path: "/schedule",
@@ -263,7 +280,7 @@ class HB {
       Variant: "ao.TN.1",
       scheduler: this._info.address,
       authority: this._info.address,
-      "scheduler-location": this.info.address,
+      "scheduler-location": this._info.address,
       "random-seed": seed(16),
       module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
       device: "process@1.0",
@@ -271,7 +288,7 @@ class HB {
       "execution-device": "genesis-wasm@1.0",
     })
     const res = await this.post({ tags })
-    return await res.process.text()
+    return res.process
   }
 
   /*
@@ -292,9 +309,14 @@ class HB {
     if (typeof action === "string") tags.Action = action
     let json = { Tags: buildTags(tags) }
     if (data) json.Data = data
-    return await fetch(
-      `${this.url}/~relay@1.0/call?relay-method=POST&relay-path=/dry-run?process-id=${process}/&content-type=application/json&body=${JSON.stringify(json)}`
-    ).then(r => r.json())
+    const res = await this.send({
+      path: "/~relay@1.0/call",
+      "relay-method": "POST",
+      "relay-path": `/dry-run?process-id=${process}`,
+      "content-type": "application/json",
+      body: JSON.stringify(json),
+    })
+    return JSON.parse(res.body)
   }
 
   async get({ device, path = "~meta@1.0/info" }) {

@@ -13,6 +13,7 @@ const subs = {
   parent: ["id"],
   bundledIn: ["id"],
 }
+
 const field = (key, val = true) => {
   if (includes(key, ["id", "anchor", "signature", "recipient"])) {
     return key
@@ -57,7 +58,7 @@ const query = (opt = {}) => {
       tags.push(`{ name: "${k}", values: ["${opt.tags[k]}"] }`)
     } else if (is(Array, opt.tags[k])) {
       tags.push(
-        `{ name: "${k}", values: [${map(v => `"${v}"`, opt.tags[k]).join(", ")}] }`,
+        `{ name: "${k}", values: [${map(v => `"${v}"`, opt.tags[k]).join(", ")}] }`
       )
     }
   }

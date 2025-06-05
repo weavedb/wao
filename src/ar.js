@@ -41,7 +41,7 @@ class AR {
           data = resData
         } catch (error) {
           console.error(
-            `Error while trying to download contiguous data from gateway cache for ${id}`,
+            `Error while trying to download contiguous data from gateway cache for ${id}`
           )
           console.error(error)
         }

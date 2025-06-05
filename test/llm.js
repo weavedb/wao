@@ -36,7 +36,7 @@ describe("LLM", function () {
   it("should wait reply from another process", async () => {
     const ao = await new AO().init(acc[0])
     const model = readFileSync(
-      resolve(import.meta.dirname, "../../tinyllama.gguf"),
+      resolve(import.meta.dirname, "../../tinyllama.gguf")
     )
     const { id } = await ao.ar.post({ data: model })
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
