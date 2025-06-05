@@ -40,13 +40,14 @@ export default class HyperBEAM {
     if (this.cmake) _env.CMAKE_POLICY_VERSION_MINIMUM = this.cmake
     return _env
   }
-  genEval({ gateway = 4000, wallet = ".wallet.json" }) {
+  genEval({ gateway, wallet = ".wallet.json" }) {
     const _wallet = `, priv_key_location => <<"${wallet}">>`
     const _gateway = gateway
       ? `, gateway => <<"http://localhost:${gateway}">>`
       : ""
-    return `hb:start_mainnet(#{ port => ${this.port}${_gateway}${_wallet} }).`
+    return `hb:start_mainnet(#{ port => ${this.port}${_gateway}${_wallet}, bundler_httpsig => <<\"http://localhost:4001\">>, routes => [ #{ <<\"template\">> => <<\"/result/.*\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/graphql\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } }, #{ <<\"template\">> => <<\"/raw\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } } ] }).`
   }
+
   kill() {
     this.hbeam.kill("SIGKILL")
   }
