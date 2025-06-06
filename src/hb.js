@@ -136,21 +136,21 @@ class HB {
     ).then(r => r.json())
   }
 
-  async compute(pid, slot) {
+  async compute({ pid, slot }) {
     return await fetch(
       `${this.url}/${pid}/compute/serialize~json@1.0?slot=${slot}`
     ).then(r => r.json())
   }
 
-  async computeLegacy(pid, slot) {
-    const json = await this.compute(pid, slot)
+  async computeLegacy({ pid, slot }) {
+    const json = await this.compute({ pid, slot })
     return JSON.parse(json.results.json.body)
   }
 
   async spawn(tags = {}) {
     const addr = await this.meta.info({ key: "address" })
     this.scheduler ??= addr
-    const spawned = await this.send(
+    const res = await this.send(
       mergeLeft(tags, {
         device: "process@1.0",
         path: "/schedule",
@@ -161,23 +161,20 @@ class HB {
         "execution-device": "wao@1.0",
       })
     )
-    const pid = spawned.headers.get("process")
-    this.pid ??= pid
-    const res = await this.compute(pid, 0)
-    return { spawned: res, pid, res }
+    return { res, pid: res.headers.get("process") }
   }
 
-  async message(...args) {
-    const { pid, slot, res: scheduled } = await this.schedule(...args)
-    const res = await this.compute(pid, slot)
-    return { slot, pid, res, scheduled }
+  async message(args) {
+    const pid = args.pid
+    const slot = await this.schedule(args)
+    const res = await this.compute({ pid, slot })
+    return { slot, pid, res }
   }
 
   async schedule({ pid, tags = {}, data, scheduler } = {}) {
     pid ??= this.pid
     scheduler ??= this.scheduler
     let _tags = mergeLeft(tags, {
-      device: "process@1.0",
       method: "POST",
       path: `/${pid}/schedule`,
       scheduler,
@@ -186,8 +183,7 @@ class HB {
     })
     if (data) _tags.data = data
     let res = await this.send(_tags)
-    const slot = res.headers.get("slot")
-    return { slot, res, pid }
+    return { slot: res.headers.get("slot"), res }
   }
 
   async spawnAOS(image) {
@@ -220,7 +216,7 @@ class HB {
     })
     const pid = res.headers.get("process")
     this.pid ??= pid
-    return pid
+    return { pid, res }
   }
 
   parseMetrics(txt) {
@@ -255,8 +251,8 @@ class HB {
     return _metrics
   }
 
-  async messages({ target, from, to, limit } = {}) {
-    let params = `target=${target}`
+  async messages({ pid, from, to, limit } = {}) {
+    let params = `target=${pid}`
     if (isNotNil(from)) params += `&from=${from}`
     if (isNotNil(to)) params += `&to=${to}`
     params += `&accept=application/aos-2`
@@ -266,7 +262,7 @@ class HB {
     if (res.page_info.has_next_page) {
       res.next = async () => {
         const from2 = last(res.edges).cursor + 1
-        return await this.message({ target, from: from2, to, limit })
+        return await this.message({ pid, from: from2, to, limit })
       }
     }
     return res
@@ -288,7 +284,7 @@ class HB {
       "execution-device": "genesis-wasm@1.0",
     })
     const res = await this.post({ tags })
-    return res.process
+    return { pid: res.process, res }
   }
 
   /*
@@ -305,14 +301,14 @@ class HB {
   }
   */
 
-  async dryrun({ tags = {}, process, action, data } = {}) {
+  async dryrun({ tags = {}, pid, action, data } = {}) {
     if (typeof action === "string") tags.Action = action
     let json = { Tags: buildTags(tags) }
     if (data) json.Data = data
     const res = await this.send({
       path: "/~relay@1.0/call",
       "relay-method": "POST",
-      "relay-path": `/dry-run?process-id=${process}`,
+      "relay-path": `/dry-run?process-id=${pid}`,
       "content-type": "application/json",
       body: JSON.stringify(json),
     })
