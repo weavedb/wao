@@ -9,13 +9,14 @@ export default class HyperBEAM {
     cwd = "../HyperBEAM",
     c,
     cmake,
+    legacy = false,
   } = {}) {
     this.c = c
     this.cmake = cmake
     this.port = port
     this.hbeam = spawn(
       "rebar3",
-      ["shell", "--eval", this.genEval({ gateway, wallet })],
+      ["shell", "--eval", this.genEval({ gateway, wallet, legacy })],
       {
         env: { ...process.env, ...this.genEnv() },
         cwd: resolve(import.meta.dirname, cwd),
@@ -40,12 +41,14 @@ export default class HyperBEAM {
     if (this.cmake) _env.CMAKE_POLICY_VERSION_MINIMUM = this.cmake
     return _env
   }
-  genEval({ gateway, wallet = ".wallet.json" }) {
+  genEval({ gateway, wallet = ".wallet.json", legacy = false }) {
     const _wallet = `, priv_key_location => <<"${wallet}">>`
     const _gateway = gateway
       ? `, gateway => <<"http://localhost:${gateway}">>`
       : ""
-    return `hb:start_mainnet(#{ port => ${this.port}${_gateway}${_wallet}, bundler_httpsig => <<\"http://localhost:4001\">>, routes => [ #{ <<\"template\">> => <<\"/result/.*\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/graphql\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } }, #{ <<\"template\">> => <<\"/raw\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } } ] }).`
+    return !legacy
+      ? `hb:start_mainnet(#{ port => ${this.port}${_gateway}${_wallet} }).`
+      : `hb:start_mainnet(#{ port => ${this.port}${_gateway}${_wallet}, bundler_httpsig => <<\"http://localhost:4001\">>, routes => [ #{ <<\"template\">> => <<\"/result/.*\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/graphql\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } }, #{ <<\"template\">> => <<\"/raw\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } } ] }).`
   }
 
   kill() {

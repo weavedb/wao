@@ -24,7 +24,12 @@ const URL = "http://localhost:10001"
 describe("Hyperbeam Legacynet", function () {
   let hb, hbeam
   before(async () => {
-    hbeam = new HyperBEAM({ c: "12", cmake: "3.5", gateway: 4000 })
+    hbeam = new HyperBEAM({
+      c: "12",
+      cmake: "3.5",
+      gateway: 4000,
+      legacy: true,
+    })
     await wait(5000)
   })
   after(async () => hbeam.kill())
