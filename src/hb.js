@@ -5,7 +5,7 @@ import { send as _send, verify, createRequest } from "./signer.js"
 
 const seed = num => {
   const array = new Uint8Array(num)
-  return crypto.getRandomValues(array)
+  return crypto.getRandomValues(array).toString()
 }
 
 class HB {
@@ -51,8 +51,9 @@ class HB {
         return await this.fetch(this.path("meta", "build"))
       },
     }
-    if (jwk) this.init(jwk)
+    if (jwk) this._init(jwk)
   }
+
   _init(jwk) {
     this.signer = createSigner(jwk, this.url)
     this.addr = toAddr(jwk.n)
@@ -67,11 +68,13 @@ class HB {
 
     this._request = request
   }
+
   async init(jwk) {
     this._init(jwk)
     this._info = await this.meta.info({})
     return this
   }
+
   async send(args) {
     return await _send(await this._request2(args))
   }
@@ -85,21 +88,21 @@ class HB {
     return result.headers.get("image")
   }
 
-  async messageAOS(action = "Eval", tags = {}, data) {
+  async messageAOS({ pid, action = "Eval", tags = {}, data }) {
+    pid ??= this.pid
     let _tags = mergeLeft(tags, {
       device: "process@1.0",
       method: "POST",
-      path: `/${this.pid}/schedule`,
+      path: `/${pid}/schedule`,
       scheduler: this.scheduler,
       Type: "Message",
       Action: action,
-      Target: this.pid,
+      Target: pid,
     })
     if (data) _tags.data = data
-    console.log(_tags)
     let res = await this.send(_tags)
     const slot = res.headers.get("slot")
-    return { slot, outbox: await this.computeAOS(this.pid, slot) }
+    return { slot, outbox: await this.computeAOS({ pid, slot }) }
   }
 
   path(dev = "meta", path = "info", json = true, params = {}) {
@@ -127,7 +130,7 @@ class HB {
     return await fetch(url).then(r => (json ? r.json() : r.text()))
   }
 
-  async computeAOS(pid, slot) {
+  async computeAOS({ pid, slot }) {
     return await fetch(
       `${this.url}/${pid}/compute/results/outbox/serialize~json@1.0?slot=${slot}`
     ).then(r => r.json())
@@ -138,9 +141,9 @@ class HB {
       `${this.url}/${pid}/compute/serialize~json@1.0?slot=${slot}`
     ).then(r => r.json())
   }
+
   async computeLegacy(pid, slot) {
     const json = await this.compute(pid, slot)
-    console.log(json)
     return JSON.parse(json.results.json.body)
   }
 
@@ -171,7 +174,6 @@ class HB {
   }
 
   async schedule({ pid, tags = {}, data, scheduler } = {}) {
-    console.log(pid)
     pid ??= this.pid
     scheduler ??= this.scheduler
     let _tags = mergeLeft(tags, {
@@ -190,10 +192,8 @@ class HB {
 
   async spawnAOS(image) {
     const addr = await this.meta.info({ key: "address" })
-    console.log("this is addr", addr)
     this.scheduler ??= addr
     image ??= this.image ?? (await this.getImage())
-    console.log("this is image", image)
     const res = await this.send({
       device: "process@1.0",
       path: "/schedule",
@@ -279,7 +279,7 @@ class HB {
       "Data-Protocol": "ao",
       Variant: "ao.TN.1",
       scheduler: this._info.address,
-      authority: this._info.address,
+      Authority: this._info.address,
       "scheduler-location": this._info.address,
       "random-seed": seed(16),
       module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
