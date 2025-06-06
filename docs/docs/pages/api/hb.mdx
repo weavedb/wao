@@ -1,0 +1,181 @@
+### HB
+
+`HB` handles interactions with a [Hyperbeam](https://permaweb.github.io/HyperBEAM/) node.
+
+- [Instantiate](#instantiate-5)
+- [path](#path)
+- [fetch](#fetch)
+- [text](#text)
+- [json](#json)
+- [send](#send)
+- [spawn](#spawn)
+- [schedule](#schedule)
+- [compute](#compute)
+- [messages](#messages)
+- [Legacynet AOS](#legacynet-aos)
+- [Mainnet AOS](#mainnet-aos)
+- [Devices](#devices)
+
+#### Instantiate
+
+```js
+import { HB } = "wao"
+const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
+```
+
+#### path
+
+Create a path to request.
+
+```js
+const device = "meta"
+const path = "info"
+const json = true
+const params = {}
+
+const path = hb.path(device, path, json, params) 
+// /~meta@1.0/info/serialize~json@1.0
+```
+
+#### fetch
+
+Request without a signature.
+
+```js
+const result = await hb.fetch(url, json)
+```
+
+#### text
+
+Request a text response without a signature.
+
+```js
+const result = await hb.text(device, path)
+```
+
+#### json
+
+Request a json response without a signature.
+
+```js
+const result = await hb.json(device, path)
+```
+
+#### send
+
+Send a request with a signed http message. `data` will be set to http body with auto-generated `content-digest`and `inline-body-key` in the header.
+
+```js
+const result = await hb.send({ ...headers })
+```
+
+#### spawn
+
+Spawn a process.
+
+```js
+const pid = await hb.spawn({ ...tags })
+```
+
+#### schedule
+
+Equivalent to sending a message.
+
+```js
+const slot = await hb.schedule({ tags, data, process: pid, action })
+```
+
+#### compute
+
+Equivalent to getting a result.
+
+```js
+const res = await hb.compute({ process: pid, slot })
+const { Messages, Spawns, Assignments, Output } = res
+```
+
+#### messages
+
+Get messages on a process. You can get next messages by `message.next`. 
+
+```js
+const msgs = await hb.messages({ target, from, to })
+for(const item of msgs.edges){
+  const { cursor: slot, node: { assignment, message } } = item
+}
+if(msgs.next) const msgs2 = await msg.next()
+```
+- `target` : a process id
+- `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawed the process. `to` is inclusive. Both are optional. 
+
+#### Legacynet AOS
+
+##### spawnLegacy
+
+Spawn Legacynet AOS.
+
+```js
+const pid = await hb.process({ tags, data })
+```
+
+##### computeLegacy
+
+Compute legacynet AOS state.
+
+```js
+const res = await hb.computeLegacy( pid, slot )
+const { Messages, Spawns, Assignments, Output } = res
+```
+
+##### dryrun
+
+`dryrun` is only for legacynet AOS. Mainnet AOS disabled this feature for a performance reason.
+
+```js
+const res = await hb.dryrun({ tags, data, process: pid, action })
+const { Messages, Spawns, Assignments, Output } = res
+```
+
+#### Mainnet AOS
+
+Mainnet AOS processes have dedicated API.
+
+##### spawnAOS
+
+```js
+const pid = await hb.spawnAOS()
+```
+
+##### messageAOS
+
+`messageAOS` = `schedule` + `computeAOS`.
+
+```js
+const result = await hb.messageAOS({ pid, action, tags, data })
+```
+
+##### computeAOS
+
+```js
+const result = await hb.computeAOS({ pid, slot })
+```
+
+#### Devices
+
+Each device has it's own API based on the paths.
+
+##### meta
+
+```js
+const info = await hb.meta.info()
+const address = await hb.meta.info({ key: "address" })
+await hb.meta.info({ method: "POST", configA: "valA" }) // update node config
+```
+
+##### hyperbuddy
+
+```js
+const metrics = await hb.hyperbuddy.metrics()
+```
+
+More devices will be added soon.

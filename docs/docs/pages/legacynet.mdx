@@ -1,0 +1,445 @@
+# Legacynet AOS
+
+- [Quick Start](#quick-start)
+  - [Installation](#installation)
+  - [Drop-in aoconnect Replacement for Tests](#drop-in-aoconnect-replacement-for-tests)
+  - [Setting up a Project](#setting-up-a-project)
+  - [Writing Tests](#writing-tests)
+  - [Using WAO SDK](#using-wao-sdk)
+  - [Cherry-Picking Outputs](#cherry-picking-outputs)
+  - [Determining Message Success](#determining-message-success)
+  - [Async Message Tracking with receive()](#async-message-tracking-with-receive)
+  - [Logging](#logging)
+  - [Fork Wasm Memory](#fork-wasm-memory)
+  - [WeaveDrive](#weavedrive)
+  - [Local Persistent Server](#local-persistent-server)
+
+## Quick Start
+
+*WAO is still actively being developed; please use it at your discretion.*
+
+### Installation
+
+```bash
+yarn add wao
+```
+
+### Drop-in `aoconnect` Replacement for Tests
+
+By replacing `aoconnect` with WAO connect, everything runs in memory with zero latency and your tests are executed 1000x faster. The APIs are identical. So, there's no need to change anything else in your code.
+
+```js
+//import { spawn, message, dryrun, assign, result } from "@permaweb/aoconnect"
+import { connect, acc } from "wao/test"
+const { spawn, message, dryrun, assign, result } = connect()
+```
+
+### Setting up a Project
+
+It's super easy to set up a test AO project manually.
+
+```bash
+mkdir wao-test && cd wao-test
+yarn init && yarn add wao
+```
+
+Add `test` and `test-only` commands to your `package.json`.
+
+```json
+{
+  "scripts": {
+    "test": "node --experimental-wasm-memory64",
+    "test-only": "node --experimental-wasm-memory64 --test-only"
+  }
+}
+```
+
+Create `test` directory and `test.js` file.
+
+```bash
+mkdir test && touch test/test.js
+```
+
+### Writing Tests
+
+Write a simple test in `test.js`.
+
+```js
+import assert from "assert"
+import { describe, it } from "node:test"
+import { connect, acc } from "wao/test"
+const { spawn, message, dryrun } = connect()
+const signer = acc[0].signer
+const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)
+`
+describe("WAO", function () {
+  it("should spawn a process and send messages", async () => {
+    const pid = await spawn({ 
+      signer,
+      module: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
+      scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
+    })
+
+    // on mainnet, you need to wait here till the process becomes available.
+    // WAO automatically handles it. No need with in-memory tests.
+    // await wait({ pid })
+
+    await message({
+      process: pid,
+      tags: [{ name: "Action", value: "Eval" }],
+      data: src_data,
+      signer,
+    })
+    const res = await dryrun({
+      process: pid,
+      tags: [{ name: "Action", value: "Hello" }],
+      signer,
+    })
+    assert.equal(res.Messages[0].Data, "Hello, World!")
+  })
+})
+```
+Note that generating random Arweave wallets for every test takes time and slows down your test executions, so Wao connect provides pre-generated accounts for your tests, which saves hours if you are to run your tests thousands of times.
+
+- `acc[0] = { jwk, addr, signer }`
+
+Run the test.
+
+```js
+yarn test test/test.js
+```
+
+### Using WAO SDK
+
+WAO comes with elegant syntactic sugar and makes writing AO projects an absolute joy.
+
+The same test can be written as follows.
+
+```js
+import assert from "assert"
+import { describe, it } from "node:test"
+import { AO, acc } from "wao/test"
+
+const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)
+`
+describe("WAO", function () {
+  it("should spawn a process and send messages", async () => {
+    const ao = await new AO().init(acc[0])
+    const { p } = await ao.deploy({ src_data })
+	assert.equal(await p.d("Hello", false), "Hello, World!")
+  })
+})
+```
+
+The `AO` class is not only for in-memory tests, but also for production code. You just need to import from a different path.
+
+```js
+import { AR, AO, GQL } from "wao"
+````
+
+### Cherry-Picking Outputs
+
+You often need to pick a specific piece of data from returned results with multiple spawned messages. You need to go through all the returned messages and further go through tags and data to find it. That's too much code to write. `AO` comes with `get` parameter to simplify it.
+
+Consider the following Lua handlers.
+
+```lua
+local json = require('json')
+
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = json.encode({ Name = "Bob" })})
+end)
+
+Handlers.add("Hello2", "Hello2", function (msg)
+  msg.reply({ Data = "Hello, World!", Name = "Bob", Age = "30" })
+end)
+
+Handlers.add("Hello3", "Hello3", function (msg)
+  msg.reply({ Profile = json.encode({ Name = "Bob", Age = "30" })})
+end)
+
+```
+
+```js
+// by default it extracts JSON decoded Data
+const out = await p.d("Hello")
+assert.deepEqual(out, { Name: "Bob" })
+
+// equivalent
+const out2 = await p.d("Hello", { get: true })
+assert.deepEqual(out2, { Name: "Bob" })
+
+// get string Data
+const out3 = await p.d("Hello2", { get: false })
+assert.equal(out3, "Hello, World!")
+
+// get a tag
+const out4 = await p.d("Hello2", { get: "Age" })
+assert.equal(out4, "30")
+
+// get multiple tags
+const out5 = await p.d("Hello2", { get: { obj: { firstname: "Name", age: "Age" }}})
+assert.deepEqual(out5, { firstname: "Bob", age: "30" })
+
+// shortcut if keys don't include name, data, from, json
+const out6 = await p.d("Hello2", { get: { firstname: "Name", age: "Age" }})
+assert.deepEqual(out6, { firstname: "Bob", age: "30" })
+
+// await p.d("Hello2", { get: { name: "Name", age: "Age" } }) doesn't work
+
+// handle tag as json
+const out7 = await p.d("Hello3", { get: { prof: { name: "Profile", json: true }}})
+assert.deepEqual(out7, { prof: { Name: "Bob", Age: "30" }})
+
+```
+
+### Determining Message Success
+
+To determine if your message is successful, you often need to track down a chain of asynchronous messages and examine resulted tags and data. This is actually a fairy complex operation and too much code to write. Luckily for you, `AO` comes with `check` parameter to extremely simplify it. `check` tracks down messages and lazy-evaluates if your `check` conditions are met.
+
+```js
+// check if Data exists
+await p.m("Hello2", { check: true })
+
+// check if Data is a certain value
+await p.m("Hello2", { check: "Hello, World! })
+
+// check if a tag exists
+await p.m("Hello2", { check: "Name" })
+
+// check if tags are certain values
+await p.m("Hello2", { check: { Name: "Bob", Age: "30" } })
+
+// it throws an Error if the conditions are not met
+try{
+  await p.m("Hello2", { check: { Name: "Bob", Age: "20" } })
+}catch(e){
+  console.log("something went wrong!")
+}
+
+// check if Name is Bob and Age exists, then get Age
+const age = await p.m("Hello2", { check: { Name: "Bob", Age: true }, get : "Age" })
+assert.equal(age, "30", "Bob is not 30 yo!")
+```
+
+### Async Message Tracking with receive()
+
+AOS2 introduced a handy function `receive()` to send a message to another process and receive a reply in the same handler.
+
+```lua
+Handlers.add("Hello3", "Hello3", function (msg)
+  msg.reply({ Data = "How old are you?" })
+  local age = Send({
+    Target = msg.To, Action = "Get-Age", Name = msg.Who
+  }).receive().Data
+  msg.reply({ Data = "got your age!", Name = msg.Who, Age = age })
+end)
+```
+
+Since the second reply will be a part of another message triggerd by the `Target` process reply, you cannot get the final reply simply with the arconnect `result` function. You need to keep pinging the process `results` or track down the chain of messages to examine what went wrong. The AO `get` and `check` automatically handle this complex operation in a lazy short-circuit manner in the background for you. A proper `timeout` (ms) should be specified.
+
+```js
+const age = await p.m(
+  "Hello3", 
+  { Who: "Bob", To: DB_PROCESS_ID }, // second argument can be tags
+  { get: "Age", check: "got your age!", timeout: 5000 }
+)
+assert.equal(age, "30")
+```
+
+There are so many more powerful tricks you can utilize to make complex AO development easier.
+
+Read on to the API reference section to find out!
+
+### Logging
+
+WAO hot-patches the core AOS module code so `ao.log` automatically is forwarded to JS `console.log` and whatever you log will be directly displayed in your terminal. Lua tables will be auto-converted to JSON objects. It doesn't affect your production code, it only hot-paches the module during testing. This makes complex debugging so easy.
+
+```lua
+Handlers.add("Hello4", "Hello4", function (msg)
+  ao.log("Hello, Wordl!") -- will be displayed in the terminal
+  ao.log({ Hello = "World!" }) -- will be auto-converted to JSON
+  
+  -- passing multiple values 
+  ao.log("Hi", 3, true, [ 1, 2, 3 ], { Hello = "World!" })
+end)
+```
+
+You can get logs even when an error occurs in the handler, which is extremely handy to identify the error causes.
+
+### Fork Wasm Memory
+
+You can fork wasm memory to a new process. This could come in handy to create checkpoints for tests.
+
+It only works with in-memory testing.
+
+```js
+const src_counter = `
+local count = 0
+Handlers.add("Add", "Add", function (msg)
+  count = count + tonumber(msg.Plus)
+end)
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+`
+const ao = await new AO().init(acc[0])
+const { p, pid } = await ao.deploy({ boot: true, src_data: src_counter })
+await p.m("Add", { Plus: 3 })
+assert.equal(await p.d("Get"), "3")
+
+const ao2 = await new AO().init(acc[0])
+// pass the exisiting wasm memory to a new process
+const { p: p2 } = await ao2.spwn({ memory: ao.mem.env[pid].memory })
+assert.equal(await p2.d("Get"), "3")
+await p2.m("Add", { Plus: 2 })
+assert.equal(await p2.d("Get"), "5")
+```
+
+You can also get mainnet process memory from the CU endpoint (`GET /state/{pid}`) and fork it for tests.
+
+### WeaveDrive
+
+The [WeaveDrive](https://hackmd.io/@ao-docs/H1JK_WezR) extension is fully emulated with WAO. You can use `attest` and `avail` functions from `AO`.
+
+```js
+import { blueprint, AO, acc } from "wao/test"
+const attestor = acc[0]
+const handler = `
+apm.install('@rakis/WeaveDrive')
+Drive = require('@rakis/WeaveDrive')
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = Drive.getData(msg.id) })
+end)`
+
+describe("WeaveDrive", () => {
+  it("should load Arweave tx data", async () => {
+    const ao = await new AO().init(attestor)
+	
+    const { p } = await ao.deploy({
+      tags: { Extension: "WeaveDrive", Attestor: attestor.addr },
+      loads: [ await blueprint("apm"), handler ],
+    })
+	
+    const { id } = await ao.ar.post({ data: "Hello" })
+    await ao.attest({ id })
+	
+    assert.equal(await p.d("Get", { id }), "Hello")
+  })
+})
+```
+### Local Persistent Server
+
+You can run a local WAO server with persistent storage, which enables connections with outside components such as frontend apps.
+
+```bash
+npx wao
+```
+
+- `port` : Arweave port, the ports of AO units are based on this port (default to `4000`)
+  - AR: [localhost:4000](http://localhost:4000)
+  - MU: [localhost:4002](http://localhost:4002)
+  - SU: [localhost:4003](http://localhost:4003)
+  - CU: [localhost:4004](http://localhost:4004)  
+- `db` : a directory to store data (default to `.cache`)
+- `reset` : to reset the database
+
+```bash
+npx wao --port 5000 --db .custom_cache_dir --reset
+```
+In this case, the ports will be, AR => `5000`, MU => `5002`, SU => `5003`, CU => `5004`.
+
+You can use WAO SDK or AOConnect to connect with the WAO units, but the following tags will be automatically set with WAO SDK.
+
+- AOS2.0.1 Module: `Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM`
+- Scheduler: `_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA`
+- Authority: `eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg`
+
+```js
+import { describe, it } from "node:test"
+import assert from "assert"
+import { AO } from "wao"
+
+const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)`
+
+describe("WAO Server", ()=>{
+  it("should connect with WAO SDK", async ()=>{
+    const ao = await new AO(4000).init(YOUR_JWK)
+    const { p } = await ao.deploy({ src_data })
+    assert.equal(await p.d("Hello"), "Hello, World!")
+  })
+})
+```
+With AOConnect,
+
+```js
+import { describe, it } from "node:test"
+import assert from "assert"
+import { connect, createDataItemSigner } from "@permaweb/aoconnect"
+const { spawn, message, dryrun, assign, result } = connect({
+  MU_URL: `http://localhost:4002`,
+  CU_URL: `http://localhost:4003`,
+  GATEWAY_URL: `http://localhost:4000`
+})
+
+const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)`
+
+describe("WAO Server", () => {
+  it("should connect with WAO SDK", async () => {
+    const pid = await spawn({
+      module: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
+      scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
+      tags: [
+        {
+          name: "Authority",
+          value: "eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg",
+        },
+      ],
+      signer: createDataItemSigner(YOUR_JWK),
+    })
+
+    // wait till the process becomes available
+
+    const mid = await message({
+      process: pid,
+      tags: [{ name: "Action", value: "Eval" }],
+      data: src_data,
+      signer: createDataItemSigner(acc[0].jwk),
+    })
+
+    console.log(await result({ process: pid, message: mid }))
+
+    const res = await dryrun({
+      process: pid,
+      data: "",
+      tags: [{ name: "Action", value: "Hello" }],
+      anchor: "1234",
+    })
+
+    assert.equal(res.Messages[0].Data, "Hello, World!")
+  })
+})
+```
+
+Connecting with the AOS terminal,
+
+```bash
+aos \
+  --gateway-url http://localhost:4000 \
+  --cu-url http://localhost:4004 \
+  --mu-url http://localhost:4002 \
+  --tag-name Authority \
+  --tag-value eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg
+```
