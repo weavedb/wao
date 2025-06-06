@@ -272,7 +272,7 @@ class HB {
     return res
   }
 
-  async process({ tags = {}, data } = {}) {
+  async spawnLegacy({ tags = {}, data } = {}) {
     tags = mergeLeft(tags, {
       data,
       Type: "Process",
