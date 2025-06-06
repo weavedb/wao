@@ -415,6 +415,14 @@ export function createRequest(config) {
     throw new Error("Signer is required for mainnet mode")
   }
 
+  /**
+   * Create a signed message with tags (no network request)
+   *
+   * @param {Object} fields - Request fields (tags)
+   * @param {string} [fields.path='/relay/process'] - Path to append to base URL
+   * @param {string} [fields.method='POST'] - HTTP method
+   * @returns {Promise<Object>} Signed message object
+   */
   return async function request(fields) {
     const { path = "/relay/process", method = "POST", ...restFields } = fields
 
@@ -438,38 +446,21 @@ export function createRequest(config) {
       }
     }
 
-    // Create lowercase headers for signing
-    const lowercaseHeaders = {}
-    for (const [key, value] of Object.entries(headersObj)) {
-      lowercaseHeaders[key.toLowerCase()] = value
-    }
+    // Get all header keys for signing (might be empty)
+    // Convert to lowercase for HTTP signature spec compliance
+    const signingFields = Object.keys(headersObj).map(key => key.toLowerCase())
 
-    // Get all header keys for signing (lowercase)
-    const signingFields = Object.keys(lowercaseHeaders)
-
-    // Sign the request with lowercase headers
+    // Sign the request (even with no fields)
     const signedRequest = await toHttpSigner(signer)({
-      request: { url: _url, method, headers: lowercaseHeaders },
+      request: { url, method, headers: headersObj },
       fields: signingFields,
     })
-
-    // Build final headers: use original casing for all headers except signature headers
-    const finalHeaders = {}
-
-    // First, add all original headers with their original casing
-    for (const [key, value] of Object.entries(headersObj)) {
-      finalHeaders[key] = value
-    }
-
-    // Then add the signature headers (which should be lowercase)
-    finalHeaders["signature"] = signedRequest.headers["signature"]
-    finalHeaders["signature-input"] = signedRequest.headers["signature-input"]
 
     // Return the signed message
     const result = {
       url: _url,
       method,
-      headers: finalHeaders,
+      headers: signedRequest.headers,
     }
 
     // Only add body if it exists
@@ -480,6 +471,7 @@ export function createRequest(config) {
     return result
   }
 }
+
 /**
  * Utility function to extract the message ID from a signed message
  * Based on the original code's hash calculation
@@ -506,6 +498,7 @@ async function getMessageId(signedMessage) {
 }
 
 export async function send(signedMsg, fetchImpl = fetch) {
+  console.log("signed....", signedMsg)
   const fetchOptions = {
     method: signedMsg.method,
     headers: signedMsg.headers,
