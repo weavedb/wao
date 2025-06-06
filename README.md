@@ -28,6 +28,7 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing the te
   - [GQL](#gql)
   - [ArMem](#armem)
   - [HB](#hb)
+  - [HyperBEAM](#hyperbeam-1)
 
 ## Quick Start
 
@@ -1674,4 +1675,45 @@ Sending a signed http request to HyperBEAM.
 
 ```js
 const res = await hb.request({ device, path, tags, method })
+```
+
+### HyperBEAM
+
+HperBEAM class can start and manage a HyperBEAM node from within JS code for testing.
+
+```js
+import { HyperBEAM, wait } from "wao/test"
+import { describe, it, before, after } from "node:test"
+
+describe("HyperBEAM", function () {
+  let hbeam
+  before(async () => {
+	hbeam = new HyperBEAM({ 
+      port: 10001, // port to run HyperBEAM node
+      c: "12", // C version for compilers
+      cmake: "3.5", // minimum cmake version
+      gateway: 4000, // change gateway url
+      legacy: true, // true if running legacynet AOS
+	  wallet: ".wallet.json", // operator wallet location relative to cwd
+      cwd: "../HyperBEAM" // HyperBEAM node directory
+    })
+	await wait(5000)
+  })
+  after(() => hbeam.kill())
+  it("should run", async () => {
+    // run some tests
+  })
+})
+
+hbeam.kill()
+```
+
+`c` and `cmake` define environment variables to run HyperBEAM with. You might not need them at all.
+
+```js
+const env = {
+  CC: `gcc-${c}`,
+  CXX: `g++-${c}`,
+  CMAKE_POLICY_VERSION_MINIMUM: cmake
+}
 ```
