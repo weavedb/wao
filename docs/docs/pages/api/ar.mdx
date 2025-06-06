@@ -1,0 +1,175 @@
+### AR
+
+`AR` handles operations on the base Arweave Storage layer as well as wallet connections.
+
+- [Instantiate](#instantiate)
+- [Set or Generate Wallet](#set-or-generate-wallet)
+- [toAddr](#toaddr)
+- [mine](#mine)
+- [balance | toAR | toWinston](#balance--toar--towinston)
+- [transfer](#transfer)
+- [checkWallet](#checkwallet)
+- [post](#post)
+- [tx](#tx)
+- [data](#data)
+- [bundle](#bundle)
+
+#### Instantiate
+
+```js
+import { AR } from "wao"
+const ar = new AR()
+```
+`host`, `port`, and `protocol` can be set to access a specific gateway rather than `https://arweave.net`.
+
+```js
+const ar = new AR({ host: "localhost", port: 4000, protocol: "http" })
+```
+
+In the case of local gateways, you can only set `port` and the rest will be automatically figured out.
+```js
+const ar = new AR({ port: 4000 })
+```
+
+`AO` class auto-instantiates `AR` internally.
+
+```js
+import { AO } from "wao"
+const ao = new AO()
+const ar = ao.ar
+```
+
+#### Set or Generate Wallet
+
+You can initialize AR with a wallet JWK or ArConnect.
+
+```js
+const ar = await new AR().init(jwk || arweaveWallet)
+```
+
+Or you can generate a new wallet. In case of ArLocal, you can mint AR at the same time.
+
+```js
+const { jwk, addr, pub, balance } = await ar.gen("100") // mint 100 AR
+```
+
+Once a wallet is set in one of these 3 ways, you cannot use the instance with another wallet unless you re-initialize it with another wallet. This is to prevent executing transactions with the wrong wallet when the browser connected active address has been changed unknowingly.
+
+You can go on without calling `init` or `gen`, in this case, AR generates a random wallet when needed, and also using different wallets will be allowed. This is useful, if you are only calling `dryrun` with AO, since AO requires a signature for `dryrun` too, but you don't want to bother the user by triggering the browser extension wallet for read only calls.
+
+Once a wallet is set, `ar.jwk` and `ar.addr` will be available.
+
+#### Token Related Methods
+
+##### toAddr
+
+Convert a jwk to the corresponding address.
+
+```js
+const addr = await ar.toAddr(jwk)
+```
+
+##### mine
+
+Mine pending blocks (only for arlocal).
+
+```js
+await ar.mine()
+```
+
+##### balance | toAR | toWinston
+
+Get the current balance of the specified address in AR. `addr` will be `ar.addr` if omitted.
+
+```js
+const balance_AR = await ar.balance() // get own balance
+const balance_Winston = ar.toWinston(balance_AR)
+const balance_AR2 = ar.toAR(balance_Winston)
+const balance_AR3 = await ar.balance(addr) // specify wallet address
+```
+
+##### transfer
+
+Transfer AR token. `amount` is in AR, not in winston for simplicity.
+
+```js
+const { id } = await ar.transfer(amount, to)
+```
+
+You can set a jwk to the 3rd parameter as a sender. Otherwise, the sender is `ar.jwk`.
+
+```js
+const { id } = await ar.transfer(amount, to, jwk)
+```
+
+For most write functions, `jwk` can be specified as the last parameter or a field like `{ data, tags, jwk }`.
+
+
+##### checkWallet
+
+`checkWallet` is mostly used internally, but it returns `this.jwk` if a wallet has been assigned with `init`, or else it generates a random wallet to use. The following pattern is used in many places. With this pattern, if a wallet is set with `init` and the `jwk` the user is passing is different, `checkWallet` produces an error to prevent the wrong wallet. If no wallet has been set with `init` or `gen` and the `jwk` is not passed, it generates and returns a random wallet.
+
+```js
+some_class_method({ jwk }){
+  let err = null
+  ;({ err, jwk } = await ar.checkWallet({ jwk }))
+  if(!err){
+    // do something with the jwk
+  }
+}
+```
+
+#### Storage Related Methods
+
+##### post 
+
+Post a data to Arweave.
+
+```js
+const { err, id } = await ar.post({ data, tags })
+```
+
+`tags` are not an Array but a hash map Object for brevity.
+
+```js
+const tags = { "Content-Type": "text/markdown", Type: "blog-post" }
+```
+
+If you must use the same name for multiple tags, the value can be an Array.
+
+```js
+const tags = { Name: [ "name-tag-1", "name-tag-2" ] }
+```
+
+
+##### tx
+
+Get a transaction.
+
+```js
+const tx = await ar.tx(txid)
+```
+
+##### data
+
+Get a data.
+
+```js
+const data = await ar.data(txid, true) // true if string
+```
+
+##### bundle
+
+Bundle ANS-104 dataitems.
+
+```js
+const { err, id } = await ar.bundle(dataitems)
+```
+`dataitems` are `[ [ data, tags ], [ data, tags ], [ data, tags ] ]`.
+```js
+const { err, id } = await ar.bundle([
+  [ "this is text", { "Content-Type": "text/plain" }],
+  [ "# this is markdown", { "Content-Type": "text/markdown" }],
+  [ png_image, { "Content-Type": "image/png" }]
+])
+```
