@@ -512,13 +512,13 @@ end)
 describe("Hyperbeam", function () {
   it("should interact with a hyperbeam node", async () => {
     const hb = await new HB({ url: "http://localhost:10001" }).init(acc[0].jwk)
-    const metrics = await hb.metrics()
-    const info = await hb.info()
-    const process = await hb.process()
-    const slot = await hb.schedule({ process, data })
-    const r = await hb.compute({ process, slot })
-    const slot2 = await hb.schedule({ process, action: "Inc" })
-    const r2 = await hb.compute({ process, slot: slot2 })
+    const metrics = await hb.hyperbuddy.metrics()
+    const info = await hb.meta.info()
+    const { pid } = await hb.spawn()
+    const { slot } = await hb.schedule({ pid, data })
+    const r = await hb.compute({ pid, slot })
+    const { slot: slot2 } = await hb.schedule({ pid, action: "Inc" })
+    const r2 = await hb.compute({ pid, slot: slot2 })
     assert.equal(r2.Messages[0].Data, "Count: 1")
     const r3 = await hb.dryrun({ process, action: "Get" })
 	assert.equal(r3.Messages[0].Data, "Count: 1")
@@ -1589,7 +1589,7 @@ This will connect the two.
 #### Instantiate
 
 ```js
-import { HB } = "wao"
+import { HB } from "wao"
 const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
 ```
 
@@ -1644,7 +1644,7 @@ const result = await hb.send({ ...headers })
 Spawn a process.
 
 ```js
-const pid = await hb.spawn({ ...tags })
+const { pid } = await hb.spawn({ ...tags })
 ```
 
 #### schedule
@@ -1652,7 +1652,7 @@ const pid = await hb.spawn({ ...tags })
 Equivalent to sending a message.
 
 ```js
-const slot = await hb.schedule({ tags, data, process: pid, action })
+const { slot } = await hb.schedule({ tags, data, process: pid, action })
 ```
 
 #### compute
@@ -1669,13 +1669,13 @@ const { Messages, Spawns, Assignments, Output } = res
 Get messages on a process. You can get next messages by `message.next`. 
 
 ```js
-const msgs = await hb.messages({ target, from, to })
+const msgs = await hb.messages({ pid, from, to })
 for(const item of msgs.edges){
   const { cursor: slot, node: { assignment, message } } = item
 }
 if(msgs.next) const msgs2 = await msg.next()
 ```
-- `target` : a process id
+- `pid` : a process id
 - `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawed the process. `to` is inclusive. Both are optional. 
 
 #### Legacynet AOS
@@ -1685,7 +1685,7 @@ if(msgs.next) const msgs2 = await msg.next()
 Spawn Legacynet AOS.
 
 ```js
-const pid = await hb.process({ tags, data })
+const { pid } = await hb.spawnLegacy({ tags, data })
 ```
 
 ##### computeLegacy
@@ -1693,7 +1693,7 @@ const pid = await hb.process({ tags, data })
 Compute legacynet AOS state.
 
 ```js
-const res = await hb.computeLegacy( pid, slot )
+const res = await hb.computeLegacy({ pid, slot })
 const { Messages, Spawns, Assignments, Output } = res
 ```
 
@@ -1702,7 +1702,7 @@ const { Messages, Spawns, Assignments, Output } = res
 `dryrun` is only for legacynet AOS. Mainnet AOS disabled this feature for a performance reason.
 
 ```js
-const res = await hb.dryrun({ tags, data, process: pid, action })
+const res = await hb.dryrun({ tags, data, pid, action })
 const { Messages, Spawns, Assignments, Output } = res
 ```
 
@@ -1713,7 +1713,7 @@ Mainnet AOS processes have dedicated API.
 ##### spawnAOS
 
 ```js
-const pid = await hb.spawnAOS()
+const { pid } = await hb.spawnAOS()
 ```
 
 ##### messageAOS
@@ -1732,7 +1732,7 @@ const result = await hb.computeAOS({ pid, slot })
 
 #### Devices
 
-Each device has it's own API based on the paths.
+Each device has its own API based on the paths.
 
 ##### meta
 
@@ -1740,6 +1740,8 @@ Each device has it's own API based on the paths.
 const info = await hb.meta.info()
 const address = await hb.meta.info({ key: "address" })
 await hb.meta.info({ method: "POST", configA: "valA" }) // update node config
+
+const build = await hb.meta.build()
 ```
 
 ##### hyperbuddy
