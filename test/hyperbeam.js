@@ -60,7 +60,7 @@ describe("Hyperbeam Legacynet", function () {
     const res = await hb.get({ path: "~meta@1.0/info/address" })
     const address = res
     assert.equal(address, hb._info.address)
-    const process = await hb.process()
+    const process = await hb.spawnLegacy()
     const { slot } = await hb.schedule({
       pid: process,
       data,
@@ -112,7 +112,7 @@ describe("Hyperbeam Legacynet", function () {
     const hb = await new HB().init(jwk)
     const address = await hb.get({ path: "~meta@1.0/info/address" })
     assert.equal(address, hb._info.address)
-    const process = await hb.process()
+    const process = await hb.spawnLegacy()
     const { slot } = await hb.schedule({
       pid: process,
       data,
