@@ -1,30 +1,14 @@
 # Legacynet AOS
 
-- [Quick Start](#quick-start)
-  - [Installation](#installation)
-  - [Drop-in aoconnect Replacement for Tests](#drop-in-aoconnect-replacement-for-tests)
-  - [Setting up a Project](#setting-up-a-project)
-  - [Writing Tests](#writing-tests)
-  - [Using WAO SDK](#using-wao-sdk)
-  - [Cherry-Picking Outputs](#cherry-picking-outputs)
-  - [Determining Message Success](#determining-message-success)
-  - [Async Message Tracking with receive()](#async-message-tracking-with-receive)
-  - [Logging](#logging)
-  - [Fork Wasm Memory](#fork-wasm-memory)
-  - [WeaveDrive](#weavedrive)
-  - [Local Persistent Server](#local-persistent-server)
-
-## Quick Start
-
 *WAO is still actively being developed; please use it at your discretion.*
 
-### Installation
+## Installation
 
 ```bash
 yarn add wao
 ```
 
-### Drop-in `aoconnect` Replacement for Tests
+## Drop-in `aoconnect` Replacement for Tests
 
 By replacing `aoconnect` with WAO connect, everything runs in memory with zero latency and your tests are executed 1000x faster. The APIs are identical. So, there's no need to change anything else in your code.
 
@@ -34,7 +18,7 @@ import { connect, acc } from "wao/test"
 const { spawn, message, dryrun, assign, result } = connect()
 ```
 
-### Setting up a Project
+## Setting up a Project
 
 It's super easy to set up a test AO project manually.
 
@@ -60,7 +44,7 @@ Create `test` directory and `test.js` file.
 mkdir test && touch test/test.js
 ```
 
-### Writing Tests
+## Writing Tests
 
 Write a simple test in `test.js`.
 
@@ -83,7 +67,7 @@ describe("WAO", function () {
       scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
     })
 
-    // on mainnet, you need to wait here till the process becomes available.
+    // on mainnet, you need to wait till the process becomes available.
     // WAO automatically handles it. No need with in-memory tests.
     // await wait({ pid })
 
@@ -112,7 +96,7 @@ Run the test.
 yarn test test/test.js
 ```
 
-### Using WAO SDK
+## Using WAO SDK
 
 WAO comes with elegant syntactic sugar and makes writing AO projects an absolute joy.
 
@@ -143,7 +127,7 @@ The `AO` class is not only for in-memory tests, but also for production code. Yo
 import { AR, AO, GQL } from "wao"
 ````
 
-### Cherry-Picking Outputs
+## Cherry-Picking Outputs
 
 You often need to pick a specific piece of data from returned results with multiple spawned messages. You need to go through all the returned messages and further go through tags and data to find it. That's too much code to write. `AO` comes with `get` parameter to simplify it.
 
@@ -199,7 +183,7 @@ assert.deepEqual(out7, { prof: { Name: "Bob", Age: "30" }})
 
 ```
 
-### Determining Message Success
+## Determining Message Success
 
 To determine if your message is successful, you often need to track down a chain of asynchronous messages and examine resulted tags and data. This is actually a fairy complex operation and too much code to write. Luckily for you, `AO` comes with `check` parameter to extremely simplify it. `check` tracks down messages and lazy-evaluates if your `check` conditions are met.
 
@@ -228,7 +212,7 @@ const age = await p.m("Hello2", { check: { Name: "Bob", Age: true }, get : "Age"
 assert.equal(age, "30", "Bob is not 30 yo!")
 ```
 
-### Async Message Tracking with receive()
+## Async Message Tracking with receive()
 
 AOS2 introduced a handy function `receive()` to send a message to another process and receive a reply in the same handler.
 
@@ -257,7 +241,7 @@ There are so many more powerful tricks you can utilize to make complex AO develo
 
 Read on to the API reference section to find out!
 
-### Logging
+## Logging
 
 WAO hot-patches the core AOS module code so `ao.log` automatically is forwarded to JS `console.log` and whatever you log will be directly displayed in your terminal. Lua tables will be auto-converted to JSON objects. It doesn't affect your production code, it only hot-paches the module during testing. This makes complex debugging so easy.
 
@@ -273,7 +257,7 @@ end)
 
 You can get logs even when an error occurs in the handler, which is extremely handy to identify the error causes.
 
-### Fork Wasm Memory
+## Fork Wasm Memory
 
 You can fork wasm memory to a new process. This could come in handy to create checkpoints for tests.
 
@@ -304,7 +288,7 @@ assert.equal(await p2.d("Get"), "5")
 
 You can also get mainnet process memory from the CU endpoint (`GET /state/{pid}`) and fork it for tests.
 
-### WeaveDrive
+## WeaveDrive
 
 The [WeaveDrive](https://hackmd.io/@ao-docs/H1JK_WezR) extension is fully emulated with WAO. You can use `attest` and `avail` functions from `AO`.
 
@@ -334,7 +318,7 @@ describe("WeaveDrive", () => {
   })
 })
 ```
-### Local Persistent Server
+## Local Persistent Server
 
 You can run a local WAO server with persistent storage, which enables connections with outside components such as frontend apps.
 
