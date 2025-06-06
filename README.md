@@ -1573,16 +1573,18 @@ This will connect the two.
 `HB` handles interactions with a [Hyperbeam](https://permaweb.github.io/HyperBEAM/) node.
 
 - [Instantiate](#instantiate-5)
-- [metrics](#metrics)
-- [info](#info)
-- [messages](#messages)
-- [process](#process)
+- [path](#path)
+- [fetch](#fetch)
+- [text](#text)
+- [json](#json)
+- [send](#send)
+- [spawn](#spawn)
 - [schedule](#schedule)
 - [compute](#compute)
-- [dryrun](#dryrun)
-- [get](#get)
-- [post](#post)
-- [request](#request)
+- [messages](#messages)
+- [Legacynet AOS](#legacynet-aos)
+- [Mainnet AOS](#mainnet-aos)
+- [Devices](#devices)
 
 #### Instantiate
 
@@ -1591,43 +1593,58 @@ import { HB } = "wao"
 const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
 ```
 
-#### metrics
+#### path
 
-Get node metrics.
+Create a path to request.
 
 ```js
-const metrics = await hb.metrics()
+const device = "meta"
+const path = "info"
+const json = true
+const params = {}
+
+const path = hb.path(device, path, json, params) 
+// /~meta@1.0/info/serialize~json@1.0
 ```
 
-#### info
+#### fetch
 
-Get node info.
-
-```js
-const info = await hb.info()
-const operator = info.address
-```
-#### messages
-
-Get messages on a process. You can get next messages by `message.next`. 
+Request without a signature.
 
 ```js
-const msgs = await hb.messages({ target, from, to })
-for(const item of msgs.edges){
-  const { cursor: slot, node: { assignment, message } } = item
-}
-if(msgs.next) const msgs2 = await msg.next()
+const result = await hb.fetch(url, json)
 ```
 
-- `target` : a process id
-- `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawed the process. `to` is inclusive. Both are optional. 
+#### text
 
-#### process
-
-Equivalent to spawning a process.
+Request a text response without a signature.
 
 ```js
-const pid = await hb.process({ tags, data })
+const result = await hb.text(device, path)
+```
+
+#### json
+
+Request a json response without a signature.
+
+```js
+const result = await hb.json(device, path)
+```
+
+#### send
+
+Send a request with a signed http message. `data` will be set to http body with auto-generated `content-digest`and `inline-body-key` in the header.
+
+```js
+const result = await hb.send({ ...headers })
+```
+
+#### spawn
+
+Spawn a process.
+
+```js
+const pid = await hb.spawn({ ...tags })
 ```
 
 #### schedule
@@ -1646,38 +1663,95 @@ Equivalent to getting a result.
 const res = await hb.compute({ process: pid, slot })
 const { Messages, Spawns, Assignments, Output } = res
 ```
-#### dryrun
+
+#### messages
+
+Get messages on a process. You can get next messages by `message.next`. 
+
+```js
+const msgs = await hb.messages({ target, from, to })
+for(const item of msgs.edges){
+  const { cursor: slot, node: { assignment, message } } = item
+}
+if(msgs.next) const msgs2 = await msg.next()
+```
+- `target` : a process id
+- `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawed the process. `to` is inclusive. Both are optional. 
+
+#### Legacynet AOS
+
+##### spawnLegacy
+
+Spawn Legacynet AOS.
+
+```js
+const pid = await hb.process({ tags, data })
+```
+
+##### computeLegacy
+
+Compute legacynet AOS state.
+
+```js
+const res = await hb.computeLegacy( pid, slot )
+const { Messages, Spawns, Assignments, Output } = res
+```
+
+##### dryrun
+
+`dryrun` is only for legacynet AOS. Mainnet AOS disabled this feature for a performance reason.
 
 ```js
 const res = await hb.dryrun({ tags, data, process: pid, action })
 const { Messages, Spawns, Assignments, Output } = res
 ```
 
-#### get
+#### Mainnet AOS
 
-Sending a signed http request with `GET` method to HyperBEAM.
+Mainnet AOS processes have dedicated API.
 
-```js
-const res = await hb.get({ device, path })
-```
-
-#### post
-
-Sending a signed http request with `POST` method to HyperBEAM.
+##### spawnAOS
 
 ```js
-const res = await hb.post({ device, path, tags })
+const pid = await hb.spawnAOS()
 ```
 
-#### request
+##### messageAOS
 
-Sending a signed http request to HyperBEAM.
+`messageAOS` = `schedule` + `computeAOS`.
 
 ```js
-const res = await hb.request({ device, path, tags, method })
+const result = await hb.messageAOS({ pid, action, tags, data })
 ```
+
+##### computeAOS
+
+```js
+const result = await hb.computeAOS({ pid, slot })
+```
+
+#### Devices
+
+Each device has it's own API based on the paths.
+
+##### meta
+
+```js
+const info = await hb.meta.info()
+const address = await hb.meta.info({ key: "address" })
+await hb.meta.info({ method: "POST", configA: "valA" }) // update node config
+```
+
+##### hyperbuddy
+
+```js
+const metrics = await hb.hyperbuddy.metrics()
+```
+
+More devices will be added soon.
 
 ### HyperBEAM
+
 
 HperBEAM class can start and manage a HyperBEAM node from within JS code for testing.
 
