@@ -1,0 +1,156 @@
+# HyperBEAM
+
+## Install WAO & HyperBEAM
+
+```bash
+yarn add wao
+```
+In addition to the WAO SDK, you will need to [install HyperBEAM](https://permaweb.github.io/HyperBEAM/getting-started/requirements/) on your local computer (recommended) or a cloud server. The required systems are not the only ones you can install HyperBEAM on. I was, for example, able to install HyperBEAM on [Arch Linux](https://archlinux.org/) by installing the necessary dependencies. You could throw installation errors at LLMs like OpenaI and Claude and likely be able to figure it out.
+
+If you want to test Mainnet AOS modules, you need to install the WAO fork of HyperBEAM, which includes a custom helper device for testing.
+
+```bash
+git clone --branch wao https://github.com/weavedb/HyperBEAM.git
+```
+
+Make sure you compiled it and are able to run `rebar3 shell`, but you don't need to have it running yet. You might need to add environment variables depending on how you installed it on your system. WAO SDK handles that too.
+
+```bash
+CMAKE_POLICY_VERSION_MINIMUM=3.5 CC=gcc-12 CXX=g++-12 rebar3 shell
+```
+
+## Create a Project
+
+To create a project, you could use `npx wao create APP_NAME`,
+
+```bash
+npx wao create myapp && cd myapp
+```
+
+or you could manually install `wao` into your project.
+
+```bash
+mkdir myapp && cd myapp && yarn init && yarn add wao
+mkdir test && touch test/test.js
+```
+
+Make sure your `package.json` looks something like the following to enable ES6 and test commands with `wasm64`. The wasm64 flag is unnecessary for NodeJS v24 and later.
+
+```json
+{
+  "name": "myapp",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-wasm-memory64",
+    "test-only": "node --experimental-wasm-memory64 --test-only"
+  },
+  "dependencies": {
+    "wao": "^0.22.1"
+  }
+}
+```
+## Write Tests
+
+`HyperBEAM` class let you create a HyperBEAM sandbox by starting a fresh HyperBEAM node before testing and shutting it down when tests are complete.
+You can interact with the HyperBEAM node with `HB`.
+
+The WAO server needs to be running if you plan to use `process@1.0` device.
+
+You can also skip the `HyperBEAM` class and connect with an already running remote node by specifying the node `url` to `HB`.
+
+```js
+import assert from "assert"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { wait, toAddr, Server } from "wao/test"
+import { HyperBEAM, HB } from "wao"
+import { resolve } from "path"
+import { readFileSync } from "fs"
+
+const cwd = "../../HyperBEAM" // HyperBEAM directory
+const wallet = ".wallet.json" // operator wallet relative to cwd
+const port = 10001
+const gateway = 4000
+const url = `http://localhost:${port}`
+
+describe("HyperBEAM", function () {
+  let hbeam, hb, jwk, server
+  before(async () => {
+    server = new Server({ port: 4000, log: true, hb_url: url })
+    hbeam = new HyperBEAM({ cwd, wallet, port })
+    jwk = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
+    )
+    await wait(5000)
+  })
+  beforeEach(async () => {
+    hb = await new HB({ url }).init(jwk)
+  })
+  after(async () => hbeam.kill())
+
+  it("should run a HyperBEAM node", async () => {
+    const info = await hb.meta.info()
+    assert.equal(info.address, toAddr(jwk.n))
+  })
+})
+```
+
+HyperBEAM has [a test device](https://github.com/permaweb/HyperBEAM/blob/main/src/dev_test.erl) to test basic features with the HB methods.
+- `spawn` : spawn a process
+- `schedule` : schedule a message to a process
+- `compute` : compute the result of a slot
+- `messages` : list messages in a process
+
+```js
+it("should test test-device@1.0", async () => {
+  const { pid } = await hb.spawn({ "execution-device": "test-device@1.0" })
+  const { slot } = await hb.schedule({ pid })
+  const res = await hb.compute({ pid, slot })
+  assert.equal(res.results["assignment-slot"], 1)
+  const {
+      edges: [ edge0, { node: { assignment, message } }]
+  } = await hb.messages({ pid, from: 0, to: 1 })
+  assert.equal(message.Target, pid)
+})
+```
+
+## AO-Core Pathing
+
+It is extremely important to understand [the pathing scheme](https://github.com/permaweb/HyperBEAM/blob/main/docs/introduction/pathing-in-ao-core.md) of AO-Core protocol when interacting with HyperBEAM nodes.
+
+`path` helps you to construct paths to query devices on a HyperBEAM node. 
+
+- `path( device, path, json = true, params = {} )`
+
+And you can `fetch` a `text` or `json` response.
+
+```js
+it("should query test-device@1.0", async () => {
+
+  const info_path = hb.path("meta", "info")
+  // => /~meta@1.0/info/serialize~json@1.0
+
+  const address_path = hb.path("meta", "info/address", false)
+  // => /~meta@1.0/info/address
+  
+  const info = await hb.fetch(info_path)
+  const info2 = await hb.json("meta", "info")
+
+  const addr = await hb.fetch(address_path, false)
+  const addr2 = await hb.text("meta", "info/address")
+})
+```
+
+## Send Signed Http Messages
+
+If you are updating anything on HyperBEAM, you need to send a signed http message. AO-Core uses the web standard http message signatures defined in [RFC 9421](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-message-signatures).
+
+`send` creates a signed http message with specified headers, and send it to a HyperBEAM node.
+
+```js
+it("should query test-device@1.0", async () => {
+  const res = await hb.send({ path: "/~meta@1.0/info", configA: "valA"})
+  const configA = await hb.text({ path: hb.path("meta","info/configA") })
+  assert.equal(configA, "valA")
+})
+```
