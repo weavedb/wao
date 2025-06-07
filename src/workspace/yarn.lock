@@ -104,7 +104,7 @@
   resolved "https://registry.yarnpkg.com/@bokuweb/zstd-wasm/-/zstd-wasm-0.0.22.tgz#32de23a65b293a68db76b5863addde4545ac75c2"
   integrity sha512-GT9gZCxWzVTclSipZZNbYRloSKLtPBxj4Avc/SLLQcnBJlJCHUllfePe8it9vNZBSMD6y9Ox0LxaubWT/nJ19Q==
 
-"@dha-team/arbundles@^1.0.1":
+"@dha-team/arbundles@1.0.3", "@dha-team/arbundles@^1.0.1":
   version "1.0.3"
   resolved "https://registry.yarnpkg.com/@dha-team/arbundles/-/arbundles-1.0.3.tgz#4080514945a830e7d61f3d079401f28e8bd198d2"
   integrity sha512-/XelOo5V/1o1M8VchCQ+F7N5kxwirWh5jD5zg1KECaV80Qld6aKBSgG19VLlBsRUXbRUfjM+LDRPJm9Hjfmycg==
@@ -547,20 +547,41 @@
     ramda "^0.30.0"
     zod "^3.23.5"
 
-"@permaweb/aoconnect@^0.0.62":
-  version "0.0.62"
-  resolved "https://registry.yarnpkg.com/@permaweb/aoconnect/-/aoconnect-0.0.62.tgz#404d9f506b70385027447a9bd7d3d51b93104ce2"
-  integrity sha512-e42yASru6ze09rugKzi2yD3E57OK0xSbjDM5TI7gKnDVMo8JHweiLCntglItJ44vuNUA7Sdool83v4bmEohaZw==
+"@permaweb/aoconnect-69@npm:@permaweb/aoconnect@0.0.69":
+  version "0.0.69"
+  resolved "https://registry.yarnpkg.com/@permaweb/aoconnect/-/aoconnect-0.0.69.tgz#c8f8dcac9cff85d080dc659d780e8e4cbe42e0af"
+  integrity sha512-JHGTHeP3zO1ZAuONBGRFHLsMV2Ba3hFkspyYMjhHmNaxXISpYOFX/L2/G8eBd9WIcTBmUdGVL19xPRnRtdyaNw==
   dependencies:
     "@permaweb/ao-scheduler-utils" "~0.0.25"
     "@permaweb/protocol-tag-utils" "~0.0.2"
+    base64url "^3.0.1"
     buffer "^6.0.3"
-    debug "^4.3.7"
+    debug "^4.4.0"
+    http-message-signatures "^1.0.4"
     hyper-async "^1.1.2"
     mnemonist "^0.39.8"
     ramda "^0.30.1"
     warp-arbundles "^1.0.4"
-    zod "^3.23.8"
+    zod "^3.24.1"
+
+"@permaweb/aoconnect@^0.0.85":
+  version "0.0.85"
+  resolved "https://registry.yarnpkg.com/@permaweb/aoconnect/-/aoconnect-0.0.85.tgz#3e8685d39ec1df91ff68b619ecd3a75168c6b6b0"
+  integrity sha512-lPfDLDaQyOY1oupxkw9B9ZslKw1ENASEdzComoMc2RZ7DejBx2OdHzU+fmZO1ZEQ5zQSm82/wgRVBd/1l6092g==
+  dependencies:
+    "@dha-team/arbundles" "1.0.3"
+    "@permaweb/ao-scheduler-utils" "~0.0.25"
+    "@permaweb/protocol-tag-utils" "~0.0.2"
+    axios "^1.7.9"
+    base64url "^3.0.1"
+    buffer "^6.0.3"
+    debug "^4.4.0"
+    http-message-signatures "^1.0.4"
+    hyper-async "^1.1.2"
+    mnemonist "^0.39.8"
+    ramda "^0.30.1"
+    structured-headers "^2.0.0"
+    zod "^3.24.1"
 
 "@permaweb/protocol-tag-utils@~0.0.2":
   version "0.0.2"
@@ -732,24 +753,6 @@ anymatch@~3.1.2:
   dependencies:
     normalize-path "^3.0.0"
     picomatch "^2.0.4"
-
-"aoconnect-wao@https://gitpkg.vercel.app/weavedb/ao/connect?5cef9f0c1a4e8872308bbe0a7d004e44a7e008b6&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build":
-  version "0.0.70"
-  resolved "https://gitpkg.vercel.app/weavedb/ao/connect?5cef9f0c1a4e8872308bbe0a7d004e44a7e008b6&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build#a1f23010169353d1eea0ae8ba0739ba77d0026e0"
-  dependencies:
-    "@dha-team/arbundles" "^1.0.1"
-    "@permaweb/ao-scheduler-utils" "~0.0.25"
-    "@permaweb/protocol-tag-utils" "~0.0.2"
-    axios "^1.7.9"
-    base64url "^3.0.1"
-    buffer "^6.0.3"
-    debug "^4.4.0"
-    http-message-signatures "^1.0.4"
-    hyper-async "^1.1.2"
-    mnemonist "^0.39.8"
-    ramda "^0.30.1"
-    structured-headers "^2.0.0"
-    zod "^3.24.1"
 
 arbundles@^0.11.1:
   version "0.11.2"
@@ -1167,7 +1170,7 @@ dayjs@~1.8.24:
   resolved "https://registry.yarnpkg.com/dayjs/-/dayjs-1.8.36.tgz#be36e248467afabf8f5a86bae0de0cdceecced50"
   integrity sha512-3VmRXEtw7RZKAf+4Tv1Ym9AGeo8r8+CjDi26x+7SYQil1UqtqdaokhzoEJohqlzt0m5kacJSDhJQkG/LWhpRBw==
 
-debug@4, debug@^4.1.1, debug@^4.3.1, debug@^4.3.4, debug@^4.3.5, debug@^4.3.7, debug@^4.4.0:
+debug@4, debug@^4.1.1, debug@^4.3.1, debug@^4.3.4, debug@^4.3.5, debug@^4.4.0:
   version "4.4.0"
   resolved "https://registry.yarnpkg.com/debug/-/debug-4.4.0.tgz#2b3f2aea2ffeb776477460267377dc8710faba8a"
   integrity sha512-6WTZ/IxCY/T6BALoZHaE4ctp9xm+Z5kY/pzYaCHRFeyVhojxlrm+46y68HA6hr0TcwEssoxNiDEUJQjfPZ/RYA==
@@ -1398,6 +1401,11 @@ fast-json-patch@^3.0.0-1:
   version "3.1.1"
   resolved "https://registry.yarnpkg.com/fast-json-patch/-/fast-json-patch-3.1.1.tgz#85064ea1b1ebf97a3f7ad01e23f9337e72c66947"
   integrity sha512-vf6IHUX2SBcA+5/+4883dsIjpBTqmfBjmYiWK1savxQmFk4JfBMLa7ynTYOs1Rolp/T1betJxHiGD3g1Mn8lUQ==
+
+fast-sha256@^1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/fast-sha256/-/fast-sha256-1.3.0.tgz#7916ba2054eeb255982608cccd0f6660c79b7ae6"
+  integrity sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==
 
 fclone@1.0.11, fclone@~1.0.11:
   version "1.0.11"
@@ -2713,17 +2721,17 @@ vlq@^2.0.4:
   resolved "https://registry.yarnpkg.com/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.19.2:
-  version "0.19.2"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.19.2.tgz#e8fc8cb3d6381b4600cab731f82224c5feb9cfcd"
-  integrity sha512-aFhhsn/pWesyPW0fVXYtsF3NTHYmrsaZmpSVkxPBI8nA3SxjoTO9fdV4BZpOeLFsT4xEa+ZaNIqU1fW4u14+4A==
+wao@^0.22.1:
+  version "0.22.1"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.22.1.tgz#b423b51b239e54dca3e004c463d8d7ea8d2bac3e"
+  integrity sha512-n7OkgvjHPMgQIXYh3GDkDXo03Sgylx24YjwO88V0HxziW0IGzwU/hwRwry9I+ClpqJhH5JW7WijTD4/UESUsRA==
   dependencies:
     "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"
     "@dha-team/arbundles" "^1.0.1"
     "@permaweb/ao-loader" "^0.0.44"
-    "@permaweb/aoconnect" "^0.0.62"
-    aoconnect-wao "https://gitpkg.vercel.app/weavedb/ao/connect?5cef9f0c1a4e8872308bbe0a7d004e44a7e008b6&scripts.postinstall=npm%20install%20--ignore-scripts%20%26%26%20npm%20run%20build"
+    "@permaweb/aoconnect" "^0.0.85"
+    "@permaweb/aoconnect-69" "npm:@permaweb/aoconnect@0.0.69"
     arbundles "^0.11.1"
     arjson "^0.0.2"
     arweave "^1.15.1"
@@ -2733,6 +2741,7 @@ wao@^0.19.2:
     chokidar "^4.0.3"
     cors "^2.8.5"
     express "^5.1.0"
+    fast-sha256 "^1.3.0"
     graphql "^16.10.0"
     http-message-signatures "^1.0.4"
     lmdb "^3.2.2"
@@ -2741,6 +2750,7 @@ wao@^0.19.2:
     md5 "^2.3.0"
     pm2 "^5.4.3"
     ramda "^0.30.1"
+    warp-arbundles "^1.0.4"
     wasm-brotli "^2.0.2"
     yargs "^17.7.2"
 
@@ -2868,7 +2878,7 @@ yargs@^3.32.0:
     window-size "^0.1.4"
     y18n "^3.2.0"
 
-zod@^3.23.5, zod@^3.23.8, zod@^3.24.1:
+zod@^3.23.5, zod@^3.24.1:
   version "3.24.3"
   resolved "https://registry.yarnpkg.com/zod/-/zod-3.24.3.tgz#1f40f750a05e477396da64438e0e1c0995dafd87"
   integrity sha512-HhY1oqzWCQWuUqvBFnsyrtZRhyPeR7SUGv+C4+MsisMuVfSPx8HpwWqH8tRahSlt6M3PiFAcoeFhZAqIXTxoSg==

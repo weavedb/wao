@@ -160,10 +160,10 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>WAO | LocalNet Launch</title>
+        <title>WAO | AO Development Environment</title>
         <meta
           name="description"
-          content="Countdown to our WAO LocalNet launch"
+          content="Lightning Fast AO / HyperBEAM Development"
         />
         <meta
           name="viewport"
@@ -462,7 +462,7 @@ export default function Home() {
                 textShadow: "0 0 10px #c252ff",
               }}
             >
-              WAO LocalNet Launch
+              AO Development Environment
             </h2>
             <p
               className="main-description"
@@ -474,7 +474,7 @@ export default function Home() {
                 lineHeight: "1.6",
               }}
             >
-              Blazing-Fast Local AO Network for Rapid Development
+              Blazing-Fast HyperBEAM Ready Local AO Testing
             </p>
 
             {/* Countdown Display */}
@@ -482,21 +482,43 @@ export default function Home() {
               className="countdown-grid"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(4, 1fr)",
+                gridTemplateColumns: "repeat(2, 1fr)",
                 gap: "1.5rem",
                 maxWidth: "800px",
                 margin: "0 auto 3rem",
               }}
             >
-              <div
+              <a
+                href="https://preview.wao.eco"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="countdown-box"
                 style={{
-                  background: "rgba(30, 15, 53, 0.7)",
-                  borderRadius: "1rem",
+                  background:
+                    "linear-gradient(135deg, rgba(194, 82, 255, 0.1) 0%, rgba(30, 15, 53, 0.8) 100%)",
+                  borderRadius: "1.5rem",
                   padding: "1.5rem",
-                  border: "1px solid rgba(194, 82, 255, 0.3)",
-                  boxShadow: "0 0 15px rgba(194, 82, 255, 0.3)",
-                  backdropFilter: "blur(5px)",
+                  border: "1px solid rgba(194, 82, 255, 0.2)",
+                  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.1)",
+                  backdropFilter: "blur(10px)",
+                  textDecoration: "none",
+                  transition:
+                    "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+                  cursor: "pointer",
+                  position: "relative",
+                  overflow: "hidden",
+                }}
+                onMouseOver={e => {
+                  e.currentTarget.style.transform = "translateY(-3px)"
+                  e.currentTarget.style.background =
+                    "linear-gradient(135deg, rgba(194, 82, 255, 0.2) 0%, rgba(30, 15, 53, 0.9) 100%)"
+                  e.currentTarget.style.borderColor = "rgba(194, 82, 255, 0.4)"
+                }}
+                onMouseOut={e => {
+                  e.currentTarget.style.transform = "translateY(0)"
+                  e.currentTarget.style.background =
+                    "linear-gradient(135deg, rgba(194, 82, 255, 0.1) 0%, rgba(30, 15, 53, 0.8) 100%)"
+                  e.currentTarget.style.borderColor = "rgba(194, 82, 255, 0.2)"
                 }}
               >
                 <div
@@ -505,32 +527,60 @@ export default function Home() {
                     fontFamily: "'Orbitron', sans-serif",
                     fontSize: "3rem",
                     fontWeight: "bold",
-                    color: "#d8b4fe",
-                    textShadow: "0 0 10px #c252ff",
+                    background:
+                      "linear-gradient(135deg, #c252ff 0%, #d8b4fe 100%)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    filter: "drop-shadow(0 0 20px rgba(194, 82, 255, 0.4))",
                   }}
                 >
-                  {timeLeft.days}
+                  WEB
                 </div>
                 <div
                   className="countdown-label"
                   style={{
-                    color: "white",
-                    fontWeight: "bold",
+                    color: "rgba(255, 255, 255, 0.8)",
+                    fontWeight: "500",
                     marginTop: "0.5rem",
+                    fontSize: "0.9rem",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
                   }}
                 >
-                  DAYS
+                  AO THE WEB
                 </div>
-              </div>
-              <div
+              </a>
+              <a
+                href="https://docs.wao.eco"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="countdown-box"
                 style={{
-                  background: "rgba(30, 15, 53, 0.7)",
-                  borderRadius: "1rem",
+                  background:
+                    "linear-gradient(135deg, rgba(194, 82, 255, 0.1) 0%, rgba(30, 15, 53, 0.8) 100%)",
+                  borderRadius: "1.5rem",
                   padding: "1.5rem",
-                  border: "1px solid rgba(194, 82, 255, 0.3)",
-                  boxShadow: "0 0 15px rgba(194, 82, 255, 0.3)",
-                  backdropFilter: "blur(5px)",
+                  border: "1px solid rgba(194, 82, 255, 0.2)",
+                  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.1)",
+                  backdropFilter: "blur(10px)",
+                  textDecoration: "none",
+                  transition:
+                    "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+                  cursor: "pointer",
+                  position: "relative",
+                  overflow: "hidden",
+                }}
+                onMouseOver={e => {
+                  e.currentTarget.style.transform = "translateY(-3px)"
+                  e.currentTarget.style.background =
+                    "linear-gradient(135deg, rgba(194, 82, 255, 0.2) 0%, rgba(30, 15, 53, 0.9) 100%)"
+                  e.currentTarget.style.borderColor = "rgba(194, 82, 255, 0.4)"
+                }}
+                onMouseOut={e => {
+                  e.currentTarget.style.transform = "translateY(0)"
+                  e.currentTarget.style.background =
+                    "linear-gradient(135deg, rgba(194, 82, 255, 0.1) 0%, rgba(30, 15, 53, 0.8) 100%)"
+                  e.currentTarget.style.borderColor = "rgba(194, 82, 255, 0.2)"
                 }}
               >
                 <div
@@ -539,101 +589,28 @@ export default function Home() {
                     fontFamily: "'Orbitron', sans-serif",
                     fontSize: "3rem",
                     fontWeight: "bold",
-                    color: "#d8b4fe",
-                    textShadow: "0 0 10px #c252ff",
+                    background:
+                      "linear-gradient(135deg, #c252ff 0%, #d8b4fe 100%)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    filter: "drop-shadow(0 0 20px rgba(194, 82, 255, 0.4))",
                   }}
                 >
-                  {timeLeft.hours}
+                  DOCS
                 </div>
                 <div
                   className="countdown-label"
                   style={{
-                    color: "white",
-                    fontWeight: "bold",
+                    color: "rgba(255, 255, 255, 0.8)",
+                    fontWeight: "500",
                     marginTop: "0.5rem",
+                    fontSize: "0.9rem",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
                   }}
                 >
-                  HOURS
+                  WAO SDK
                 </div>
-              </div>
-              <div
-                className="countdown-box"
-                style={{
-                  background: "rgba(30, 15, 53, 0.7)",
-                  borderRadius: "1rem",
-                  padding: "1.5rem",
-                  border: "1px solid rgba(194, 82, 255, 0.3)",
-                  boxShadow: "0 0 15px rgba(194, 82, 255, 0.3)",
-                  backdropFilter: "blur(5px)",
-                }}
-              >
-                <div
-                  className="countdown-number"
-                  style={{
-                    fontFamily: "'Orbitron', sans-serif",
-                    fontSize: "3rem",
-                    fontWeight: "bold",
-                    color: "#d8b4fe",
-                    textShadow: "0 0 10px #c252ff",
-                  }}
-                >
-                  {timeLeft.minutes}
-                </div>
-                <div
-                  className="countdown-label"
-                  style={{
-                    color: "white",
-                    fontWeight: "bold",
-                    marginTop: "0.5rem",
-                  }}
-                >
-                  MINUTES
-                </div>
-              </div>
-              <div
-                className="countdown-box"
-                style={{
-                  background: "rgba(30, 15, 53, 0.7)",
-                  borderRadius: "1rem",
-                  padding: "1.5rem",
-                  border: "1px solid rgba(194, 82, 255, 0.3)",
-                  boxShadow: "0 0 15px rgba(194, 82, 255, 0.3)",
-                  backdropFilter: "blur(5px)",
-                }}
-              >
-                <div
-                  className="countdown-number"
-                  style={{
-                    fontFamily: "'Orbitron', sans-serif",
-                    fontSize: "3rem",
-                    fontWeight: "bold",
-                    color: "#d8b4fe",
-                    textShadow: "0 0 10px #c252ff",
-                  }}
-                >
-                  {timeLeft.seconds}
-                </div>
-                <div
-                  className="countdown-label"
-                  style={{
-                    color: "white",
-                    fontWeight: "bold",
-                    marginTop: "0.5rem",
-                  }}
-                >
-                  SECONDS
-                </div>
-              </div>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                marginTop: "50px",
-              }}
-            >
-              <a href="https://arweaveindia.com/adi" target="_blank">
-                <img src="/adi.avif" width="300px" />
               </a>
             </div>
           </div>
@@ -666,7 +643,7 @@ export default function Home() {
             className="footer-content"
           >
             <div style={{ color: "#d8b4fe" }} className="footer-text">
-              &copy; 2025 WAO. All rights reserved.
+              Only Possible on AO & Arweave
             </div>
             <div
               style={{
