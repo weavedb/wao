@@ -1,0 +1,137 @@
+# Creating Custom HyperBEAM Devices
+
+You can create your own HyperBEAM devices with Erlang, Rust or C++, and test them using WAO JS SDK.
+
+You should write unit tests in device's own language such as Erlang with `eunit`.
+
+## Minimum Viable Device
+
+You can add an arbitrary device in the `HyperBEAM/src` directory.
+
+```erlang
+-module(dev_foo).
+-export([ info/3 ]).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+info(Msg, _, Opts) ->
+    {ok, hb_ao:set(Msg, #{ <<"version">> => <<"1.0">> }, Opts)}.
+```
+
+Then add your device to the `preloaded_devices` list in `HyperBEAM/src/hb_ops`.
+
+```erlang
+preloaded_devices => [
+  #{<<"name">> => <<"ans104@1.0">>, <<"module">> => dev_codec_ans104},
+  #{<<"name">> => <<"compute@1.0">>, <<"module">> => dev_cu},
+  ...
+  #{<<"name">> => <<"foo@1.0">>, <<"module">> => dev_foo}
+],
+```
+
+Now you can execute the functions using the WAO `HB` class.
+
+```js
+import assert from "assert"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { wait, toAddr, Server } from "wao/test"
+import { HyperBEAM, HB } from "wao"
+import { resolve } from "path"
+import { readFileSync } from "fs"
+
+const cwd = "../../HyperBEAM" // HyperBEAM directory
+const wallet = ".wallet.json" // operator wallet relative to cwd
+const port = 10001
+const gateway = 4000
+const url = `http://localhost:${port}`
+
+describe("Hyperbeam Legacynet", function () {
+  let hbeam, hb, jwk, server
+  before(async () => {
+    server = new Server({ port: gateway, log: true, hb_url: url })
+    hbeam = new HyperBEAM({ cwd, wallet, port, gateway })
+    jwk = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
+    )
+    await wait(5000)
+  })
+  beforeEach(async () => {
+    hb = await new HB({ url }).init(jwk)
+  })
+  after(async () => hbeam.kill())
+
+  it("should query a custome device", async () => {
+    const res = await hb.text(hb.path("foo", "info"))
+  })
+})
+```
+
+## Execution Device for AO Process
+
+To create an execution device for AO process, you need to implement at least `init/3`, `normalize/3`, `compute/3` and `snapshot/3`.
+
+```erlang
+-module(dev_foo).
+-export([ compute/3, init/3, snapshot/3, normalize/3 ]).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+compute(Msg1, Msg2, Opts) ->
+    case hb_ao:get([<<"body">>,<<"Action">>], Msg2, Opts) of
+	Other ->
+	    {ok, hb_ao:set( Msg1, #{  }, Opts )}
+    end.
+
+init(Msg, Msg2, Opts) -> 
+    {ok, hb_ao:set(Msg, #{ }, Opts)}.
+
+snapshot(Msg, _Msg2, _Opts) -> {ok, Msg}.
+
+normalize(Msg, _Msg2, _Opts) -> {ok, Msg}.
+```
+
+Now you can spawn a process by specifying `execution-device`.
+
+```js
+import assert from "assert"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { wait, toAddr, Server } from "wao/test"
+import { HyperBEAM, HB } from "wao"
+import { resolve } from "path"
+import { readFileSync } from "fs"
+
+const cwd = "../../HyperBEAM" // HyperBEAM directory
+const wallet = ".wallet.json" // operator wallet relative to cwd
+const port = 10001
+const gateway = 4000
+const url = `http://localhost:${port}`
+
+describe("Hyperbeam Legacynet", function () {
+  let hbeam, hb, jwk, server
+  before(async () => {
+    server = new Server({ port: gateway, log: true, hb_url: url })
+    hbeam = new HyperBEAM({ cwd, wallet, port, gateway })
+    jwk = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
+    )
+    await wait(5000)
+  })
+  beforeEach(async () => {
+    hb = await new HB({ url }).init(jwk)
+  })
+  after(async () => hbeam.kill())
+
+  it("should query a custome device", async () => {
+    const { pid } = await hb.spawn({"excecution-device": "foo@1.0"})
+    const { slot, res } = await hb.message({ pid })
+  })
+})
+```
+
+## Device in Rust
+
+*Coming soon!*
+
+## Device in C++
+
+*Coming soon!*
