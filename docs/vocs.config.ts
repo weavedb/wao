@@ -37,6 +37,22 @@ export default defineConfig({
       text: 'Tutorials',
       collapsed: false,
       items: [
+	{
+          text: 'Mainnet AOS',
+          link: '/tutorials/mainnet-aos',
+        },
+	{
+          text: 'Creating Custom Devices',
+          link: '/tutorials/creating-devices',
+        },
+	{
+          text: 'Running LLMs on AOS',
+          link: '/tutorials/running-llms',
+        },
+	{
+          text: 'Legacynet AOS on HyperBEAM',
+          link: '/tutorials/legacynet-aos',
+        },
       ],
     },
     {

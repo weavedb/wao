@@ -1,0 +1,96 @@
+# Mainnet AOS
+
+To test mainnet aos processes with WAO, you currently need the WAO HyperBEAM fork.
+
+```js
+git clone --branch wao https://github.com/weavedb/HyperBEAM.git
+```
+
+Mainnet AOS requires `stack@1.0` device with `wasi@1.0`, `json-iface@1.0`, `wasm-64@1.0`, and `multipass@1.0`. The required http header tags look like the following.
+
+```js
+const scheduler = (await hb.meta.info()).address
+
+const headers = {
+  device: "process@1.0",
+  path: "/schedule",
+  scheduler,
+  "Data-Protocol": "ao",
+  Variant: "ao.N.1",
+  "scheduler-location": scheduler,
+  Authority: scheduler,
+  "random-seed": seed(16),
+  Type: "Process",
+  image: WASM_IMAGE_ID,
+  "scheduler-device": "scheduler@1.0",
+  "execution-device": "stack@1.0",
+  "device-stack": [
+    "wasi@1.0",
+    "json-iface@1.0",
+    "wasm-64@1.0",
+    "multipass@1.0",
+  ],
+  "output-prefix": "wasm",
+  "patch-from": "/results/outbox",
+  "stack-keys": ["init", "compute", "snapshot", "normalize"],
+  passes: 2,
+}
+```
+
+`spawnAOS()` handles the tag construction and automatically loads the necessary wasm image using `wao@1.0` device for you.
+
+`messageAOS()` schedules a message and return the computed result.
+
+Dryruns are disabled on mainnet AOS processes.
+
+```js
+import assert from "assert"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { wait, toAddr, Server } from "wao/test"
+import { HyperBEAM, HB } from "wao"
+import { resolve } from "path"
+import { readFileSync } from "fs"
+
+const cwd = "../../HyperBEAM" // HyperBEAM directory
+const wallet = ".wallet.json" // operator wallet relative to cwd
+const port = 10001
+const gateway = 4000
+const url = `http://localhost:${port}`
+
+const data = `
+local count = 0
+Handlers.add("Add", "Add", function (msg)
+  count = count + tonumber(msg.Plus)
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)`
+
+describe("Hyperbeam Legacynet", function () {
+  let hbeam, hb, jwk, server
+  before(async () => {
+    server = new Server({ port: gateway, log: true, hb_url: url })
+    hbeam = new HyperBEAM({ cwd, wallet, port, gateway })
+    jwk = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
+    )
+    await wait(5000)
+  })
+  beforeEach(async () => {
+    hb = await new HB({ url }).init(jwk)
+  })
+  after(async () => hbeam.kill())
+
+  it("should handle counter with Add and Get handlers", async () => {
+    const { pid } = await hb.spawnAOS()
+    await hb.messageAOS({ pid, action: "Eval", tags: {}, data: src_data })
+    await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
+    assert.equal(
+      (await hb.messageAOS({ pid, action: "Get" })).outbox["1"].data,
+      "3"
+    )
+  })
+})
+```
+

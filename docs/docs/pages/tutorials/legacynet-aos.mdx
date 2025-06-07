@@ -1,0 +1,78 @@
+# Legacynet AOS on HyperBEAM
+
+Currently, testing legacynet aos processes works much better without HyperBEAM.
+
+You can check out [Legacynet AOS](/legacynet) guide to test with legacy AO units.
+
+Legacynet AOS on HyperBEAM uses `genesis-wasm@1.0` device and an external CU for computation. The standalone WAO server works as a local CU.
+
+`spawnLegacy`, `schedule`, and `computeLegacy` manages the process for you.
+
+```js
+import assert from "assert"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { wait, toAddr, Server } from "wao/test"
+import { HyperBEAM, HB } from "wao"
+import { resolve } from "path"
+import { readFileSync } from "fs"
+
+const cwd = "../../HyperBEAM" // HyperBEAM directory
+const wallet = ".wallet.json" // operator wallet relative to cwd
+const port = 10001
+const gateway = 4000
+const url = `http://localhost:${port}`
+
+
+const lua = `
+local count = 0
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)`
+
+describe("Hyperbeam Legacynet", function () {
+  let hbeam, hb, jwk, server
+  before(async () => {
+    server = new Server({ port: gateway, log: true, hb_url: url })
+    hbeam = new HyperBEAM({ cwd, wallet, port, gateway, legacy: true })
+    jwk = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
+    )
+    await wait(5000)
+  })
+  beforeEach(async () => {
+    hb = await new HB({ url }).init(jwk)
+  })
+  after(async () => hbeam.kill())
+
+  it("should run a legacynet AOS process with a CU", async () => {
+    const { pid } = await hb.spawnLegacy()
+    const { slot } = await hb.schedule({
+      pid,
+      data: lua,
+      tags: { Action: "Eval" },
+    })
+    const res = await hb.computeLegacy({ pid, slot })
+    
+    let i = 0
+    while (i < 10) {
+      const { slot } = await hb.schedule({
+        pid,
+        tags: { Action: "Inc" },
+      })
+      const res2 = await hb.computeLegacy({ pid, slot })
+      assert.equal(res2.Messages[0].Data, `Count: ${++i}`)
+    }
+    
+    const res3 = await ao.hb.dryrun({ pid, action: "Get" })
+    assert.equal(res3.Messages[0].Data, `Count: ${i}`)
+
+    const res4 = await hb.messages({ pid, from: 0 })
+    assert.equal(res4.edges.length, i + 2)
+  })
+})
+```
