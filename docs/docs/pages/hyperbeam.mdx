@@ -77,7 +77,7 @@ describe("HyperBEAM", function () {
   let hbeam, hb, jwk, server
   before(async () => {
     server = new Server({ port: 4000, log: true, hb_url: url })
-    hbeam = new HyperBEAM({ cwd, wallet, port })
+    hbeam = new HyperBEAM({ cwd, wallet, port, gateway })
     jwk = JSON.parse(
       readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
     )
