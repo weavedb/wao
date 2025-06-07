@@ -119,7 +119,7 @@ describe("Hyperbeam Legacynet", function () {
     return
   })
 
-  it.only("should test test device", async () => {
+  it("should test test device", async () => {
     const info = await hb.meta.info()
     assert.equal(info.address, toAddr(jwk.n))
     const { pid } = await hb.spawn({ "execution-device": "test-device@1.0" })
@@ -135,5 +135,10 @@ describe("Hyperbeam Legacynet", function () {
       ],
     } = await hb.messages({ pid })
     assert.equal(message.Target, pid)
+  })
+  it.only("should query test-device@1.0", async () => {
+    const res = await hb.send({ path: "/~meta@1.0/info", configA: "valA" })
+    const configA = await hb.text("meta", "info/configA")
+    assert.equal(configA, "valA")
   })
 })
