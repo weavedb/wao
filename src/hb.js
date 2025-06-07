@@ -158,7 +158,7 @@ class HB {
         "random-seed": seed(16),
         Type: "Process",
         "scheduler-device": "scheduler@1.0",
-        "execution-device": "wao@1.0",
+        "execution-device": "test-device@1.0",
       })
     )
     return { res, pid: res.headers.get("process") }
@@ -166,7 +166,7 @@ class HB {
 
   async message(args) {
     const pid = args.pid
-    const slot = await this.schedule(args)
+    const { slot } = await this.schedule(args)
     const res = await this.compute({ pid, slot })
     return { slot, pid, res }
   }
@@ -283,7 +283,7 @@ class HB {
       "scheduler-device": "scheduler@1.0",
       "execution-device": "genesis-wasm@1.0",
     })
-    const res = await this.post({ tags })
+    const res = await this.spawn(tags)
     return { pid: res.process, res }
   }
 
