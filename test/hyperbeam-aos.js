@@ -44,11 +44,14 @@ describe("HyperBEAM", function () {
     assert.equal((await hb.messages({ target: pid })).edges.length, 2)
   })
 
-  it("should handle counter with Add and Get handlers", async () => {
-    const pid = await hb.spawnAOS()
-    await hb.messageAOS({ action: "Eval", tags: {}, data: src_data })
-    await hb.messageAOS({ action: "Add", tags: { Plus: "3" } })
-    assert.equal((await hb.messageAOS({ action: "Get" })).outbox["1"].data, "3")
+  it.only("should handle counter with Add and Get handlers", async () => {
+    const { pid } = await hb.spawnAOS()
+    await hb.messageAOS({ pid, action: "Eval", tags: {}, data: src_data })
+    await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
+    assert.equal(
+      (await hb.messageAOS({ pid, action: "Get" })).outbox["1"].data,
+      "3"
+    )
   })
 
   it("should execute AOS with WAMR", async () => {
@@ -71,7 +74,6 @@ describe("HyperBEAM", function () {
     const build = await hb.meta.build()
     assert.equal(build.node, "HyperBEAM")
     const metrics = await hb.hyperbuddy.metrics({})
-    console.log(metrics)
   })
 
   it("should deserialize json", async () => {
