@@ -40,17 +40,17 @@ describe("Hyperbeam Legacynet", function () {
   after(async () => hbeam.kill())
 
   it("should interact with a hyperbeam node", async () => {
-    const { pid } = await hb.spawn({ tags: { authority: mu.addr } })
+    const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.schedule({ pid, data, tags: { Action: "Eval" } })
-    const r = await hb.compute({ pid, slot })
+    const r = await hb.computeLegacy({ pid, slot })
     const { slot: slot2 } = await hb.schedule({ pid, tags: { Action: "Inc" } })
-    const r2 = await hb.compute({ pid, slot: slot2 })
+    const r2 = await hb.computeLegacy({ pid, slot: slot2 })
     assert.equal(r2.results.outbox["1"].data, "Count: 1")
     const r3 = await hb.dryrun({ pid, tags: { Action: "Get" } })
     assert.equal(r3.Messages[0].Data, "Count: 1")
   })
 
-  it("should get messages and recover them", async () => {
+  it.only("should get messages and recover them", async () => {
     const res = await hb.get({ path: "~meta@1.0/info/address" })
     const address = res
     assert.equal(address, hb._info.address)
@@ -136,7 +136,7 @@ describe("Hyperbeam Legacynet", function () {
     } = await hb.messages({ pid })
     assert.equal(message.Target, pid)
   })
-  it.only("should query test-device@1.0", async () => {
+  it("should query test-device@1.0", async () => {
     const res = await hb.send({ path: "/~meta@1.0/info", configA: "valA" })
     const configA = await hb.text("meta", "info/configA")
     assert.equal(configA, "valA")
