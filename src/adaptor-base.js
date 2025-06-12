@@ -316,7 +316,6 @@ class Adaptor {
   }
 
   async cu_get_result({ query, params, body, headers, method }) {
-    console.log("are we her...............................")
     let message = params.mid
     const process = query["process-id"]
     // check if recovery is ongoing and
