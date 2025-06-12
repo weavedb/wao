@@ -170,7 +170,16 @@ class HB {
     const res = await this.compute({ pid, slot })
     return { slot, pid, res }
   }
-
+  async scheduleLegacy({
+    pid,
+    action = "Eval",
+    tags = {},
+    data,
+    scheduler,
+  } = {}) {
+    if (action) tags.Action = action
+    return await this.schedule({ pid, tags, data, scheduler })
+  }
   async schedule({ pid, tags = {}, data, scheduler } = {}) {
     pid ??= this.pid
     scheduler ??= this.scheduler
@@ -283,8 +292,7 @@ class HB {
       "scheduler-device": "scheduler@1.0",
       "execution-device": "genesis-wasm@1.0",
     })
-    const res = await this.spawn(tags)
-    return { pid: res.process, res }
+    return await this.spawn(tags)
   }
 
   /*

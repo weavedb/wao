@@ -41,10 +41,10 @@ describe("HyperBEAM", function () {
     assert.equal(await hb.text("wao", "info/version"), "1.0")
     const { pid } = await hb.spawn()
     const { slot, res } = await hb.message({ pid })
-    assert.equal((await hb.messages({ target: pid })).edges.length, 2)
+    assert.equal((await hb.messages({ pid })).edges.length, 2)
   })
 
-  it.only("should handle counter with Add and Get handlers", async () => {
+  it("should handle counter with Add and Get handlers", async () => {
     const { pid } = await hb.spawnAOS()
     await hb.messageAOS({ pid, action: "Eval", tags: {}, data: src_data })
     await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
@@ -91,7 +91,7 @@ describe("HyperBEAM", function () {
     const { slot, res } = await hb.message({
       data: Buffer.from(binary).toString("base64"),
     })
-    const msgs = await hb.messages({ target: pid, from: 1, limit: 10 })
+    const msgs = await hb.messages({ pid, from: 1, limit: 10 })
     const image = msgs.edges[0].node.message.Id
     const pid2 = await hb.spawnAOS(image)
     hb.pid = pid2
