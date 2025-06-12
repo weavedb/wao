@@ -119,6 +119,15 @@ Spawn Legacynet AOS.
 const { pid } = await hb.spawnLegacy({ tags, data })
 ```
 
+##### scheduleLegacy
+
+Schedule a legacynet aos message.
+
+```js
+const res = await hb.scheduleLegacy({ tags, data, pid, action })
+const { Messages, Spawns, Assignments, Output } = res
+```
+
 ##### computeLegacy
 
 Compute legacynet AOS state.
