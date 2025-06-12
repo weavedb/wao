@@ -659,9 +659,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           try {
             const p = await mem.get("env", pid)
             const from = p ? p.results.length : 0
-            const msgs = next
-              ? await next()
-              : await hb.messages({ target: pid, from })
+            const msgs = next ? await next() : await hb.messages({ pid, from })
             for (let v of msgs.edges) {
               let item = {}
               for (let k in v.node.message) {
