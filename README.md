@@ -104,13 +104,13 @@ describe("WAO", function () {
     // await wait({ pid })
 
     await message({
-      process: pid,
+      pid,
       tags: [{ name: "Action", value: "Eval" }],
       data: src_data,
       signer,
     })
     const res = await dryrun({
-      process: pid,
+      pid,
       tags: [{ name: "Action", value: "Hello" }],
       signer,
     })
@@ -429,16 +429,16 @@ describe("WAO Server", () => {
     // wait till the process becomes available
 
     const mid = await message({
-      process: pid,
+      pid,
       tags: [{ name: "Action", value: "Eval" }],
       data: src_data,
       signer: createDataItemSigner(acc[0].jwk),
     })
 
-    console.log(await result({ process: pid, message: mid }))
+    console.log(await result({ pid, message: mid }))
 
     const res = await dryrun({
-      process: pid,
+      pid,
       data: "",
       tags: [{ name: "Action", value: "Hello" }],
       anchor: "1234",
@@ -520,7 +520,7 @@ describe("Hyperbeam", function () {
     const { slot: slot2 } = await hb.schedule({ pid, action: "Inc" })
     const r2 = await hb.compute({ pid, slot: slot2 })
     assert.equal(r2.Messages[0].Data, "Count: 1")
-    const r3 = await hb.dryrun({ process, action: "Get" })
+    const r3 = await hb.dryrun({ pid, action: "Get" })
 	assert.equal(r3.Messages[0].Data, "Count: 1")
   })
 })
@@ -1652,7 +1652,7 @@ const { pid } = await hb.spawn({ ...tags })
 Equivalent to sending a message.
 
 ```js
-const { slot } = await hb.schedule({ tags, data, process: pid, action })
+const { slot } = await hb.schedule({ tags, data, pid })
 ```
 
 #### compute
@@ -1660,7 +1660,7 @@ const { slot } = await hb.schedule({ tags, data, process: pid, action })
 Equivalent to getting a result.
 
 ```js
-const res = await hb.compute({ process: pid, slot })
+const res = await hb.compute({ pid, slot })
 const { Messages, Spawns, Assignments, Output } = res
 ```
 
@@ -1686,6 +1686,15 @@ Spawn Legacynet AOS.
 
 ```js
 const { pid } = await hb.spawnLegacy({ tags, data })
+```
+
+##### scheduleLegacy
+
+Schedule a legacynet aos message.
+
+```js
+const res = await hb.scheduleLegacy({ tags, data, pid, action })
+const { Messages, Spawns, Assignments, Output } = res
 ```
 
 ##### computeLegacy
