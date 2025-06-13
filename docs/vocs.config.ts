@@ -38,6 +38,10 @@ export default defineConfig({
       collapsed: false,
       items: [
 	{
+          text: 'Legacynet AOS on HyperBEAM',
+          link: '/tutorials/legacynet-aos',
+        },
+	{
           text: 'Mainnet AOS',
           link: '/tutorials/mainnet-aos',
         },
@@ -56,10 +60,6 @@ export default defineConfig({
 	{
           text: 'Running LLMs on AOS',
           link: '/tutorials/running-llms',
-        },
-	{
-          text: 'Legacynet AOS on HyperBEAM',
-          link: '/tutorials/legacynet-aos',
         },
       ],
     },

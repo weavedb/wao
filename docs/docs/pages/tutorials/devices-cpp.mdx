@@ -1,0 +1,192 @@
+# Custom Devices in C++
+
+Erlang can natively execute C++ functions with almost no overhead via NIF (Native Implemented Function).
+
+## Creating a C++ Device
+
+Go to `HyperBEAM/native` directory and create a new directory for your C++ device.
+
+```bash
+mkdir -p dev_mul_nif/include && cd dev_mul_nif
+```
+
+### Step 1: Create the C++ Header File
+
+Create `include/dev_mul.h`:
+
+```cpp
+#pragma once
+
+extern "C" {
+  int multiply(const int a, const int b);
+}
+```
+
+The `extern "C"` linkage is crucial for making C++ functions callable from C/Erlang NIFs.
+
+### Step 2: Implement the C++ Logic
+
+Create `dev_mul.cpp`:
+
+```cpp
+#include "include/dev_mul.h"
+
+int multiply(const int a, const int b) {
+  return a * b;
+}
+```
+
+### Step 3: Create the NIF Wrapper
+
+Create `dev_mul_nif.cpp`:
+
+```cpp
+#include <erl_nif.h>
+#include "include/dev_mul.h"
+
+static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info) {
+    return 0;
+}
+
+static void unload(ErlNifEnv* env, void* priv_data) {}
+
+static ERL_NIF_TERM mul_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    int a, b;
+    if (!enif_get_int(env, argv[0], &a) || !enif_get_int(env, argv[1], &b)) {
+        return enif_make_badarg(env);
+    }
+
+    int result = multiply(a, b);
+    return enif_make_int(env, result);
+}
+
+static ErlNifFunc nif_funcs[] = {
+    {"multiply", 2, mul_nif}
+};
+
+ERL_NIF_INIT(dev_mul_nif, nif_funcs, load, NULL, NULL, unload)
+```
+
+### Step 4: Configure Build in rebar.config
+
+Add the C++ compilation settings to `HyperBEAM/rebar.config`:
+
+```erlang
+{port_env, [
+    {"(linux|darwin|solaris)", "CXX", "g++"},
+    {"(linux|darwin|solaris)", "CXXFLAGS", 
+        "$CXXFLAGS -std=c++17 -I${REBAR_ROOT_DIR}/native/dev_mul_nif/include -I/usr/local/lib/erlang/usr/include/"},
+    {"(linux|darwin|solaris)", "LDFLAGS", 
+        "$LDFLAGS -lstdc++"}
+]}.
+```
+
+Add the port specification:
+
+```erlang
+{port_specs, [
+    ...
+    {"./priv/dev_mul.so", [
+        "./native/dev_mul_nif/dev_mul_nif.cpp",
+        "./native/dev_mul_nif/dev_mul.cpp"
+    ]}
+    ...
+]}.
+```
+
+Add cleanup hooks:
+
+```erlang
+{post_hooks, [
+    ...
+    { compile, "rm -f native/dev_mul_nif/*.o native/dev_mul_nif/*.d"}
+    ...
+]}.
+```
+
+### Step 5: Create the Erlang NIF Module
+
+Create `HyperBEAM/src/dev_mul_nif.erl`:
+
+```erlang
+-module(dev_mul_nif).
+-export([multiply/2]).
+
+-include("include/hb.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+-on_load(init/0).
+
+-define(NOT_LOADED, not_loaded(?LINE)).
+not_loaded(Line) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, Line}]}).
+
+init() ->
+    PrivDir = code:priv_dir(hb),
+    Path = filename:join(PrivDir, "dev_mul"),
+    case erlang:load_nif(Path, 0) of
+        ok -> ok;
+        {error, Reason} -> exit({load_failed, Reason})
+    end.
+
+multiply(_A, _B) ->
+    not_loaded(?LINE).
+```
+
+### Step 6: Create the Erlang Device Module
+
+Create `HyperBEAM/src/dev_mul.erl`:
+
+```erlang
+-module(dev_mul).
+-export([mul/3]).
+-include("include/hb.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+mul(_, M2, Opts) ->
+    A = hb_ao:get(<<"a">>, M2, Opts),
+    B = hb_ao:get(<<"b">>, M2, Opts),
+
+    Product = dev_mul_nif:multiply(A, B),
+
+    {ok, #{ <<"product">> => Product, <<"a">> => A, <<"b">> => B }}.
+
+multiply_test() ->
+    M1 = #{<<"device">> => <<"mul@1.0">>},
+    M2 = #{
+        <<"path">> => <<"mul">>,
+        <<"a">> => 2,
+        <<"b">> => 3
+    },
+    {ok, Product} = hb_ao:resolve(M1, M2, #{}),
+    ?assertEqual(6, maps:get(<<"product">>, Product)).
+```
+
+### Step 7: Register the Device
+
+Add the device to `HyperBEAM/hb_opt.erl`:
+
+```erlang
+preloaded_devices => [
+  ...
+  #{<<"name">> => <<"mul@1.0">>, <<"module">> => dev_mul},
+  ...
+],
+```
+
+### Step 8: Build and Test
+
+Run the unit tests:
+
+```bash
+rebar3 eunit --module=dev_mul
+```
+
+Test the device with WAO:
+
+```js
+it("should test mul@1.0", async () => {
+  const res = await hb.send({ path: "/~mul@1.0/mul", a: 4, b: 5 })
+  assert.equal(res.headers.get("product"), "20")
+})
+```
