@@ -140,4 +140,14 @@ describe("Hyperbeam Legacynet", function () {
     const configA = await hb.text("meta", "info/configA")
     assert.equal(configA, "valA")
   })
+
+  it("should test add@1.0", async () => {
+    const res = await hb.send({ path: "/~add@1.0/add", a: 2, b: 3 })
+    assert.equal(res.headers.get("sum"), "5")
+  })
+
+  it.only("should test mul@1.0", async () => {
+    const res = await hb.send({ path: "/~mul@1.0/mul", a: 2, b: 3 })
+    assert.equal(res.headers.get("product"), "6")
+  })
 })

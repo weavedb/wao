@@ -1675,6 +1675,7 @@ for(const item of msgs.edges){
 }
 if(msgs.next) const msgs2 = await msg.next()
 ```
+
 - `pid` : a process id
 - `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawed the process. `to` is inclusive. Both are optional. 
 

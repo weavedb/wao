@@ -38,6 +38,10 @@ export default defineConfig({
       collapsed: false,
       items: [
 	{
+          text: 'Legacynet AOS on HyperBEAM',
+          link: '/tutorials/legacynet-aos',
+        },
+	{
           text: 'Mainnet AOS',
           link: '/tutorials/mainnet-aos',
         },
@@ -46,12 +50,16 @@ export default defineConfig({
           link: '/tutorials/creating-devices',
         },
 	{
-          text: 'Running LLMs on AOS',
-          link: '/tutorials/running-llms',
+          text: 'Custom Devices in Rust',
+          link: '/tutorials/devices-rust',
         },
 	{
-          text: 'Legacynet AOS on HyperBEAM',
-          link: '/tutorials/legacynet-aos',
+          text: 'Custom Devices in C++',
+          link: '/tutorials/devices-cpp',
+        },
+	{
+          text: 'Running LLMs on AOS',
+          link: '/tutorials/running-llms',
         },
       ],
     },
