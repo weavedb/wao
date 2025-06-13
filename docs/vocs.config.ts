@@ -1,8 +1,9 @@
 import { defineConfig } from 'vocs'
 
 export default defineConfig({
+  iconUrl: '/favicon.ico',
   title: 'WAO',
-    socials: [
+  socials: [
     {
       icon: 'discord',
       link: 'https://discord.gg/vCkuVhkugY',
@@ -32,6 +33,10 @@ export default defineConfig({
     {
       text: 'AO The Web',
       link: '/web',
+    },
+    {
+      text: 'WAO Hub',
+      link: '/hub',
     },
     {
       text: 'Tutorials',
