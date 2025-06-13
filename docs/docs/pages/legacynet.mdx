@@ -86,6 +86,7 @@ describe("WAO", function () {
   })
 })
 ```
+
 Note that generating random Arweave wallets for every test takes time and slows down your test executions, so Wao connect provides pre-generated accounts for your tests, which saves hours if you are to run your tests thousands of times.
 
 - `acc[0] = { jwk, addr, signer }`
@@ -180,7 +181,6 @@ assert.deepEqual(out6, { firstname: "Bob", age: "30" })
 // handle tag as json
 const out7 = await p.d("Hello3", { get: { prof: { name: "Profile", json: true }}})
 assert.deepEqual(out7, { prof: { Name: "Bob", Age: "30" }})
-
 ```
 
 ## Determining Message Success
@@ -318,6 +318,7 @@ describe("WeaveDrive", () => {
   })
 })
 ```
+
 ## Local Persistent Server
 
 You can run a local WAO server with persistent storage, which enables connections with outside components such as frontend apps.
@@ -363,6 +364,7 @@ describe("WAO Server", ()=>{
   })
 })
 ```
+
 With AOConnect,
 
 ```js
