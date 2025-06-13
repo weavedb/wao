@@ -1,0 +1,118 @@
+# Custom Devices in Rust
+
+Erlang can natively execute Rust functions with almost no overhead via NIF (Native Implemented Function).
+
+Go to `HyperBEAM/native` directory and create a new Rust project.
+
+```bash
+cargo new dev_add_nif --lib && cd dev_add_nif
+```
+
+Change `crate-type` and add `rustler` in `Cargo.toml`.
+
+```toml
+[package]
+name = "dev_add_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.36"
+```
+
+Create an nif function in `src/lib.rs`.
+
+```rust
+use rustler::{Env, NifResult, Term, Encoder};
+use rustler::types::atom::ok;
+
+#[rustler::nif]
+fn add<'a>(env: Env<'a>, a: i64, b: i64) -> NifResult<Term<'a>> {
+    Ok((ok(), a * b).encode(env))
+}
+
+rustler::init!("dev_add_nif", [add]);
+```
+
+Compile it.
+
+```bash
+cargo build
+```
+
+Add the device to `cargo_opts` in `HyperBEAM/rebar.config`.
+
+```bash
+...
+{cargo_opts, [
+    {src_dir, "native/dev_add_nif"},
+    {src_dir, "native/dev_snp_nif"}
+]}.
+...
+```
+
+Create an Erlang NIF device in `HyperBEAM/src/dev_add_nif.erl`.
+
+```erlang
+-module(dev_add_nif).
+-export([add/2]).
+-on_load(init/0).
+
+-include("include/cargo.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+init() ->
+    ?load_nif_from_crate(dev_add_nif, 0).
+
+add(_, _) ->
+    erlang:nif_error(nif_not_loaded).
+```
+
+Create an Erlang device in `HyperBEAM/src/dev_add.erl`.
+
+```erlang
+-module(dev_add).
+-export([add/3]).
+-include("include/hb.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+add(_M1, M2, _Opts) ->
+    A = maps:get(<<"a">>, M2),
+    B = maps:get(<<"b">>, M2),
+    {ok, Sum} = dev_add_nif:add(A, B),
+    {ok, #{ <<"sum">> => Sum }}.
+
+add_test() ->
+    M1 = #{ <<"device">> => <<"add@1.0">> },
+    M2 = #{ <<"path">> => <<"add">>, <<"a">> => 2, <<"b">> => 3 },
+    {ok, #{ <<"sum">> := 5 }} = hb_ao:resolve(M1, M2, #{}).
+```
+
+Add the device to `HyperBEAM/hb_opt.erl`.
+
+```erlang
+preloaded_devices => [
+  ...
+  #{<<"name">> => <<"add@1.0">>, <<"module">> => dev_add},
+  ...
+],
+```
+
+Run eunit tests.
+
+```bash
+rebar3 eunit --module=dev_add
+```
+
+Test the device with WAO.
+
+```js
+it("should test add@1.0", async () => {
+  const res = await hb.send({ path: "/~add@1.0/add", a: 2, b: 3 })
+  assert.equal(res.headers.get("sum"), "5")
+})
+
+```

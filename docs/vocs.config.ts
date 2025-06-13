@@ -46,6 +46,14 @@ export default defineConfig({
           link: '/tutorials/creating-devices',
         },
 	{
+          text: 'Custom Devices in Rust',
+          link: '/tutorials/devices-rust',
+        },
+	{
+          text: 'Custom Devices in C++',
+          link: '/tutorials/devices-cpp',
+        },
+	{
           text: 'Running LLMs on AOS',
           link: '/tutorials/running-llms',
         },
