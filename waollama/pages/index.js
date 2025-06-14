@@ -46,17 +46,14 @@ const src_data = `
 Llama = require(".Llama")
 Llama.logLevel = 4
 
-Handlers.add("Hello", "Hello", function (msg)
-  io.stderr:write("Loaded! Setting prompt")
+Handlers.add("Load", "Load", function (msg)
   Llama.load("/data/" .. msg.ModelID)
-  msg.reply({ Data = true })
+  msg.reply({ Data = "ok" })
 end)
 
 Handlers.add("Ask", "Ask", function (msg)
   Llama.setPrompt(msg.Q)
-  io.stderr:write("prompt set!")
-  local str = Llama.run(30)
-  msg.reply({ Data = str })
+  msg.reply({ Data = Llama.run(30) })
 end)
 `
 
@@ -110,17 +107,20 @@ export default function Home({ _date = null }) {
                 if (llm) setInit(true)
                 else {
                   const _module = await fetch("/llama/llama.wasm").then(r =>
-                    r.arrayBuffer(),
+                    r.arrayBuffer()
                   )
                   const { id: modid } = await ao.postModule({
                     data: Buffer.from(_module),
                   })
                   console.log("module:", modid)
                   const model = await fetch("/llama/tinyllama.gguf").then(r =>
-                    r.arrayBuffer(),
+                    r.arrayBuffer()
                   )
 
-                  const { id } = await ao.ar.post({ data: Buffer.from(model) })
+                  const { id } = await ao.ar.post({
+                    data: Buffer.from(model),
+                    tags: { "Memory-Limit": "2-gb" },
+                  })
                   console.log("model:", id)
 
                   const { p, pid, err } = await ao.deploy({
@@ -130,11 +130,10 @@ export default function Home({ _date = null }) {
                   })
                   llm = p
                   console.log("pid", pid, err)
-                  console.log(
-                    "attested........................",
-                    await ao.attest({ id }),
-                  )
-                  if (await p.m("Hello", { ModelID: id })) setInit(true)
+                  console.log("attested:", await ao.attest({ id }))
+                  if ((await p.m("Load", { ModelID: id }, false)) === "ok") {
+                    setInit(true)
+                  }
                 }
                 setDeploying(false)
               }}
@@ -178,7 +177,7 @@ export default function Home({ _date = null }) {
                   setMsg("")
                   let _reply = append({ who: "you", msg }, reply)
                   setReply(_reply)
-                  const rep = await llm.d("Ask", { Q: msg })
+                  const rep = await llm.d("Ask", { Q: msg }, false)
                   console.log(rep)
                   setReply(append({ who: "agent", msg: rep }, _reply))
                   setSending(false)
