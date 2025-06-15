@@ -1,5 +1,6 @@
 import { spawn } from "child_process"
 import { resolve } from "path"
+import { isNil, map } from "ramda"
 
 export default class HyperBEAM {
   constructor({
@@ -10,7 +11,9 @@ export default class HyperBEAM {
     c,
     cmake,
     legacy = false,
+    faff,
   } = {}) {
+    this.faff = faff
     this.c = c
     this.cmake = cmake
     this.port = port
@@ -50,9 +53,13 @@ export default class HyperBEAM {
     const _bundler = `, bundler_httpsig => <<"http://localhost:4001">>`
     const _routes = `, routes => [#{ <<"template">> => <<"/result/.*">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:6363">> } }, #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [#{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => httpc, protocol => http2 } }, #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }] }, #{ <<"template">> => <<"/raw">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } } }]`
     const _port = `port => ${this.port}`
+    const _faff = isNil(this.faff)
+      ? ""
+      : `, faff_allow_list => [ ${map(addr => `<<"${addr}">>`)(this.faff).join(", ")} ]`
+    const _on = `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
     return !legacy
-      ? `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store} }).`
-      : `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store}${_bundler}${_routes} }).`
+      ? `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store}${_on} }).`
+      : `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store}${_faff}${_bundler}${_routes}${_on} }).`
   }
 
   kill() {

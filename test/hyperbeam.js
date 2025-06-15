@@ -3,7 +3,7 @@ import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, AO, toAddr } from "../src/test.js"
 import { getJWK } from "./lib/test-utils.js"
 import HB from "../src/hb.js"
-import { isNotNil, filter } from "ramda"
+import { isNotNil, filter, isNil } from "ramda"
 import { randomBytes } from "node:crypto"
 import { wait } from "../src/utils.js"
 import Server from "../src/server.js"
@@ -23,19 +23,26 @@ end)`
 const URL = "http://localhost:10001"
 
 describe("Hyperbeam Legacynet", function () {
-  let hb, hbeam, jwk, server
+  let hb, hb2, hbeam, jwk, server, addr, addr2
   before(async () => {
     server = new Server({ port: 4000, log: true, hb_url: URL })
+    jwk = getJWK("../../HyperBEAM/.wallet.json")
+    addr = toAddr(jwk.n)
+    addr2 = toAddr(acc[0].jwk.n)
     hbeam = new HyperBEAM({
       c: "12",
       cmake: "3.5",
       gateway: 4000,
       legacy: true,
+      faff: [addr],
     })
-    jwk = getJWK("../../HyperBEAM/.wallet.json")
+
     await wait(5000)
   })
-  beforeEach(async () => (hb = await new HB({}).init(jwk)))
+  beforeEach(async () => {
+    hb = await new HB({}).init(jwk)
+    hb2 = await new HB({}).init(acc[0].jwk)
+  })
   after(async () => hbeam.kill())
 
   it("should interact with a hyperbeam node", async () => {
@@ -144,7 +151,7 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(res.headers.get("product"), "6")
   })
 
-  it.only("should test devices", async () => {
+  it("should test devices", async () => {
     // meta@1.0
     await hb.send({ path: "/~meta@1.0/info", abc: "def" })
     assert.equal(await hb.text("meta", "/info/abc"), "def")
@@ -174,5 +181,9 @@ describe("Hyperbeam Legacynet", function () {
     const { slot: slot2 } = await hb.scheduleLua({ pid: pid2, action: "Get" })
     const { outbox, output } = await hb.computeLua({ pid: pid2, slot: slot2 })
     assert.equal(outbox[0].Data, "Count: 1")
+  })
+  it.only("should test faff", async () => {
+    const { pid } = await hb.spawn()
+    assert(!isNil(pid))
   })
 })
