@@ -1694,8 +1694,7 @@ const { pid } = await hb.spawnLegacy({ tags, data })
 Schedule a legacynet aos message.
 
 ```js
-const res = await hb.scheduleLegacy({ tags, data, pid, action })
-const { Messages, Spawns, Assignments, Output } = res
+const { slot } = await hb.scheduleLegacy({ tags, data, pid, action })
 ```
 
 ##### computeLegacy
@@ -1714,6 +1713,32 @@ const { Messages, Spawns, Assignments, Output } = res
 ```js
 const res = await hb.dryrun({ tags, data, pid, action })
 const { Messages, Spawns, Assignments, Output } = res
+```
+
+#### Hyper AOS
+
+AOS with Lua VM (`lua@5.3a`) instead of Wasm.
+
+##### spawnLua
+
+The AOS module is fetched from the Arweave mainnet.
+
+```js
+const { pid } = await hb.spanw("8DvyaxF8xpHMgPdmpMnhcb1mjY-M8qr2kGxnCpGMb60")
+```
+
+##### scheduleLua
+
+This is an alias of `scheduleLegacy`.
+
+```js
+const { slot } = await hb.scheduleLua({ tags, data, pid, action })
+```
+
+##### computeLua
+
+```js
+const { outbox, output } = await hb.computeLua({ slot, pid })
 ```
 
 #### Mainnet AOS
@@ -1747,17 +1772,17 @@ Each device has its own API based on the paths.
 ##### meta
 
 ```js
-const info = await hb.meta.info()
-const address = await hb.meta.info({ key: "address" })
-await hb.meta.info({ method: "POST", configA: "valA" }) // update node config
+const info = await hb.dev.meta.info()
+const address = await hb.dev.meta.info({ key: "address" })
+await hb.dev.meta.info({ method: "POST", configA: "valA" }) // update node config
 
-const build = await hb.meta.build()
+const build = await hb.dev.meta.build()
 ```
 
 ##### hyperbuddy
 
 ```js
-const metrics = await hb.hyperbuddy.metrics()
+const metrics = await hb.dev.hyperbuddy.metrics()
 ```
 
 More devices will be added soon.

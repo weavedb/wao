@@ -11,7 +11,8 @@ const seed = num => {
 class HB {
   constructor({ url = "http://localhost:10001", jwk } = {}) {
     this.url = url
-    this.hyperbuddy = {
+    this.dev = {}
+    this.dev.hyperbuddy = {
       metrics: async (args = {}) => {
         return this.parseMetrics(
           await this.fetch(this.path("hyperbuddy", "metrics", false), false)
@@ -19,7 +20,7 @@ class HB {
       },
     }
 
-    this.json = {
+    this.dev.json = {
       commit: async args => {
         return await this.send({ path: "/~json@1.0/commit", ...args })
       },
@@ -33,7 +34,7 @@ class HB {
         return await this.send({ path: "/~json@1.0/serialize", ...args })
       },
     }
-    this.meta = {
+    this.dev.meta = {
       info: async (args = {}) => {
         let { method = "GET", json = true, key } = args
         if (method.toLowerCase() === "post") {
@@ -71,7 +72,7 @@ class HB {
 
   async init(jwk) {
     this._init(jwk)
-    this._info = await this.meta.info({})
+    this._info = await this.dev.meta.info({})
     return this
   }
 
@@ -82,10 +83,21 @@ class HB {
   async getImage() {
     const result = await this.send({
       path: "/~wao@1.0/cache_wasm_image",
-      method: "POST",
       filename: "test/aos-2-pure-xs.wasm",
     })
-    return result.headers.get("image")
+    const image = result.headers.get("image")
+    this.image ??= image
+    return image
+  }
+
+  async getLua() {
+    const result = await this.send({
+      path: "/~wao@1.0/cache_lua_module",
+      filename: "test/hyper-aos.lua",
+    })
+    const lua = result.headers.get("id").split("/").pop()
+    this.lua ??= lua
+    return lua
   }
 
   async messageAOS({ pid, action = "Eval", tags = {}, data }) {
@@ -105,7 +117,7 @@ class HB {
     return { slot, outbox: await this.computeAOS({ pid, slot }) }
   }
 
-  path(dev = "meta", path = "info", json = true, params = {}) {
+  path(dev = "message", path, json = true, params = {}, pid = "", tail = "") {
     if (!/@/.test(dev)) dev += "@1.0"
     let _params = ""
     if (!isEmpty(params)) {
@@ -115,15 +127,28 @@ class HB {
         i++
       }
     }
-    return `${this.url}/~${dev}/${path}${json ? "/serialize~json@1.0" : ""}${_params}`
+    return `${this.url}/${pid}~${dev}${path ? `/${path}` : ""}${tail}${json ? "/~json@1.0/serialize" : ""}${_params}`
   }
 
-  async text(dev, path) {
-    return await this.fetch(this.path(dev, path, false), false)
+  async text(dev, path, params = {}, tail) {
+    let pid = ""
+    if (/^[a-zA-Z0-9_-]{43}$/.test(dev)) {
+      pid = dev
+      dev = "process"
+    }
+    return await this.fetch(
+      this.path(dev, path, false, params, pid, tail),
+      false
+    )
   }
 
-  async json(dev, path) {
-    return await this.fetch(this.path(dev, path))
+  async json(dev, path, params = {}, tail) {
+    let pid = ""
+    if (/^[a-zA-Z0-9_-]{43}$/.test(dev)) {
+      pid = dev
+      dev = "process"
+    }
+    return await this.fetch(this.path(dev, path, true, params, pid, tail))
   }
 
   async fetch(url, json = true) {
@@ -132,13 +157,19 @@ class HB {
 
   async computeAOS({ pid, slot }) {
     return await fetch(
-      `${this.url}/${pid}/compute/results/outbox/serialize~json@1.0?slot=${slot}`
+      `${this.url}/${pid}/compute/results/outbox/~json@1.0/serialize?slot=${slot}`
+    ).then(r => r.json())
+  }
+
+  async computeLua({ pid, slot }) {
+    return await fetch(
+      `${this.url}/${pid}/compute/results/~json@1.0/serialize?slot=${slot}`
     ).then(r => r.json())
   }
 
   async compute({ pid, slot }) {
     return await fetch(
-      `${this.url}/${pid}/compute/serialize~json@1.0?slot=${slot}`
+      `${this.url}/${pid}/compute/~json@1.0/serialize?slot=${slot}`
     ).then(r => r.json())
   }
 
@@ -148,7 +179,7 @@ class HB {
   }
 
   async spawn(tags = {}) {
-    const addr = await this.meta.info({ key: "address" })
+    const addr = await this.dev.meta.info({ key: "address" })
     this.scheduler ??= addr
     const res = await this.send(
       mergeLeft(tags, {
@@ -180,6 +211,9 @@ class HB {
     if (action) tags.Action = action
     return await this.schedule({ pid, tags, data, scheduler })
   }
+  async scheduleLua(...args) {
+    return await this.scheduleLegacy(...args)
+  }
   async schedule({ pid, tags = {}, data, scheduler } = {}) {
     pid ??= this.pid
     scheduler ??= this.scheduler
@@ -196,7 +230,7 @@ class HB {
   }
 
   async spawnAOS(image) {
-    const addr = await this.meta.info({ key: "address" })
+    const addr = await this.dev.meta.info({ key: "address" })
     this.scheduler ??= addr
     image ??= this.image ?? (await this.getImage())
     const res = await this.send({
@@ -222,6 +256,30 @@ class HB {
       "patch-from": "/results/outbox",
       "stack-keys": ["init", "compute", "snapshot", "normalize"],
       passes: 2,
+    })
+    const pid = res.headers.get("process")
+    this.pid ??= pid
+    return { pid, res }
+  }
+
+  async spawnLua(lua = "8DvyaxF8xpHMgPdmpMnhcb1mjY-M8qr2kGxnCpGMb60") {
+    const addr = await this.dev.meta.info({ key: "address" })
+    this.scheduler ??= addr
+    lua ??= this.lua ?? (await this.getLua())
+    const res = await this.send({
+      device: "process@1.0",
+      path: "/schedule",
+      scheduler: this.scheduler,
+      "Data-Protocol": "ao",
+      Variant: "ao.N.1",
+      "scheduler-location": this.scheduler,
+      Authority: this.scheduler,
+      "random-seed": seed(16),
+      Type: "Process",
+      module: lua,
+      "scheduler-device": "scheduler@1.0",
+      "execution-device": "lua@5.3a",
+      "patch-from": "/results/outbox",
     })
     const pid = res.headers.get("process")
     this.pid ??= pid
@@ -296,17 +354,17 @@ class HB {
   }
 
   /*
-  async scheduleLegacy({ tags = {}, data, process, action = "Eval" } = {}) {
+    async scheduleLegacy({ tags = {}, data, process, action = "Eval" } = {}) {
     tags = mergeLeft(tags, {
-      path: `${process}/schedule`,
-      type: "Message",
-      action,
-      data,
-      "Data-Protocol": "ao",
-      Variant: "ao.N.1",
+    path: `${process}/schedule`,
+    type: "Message",
+    action,
+    data,
+    "Data-Protocol": "ao",
+    Variant: "ao.N.1",
     })
     return (await this.post({ tags })).slot.text()
-  }
+    }
   */
 
   async dryrun({ tags = {}, pid, action, data } = {}) {

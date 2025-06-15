@@ -46,9 +46,13 @@ export default class HyperBEAM {
     const _gateway = gateway
       ? `, gateway => <<"http://localhost:${gateway}">>`
       : ""
+    const _store = `, store => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"cache-mainnet">> }, #{ <<"store-module">> => hb_store_gateway, <<"subindex">> => [#{ <<"name">> => <<"Data-Protocol">>, <<"value">> => <<"ao">> }], <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"cache-mainnet">> }] }, #{ <<"store-module">> => hb_store_gateway, <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"cache-mainnet">> }] }]`
+    const _bundler = `, bundler_httpsig => <<"http://localhost:4001">>`
+    const _routes = `, routes => [#{ <<"template">> => <<"/result/.*">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:6363">> } }, #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [#{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => httpc, protocol => http2 } }, #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }] }, #{ <<"template">> => <<"/raw">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } } }]`
+    const _port = `port => ${this.port}`
     return !legacy
-      ? `hb:start_mainnet(#{ port => ${this.port}${_gateway}${_wallet} }).`
-      : `hb:start_mainnet(#{ port => ${this.port}${_gateway}${_wallet}, bundler_httpsig => <<\"http://localhost:4001\">>, routes => [ #{ <<\"template\">> => <<\"/result/.*\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4004\">> } }, #{ <<\"template\">> => <<\"/graphql\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } }, #{ <<\"template\">> => <<\"/raw\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:4000\">>, <<\"opts\">> => #{ http_client => gun } } } ] }).`
+      ? `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store} }).`
+      : `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store}${_bundler}${_routes} }).`
   }
 
   kill() {
