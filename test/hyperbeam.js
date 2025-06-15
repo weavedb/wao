@@ -34,7 +34,10 @@ describe("Hyperbeam Legacynet", function () {
       cmake: "3.5",
       gateway: 4000,
       legacy: true,
-      faff: [addr],
+      //faff: [addr],
+      simplePay: true,
+      simplePayPrice: 2,
+      operator: addr,
     })
 
     await wait(5000)
@@ -182,8 +185,19 @@ describe("Hyperbeam Legacynet", function () {
     const { outbox, output } = await hb.computeLua({ pid: pid2, slot: slot2 })
     assert.equal(outbox[0].Data, "Count: 1")
   })
-  it.only("should test faff", async () => {
+  it.skip("should test faff", async () => {
     const { pid } = await hb.spawn()
     assert(!isNil(pid))
+  })
+
+  it.only("should test simple pay", async () => {
+    await hb.send({
+      path: "/~simple-pay@1.0/topup",
+      amount: 10,
+      recipient: addr2,
+    })
+    const { pid } = await hb2.spawn()
+    const res = await hb2.send({ path: "/~simple-pay@1.0/balance" })
+    assert.equal(res.body, "6")
   })
 })
