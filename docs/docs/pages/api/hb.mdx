@@ -32,8 +32,10 @@ const device = "meta"
 const path = "info"
 const json = true
 const params = {}
+const pid = ""
+const tail = ""
 
-const path = hb.path(device, path, json, params) 
+const path = hb.path(device, path, json, params, pid, tail) 
 // /~meta@1.0/info/serialize~json@1.0
 ```
 
@@ -82,7 +84,7 @@ const { pid } = await hb.spawn({ ...tags })
 Equivalent to sending a message.
 
 ```js
-const { slot } = await hb.schedule({ tags, data, pid, action })
+const { slot } = await hb.schedule({ tags, data, pid })
 ```
 
 #### compute
@@ -124,8 +126,7 @@ const { pid } = await hb.spawnLegacy({ tags, data })
 Schedule a legacynet aos message.
 
 ```js
-const res = await hb.scheduleLegacy({ tags, data, pid, action })
-const { Messages, Spawns, Assignments, Output } = res
+const { slot } = await hb.scheduleLegacy({ tags, data, pid, action })
 ```
 
 ##### computeLegacy
@@ -144,6 +145,32 @@ const { Messages, Spawns, Assignments, Output } = res
 ```js
 const res = await hb.dryrun({ tags, data, pid, action })
 const { Messages, Spawns, Assignments, Output } = res
+```
+
+#### Hyper AOS
+
+AOS with Lua VM (`lua@5.3a`) instead of Wasm.
+
+##### spawnLua
+
+The AOS module is fetched from the Arweave mainnet.
+
+```js
+const { pid } = await hb.spanw("8DvyaxF8xpHMgPdmpMnhcb1mjY-M8qr2kGxnCpGMb60")
+```
+
+##### scheduleLua
+
+This is an alias of `scheduleLegacy`.
+
+```js
+const { slot } = await hb.scheduleLua({ tags, data, pid, action })
+```
+
+##### computeLua
+
+```js
+const { outbox, output } = await hb.computeLua({ slot, pid })
 ```
 
 #### Mainnet AOS
