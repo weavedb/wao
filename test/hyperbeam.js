@@ -18,8 +18,7 @@ end)
 
 Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = "Count: "..tostring(count) })
-end)
-`
+end)`
 
 const URL = "http://localhost:10001"
 
@@ -55,17 +54,11 @@ describe("Hyperbeam Legacynet", function () {
     const address = res
     assert.equal(address, hb._info.address)
     const { pid } = await hb.spawnLegacy()
-    const { slot } = await hb.scheduleLegacy({
-      pid,
-      data,
-    })
+    const { slot } = await hb.scheduleLegacy({ pid, data })
     const r = await hb.computeLegacy({ pid, slot })
     let i = 0
     while (i < 10) {
-      const { slot: slot2 } = await hb.scheduleLegacy({
-        pid,
-        action: "Inc",
-      })
+      const { slot: slot2 } = await hb.scheduleLegacy({ pid, action: "Inc" })
       const r3 = await hb.computeLegacy({ pid, slot: slot2 })
       assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
     }
@@ -118,7 +111,7 @@ describe("Hyperbeam Legacynet", function () {
   })
 
   it("should test test device", async () => {
-    const info = await hb.meta.info()
+    const info = await hb.dev.meta.info()
     assert.equal(info.address, toAddr(jwk.n))
     const { pid } = await hb.spawn({ "execution-device": "test-device@1.0" })
     const { slot } = await hb.schedule({ pid })
@@ -146,8 +139,40 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(res.headers.get("sum"), "5")
   })
 
-  it.only("should test mul@1.0", async () => {
+  it("should test mul@1.0", async () => {
     const res = await hb.send({ path: "/~mul@1.0/mul", a: 2, b: 3 })
     assert.equal(res.headers.get("product"), "6")
+  })
+
+  it.only("should test devices", async () => {
+    // meta@1.0
+    await hb.send({ path: "/~meta@1.0/info", abc: "def" })
+    assert.equal(await hb.text("meta", "/info/abc"), "def")
+
+    // process@1.0
+    const { pid } = await hb.spawn()
+    await hb.schedule({ pid })
+    const { slot } = await hb.schedule({ pid })
+    assert.equal(
+      (await hb.json(pid, "compute", { slot })).results["assignment-slot"],
+      2
+    )
+
+    // message@1.0
+    assert.equal(
+      await hb.text("message", null, { hello: "world" }, "/hello"),
+      "world"
+    )
+    console.log(await hb.text("message", null, { hello: "world" }, "/keys"))
+
+    // lua@5.3
+    const { pid: pid2 } = await hb.spawnLua(
+      "8DvyaxF8xpHMgPdmpMnhcb1mjY-M8qr2kGxnCpGMb60"
+    )
+    await hb.scheduleLua({ pid: pid2, action: "Eval", data })
+    await hb.scheduleLua({ pid: pid2, action: "Inc" })
+    const { slot: slot2 } = await hb.scheduleLua({ pid: pid2, action: "Get" })
+    const { outbox, output } = await hb.computeLua({ pid: pid2, slot: slot2 })
+    assert.equal(outbox[0].Data, "Count: 1")
   })
 })
