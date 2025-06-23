@@ -84,16 +84,25 @@ class HB {
 
   async getImage() {
     const wasm = readFileSync(
-      resolve(import.meta.dirname, "../HyperBEAM/test/aos-2-pure-xs.wasm")
+      resolve(import.meta.dirname, "./lua/aos2-wamr.wasm")
     )
     const id = await this.cacheModule(wasm, "application/wasm")
     this.image ??= id
     return id
   }
 
+  async getLegacy() {
+    const wasm = readFileSync(
+      resolve(import.meta.dirname, "./lua/aos2_0_6.wasm")
+    )
+    const id = await this.cacheModule(wasm, "application/wasm")
+    this.legacy ??= id
+    return id
+  }
+
   async getLua() {
     const lua = readFileSync(
-      resolve(import.meta.dirname, "../HyperBEAM/test/hyper-aos.lua")
+      resolve(import.meta.dirname, "./lua/hyper-aos.lua")
     )
     const id = await this.cacheModule(lua, "application/lua")
     this.lua ??= id
@@ -269,7 +278,7 @@ class HB {
     return { pid, res }
   }
 
-  async spawnLua(lua = "8DvyaxF8xpHMgPdmpMnhcb1mjY-M8qr2kGxnCpGMb60") {
+  async spawnLua(lua) {
     const addr = await this.dev.meta.info({ key: "address" })
     this.scheduler ??= addr
     lua ??= this.lua ?? (await this.getLua())
@@ -342,7 +351,7 @@ class HB {
     return res
   }
 
-  async spawnLegacy({ tags = {}, data } = {}) {
+  async spawnLegacy({ module, tags = {}, data } = {}) {
     tags = mergeLeft(tags, {
       data,
       Type: "Process",
@@ -352,27 +361,13 @@ class HB {
       Authority: this._info.address,
       "scheduler-location": this._info.address,
       "random-seed": seed(16),
-      module: "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
+      module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
       device: "process@1.0",
       "scheduler-device": "scheduler@1.0",
       "execution-device": "genesis-wasm@1.0",
     })
     return await this.spawn(tags)
   }
-
-  /*
-    async scheduleLegacy({ tags = {}, data, process, action = "Eval" } = {}) {
-    tags = mergeLeft(tags, {
-    path: `${process}/schedule`,
-    type: "Message",
-    action,
-    data,
-    "Data-Protocol": "ao",
-    Variant: "ao.N.1",
-    })
-    return (await this.post({ tags })).slot.text()
-    }
-  */
 
   async dryrun({ tags = {}, pid, action, data } = {}) {
     if (typeof action === "string") tags.Action = action

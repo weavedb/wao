@@ -27,21 +27,14 @@ const URL = "http://localhost:10001"
 describe("Hyperbeam Legacynet", function () {
   let hb, hb2, hbeam, jwk, server, addr, addr2
   before(async () => {
-    server = new Server({ port: 4000, log: true, hb_url: URL })
+    server = new Server({ port: 6359, log: true, hb_url: URL })
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
     hbeam = new HyperBEAM({
       c: "12",
       cmake: "3.5",
-      gateway: 4000,
-      legacy: true,
-      //faff: [addr],
-      //simplePay: true,
-      //simplePayPrice: 2,
-      //operator: addr,
     })
-
     await wait(5000)
   })
 
@@ -53,7 +46,7 @@ describe("Hyperbeam Legacynet", function () {
   after(async () => hbeam.kill())
 
   it("should interact with a hyperbeam node", async () => {
-    const { pid, res } = await hb.spawnLegacy()
+    const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
     const r = await hb.computeLegacy({ pid, slot })
     const { slot: slot2 } = await hb.scheduleLegacy({ pid, action: "Inc" })
@@ -180,30 +173,12 @@ describe("Hyperbeam Legacynet", function () {
     console.log(await hb.text("message", null, { hello: "world" }, "/keys"))
 
     // lua@5.3
-    const { pid: pid2 } = await hb.spawnLua(
-      "8DvyaxF8xpHMgPdmpMnhcb1mjY-M8qr2kGxnCpGMb60"
-    )
+    const { pid: pid2 } = await hb.spawnLua()
     await hb.scheduleLua({ pid: pid2, action: "Eval", data })
     await hb.scheduleLua({ pid: pid2, action: "Inc" })
     const { slot: slot2 } = await hb.scheduleLua({ pid: pid2, action: "Get" })
     const { outbox, output } = await hb.computeLua({ pid: pid2, slot: slot2 })
     assert.equal(outbox[0].Data, "Count: 1")
-  })
-
-  it.skip("should test faff", async () => {
-    const { pid } = await hb.spawn()
-    assert(!isNil(pid))
-  })
-
-  it("should test simple pay", async () => {
-    await hb.send({
-      path: "/~simple-pay@1.0/topup",
-      amount: 10,
-      recipient: addr2,
-    })
-    const { pid } = await hb2.spawn()
-    const res = await hb2.send({ path: "/~simple-pay@1.0/balance" })
-    assert.equal(res.body, "6")
   })
 
   it("should upload module", async () => {
