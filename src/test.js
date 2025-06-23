@@ -15,7 +15,7 @@ const blueprint = async pkg => {
   return readFileSync(resolve(await dirname(), `lua/${pkg}.lua`), "utf8")
 }
 const scheduler = "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
-const HyperBEAM = "./hyperbeam.js"
+import HyperBEAM from "./hyperbeam.js"
 
 export {
   toAddr,
