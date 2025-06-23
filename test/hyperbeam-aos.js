@@ -55,12 +55,10 @@ describe("HyperBEAM", function () {
   })
 
   it("should execute AOS with WAMR", async () => {
-    const result = await hb.send({
-      path: "/~wao@1.0/cache_wasm_image",
-      method: "POST",
-      filename: "test/aos-2-pure-xs.wasm",
-    })
-    const id = result.headers.get("image")
+    const wasm = readFileSync(
+      resolve(import.meta.dirname, "../HyperBEAM/test/aos-2-pure-xs.wasm")
+    )
+    const id = await hb.cacheModule(wasm)
     const pid = await hb.spawnAOS(id)
     await hb.messageAOS({ action: "Eval", tags: {}, data: src_data })
     await hb.messageAOS({ action: "Add", tags: { Plus: "3" } })
@@ -68,17 +66,18 @@ describe("HyperBEAM", function () {
   })
 
   it("should query meta device", async () => {
-    await hb.meta.info({ method: "post", abc: "def" })
-    const info = await hb.meta.info()
+    await hb.dev.meta.info({ method: "post", abc: "def" })
+    const info = await hb.dev.meta.info()
     assert.equal(info.abc, "def")
-    const build = await hb.meta.build()
+    const build = await hb.dev.meta.build()
     assert.equal(build.node, "HyperBEAM")
-    const metrics = await hb.hyperbuddy.metrics({})
+    const metrics = await hb.dev.hyperbuddy.metrics({})
   })
 
   it("should deserialize json", async () => {
     assert.equal(
-      (await hb.json.deserialize({ body: JSON.stringify({ a: 3 }) })).status,
+      (await hb.dev.json.deserialize({ body: JSON.stringify({ a: 3 }) }))
+        .status,
       200
     )
   })
@@ -99,7 +98,7 @@ describe("HyperBEAM", function () {
   })
 
   it.skip("should spawn module outside", async () => {
-    await hb.meta.info({ cache_writers: [addr], method: "POST" })
+    await hb.dev.meta.info({ cache_writers: [addr], method: "POST" })
     const binary = readFileSync(
       resolve(import.meta.dirname, "../HyperBEAM/test/aos-2-pure-xs.wasm")
     )
