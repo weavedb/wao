@@ -26,8 +26,6 @@ describe("Hyperbeam Legacynet", function () {
       store_prefix,
       c: "12",
       cmake: "3.5",
-      gateway: 4000,
-      legacy: true,
       operator: addr,
     })
 
@@ -41,7 +39,7 @@ describe("Hyperbeam Legacynet", function () {
 
   after(async () => hbeam.kill())
 
-  it.only("should handle payment with lua", async () => {
+  it("should handle payment with lua", async () => {
     const process = readFileSync(
       resolve(
         import.meta.dirname,
