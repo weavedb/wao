@@ -1,7 +1,9 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft } from "ramda"
 import { toAddr, buildTags } from "./utils.js"
-import { send as _send, verify, createRequest } from "./signer.js"
+import { send as _send, createRequest } from "./signer.js"
+import { resolve } from "path"
+import { readFileSync } from "fs"
 
 const seed = num => {
   const array = new Uint8Array(num)
@@ -81,23 +83,21 @@ class HB {
   }
 
   async getImage() {
-    const result = await this.send({
-      path: "/~wao@1.0/cache_wasm_image",
-      filename: "test/aos-2-pure-xs.wasm",
-    })
-    const image = result.headers.get("image")
-    this.image ??= image
-    return image
+    const wasm = readFileSync(
+      resolve(import.meta.dirname, "../HyperBEAM/test/aos-2-pure-xs.wasm")
+    )
+    const id = await this.cacheModule(wasm, "application/wasm")
+    this.image ??= id
+    return id
   }
 
   async getLua() {
-    const result = await this.send({
-      path: "/~wao@1.0/cache_lua_module",
-      filename: "test/hyper-aos.lua",
-    })
-    const lua = result.headers.get("id").split("/").pop()
-    this.lua ??= lua
-    return lua
+    const lua = readFileSync(
+      resolve(import.meta.dirname, "../HyperBEAM/test/hyper-aos.lua")
+    )
+    const id = await this.cacheModule(lua, "application/lua")
+    this.lua ??= id
+    return id
   }
 
   async messageAOS({ pid, action = "Eval", tags = {}, data }) {
@@ -194,7 +194,14 @@ class HB {
     )
     return { res, pid: res.headers.get("process") }
   }
-
+  async cacheModule(data, type) {
+    const res = await this.send({
+      path: "/~wao@1.0/cache_module",
+      data,
+      type,
+    })
+    return res.headers.get("id")
+  }
   async message(args) {
     const pid = args.pid
     const { slot } = await this.schedule(args)

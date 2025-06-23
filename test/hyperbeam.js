@@ -8,6 +8,8 @@ import { randomBytes } from "node:crypto"
 import { wait } from "../src/utils.js"
 import Server from "../src/server.js"
 import HyperBEAM from "../src/hyperbeam.js"
+import { readFileSync } from "fs"
+import { resolve } from "path"
 
 const data = `
 local count = 0
@@ -35,17 +37,19 @@ describe("Hyperbeam Legacynet", function () {
       gateway: 4000,
       legacy: true,
       //faff: [addr],
-      simplePay: true,
-      simplePayPrice: 2,
-      operator: addr,
+      //simplePay: true,
+      //simplePayPrice: 2,
+      //operator: addr,
     })
 
     await wait(5000)
   })
+
   beforeEach(async () => {
     hb = await new HB({}).init(jwk)
     hb2 = await new HB({}).init(acc[0].jwk)
   })
+
   after(async () => hbeam.kill())
 
   it("should interact with a hyperbeam node", async () => {
@@ -185,12 +189,13 @@ describe("Hyperbeam Legacynet", function () {
     const { outbox, output } = await hb.computeLua({ pid: pid2, slot: slot2 })
     assert.equal(outbox[0].Data, "Count: 1")
   })
+
   it.skip("should test faff", async () => {
     const { pid } = await hb.spawn()
     assert(!isNil(pid))
   })
 
-  it.only("should test simple pay", async () => {
+  it("should test simple pay", async () => {
     await hb.send({
       path: "/~simple-pay@1.0/topup",
       amount: 10,
@@ -199,5 +204,17 @@ describe("Hyperbeam Legacynet", function () {
     const { pid } = await hb2.spawn()
     const res = await hb2.send({ path: "/~simple-pay@1.0/balance" })
     assert.equal(res.body, "6")
+  })
+
+  it("should upload module", async () => {
+    const lua = readFileSync(
+      resolve(import.meta.dirname, "../HyperBEAM/test/hyper-aos.lua")
+    )
+    const { pid: pid2 } = await hb.spawnLua(await hb.cacheModule(lua))
+    await hb.scheduleLua({ pid: pid2, action: "Eval", data })
+    await hb.scheduleLua({ pid: pid2, action: "Inc" })
+    const { slot: slot2 } = await hb.scheduleLua({ pid: pid2, action: "Get" })
+    const { outbox, output } = await hb.computeLua({ pid: pid2, slot: slot2 })
+    assert.equal(outbox[0].Data, "Count: 1")
   })
 })
