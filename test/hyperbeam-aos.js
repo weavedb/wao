@@ -55,11 +55,7 @@ describe("HyperBEAM", function () {
   })
 
   it("should execute AOS with WAMR", async () => {
-    const wasm = readFileSync(
-      resolve(import.meta.dirname, "../HyperBEAM/test/aos-2-pure-xs.wasm")
-    )
-    const id = await hb.cacheModule(wasm)
-    const pid = await hb.spawnAOS(id)
+    const pid = await hb.spawnAOS()
     await hb.messageAOS({ action: "Eval", tags: {}, data: src_data })
     await hb.messageAOS({ action: "Add", tags: { Plus: "3" } })
     assert.equal((await hb.messageAOS({ action: "Get" })).outbox["1"].data, "3")
@@ -80,37 +76,5 @@ describe("HyperBEAM", function () {
         .status,
       200
     )
-  })
-
-  it.skip("should spawn module outside", async () => {
-    const binary = readFileSync(
-      resolve(import.meta.dirname, "../HyperBEAM/test/aos-2-pure-xs.wasm")
-    )
-    const { pid } = await hb.spawn({})
-    const { slot, res } = await hb.message({
-      data: Buffer.from(binary).toString("base64"),
-    })
-    const msgs = await hb.messages({ pid, from: 1, limit: 10 })
-    const image = msgs.edges[0].node.message.Id
-    const pid2 = await hb.spawnAOS(image)
-    hb.pid = pid2
-    await hb.messageAOS({ action: "Eval", tags: {}, data: src_data })
-  })
-
-  it.skip("should spawn module outside", async () => {
-    await hb.dev.meta.info({ cache_writers: [addr], method: "POST" })
-    const binary = readFileSync(
-      resolve(import.meta.dirname, "../HyperBEAM/test/aos-2-pure-xs.wasm")
-    )
-    const res = await hb.send({
-      path: "/~cache@1.0/write",
-      body: binary,
-      "content-type": "application/wasm",
-    })
-    const image = res.headers.get("path").split("/").pop()
-    const pid = await hb.spawnAOS(image)
-    await hb.messageAOS({ action: "Eval", tags: {}, data: src_data })
-    await hb.messageAOS("Add", { Plus: "3" })
-    assert.equal((await hb.messageAOS({ action: "Get" })).outbox["1"].data, "3")
   })
 })

@@ -5,6 +5,8 @@ import { readFileSync } from "fs"
 export default class HyperBEAM {
   constructor({
     port = 10001,
+    cu = 6363,
+    bundler,
     gateway,
     wallet,
     cwd = "./HyperBEAM",
@@ -18,6 +20,7 @@ export default class HyperBEAM {
     store_prefix,
     operator,
   } = {}) {
+    this.cu = cu
     this.store_prefix =
       store_prefix ?? "cache-mainnet-" + Math.floor(Math.random() * 10000000)
     this.p4_lua = p4_lua
@@ -28,9 +31,10 @@ export default class HyperBEAM {
     this.c = c
     this.cmake = cmake
     this.port = port
+    this.bundler = bundler
     this.hbeam = spawn(
       "rebar3",
-      ["shell", "--eval", this.genEval({ gateway, wallet, legacy })],
+      ["shell", "--eval", this.genEval({ gateway, wallet })],
       {
         env: { ...process.env, ...this.genEnv() },
         cwd: resolve(process.cwd(), cwd),
@@ -46,6 +50,7 @@ export default class HyperBEAM {
     )
     return this.hbeam
   }
+
   genEnv() {
     let _env = {}
     if (this.c) {
@@ -55,14 +60,19 @@ export default class HyperBEAM {
     if (this.cmake) _env.CMAKE_POLICY_VERSION_MINIMUM = this.cmake
     return _env
   }
-  genEval({ gateway, wallet = ".wallet.json", legacy = false }) {
+
+  genEval({ gateway, wallet = ".wallet.json" }) {
     const _wallet = `, priv_key_location => <<"${wallet}">>`
     const _gateway = gateway
       ? `, gateway => <<"http://localhost:${gateway}">>`
       : ""
-    const _store = `, store => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }, #{ <<"store-module">> => hb_store_gateway, <<"subindex">> => [#{ <<"name">> => <<"Data-Protocol">>, <<"value">> => <<"ao">> }], <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }] }, #{ <<"store-module">> => hb_store_gateway, <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }] }]`
-    const _bundler = `, bundler_httpsig => <<"http://localhost:4001">>`
-    const _routes = `, routes => [#{ <<"template">> => <<"/result/.*">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:6363">> } }, #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [#{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => httpc, protocol => http2 } }, #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }] }, #{ <<"template">> => <<"/raw">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } } }]`
+    const _store = this.store_prefix
+      ? `, store => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }, #{ <<"store-module">> => hb_store_gateway, <<"subindex">> => [#{ <<"name">> => <<"Data-Protocol">>, <<"value">> => <<"ao">> }], <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }] }, #{ <<"store-module">> => hb_store_gateway, <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }] }]`
+      : ""
+    const _bundler = this.bundler
+      ? `, bundler_httpsig => <<"http://localhost:${this.bundler}">>`
+      : ""
+    const _routes = `, routes => [#{ <<"template">> => <<"/result/.*">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${this.cu}">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:${this.cu}\">> } }, #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [#{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => httpc, protocol => http2 } }, #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }] }, #{ <<"template">> => <<"/raw">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } } }]`
 
     const _p4_non_chargable = this.p4_lua
       ? `, p4_non_chargable_routes => [#{ <<"template">> => <<"/*~node-process@1.0/*">> }, #{ <<"template">> => <<"/~wao@1.0/*">> }, #{ <<"template">> => <<"/~p4@1.0/balance">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }]`
@@ -92,9 +102,7 @@ export default class HyperBEAM {
         : !isNil(this.faff)
           ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
           : ""
-    const start = !legacy
-      ? `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store}${_on} }).`
-      : `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store}${_faff}${_bundler}${_routes}${_on}${_p4_non_chargable}${_operator}${_spp}${_node_processes} }).`
+    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store}${_faff}${_bundler}${_routes}${_on}${_p4_non_chargable}${_operator}${_spp}${_node_processes} }).`
     return start
   }
 

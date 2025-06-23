@@ -115,7 +115,13 @@ describe("Hyperbeam Legacynet", function () {
   })
 
   after(async () => hbeam.kill())
-  it.only("should parse nested header values", async () => {
+  it.only("should generate valid signatures", async () => {
+    const { pid } = await hb.spawn()
+    const { slot } = await hb.schedule({ pid })
+    const { results } = await hb.compute({ pid, slot })
+    assert.deepEqual(results, { "assignment-slot": 1 })
+  })
+  it("should parse nested header values", async () => {
     const keys = {
       path: "/~wao@1.0/httpsig_to_json",
       body: { a: { b: 5, c: 3 } },
@@ -136,9 +142,5 @@ describe("Hyperbeam Legacynet", function () {
     assert.deepEqual(list, keys.list)
     assert.deepEqual(str, keys.str)
     assert.deepEqual(path, "httpsig_to_json")
-    const { pid } = await hb.spawn()
-    const { slot } = await hb.schedule({ pid })
-    const { results } = await hb.compute({ pid, slot })
-    assert.deepEqual(results, { "assignment-slot": 1 })
   })
 })
