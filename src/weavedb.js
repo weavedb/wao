@@ -62,7 +62,7 @@ function frombits(bitArray) {
 let init = {}
 export default class WeaveDB {
   constructor(ar, dir) {
-    dir ??= resolve(import.meta.dirname, ".db")
+    dir ??= resolve(process.cwd(), ".db")
     const kv_dir = resolve(dir, rand)
     const data_dir = resolve(kv_dir, "data")
     const rollup_dir = resolve(kv_dir, "rollup")
