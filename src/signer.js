@@ -611,9 +611,11 @@ export async function send(signedMsg, fetchImpl = fetch) {
   if (response.status >= 400) {
     throw new Error(`${response.status}: ${await response.text()}`)
   }
-
+  let headers = {}
+  response.headers.forEach((v, k) => (headers[k] = v))
   return {
-    headers: response.headers,
+    response,
+    headers,
     body: await response.text(),
     status: response.status,
   }
