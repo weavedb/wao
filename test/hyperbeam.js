@@ -58,8 +58,8 @@ describe("Hyperbeam Legacynet", function () {
   })
 
   it("should get messages and recover them", async () => {
-    const res = await hb.get({ path: "~meta@1.0/info/address" })
-    const address = res
+    const address = (await hb.get({ path: "/~meta@1.0/info/address" })).body
+
     assert.equal(address, hb._info.address)
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
@@ -100,8 +100,8 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
   })
 
-  it("should deploy a process", async () => {
-    const address = await hb.get({ path: "~meta@1.0/info/address" })
+  it.only("should deploy a process", async () => {
+    const address = (await hb.get({ path: "/~meta@1.0/info/address" })).body
     assert.equal(address, hb._info.address)
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
@@ -137,24 +137,24 @@ describe("Hyperbeam Legacynet", function () {
   })
 
   it("should query test-device@1.0", async () => {
-    const res = await hb.send({ path: "/~meta@1.0/info", configA: "valA" })
+    const res = await hb.post({ path: "/~meta@1.0/info", configA: "valA" })
     const configA = await hb.text("meta", "info/configA")
     assert.equal(configA, "valA")
   })
 
   it("should test add@1.0", async () => {
-    const res = await hb.send({ path: "/~add@1.0/add", a: 2, b: 3 })
-    assert.equal(res.headers.get("sum"), "5")
+    const res = await hb.post({ path: "/~add@1.0/add", a: 2, b: 3 })
+    assert.equal(res.headers.sum, "5")
   })
 
   it("should test mul@1.0", async () => {
-    const res = await hb.send({ path: "/~mul@1.0/mul", a: 2, b: 3 })
-    assert.equal(res.headers.get("product"), "6")
+    const res = await hb.post({ path: "/~mul@1.0/mul", a: 2, b: 3 })
+    assert.equal(res.headers.product, "6")
   })
 
   it("should test devices", async () => {
     // meta@1.0
-    await hb.send({ path: "/~meta@1.0/info", abc: "def" })
+    await hb.post({ path: "/~meta@1.0/info", abc: "def" })
     assert.equal(await hb.text("meta", "/info/abc"), "def")
 
     // process@1.0
