@@ -35,7 +35,7 @@ describe("Hyperbeam Legacynet", function () {
   after(async () => hbeam.kill())
 
   it("should test meta@1.0", async () => {
-    const info = await hb.dev.meta.info()
+    const info = await hb.json("meta", "info")
     assert.deepEqual(
       pick(["initialized", "port", "operator", "gateway", "address"])(info),
       {
@@ -46,21 +46,31 @@ describe("Hyperbeam Legacynet", function () {
         gateway: "http://localhost:6359",
       }
     )
-    await hb.dev.meta.info({
-      method: "POST",
+    await hb.post({
+      path: "/~meta@1.0/info",
       test_config: 123,
       initialized: "permanent",
     })
-    const info2 = await hb.dev.meta.info()
+    const info2 = await hb.json("meta", "info")
+
     assert.deepEqual(info2.test_config, 123)
     try {
       // this should faild due to "initialized=permanent"
-      await hb.dev.meta.info({ method: "POST", test_config: 124 })
+      await hb.post({ path: "/~meta@1.0/info", test_config: 124 })
     } catch (e) {}
-    const info3 = await hb.dev.meta.info()
+    const info3 = await hb.json("meta", "info")
     assert.deepEqual(info3.test_config, 123)
 
-    const build = await hb.dev.meta.build()
+    const build = await hb.json("meta", "build")
     assert.equal(build.node, "HyperBEAM")
+
+    assert.equal(
+      (
+        await hb
+          .get({ path: "/~meta@1.0/info/~json@1.0/serialize" })
+          .then(r => r.json())
+      ).port,
+      10001
+    )
   })
 })
