@@ -1615,7 +1615,7 @@ const path = hb.path({ device, path, pid, json, params tail })
 Request without a signature.
 
 ```js
-const result = await hb.fetch(url, json)
+const result = await hb.fetch(path, json)
 ```
 
 #### text
@@ -1623,7 +1623,7 @@ const result = await hb.fetch(url, json)
 Request a text response without a signature.
 
 ```js
-const result = await hb.text(device, path)
+const result = await hb.text(device, path, params, tail)
 ```
 
 #### json
@@ -1631,7 +1631,7 @@ const result = await hb.text(device, path)
 Request a json response without a signature.
 
 ```js
-const result = await hb.json(device, path)
+const result = await hb.json(device, path, params, tail)
 ```
 
 #### get

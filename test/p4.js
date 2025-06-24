@@ -65,7 +65,7 @@ describe("Hyperbeam Legacynet", function () {
     const hb3 = await new HB({ url: `http://localhost:10004` }).init(jwk)
     const hb4 = await new HB({ url: `http://localhost:10004` }).init(acc[0].jwk)
 
-    await hb3.send({ path: "/~wao@1.0/topup", recipient: addr2 })
+    await hb3.post({ path: "/~wao@1.0/topup", recipient: addr2 })
     const balance = (
       await fetch(
         `http://localhost:10004/~wao@1.0/balance?target=${addr2}`
