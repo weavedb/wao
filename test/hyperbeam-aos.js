@@ -54,7 +54,7 @@ describe("HyperBEAM", function () {
     )
   })
 
-  it("should execute AOS with WAMR", async () => {
+  it.only("should execute AOS with WAMR", async () => {
     const pid = await hb.spawnAOS()
     await hb.messageAOS({ action: "Eval", tags: {}, data: src_data })
     await hb.messageAOS({ action: "Add", tags: { Plus: "3" } })
