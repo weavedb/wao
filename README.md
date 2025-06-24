@@ -1764,7 +1764,7 @@ const result = await hb.messageAOS({ pid, action, tags, data })
 ```js
 const result = await hb.computeAOS({ pid, slot })
 ```
-
+o
 #### Devices
 
 Each device has its own API based on the paths.

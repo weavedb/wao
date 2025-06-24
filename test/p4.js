@@ -23,12 +23,13 @@ describe("Hyperbeam Legacynet", function () {
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
     hbeam = new HyperBEAM({
+      clearCache: true,
       store_prefix,
+      gateway: 6359,
       c: "12",
       cmake: "3.5",
       operator: addr,
     })
-
     await wait(5000)
   })
 
@@ -55,15 +56,15 @@ describe("Hyperbeam Legacynet", function () {
       store_prefix,
       c: "12",
       cmake: "3.5",
+      gateway: 6359,
       port: 10004,
-      gateway: 4000,
-      legacy: true,
       operator: addr,
       p4_lua: { processor: pid, client: cid },
     })
     await wait(5000)
     const hb3 = await new HB({ url: `http://localhost:10004` }).init(jwk)
     const hb4 = await new HB({ url: `http://localhost:10004` }).init(acc[0].jwk)
+
     await hb3.send({ path: "/~wao@1.0/topup", recipient: addr2 })
     const balance = (
       await fetch(
@@ -71,7 +72,6 @@ describe("Hyperbeam Legacynet", function () {
       ).then(r => r.json())
     ).balance
     assert.equal(balance, 100)
-
     const { pid: pid2 } = await hb4.spawn()
     const balance2 = (
       await fetch(
