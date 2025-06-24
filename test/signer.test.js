@@ -91,7 +91,7 @@ end)`
 
 const URL = "http://localhost:10001"
 
-describe("Hyperbeam Legacynet", function () {
+describe("Hyperbeam Signer", function () {
   let hb, hb2, hbeam, jwk, server, addr, store_prefix
   before(async () => {
     store_prefix = "cache-mainnet-" + Math.floor(Math.random() * 10000000)
@@ -131,10 +131,9 @@ describe("Hyperbeam Legacynet", function () {
       list: [1, 2, 3],
       str: "Hello",
     }
-    const msg = await hb._request2(keys)
-    const { path, body, data, key, num, list, str } = JSON.parse(
-      (await _send(msg)).body
-    )
+    const msg = await hb.sign(keys)
+    const res = await hb.send(msg)
+    const { path, body, data, key, num, list, str } = JSON.parse(res.body)
     assert.deepEqual(body, keys.body)
     assert.deepEqual(data, keys.data)
     assert.deepEqual(key, keys.key)
@@ -143,13 +142,21 @@ describe("Hyperbeam Legacynet", function () {
     assert.deepEqual(str, keys.str)
     assert.deepEqual(path, "httpsig_to_json")
   })
-  it.only("should sign body", async () => {
+  it("should sign body", async () => {
     const keys = {
       path: "/~wao@1.0/httpsig_to_json",
-      body: { a: 3, b: 2 },
+      data: { a: 3, b: 4 },
     }
-    const msg = await hb._request2(keys)
-    const { body } = JSON.parse((await _send(msg)).body)
-    assert.deepEqual(body, keys.body)
+    const msg = await hb.sign(keys)
+    const { data } = JSON.parse((await hb.send(msg)).body)
+    assert.deepEqual(data, keys.data)
+
+    const keys2 = {
+      path: "/~wao@1.0/httpsig_to_json",
+      body: { a: { c: 3 }, b: 4 },
+    }
+    const msg2 = await hb.sign(keys2)
+    const { body } = JSON.parse((await hb.send(msg2)).body)
+    assert.deepEqual(body, keys2.body)
   })
 })

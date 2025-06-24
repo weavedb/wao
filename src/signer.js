@@ -143,6 +143,9 @@ function hbEncodeLift(obj, parent = "", top = {}) {
         )
       }
 
+      // Store the original value for reference
+      const originalValue = value
+
       // first/second lift object - handle nested objects
       if (isPojo(value)) {
         // Check if this object has any nested objects or arrays with objects
@@ -163,6 +166,7 @@ function hbEncodeLift(obj, parent = "", top = {}) {
             } else if (typeof v === "number") {
               items.push(`${subKey}=${v}`)
               if (Number.isInteger(v)) {
+                // Use URL-encoded forward slash separator
                 acc[1][`${key.toLowerCase()}%2f${subKey}`] = "integer"
               } else {
                 acc[1][`${key.toLowerCase()}%2f${subKey}`] = "float"
@@ -186,11 +190,14 @@ function hbEncodeLift(obj, parent = "", top = {}) {
             }
           })
 
-          acc[0][key] = items.join(", ")
+          const encodedValue = items.join(", ")
+          acc[0][key] = encodedValue
           acc[1][key.toLowerCase()] = "map"
         } else {
           // Has nested objects - needs multipart encoding
           hbEncodeLift(value, storageKey, top)
+          // Add the original object to flattened so it can be processed
+          acc[0][key] = value
         }
 
         return acc
@@ -199,8 +206,14 @@ function hbEncodeLift(obj, parent = "", top = {}) {
       // leaf encode value
       const [type, encoded] = hbEncodeValue(value)
       if (encoded !== undefined) {
-        if (Buffer.from(String(encoded)).byteLength > MAX_HEADER_LENGTH) {
-          top[storageKey] = String(encoded)
+        // For binary data, check the byte length directly without converting to string
+        const byteLength = isBytes(encoded)
+          ? encoded.byteLength
+          : Buffer.from(String(encoded)).byteLength
+
+        if (byteLength > MAX_HEADER_LENGTH) {
+          // Store large values, but preserve binary data as-is
+          top[storageKey] = isBytes(encoded) ? encoded : String(encoded)
         } else {
           // Preserve the original key casing
           const httpKey = key
@@ -225,12 +238,14 @@ function hbEncodeLift(obj, parent = "", top = {}) {
   if (Object.keys(types).length > 0) {
     // Format as structured fields dictionary
     const aoTypeItems = Object.entries(types).map(([key, value]) => {
+      // The Erlang side expects keys with %2f for forward slashes
       const safeKey = key
         .toLowerCase()
         .replace(
-          /[^a-z0-9_-]/g,
+          /[^a-z0-9_\-.*\/]/g,
           c => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")
         )
+        .replace(/\//g, "%2f") // Replace forward slashes AFTER other encoding
       return `${safeKey}="${value}"`
     })
     aoTypeItems.sort()
@@ -298,11 +313,22 @@ async function encode(obj = {}) {
       }
 
       // Check if this should be a body field
+      if (isBytes(value)) {
+        // Binary data should always go to body
+        bodyKeys.push(key)
+        flattened[key] = new Blob([
+          `content-disposition: form-data;name="${key}"\r\n\r\n`,
+          new Uint8Array(value.buffer || value),
+        ])
+        return
+      }
+
       const valueStr = String(value)
       if (
         (await hasNewline(valueStr)) ||
         key.includes("/") ||
-        Buffer.from(valueStr).byteLength > MAX_HEADER_LENGTH
+        Buffer.from(valueStr).byteLength > MAX_HEADER_LENGTH ||
+        (isPojo(value) && valueStr === "[object Object]") // Catch unencoded objects
       ) {
         bodyKeys.push(key)
         flattened[key] = new Blob([
@@ -335,6 +361,7 @@ async function encode(obj = {}) {
   }
 
   let body = undefined
+  let promoteToBody = true
   if (bodyKeys.length > 0) {
     if (bodyKeys.length === 1) {
       // If there is only one element, promote it to be the full body
@@ -342,24 +369,29 @@ async function encode(obj = {}) {
       const originalValue = originalObj[bodyKey]
       const flattenedValue = flattened[bodyKey]
 
-      // Special handling only for body field with plain objects
-      if (bodyKey === "body" && isPojo(originalValue)) {
-        // Check if it was encoded as a structured field
+      // Only promote if it's not a complex object
+      if (
+        !isPojo(originalValue) ||
+        (isPojo(originalValue) && typeof flattenedValue === "string")
+      ) {
+        // For objects that were encoded as structured fields, use the encoded value
         if (
-          headers["ao-types"]?.includes('body="map"') &&
+          (bodyKey === "body" || bodyKey === "data") &&
+          isPojo(originalValue) &&
           typeof flattenedValue === "string"
         ) {
           body = new Blob([flattenedValue])
         } else {
-          // Object but not encoded as structured field - use original
-          body = new Blob([originalValue])
+          body = new Blob([originalValue || flattenedValue])
         }
+        headers["inline-body-key"] = bodyKey
       } else {
-        // For data field and all non-object values, always use original
-        body = new Blob([originalValue || flattenedValue])
+        // Complex object - don't promote, create multipart
+        promoteToBody = false
       }
-      headers["inline-body-key"] = bodyKey
-    } else {
+    }
+
+    if (!promoteToBody || bodyKeys.length > 1) {
       // Multiple body fields - create multipart
       const bodyParts = await Promise.all(
         bodyKeys.map(async name => {
@@ -369,6 +401,20 @@ async function encode(obj = {}) {
           }
           // For raw values, we need to create a proper multipart part
           const value = originalObj[name] || flattened[name] || ""
+
+          // Special case: if this is a structured field encoded value, use the flattened value
+          if (
+            name === "body" &&
+            isPojo(originalObj[name]) &&
+            typeof flattened[name] === "string"
+          ) {
+            const partBlob = new Blob([
+              `content-disposition: form-data;name="${name}"\r\n\r\n`,
+              flattened[name],
+            ])
+            return partBlob
+          }
+
           const partBlob = new Blob([
             `content-disposition: form-data;name="${name}"\r\n\r\n`,
             value,
@@ -611,6 +657,7 @@ export async function send(signedMsg, fetchImpl = fetch) {
   if (response.status >= 400) {
     throw new Error(`${response.status}: ${await response.text()}`)
   }
+
   let headers = {}
   response.headers.forEach((v, k) => (headers[k] = v))
   return {
