@@ -708,7 +708,7 @@ function extractSignatureName(headers) {
  * @param {string} [signatureName] - Optional signature name to look for
  * @returns {Buffer|null} Public key buffer or null
  */
-function extractPublicKeyFromHeaders(headers, signatureName) {
+export function extractPublicKeyFromHeaders(headers, signatureName) {
   const signatureInput =
     headers["signature-input"] || headers["Signature-Input"]
   if (!signatureInput) return null
