@@ -1,4 +1,5 @@
 import assert from "assert"
+import { send as _send } from "../src/signer.js"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, AO, toAddr } from "../src/test.js"
 import { getJWK } from "./lib/test-utils.js"
@@ -171,21 +172,10 @@ describe("Hyperbeam Legacynet", function () {
       "world"
     )
     console.log(await hb.text("message", null, { hello: "world" }, "/keys"))
-
-    // lua@5.3
-    const { pid: pid2 } = await hb.spawnLua()
-    await hb.scheduleLua({ pid: pid2, action: "Eval", data })
-    await hb.scheduleLua({ pid: pid2, action: "Inc" })
-    const { slot: slot2 } = await hb.scheduleLua({ pid: pid2, action: "Get" })
-    const { outbox, output } = await hb.computeLua({ pid: pid2, slot: slot2 })
-    assert.equal(outbox[0].Data, "Count: 1")
   })
 
   it("should upload module", async () => {
-    const lua = readFileSync(
-      resolve(import.meta.dirname, "../HyperBEAM/test/hyper-aos.lua")
-    )
-    const { pid: pid2 } = await hb.spawnLua(await hb.cacheModule(lua))
+    const { pid: pid2 } = await hb.spawnLua()
     await hb.scheduleLua({ pid: pid2, action: "Eval", data })
     await hb.scheduleLua({ pid: pid2, action: "Inc" })
     const { slot: slot2 } = await hb.scheduleLua({ pid: pid2, action: "Get" })

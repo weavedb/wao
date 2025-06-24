@@ -1,7 +1,8 @@
 import { spawn } from "child_process"
 import { resolve } from "path"
 import { isNil, map } from "ramda"
-import { readFileSync } from "fs"
+import { rmSync, readFileSync, readdirSync } from "fs"
+
 export default class HyperBEAM {
   constructor({
     port = 10001,
@@ -9,6 +10,7 @@ export default class HyperBEAM {
     bundler,
     gateway,
     wallet,
+    clearCache,
     cwd = "./HyperBEAM",
     c,
     cmake,
@@ -20,9 +22,22 @@ export default class HyperBEAM {
     store_prefix,
     operator,
   } = {}) {
+    if (clearCache) {
+      const dirname = resolve(process.cwd(), cwd)
+      for (let v of readdirSync(dirname)) {
+        if (/^cache-/.test(v)) {
+          try {
+            rmSync(resolve(dirname, v), { recursive: true, force: true })
+          } catch (e) {
+            console.log(e)
+          }
+        }
+      }
+    }
     this.cu = cu
-    this.store_prefix =
-      store_prefix ?? "cache-mainnet-" + Math.floor(Math.random() * 10000000)
+    this.store_prefix = store_prefix
+      ? "cache-mainnet-" + Math.floor(Math.random() * 10000000)
+      : "cache-mainnet"
     this.p4_lua = p4_lua
     this.simplePay = simplePay
     this.spp = simplePayPrice
@@ -66,6 +81,8 @@ export default class HyperBEAM {
     const _gateway = gateway
       ? `, gateway => <<"http://localhost:${gateway}">>`
       : ""
+
+    // store option will be overwritten by hb.erl
     const _store = this.store_prefix
       ? `, store => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }, #{ <<"store-module">> => hb_store_gateway, <<"subindex">> => [#{ <<"name">> => <<"Data-Protocol">>, <<"value">> => <<"ao">> }], <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }] }, #{ <<"store-module">> => hb_store_gateway, <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }] }]`
       : ""
@@ -102,7 +119,7 @@ export default class HyperBEAM {
         : !isNil(this.faff)
           ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
           : ""
-    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_store}${_faff}${_bundler}${_routes}${_on}${_p4_non_chargable}${_operator}${_spp}${_node_processes} }).`
+    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_routes}${_on}${_p4_non_chargable}${_operator}${_spp}${_node_processes}}).`
     return start
   }
 
