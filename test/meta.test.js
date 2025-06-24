@@ -10,7 +10,7 @@ import HyperBEAM from "../src/hyperbeam.js"
 
 const URL = "http://localhost:10001"
 
-describe("Hyperbeam Legacynet", function () {
+describe("Hyperbeam Device", function () {
   let hb, hb2, hbeam, jwk, server, addr, addr2
   before(async () => {
     server = new Server({ port: 6359, log: true, hb_url: URL })
