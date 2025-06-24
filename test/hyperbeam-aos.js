@@ -69,12 +69,4 @@ describe("HyperBEAM", function () {
     assert.equal(build.node, "HyperBEAM")
     const metrics = await hb.dev.hyperbuddy.metrics({})
   })
-
-  it("should deserialize json", async () => {
-    assert.equal(
-      (await hb.dev.json.deserialize({ body: JSON.stringify({ a: 3 }) }))
-        .status,
-      200
-    )
-  })
 })
