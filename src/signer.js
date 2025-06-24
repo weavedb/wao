@@ -101,6 +101,12 @@ function hbEncodeValue(value) {
           // Escape quotes and backslashes
           const escaped = v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
           return `"${escaped}"`
+        } else if (typeof v === "number") {
+          // Numbers should be encoded as bare items, not strings
+          return String(v)
+        } else if (typeof v === "boolean") {
+          // Booleans as structured field tokens
+          return v ? "?1" : "?0"
         }
         return `"${String(v)}"`
       })
@@ -137,9 +143,56 @@ function hbEncodeLift(obj, parent = "", top = {}) {
         )
       }
 
-      // first/second lift object
+      // first/second lift object - handle nested objects
       if (isPojo(value)) {
-        hbEncodeLift(value, storageKey, top)
+        // Check if this object has any nested objects or arrays with objects
+        const hasComplexValues = Object.values(value).some(
+          v => isPojo(v) || (Array.isArray(v) && v.some(item => isPojo(item)))
+        )
+
+        if (!hasComplexValues) {
+          // Simple flat object - can be encoded as structured field dictionary
+          const items = []
+
+          Object.entries(value).forEach(([k, v]) => {
+            const subKey = k.toLowerCase()
+
+            if (typeof v === "string") {
+              const escaped = v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+              items.push(`${subKey}="${escaped}"`)
+            } else if (typeof v === "number") {
+              items.push(`${subKey}=${v}`)
+              if (Number.isInteger(v)) {
+                acc[1][`${key.toLowerCase()}%2f${subKey}`] = "integer"
+              } else {
+                acc[1][`${key.toLowerCase()}%2f${subKey}`] = "float"
+              }
+            } else if (typeof v === "boolean") {
+              items.push(`${subKey}=${v ? "?1" : "?0"}`)
+            } else if (Array.isArray(v) && !v.some(item => isPojo(item))) {
+              // Simple array (no objects) - encode as structured field inner list
+              const listItems = v.map(item => {
+                if (typeof item === "string") {
+                  return `"${item.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+                } else if (typeof item === "number") {
+                  return String(item)
+                } else if (typeof item === "boolean") {
+                  return item ? "?1" : "?0"
+                } else {
+                  return `"${String(item)}"`
+                }
+              })
+              items.push(`${subKey}=(${listItems.join(" ")})`)
+            }
+          })
+
+          acc[0][key] = items.join(", ")
+          acc[1][key.toLowerCase()] = "map"
+        } else {
+          // Has nested objects - needs multipart encoding
+          hbEncodeLift(value, storageKey, top)
+        }
+
         return acc
       }
 
@@ -200,8 +253,14 @@ function hbEncodeLift(obj, parent = "", top = {}) {
   return top
 }
 
-function encodePart(name, { headers, body }) {
-  const parts = Object.entries(Object.fromEntries(headers)).reduce(
+function encodePart(name, { headers = {}, body }) {
+  // Convert headers to a plain object if it's a Headers instance
+  const headerEntries =
+    headers instanceof Headers
+      ? Array.from(headers.entries())
+      : Object.entries(headers || {})
+
+  const parts = headerEntries.reduce(
     (acc, [name, value]) => {
       acc.push(`${name}: `, value, "\r\n")
       return acc
@@ -215,7 +274,7 @@ function encodePart(name, { headers, body }) {
 }
 
 async function encode(obj = {}) {
-  if (Object.keys(obj).length === 0) return
+  if (Object.keys(obj).length === 0) return { headers: {}, body: undefined }
 
   // Keep reference to original object for data field
   const originalObj = obj
@@ -280,33 +339,60 @@ async function encode(obj = {}) {
     if (bodyKeys.length === 1) {
       // If there is only one element, promote it to be the full body
       const bodyKey = bodyKeys[0]
-      body = new Blob([originalObj[bodyKey] || flattened[bodyKey]])
+      const originalValue = originalObj[bodyKey]
+      const flattenedValue = flattened[bodyKey]
+
+      // Special handling only for body field with plain objects
+      if (bodyKey === "body" && isPojo(originalValue)) {
+        // Check if it was encoded as a structured field
+        if (
+          headers["ao-types"]?.includes('body="map"') &&
+          typeof flattenedValue === "string"
+        ) {
+          body = new Blob([flattenedValue])
+        } else {
+          // Object but not encoded as structured field - use original
+          body = new Blob([originalValue])
+        }
+      } else {
+        // For data field and all non-object values, always use original
+        body = new Blob([originalValue || flattenedValue])
+      }
       headers["inline-body-key"] = bodyKey
     } else {
       // Multiple body fields - create multipart
       const bodyParts = await Promise.all(
-        bodyKeys.map(name => {
+        bodyKeys.map(async name => {
           if (flattened[name] instanceof Blob) {
-            return flattened[name].arrayBuffer()
+            // The blob already has the content-disposition header
+            return flattened[name]
           }
-          // For raw values, create a blob
-          return new Blob([originalObj[name] || ""]).arrayBuffer()
+          // For raw values, we need to create a proper multipart part
+          const value = originalObj[name] || flattened[name] || ""
+          const partBlob = new Blob([
+            `content-disposition: form-data;name="${name}"\r\n\r\n`,
+            value,
+          ])
+          return partBlob
         })
       )
 
-      const base = new Blob(
-        bodyParts.flatMap((p, i, arr) =>
-          i < arr.length - 1 ? [p, "\r\n"] : [p]
-        )
-      )
-      const hash = await sha256(await base.arrayBuffer())
+      // Calculate boundary from the content
+      const allPartsBuffer = await new Blob(bodyParts).arrayBuffer()
+      const hash = await sha256(allPartsBuffer)
       const boundary = base64url.encode(Buffer.from(hash))
 
-      const blobParts = bodyParts.flatMap(p => [`--${boundary}\r\n`, p, "\r\n"])
-      blobParts.push(`--${boundary}--`)
+      // Build the multipart body with proper boundaries
+      const finalParts = []
+      for (const part of bodyParts) {
+        finalParts.push(`--${boundary}\r\n`)
+        finalParts.push(part)
+        finalParts.push("\r\n")
+      }
+      finalParts.push(`--${boundary}--`)
 
       headers["content-type"] = `multipart/form-data; boundary="${boundary}"`
-      body = new Blob(blobParts)
+      body = new Blob(finalParts)
     }
 
     if (body) {

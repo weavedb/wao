@@ -91,15 +91,6 @@ class HB {
     return id
   }
 
-  async getLegacy() {
-    const wasm = readFileSync(
-      resolve(import.meta.dirname, "./lua/aos2_0_6.wasm")
-    )
-    const id = await this.cacheModule(wasm, "application/wasm")
-    this.legacy ??= id
-    return id
-  }
-
   async getLua() {
     const lua = readFileSync(
       resolve(import.meta.dirname, "./lua/hyper-aos.lua")
@@ -203,6 +194,20 @@ class HB {
     )
     return { res, pid: res.headers.get("process") }
   }
+  async cacheModule2(data, type) {
+    if (!this.cache) {
+      const { pid } = await this.spawn({})
+      this.cache = pid
+    }
+    const { slot } = await this.schedule({
+      data,
+      pid: this.cache,
+      "content-type": type,
+    })
+    const msgs = await this.messages({ pid: this.cache, from: slot, limit: 1 })
+    return msgs.edges[0].node.message.Id
+  }
+
   async cacheModule(data, type) {
     const res = await this.send({
       path: "/~wao@1.0/cache_module",
