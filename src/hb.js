@@ -17,41 +17,50 @@ class HB {
     this.dev.hyperbuddy = {
       metrics: async (args = {}) => {
         return this.parseMetrics(
-          await this.fetch(this.path("hyperbuddy", "metrics", false), false)
+          await this.fetch(
+            this.path({ dev: "hyperbuddy", path: "metrics", json: false }),
+            false
+          )
         )
       },
     }
 
     this.dev.json = {
       commit: async args => {
-        return await this.send({ path: "/~json@1.0/commit", ...args })
+        return await this.post({ path: "/~json@1.0/commit", ...args })
       },
       verify: async args => {
-        return await this.send({ path: "/~json@1.0/verify", ...args })
+        return await this.post({ path: "/~json@1.0/verify", ...args })
       },
       deserialize: async args => {
-        return await this.send({ path: "/~json@1.0/deserialize", ...args })
+        return await this.post({ path: "/~json@1.0/deserialize", ...args })
       },
       serialize: async args => {
-        return await this.send({ path: "/~json@1.0/serialize", ...args })
+        return await this.post({ path: "/~json@1.0/serialize", ...args })
       },
     }
     this.dev.meta = {
       info: async (args = {}) => {
         let { method = "GET", json = true, key } = args
         if (method.toLowerCase() === "post") {
-          return await this.send({ path: "/~meta@1.0/info", ...args })
+          return await this.post({ path: "/~meta@1.0/info", ...args })
         } else {
           return key
             ? await this.fetch(
-                this.path("meta", `info/${key}`, args.json ?? false),
+                this.path({
+                  dev: "meta",
+                  path: `info/${key}`,
+                  json: args.json ?? false,
+                }),
                 args.json ?? false
               )
-            : await this.fetch(this.path("meta", "info", json))
+            : await this.fetch(
+                this.path({ dev: "meta", path: "info", json: json })
+              )
         }
       },
       build: async () => {
-        return await this.fetch(this.path("meta", "build"))
+        return await this.fetch(this.path({ dev: "meta", path: "build" }))
       },
     }
     if (jwk) this._init(jwk)
@@ -60,7 +69,7 @@ class HB {
   _init(jwk) {
     this.signer = createSigner(jwk, this.url)
     this.addr = toAddr(jwk.n)
-    this._request2 = createRequest({ signer: this.signer, url: this.url })
+    this.sign = createRequest({ signer: this.signer, url: this.url })
 
     const { request } = connect({
       MODE: "mainnet",
@@ -78,8 +87,8 @@ class HB {
     return this
   }
 
-  async send(args) {
-    return await _send(await this._request2(args))
+  async send(msg) {
+    return await _send(msg)
   }
 
   async getImage() {
@@ -112,12 +121,19 @@ class HB {
       Target: pid,
     })
     if (data) _tags.data = data
-    let res = await this.send(_tags)
-    const slot = res.headers.get("slot")
+    let res = await this.post(_tags)
+    const slot = res.headers.slot
     return { slot, outbox: await this.computeAOS({ pid, slot }) }
   }
 
-  path(dev = "message", path, json = true, params = {}, pid = "", tail = "") {
+  path({
+    dev = "message",
+    path,
+    json = true,
+    params = {},
+    pid = "",
+    tail = "",
+  }) {
     if (!/@/.test(dev)) dev += "@1.0"
     let _params = ""
     if (!isEmpty(params)) {
@@ -127,7 +143,8 @@ class HB {
         i++
       }
     }
-    return `${this.url}/${pid}~${dev}${path ? `/${path}` : ""}${tail}${json ? "/~json@1.0/serialize" : ""}${_params}`
+    if (path && !/^\//.test(path)) path = "/" + path
+    return `/${pid}~${dev}${path ?? ""}${tail}${json ? "/~json@1.0/serialize" : ""}${_params}`
   }
 
   async text(dev, path, params = {}, tail) {
@@ -137,7 +154,7 @@ class HB {
       dev = "process"
     }
     return await this.fetch(
-      this.path(dev, path, false, params, pid, tail),
+      this.path({ dev, path, json: false, params, pid, tail }),
       false
     )
   }
@@ -148,11 +165,13 @@ class HB {
       pid = dev
       dev = "process"
     }
-    return await this.fetch(this.path(dev, path, true, params, pid, tail))
+    return await this.fetch(
+      this.path({ dev, path, json: true, params, pid, tail })
+    )
   }
 
-  async fetch(url, json = true) {
-    return await fetch(url).then(r => (json ? r.json() : r.text()))
+  async fetch(path, json = true) {
+    return await fetch(this.url + path).then(r => (json ? r.json() : r.text()))
   }
 
   async computeAOS({ pid, slot }) {
@@ -181,7 +200,7 @@ class HB {
   async spawn(tags = {}) {
     const addr = await this.dev.meta.info({ key: "address" })
     this.scheduler ??= addr
-    const res = await this.send(
+    const res = await this.post(
       mergeLeft(tags, {
         device: "process@1.0",
         path: "/schedule",
@@ -192,8 +211,9 @@ class HB {
         "execution-device": "test-device@1.0",
       })
     )
-    return { res, pid: res.headers.get("process") }
+    return { res, pid: res.headers.process }
   }
+
   async cacheModule2(data, type) {
     if (!this.cache) {
       const { pid } = await this.spawn({})
@@ -209,12 +229,12 @@ class HB {
   }
 
   async cacheModule(data, type) {
-    const res = await this.send({
+    const res = await this.post({
       path: "/~wao@1.0/cache_module",
       data,
       type,
     })
-    return res.headers.get("id")
+    return res.headers.id
   }
   async message(args) {
     const pid = args.pid
@@ -246,15 +266,15 @@ class HB {
       Target: pid,
     })
     if (data) _tags.data = data
-    let res = await this.send(_tags)
-    return { slot: res.headers.get("slot"), res }
+    let res = await this.post(_tags)
+    return { slot: res.headers.slot, res }
   }
 
   async spawnAOS(image) {
     const addr = await this.dev.meta.info({ key: "address" })
     this.scheduler ??= addr
     image ??= this.image ?? (await this.getImage())
-    const res = await this.send({
+    const res = await this.post({
       device: "process@1.0",
       path: "/schedule",
       scheduler: this.scheduler,
@@ -278,7 +298,7 @@ class HB {
       "stack-keys": ["init", "compute", "snapshot", "normalize"],
       passes: 2,
     })
-    const pid = res.headers.get("process")
+    const pid = res.headers.process
     this.pid ??= pid
     return { pid, res }
   }
@@ -287,7 +307,7 @@ class HB {
     const addr = await this.dev.meta.info({ key: "address" })
     this.scheduler ??= addr
     lua ??= this.lua ?? (await this.getLua())
-    const res = await this.send({
+    const res = await this.post({
       device: "process@1.0",
       path: "/schedule",
       scheduler: this.scheduler,
@@ -302,7 +322,7 @@ class HB {
       "execution-device": "lua@5.3a",
       "patch-from": "/results/outbox",
     })
-    const pid = res.headers.get("process")
+    const pid = res.headers.process
     this.pid ??= pid
     return { pid, res }
   }
@@ -378,7 +398,7 @@ class HB {
     if (typeof action === "string") tags.Action = action
     let json = { Tags: buildTags(tags) }
     if (data) json.Data = data
-    const res = await this.send({
+    const res = await this.post({
       path: "/~relay@1.0/call",
       "relay-method": "POST",
       "relay-path": `/dry-run?process-id=${pid}`,
@@ -388,18 +408,30 @@ class HB {
     return JSON.parse(res.body)
   }
 
-  async get({ device, path = "~meta@1.0/info" }) {
-    return (await this.request({ device, path, method: "GET" })).body
+  async post(obj) {
+    return await this.send(await this.sign(obj))
   }
 
-  async post({ device, tags, path = "/schedule" }) {
-    return await this.request({ tags, device, path, method: "POST" })
-  }
-
-  async request({ device, tags, method = "POST", path = "/schedule" }) {
-    let _tags = mergeLeft(tags, { path, method })
-    if (device) _tags.device = device
-    return await this._request(_tags)
+  async get({ path, ...params }) {
+    path ??= "/~message@1.0"
+    if (!/^\//.test(path)) path = "/" + path
+    let _params = ""
+    if (!isEmpty(params)) {
+      let i = 0
+      for (const k in params) {
+        _params += `${i === 0 ? "?" : "&"}${k}=${params[k]}`
+        i++
+      }
+    }
+    const response = await fetch(`${this.url}${path}${_params}`)
+    let headers = {}
+    response.headers.forEach((v, k) => (headers[k] = v))
+    return {
+      response,
+      headers,
+      body: await response.text(),
+      status: response.status,
+    }
   }
 }
 

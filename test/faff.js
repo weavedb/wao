@@ -38,6 +38,7 @@ describe("Hyperbeam Legacynet", function () {
   })
 
   after(async () => hbeam.kill())
+
   it("should test faff", async () => {
     const { pid } = await hb.spawn()
     assert(!isNil(pid))

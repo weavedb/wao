@@ -20,7 +20,7 @@ Additionally, it includes a drop-in replacement for `aoconnect`, allowing the te
   - [WeaveDrive](#weavedrive)
   - [Local Persistent Server](#local-persistent-server)
   - [HyperBEAM](#hyperbeam)
-- [API Reference](#api-reference)
+  - [API Reference](#api-reference)
   - [AO](#ao)
   - [Process](#process)
   - [Function Piping](#function-piping)
@@ -1574,10 +1574,11 @@ This will connect the two.
 
 - [Instantiate](#instantiate-5)
 - [path](#path)
+- [get](#get)
 - [fetch](#fetch)
 - [text](#text)
 - [json](#json)
-- [send](#send)
+- [post](#post)
 - [spawn](#spawn)
 - [schedule](#schedule)
 - [compute](#compute)
@@ -1602,8 +1603,10 @@ const device = "meta"
 const path = "info"
 const json = true
 const params = {}
+const pid = ""
+const tail = ""
 
-const path = hb.path(device, path, json, params) 
+const path = hb.path({ device, path, pid, json, params tail }) 
 // /~meta@1.0/info/serialize~json@1.0
 ```
 
@@ -1631,12 +1634,20 @@ Request a json response without a signature.
 const result = await hb.json(device, path)
 ```
 
-#### send
+#### get
 
-Send a request with a signed http message. `data` will be set to http body with auto-generated `content-digest`and `inline-body-key` in the header.
+Send a GET request without a signed http message. 
 
 ```js
-const result = await hb.send({ ...headers })
+const result = await hb.get({ ...headers })
+```
+ 
+#### post
+
+Send a POST request with a signed http message. `data` will be set to http body with auto-generated `content-digest`and `inline-body-key` in the header.
+
+```js
+const result = await hb.post({ ...headers })
 ```
 
 #### spawn
