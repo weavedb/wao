@@ -115,7 +115,7 @@ describe("Hyperbeam Legacynet", function () {
   })
 
   after(async () => hbeam.kill())
-  it.only("should generate valid signatures", async () => {
+  it("should generate valid signatures", async () => {
     const { pid } = await hb.spawn()
     const { slot } = await hb.schedule({ pid })
     const { results } = await hb.compute({ pid, slot })
@@ -142,5 +142,14 @@ describe("Hyperbeam Legacynet", function () {
     assert.deepEqual(list, keys.list)
     assert.deepEqual(str, keys.str)
     assert.deepEqual(path, "httpsig_to_json")
+  })
+  it.only("should sign body", async () => {
+    const keys = {
+      path: "/~wao@1.0/httpsig_to_json",
+      body: { a: 3, b: 2 },
+    }
+    const msg = await hb._request2(keys)
+    const { body } = JSON.parse((await _send(msg)).body)
+    assert.deepEqual(body, keys.body)
   })
 })
