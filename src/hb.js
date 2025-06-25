@@ -108,13 +108,12 @@ class HB {
     this.lua ??= id
     return id
   }
-
-  async messageAOS({ pid, action = "Eval", tags = {}, data }) {
+  async scheduleAOS({ pid, action = "Eval", tags = {}, data }) {
     pid ??= this.pid
     let _tags = mergeLeft(tags, {
       device: "process@1.0",
       method: "POST",
-      path: `/${pid}/schedule`,
+      path: `/${pid}~process@1.0/schedule`,
       scheduler: this.scheduler,
       Type: "Message",
       Action: action,
@@ -123,6 +122,10 @@ class HB {
     if (data) _tags.data = data
     let res = await this.post(_tags)
     const slot = res.headers.slot
+    return { slot, res, pid }
+  }
+  async messageAOS(args) {
+    const { slot, pid } = await this.scheduleAOS(args)
     return { slot, outbox: await this.computeAOS({ pid, slot }) }
   }
 
@@ -175,21 +178,15 @@ class HB {
   }
 
   async computeAOS({ pid, slot }) {
-    return await fetch(
-      `${this.url}/${pid}/compute/results/outbox/~json@1.0/serialize?slot=${slot}`
-    ).then(r => r.json())
+    return await this.getJSON({ path: `/${pid}/compute/results/outbox`, slot })
   }
 
   async computeLua({ pid, slot }) {
-    return await fetch(
-      `${this.url}/${pid}/compute/results/~json@1.0/serialize?slot=${slot}`
-    ).then(r => r.json())
+    return await this.getJSON({ path: `/${pid}/compute/results`, slot })
   }
 
   async compute({ pid, slot }) {
-    return await fetch(
-      `${this.url}/${pid}/compute/~json@1.0/serialize?slot=${slot}`
-    ).then(r => r.json())
+    return await this.getJSON({ path: `/${pid}/compute`, slot })
   }
 
   async computeLegacy({ pid, slot }) {
@@ -200,17 +197,15 @@ class HB {
   async spawn(tags = {}) {
     const addr = await this.dev.meta.info({ key: "address" })
     this.scheduler ??= addr
-    const res = await this.post(
-      mergeLeft(tags, {
-        device: "process@1.0",
-        path: "/~process@1.0/schedule",
-        scheduler: this.scheduler,
-        "random-seed": seed(16),
-        Type: "Process",
-        "scheduler-device": "scheduler@1.0",
-        "execution-device": "test-device@1.0",
-      })
-    )
+    const _tags = mergeLeft(tags, {
+      device: "process@1.0",
+      path: "/schedule",
+      scheduler: this.scheduler,
+      "random-seed": seed(16),
+      Type: "Process",
+      "execution-device": "test-device@1.0",
+    })
+    const res = await this.post(_tags)
     return { res, pid: res.headers.process }
   }
 
@@ -229,11 +224,7 @@ class HB {
   }
 
   async cacheModule(data, type) {
-    const res = await this.post({
-      path: "/~wao@1.0/cache_module",
-      data,
-      type,
-    })
+    const res = await this.post({ path: "/~wao@1.0/cache_module", data, type })
     return res.headers.id
   }
   async message(args) {
@@ -255,13 +246,11 @@ class HB {
   async scheduleLua(...args) {
     return await this.scheduleLegacy(...args)
   }
-  async schedule({ pid, tags = {}, data, scheduler } = {}) {
+  async schedule({ pid, tags = {}, data } = {}) {
     pid ??= this.pid
-    scheduler ??= this.scheduler
     let _tags = mergeLeft(tags, {
       method: "POST",
-      path: `/${pid}/schedule`,
-      scheduler,
+      path: `/${pid}~process@1.0/schedule`,
       Type: "Message",
       Target: pid,
     })
@@ -285,7 +274,6 @@ class HB {
       "random-seed": seed(16),
       Type: "Process",
       image,
-      "scheduler-device": "scheduler@1.0",
       "execution-device": "stack@1.0",
       "device-stack": [
         "wasi@1.0",
@@ -318,7 +306,6 @@ class HB {
       "random-seed": seed(16),
       Type: "Process",
       module: lua,
-      "scheduler-device": "scheduler@1.0",
       "execution-device": "lua@5.3a",
       "patch-from": "/results/outbox",
     })
@@ -357,6 +344,10 @@ class HB {
       }
     }
     return _metrics
+  }
+  async now({ pid, path = "" }) {
+    if (path && !/^\//.test(path)) path = "/" + path
+    return await this.getJSON({ path: `/${pid}~process@1.0/now${path}` })
   }
 
   async messages({ pid, from, to, limit } = {}) {
