@@ -579,6 +579,12 @@ export function createRequest(config) {
     // Get all header keys for signing (lowercase)
     const signingFields = Object.keys(lowercaseHeaders)
 
+    // If there are no fields to sign, add at least the content-length
+    if (signingFields.length === 0 && !body) {
+      lowercaseHeaders["content-length"] = "0"
+      signingFields.push("content-length")
+    }
+
     // Sign the request with lowercase headers
     const signedRequest = await toHttpSigner(signer)({
       request: { url: _url, method, headers: lowercaseHeaders },
@@ -658,8 +664,12 @@ export async function send(signedMsg, fetchImpl = fetch) {
     throw new Error(`${response.status}: ${await response.text()}`)
   }
 
+  // Convert Headers object to plain object
   let headers = {}
-  response.headers.forEach((v, k) => (headers[k] = v))
+  if (response.headers && typeof response.headers.forEach === "function") {
+    response.headers.forEach((v, k) => (headers[k] = v))
+  } else headers = response.headers
+
   return {
     response,
     headers,
