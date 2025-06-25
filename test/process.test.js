@@ -14,7 +14,29 @@ const seed = num => {
 }
 
 const URL = "http://localhost:10001"
-const toJSON = res => JSON.parse(res.body)
+
+const data = `
+local count = 0
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)`
+
+const src_data = `
+local count = 0
+Handlers.add("Add", "Add", function (msg)
+  count = count + tonumber(msg.Plus)
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+`
+
 describe("Hyperbeam Device", function () {
   let hb, hb2, hbeam, jwk, server, addr, addr2
   before(async () => {
@@ -39,46 +61,33 @@ describe("Hyperbeam Device", function () {
 
   after(async () => hbeam.kill())
 
-  it("should test process@1.0", async () => {
-    const { process: pid } = await hb.postJSON({
-      path: "/~process@1.0/schedule",
+  it("should upload module", async () => {
+    const {
+      headers: { process: pid },
+    } = await hb.post({
+      device: "process@1.0",
+      path: "/schedule",
       scheduler: addr,
-      "execution-device": "test-device@1.0",
+      "execution-device": "wao@1.0",
     })
-    const { slot } = await hb.postJSON({ path: `/${pid}~process@1.0/schedule` })
-    // bugs with compute and now
-    /*
-    const { slot: slot2 } = await hb.postJSON({
-    path: `/${pid}~process@1.0/schedule`,
-    })*/
-    assert.equal(slot, 1)
-    const { assignments } = await hb.getJSON({
-      path: `/${pid}~process@1.0/schedule`,
-    })
-    assert.equal(assignments["0"].process, pid)
-    assert.equal(assignments["1"].process, pid)
+    await hb.postJSON({ path: `/${pid}/schedule` })
+    await hb.postJSON({ path: `/${pid}/schedule` })
+    await hb.postJSON({ path: `/${pid}/schedule` })
+    const { count } = await hb.getJSON({ path: `/${pid}/compute`, slot: 3 })
+    assert.equal(count, 4)
+    await hb.postJSON({ path: `/${pid}/schedule` })
+    const now = await hb.getJSON({ path: `/${pid}/now` })
+    assert.equal(now.count, 5)
+  })
 
-    const { results: res } = await hb.getJSON({
-      path: `/${pid}~process@1.0/compute`,
-      slot: 1,
-    })
-    assert.equal(res["assignment-slot"], 1)
-    const { results: res3 } = await hb.getJSON({
-      path: `/${pid}~process@1.0/now`,
-    })
-    assert.equal(res3["assignment-slot"], 1)
-    const { current } = await hb.getJSON({
-      path: `/${pid}~process@1.0/slot`,
-    })
-    assert.equal(current, slot)
-
-    const { results: res4 } = await hb.getJSON({
-      path: `/${pid}~process@1.0/now`,
-    })
-    assert.equal(res4["assignment-slot"], 1)
-    const { method } = await hb.getJSON({
-      path: `/${pid}~process@1.0/snapshot`,
-    })
-    assert.equal(method, "GET")
+  it.only("should upload module", async () => {
+    const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
+    await hb.schedule({ pid })
+    await hb.schedule({ pid })
+    await hb.schedule({ pid })
+    const { count } = await hb.compute({ pid, slot: 2 })
+    assert.equal(count, 3)
+    await hb.schedule({ pid })
+    assert.equal((await hb.now({ pid })).count, 5)
   })
 })

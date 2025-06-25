@@ -12,6 +12,17 @@ import HyperBEAM from "../src/hyperbeam.js"
 import { readFileSync } from "fs"
 import { resolve } from "path"
 
+const src_data = `
+local count = 0
+Handlers.add("Add", "Add", function (msg)
+  count = count + tonumber(msg.Plus)
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+`
+
 const data = `
 local count = 0
 Handlers.add("Inc", "Inc", function (msg)
@@ -53,13 +64,14 @@ describe("Hyperbeam Legacynet", function () {
     const { slot: slot2 } = await hb.scheduleLegacy({ pid, action: "Inc" })
     const r2 = await hb.computeLegacy({ pid, slot: slot2 })
     assert.equal(r2.Messages[0].Data, "Count: 1")
+    const { slot: slot3 } = await hb.scheduleLegacy({ pid, action: "Inc" })
+    const r4 = await hb.computeLegacy({ pid, slot: slot3 })
     const r3 = await hb.dryrun({ pid, action: "Get" })
-    assert.equal(r3.Messages[0].Data, "Count: 1")
+    assert.equal(r3.Messages[0].Data, "Count: 2")
   })
 
   it("should get messages and recover them", async () => {
     const address = (await hb.get({ path: "/~meta@1.0/info/address" })).body
-
     assert.equal(address, hb._info.address)
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
@@ -118,7 +130,7 @@ describe("Hyperbeam Legacynet", function () {
     return
   })
 
-  it.only("should test test device", async () => {
+  it("should test test device", async () => {
     const info = await hb.dev.meta.info()
     assert.equal(info.address, toAddr(jwk.n))
     const { pid } = await hb.spawn({ "execution-device": "test-device@1.0" })
@@ -175,11 +187,38 @@ describe("Hyperbeam Legacynet", function () {
   })
 
   it("should upload module", async () => {
-    const { pid: pid2 } = await hb.spawnLua()
-    await hb.scheduleLua({ pid: pid2, action: "Eval", data })
-    await hb.scheduleLua({ pid: pid2, action: "Inc" })
-    const { slot: slot2 } = await hb.scheduleLua({ pid: pid2, action: "Get" })
-    const { outbox, output } = await hb.computeLua({ pid: pid2, slot: slot2 })
+    const { pid } = await hb.spawnLua()
+    await hb.scheduleLua({ pid, action: "Eval", data })
+    await hb.scheduleLua({ pid, action: "Inc" })
+    const { slot } = await hb.scheduleLua({ pid, action: "Get" })
+    const { outbox } = await hb.computeLua({ pid, slot })
     assert.equal(outbox[0].Data, "Count: 1")
+    await hb.scheduleLua({ pid, action: "Inc" })
+    const { slot: slot2 } = await hb.scheduleLua({ pid, action: "Get" })
+    const { outbox: outbox2 } = await hb.computeLua({ pid, slot: slot2 })
+    assert.equal(outbox2[0].Data, "Count: 2")
+    console.log(await hb.computeLua({ pid, slot }))
+  })
+  it.only("should upload module", async () => {
+    const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
+    await hb.schedule({ pid })
+    await hb.schedule({ pid })
+    await hb.schedule({ pid })
+    await hb.schedule({ pid })
+    assert.equal((await hb.now({ pid })).count, 5)
+    assert.equal((await hb.now({ pid })).count, 5)
+  })
+  it("should test WAMR", async () => {
+    const { pid } = await hb.spawnAOS()
+    await hb.scheduleAOS({ pid, action: "Eval", data: src_data })
+    await hb.scheduleAOS({ pid, action: "Add", tags: { Plus: "3" } })
+    await hb.scheduleAOS({ pid, action: "Get" })
+    //console.log(await hb.now({ pid }))
+    console.log("compute: 0", await hb.computeAOS({ pid, slot: 0 }))
+    console.log("compute: 1", await hb.computeAOS({ pid, slot: 1 }))
+    console.log("compute: 3", await hb.computeAOS({ pid, slot: 3 }))
+    console.log("compute: 3", await hb.computeAOS({ pid, slot: 3 }))
+    console.log("compute: 2", await hb.computeAOS({ pid, slot: 2 }))
+    //console.log(await hb.now({ pid }))
   })
 })

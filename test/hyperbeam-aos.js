@@ -7,6 +7,7 @@ import HyperBEAM from "../src/hyperbeam.js"
 import { resolve } from "path"
 import { readFileSync } from "fs"
 import gateway from "./lib/gateway.js"
+import Server from "../src/server.js"
 
 const src_data = `
 local count = 0
@@ -19,11 +20,14 @@ Handlers.add("Get", "Get", function (msg)
 end)
 `
 
+const URL = "http://localhost:10001"
+
 describe("HyperBEAM", function () {
-  let hb, hbeam, hb2, addr, jwk, jwk2
+  let hb, hbeam, hb2, addr, jwk, jwk2, server
 
   before(async () => {
-    hbeam = new HyperBEAM({ c: "12", cmake: "3.5", gateway: 4000 })
+    server = new Server({ port: 6359, log: true, hb_url: URL })
+    hbeam = new HyperBEAM({ c: "12", cmake: "3.5", gateway: 6359 })
     await wait(5000)
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
@@ -39,7 +43,7 @@ describe("HyperBEAM", function () {
 
   it("should query wao device", async () => {
     assert.equal(await hb.text("wao", "info/version"), "1.0")
-    const { pid } = await hb.spawn()
+    const { pid } = await hb.spawn({})
     const { slot, res } = await hb.message({ pid })
     assert.equal((await hb.messages({ pid })).edges.length, 2)
   })
@@ -54,11 +58,13 @@ describe("HyperBEAM", function () {
     )
   })
 
-  it.only("should execute AOS with WAMR", async () => {
+  it("should execute AOS with WAMR", async () => {
     const pid = await hb.spawnAOS()
     await hb.messageAOS({ action: "Eval", tags: {}, data: src_data })
     await hb.messageAOS({ action: "Add", tags: { Plus: "3" } })
     assert.equal((await hb.messageAOS({ action: "Get" })).outbox["1"].data, "3")
+    await hb.messageAOS({ action: "Add", tags: { Plus: "3" } })
+    assert.equal((await hb.messageAOS({ action: "Get" })).outbox["1"].data, "6")
   })
 
   it("should query meta device", async () => {
