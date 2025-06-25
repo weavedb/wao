@@ -35,7 +35,7 @@ describe("Hyperbeam Device", function () {
 
   after(async () => hbeam.kill())
 
-  it("should test json@1.0", async () => {
+  it("should test message@1.0", async () => {
     assert.equal(
       (await hb.get({ path: `/~message@1.0&hello=world/hello` })).body,
       "world"

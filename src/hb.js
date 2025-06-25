@@ -203,7 +203,7 @@ class HB {
     const res = await this.post(
       mergeLeft(tags, {
         device: "process@1.0",
-        path: "/schedule",
+        path: "/~process@1.0/schedule",
         scheduler: this.scheduler,
         "random-seed": seed(16),
         Type: "Process",
@@ -408,11 +408,13 @@ class HB {
     return JSON.parse(res.body)
   }
 
-  async post(obj) {
+  async post(obj, json) {
+    const _json = json ? "/~json@1.0/serialize" : ""
+    obj.path += _json
     return await this.send(await this.sign(obj))
   }
-
-  async get({ path, ...params }) {
+  async get({ path, ...params }, json = false) {
+    const _json = json ? "/~json@1.0/serialize" : ""
     path ??= "/~message@1.0"
     if (!/^\//.test(path)) path = "/" + path
     let _params = ""
@@ -423,7 +425,7 @@ class HB {
         i++
       }
     }
-    const response = await fetch(`${this.url}${path}${_params}`)
+    const response = await fetch(`${this.url}${path}${_json}${_params}`)
     let headers = {}
     response.headers.forEach((v, k) => (headers[k] = v))
     return {
@@ -432,6 +434,14 @@ class HB {
       body: await response.text(),
       status: response.status,
     }
+  }
+  async postJSON(args) {
+    const res = await this.post(args, true)
+    return JSON.parse(res.body)
+  }
+  async getJSON(args) {
+    const res = await this.get(args, true)
+    return JSON.parse(res.body)
   }
 }
 
