@@ -547,6 +547,7 @@ const toGraphObj = ({ query, variables }) => {
   if (fields) args.fields = fields
   if (args.sort && args.sort === "HEIGHT_ASC") args.asc = true
   delete args.sort
+  if (!Array.isArray(args.tags)) args.tags = [args.tags]
   if (args.tags) {
     let _tags = {}
     for (const v of args.tags) _tags[v.name] = v.values
