@@ -159,4 +159,13 @@ describe("Hyperbeam Signer", function () {
     const { body } = JSON.parse((await hb.send(msg2)).body)
     assert.deepEqual(body, keys2.body)
   })
+  it.only("should sign body", async () => {
+    const { pid } = await hb.spawn()
+    const keys = {
+      path: `/${pid}~process@1.0/schedule/~json@1.0/serialize`,
+    }
+    const res = await hb.post(keys)
+    const { slot } = JSON.parse(res.body)
+    assert.equal(slot, 1)
+  })
 })
