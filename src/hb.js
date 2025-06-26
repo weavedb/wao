@@ -185,8 +185,9 @@ class HB {
     return await this.getJSON({ path: `/${pid}/compute/results`, slot })
   }
 
-  async compute({ pid, slot }) {
-    return await this.getJSON({ path: `/${pid}/compute`, slot })
+  async compute({ pid, slot, path = "" }) {
+    if (path && !/^\//.test(path)) path = "/" + path
+    return await this.getJSON({ path: `/${pid}/compute${path}`, slot })
   }
 
   async computeLegacy({ pid, slot }) {
@@ -250,7 +251,7 @@ class HB {
     pid ??= this.pid
     let _tags = mergeLeft(tags, {
       method: "POST",
-      path: `/${pid}~process@1.0/schedule`,
+      path: `/${pid}/schedule`,
       Type: "Message",
       Target: pid,
     })
@@ -279,6 +280,7 @@ class HB {
         "wasi@1.0",
         "json-iface@1.0",
         "wasm-64@1.0",
+        "patch@1.0",
         "multipass@1.0",
       ],
       "output-prefix": "wasm",
@@ -347,7 +349,7 @@ class HB {
   }
   async now({ pid, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
-    return await this.getJSON({ path: `/${pid}~process@1.0/now${path}` })
+    return await this.getJSON({ path: `/${pid}/now${path}` })
   }
 
   async messages({ pid, from, to, limit } = {}) {
