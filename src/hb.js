@@ -285,6 +285,7 @@ class HB {
       ],
       "output-prefix": "wasm",
       "patch-from": "/results/outbox",
+      "patch-mode": "patches",
       "stack-keys": ["init", "compute", "snapshot", "normalize"],
       passes: 2,
     })
@@ -382,7 +383,10 @@ class HB {
       module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
       device: "process@1.0",
       "scheduler-device": "scheduler@1.0",
-      "execution-device": "genesis-wasm@1.0",
+      "execution-device": "stack@1.0",
+      "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
+      "patch-from": "/results/outbox",
+      "stack-keys": ["init", "compute", "snapshot", "normalize"],
     })
     return await this.spawn(tags)
   }
