@@ -106,7 +106,6 @@ describe("Hyperbeam Signer", function () {
       legacy: true,
       operator: addr,
     })
-
     await wait(5000)
   })
 
@@ -114,7 +113,10 @@ describe("Hyperbeam Signer", function () {
     hb = await new HB({}).init(jwk)
   })
 
-  after(async () => hbeam.kill())
+  after(async () => {
+    hbeam.kill()
+    server.end()
+  })
   it("should generate valid signatures", async () => {
     const { pid } = await hb.spawn()
     const { slot } = await hb.schedule({ pid })

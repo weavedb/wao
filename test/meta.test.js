@@ -32,7 +32,10 @@ describe("Hyperbeam Device", function () {
     hb2 = await new HB({}).init(acc[0].jwk)
   })
 
-  after(async () => hbeam.kill())
+  after(async () => {
+    hbeam.kill()
+    server.end()
+  })
 
   it("should test meta@1.0", async () => {
     const info = await hb.json("meta", "info")
