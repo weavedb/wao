@@ -4,7 +4,7 @@ import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, AO, toAddr } from "../src/test.js"
 import { getJWK } from "./lib/test-utils.js"
 import HB from "../src/hb.js"
-import { isNotNil, filter, isNil } from "ramda"
+import { isNotNil, filter, isNil, range } from "ramda"
 import { randomBytes } from "node:crypto"
 import { wait } from "../src/utils.js"
 import Server from "../src/server.js"
@@ -142,7 +142,7 @@ describe("Hyperbeam Signer", function () {
     assert.deepEqual(str, keys.str)
     assert.deepEqual(path, "httpsig_to_json")
   })
-  it("should sign body", async () => {
+  it("should sign data", async () => {
     const keys = {
       path: "/~wao@1.0/httpsig_to_json",
       data: { a: 3, b: 4 },
@@ -159,7 +159,7 @@ describe("Hyperbeam Signer", function () {
     const { body } = JSON.parse((await hb.send(msg2)).body)
     assert.deepEqual(body, keys2.body)
   })
-  it.only("should sign body", async () => {
+  it("should sign a valid message", async () => {
     const { pid } = await hb.spawn()
     const keys = {
       path: `/${pid}~process@1.0/schedule/~json@1.0/serialize`,
@@ -167,5 +167,123 @@ describe("Hyperbeam Signer", function () {
     const res = await hb.post(keys)
     const { slot } = JSON.parse(res.body)
     assert.equal(slot, 1)
+  })
+  it("should sign nested data and body", async () => {
+    const keys = {
+      path: "/~wao@1.0/httpsig_to_json",
+      data: { a: 3, b: { c: { d: 4 } } },
+      body: { a: 3, b: { c: { d: 4 } } },
+    }
+    const msg = await hb.sign(keys)
+    const json = JSON.parse((await hb.send(msg)).body)
+    assert.deepEqual(json.data, keys.data)
+    assert.deepEqual(json.body, keys.body)
+  })
+  it("should sign atom", async () => {
+    const keys = {
+      path: "/~wao@1.0/httpsig_to_json",
+      float: 1.23,
+      int: 1,
+      bool: true,
+      atom: Symbol("atom"),
+      nest: {
+        bool: true,
+        atom: Symbol("nested_atom"),
+      },
+      body: { bool: true, nest: { atom: Symbol("nested_atom") } },
+      data: { bool: true, nest: { atom: Symbol("nested_atom") } },
+    }
+    const msg = await hb.sign(keys)
+    const json = JSON.parse((await hb.send(msg)).body)
+    assert.deepEqual(json.nest, { bool: true, atom: "nested_atom" })
+    assert.deepEqual(json.body, { bool: true, nest: { atom: "nested_atom" } })
+    assert.deepEqual(json.data, { bool: true, nest: { atom: "nested_atom" } })
+    assert.deepEqual(json.float, keys.float)
+    assert.deepEqual(json.int, keys.int)
+    assert.deepEqual(json.bool, keys.bool)
+  })
+
+  it("should sign list", async () => {
+    const keys = {
+      path: "/~wao@1.0/httpsig_to_json",
+      list: [1, "abc", true, Symbol("atom"), 1.23],
+      body: [1, "abc", true, Symbol("atom"), 1.23],
+      data: [
+        1,
+        "abc",
+        true,
+        Symbol("atom"),
+        1.23,
+        {
+          nested: Symbol("nested"),
+          int: 1,
+          str: "abc",
+          bool: false,
+          float: 3.14,
+        },
+      ],
+    }
+    const msg = await hb.sign(keys)
+    const json = JSON.parse((await hb.send(msg)).body)
+    assert.deepEqual(json.data, [
+      1,
+      "abc",
+      true,
+      "atom",
+      1.23,
+      { bool: false, float: 3.14, int: 1, nested: "nested", str: "abc" },
+    ])
+  })
+  it("should sign null/undefined & empty values", async () => {
+    const keys = {
+      path: "/~wao@1.0/httpsig_to_json",
+      null: null,
+      undefined: undefined,
+      body: { list: [], map: {} },
+      nested: { list: [], map: {} },
+    }
+    const msg = await hb.sign(keys)
+    const json = JSON.parse((await hb.send(msg)).body)
+    assert.deepEqual(json.nested, { list: [], map: {} })
+    assert.deepEqual(json.body, { list: [], map: {} })
+  })
+
+  it("should sign empty binary & nested binary", async () => {
+    const binary = Buffer.from([4, 5, 6])
+    const empty = Buffer.from([])
+    const keys = {
+      path: "/~wao@1.0/httpsig_to_json",
+      empty,
+      nested: [binary, empty],
+    }
+    const msg = await hb.sign(keys)
+    const json = JSON.parse((await hb.send(msg)).body)
+    assert.equal(json.empty, "")
+    assert.deepEqual(json.nested, ["\x04\x05\x06", ""])
+  })
+
+  it("should sign single binary", async () => {
+    const binary = Buffer.from([4, 5, 6])
+    const empty = Buffer.from([])
+    const keys = {
+      path: "/~wao@1.0/httpsig_to_json",
+      binary,
+    }
+    const msg = await hb.sign(keys)
+    const json = JSON.parse((await hb.send(msg)).body)
+    assert.deepEqual(json.binary, "\x04\x05\x06")
+  })
+  it("should sign multiple binaries without body/data", async () => {
+    const binary = Buffer.from([4, 5, 6])
+    const empty = Buffer.from([])
+    const keys = {
+      path: "/~wao@1.0/httpsig_to_json",
+      bin: binary,
+      bin2: binary,
+    }
+    const msg = await hb.sign(keys)
+    const json = JSON.parse((await hb.send(msg)).body)
+    assert.deepEqual(json.bin, "\x04\x05\x06")
+    assert.deepEqual(json.bin2, "\x04\x05\x06")
   })
 })
