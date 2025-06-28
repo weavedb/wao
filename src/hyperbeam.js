@@ -48,13 +48,25 @@ export default class HyperBEAM {
     this.cmake = cmake
     this.port = port
     this.bundler = bundler
-    const _as = as.length === 0 ? [] : ["as", as.join(", ")]
+    this.as = as
+    this.gateway = gateway
+    this.wallet = wallet
+    this.cwd = cwd
+    this.run()
+  }
+  run() {
+    const _as = this.as.length === 0 ? [] : ["as", this.as.join(", ")]
     this.hbeam = spawn(
       "rebar3",
-      [..._as, "shell", "--eval", this.genEval({ gateway, wallet })],
+      [
+        ..._as,
+        "shell",
+        "--eval",
+        this.genEval({ gateway: this.gateway, wallet: this.wallet }),
+      ],
       {
         env: { ...process.env, ...this.genEnv() },
-        cwd: resolve(process.cwd(), cwd),
+        cwd: resolve(process.cwd(), this.cwd),
       }
     )
     this.hbeam.stdout.on("data", chunk => console.log(chunk.toString()))
@@ -66,7 +78,34 @@ export default class HyperBEAM {
       console.log(`child process exited with code ${code}`)
     )
   }
-
+  async ok() {
+    try {
+      const address = await fetch(
+        `http://localhost:${this.port}/~meta@1.0/info/address`
+      ).then(r => r.text())
+      return address ? true : false
+    } catch (e) {
+      return false
+    }
+  }
+  async ready(timeout = 30000) {
+    const start = Date.now()
+    return new Promise(res => {
+      const to = setInterval(async () => {
+        try {
+          if (Date.now() - start > 30000) {
+            clearInterval(to)
+            res(false)
+          } else {
+            if (await this.ok()) {
+              clearInterval(to)
+              res(this)
+            }
+          }
+        } catch (e) {}
+      }, 1000)
+    })
+  }
   genEnv() {
     let _env = {}
     if (this.c) {

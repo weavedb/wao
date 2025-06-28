@@ -4,6 +4,8 @@ import { toAddr, buildTags } from "./utils.js"
 import { send as _send, createRequest } from "./signer.js"
 import { resolve } from "path"
 import { readFileSync } from "fs"
+import hyper_aos from "./lua/hyper-aos.js"
+import aos_wamr from "./lua/aos_wamr.js"
 
 const seed = num => {
   const array = new Uint8Array(num)
@@ -29,7 +31,6 @@ class HB {
         )
       },
     }
-
     this.dev.json = {
       commit: async args => {
         return await this.post({ path: "/~json@1.0/commit", ...args })
@@ -97,18 +98,14 @@ class HB {
   }
 
   async getImage() {
-    const wasm = readFileSync(
-      resolve(import.meta.dirname, "./lua/aos2-wamr.wasm")
-    )
+    const wasm = Buffer.from(aos_wamr, "base64")
     const id = await this.cacheModule(wasm, "application/wasm")
     this.image ??= id
     return id
   }
 
   async getLua() {
-    const lua = readFileSync(
-      resolve(import.meta.dirname, "./lua/hyper-aos.lua")
-    )
+    const lua = Buffer.from(hyper_aos, "base64")
     const id = await this.cacheModule(lua, "application/lua")
     this.lua ??= id
     return id

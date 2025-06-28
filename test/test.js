@@ -107,9 +107,7 @@ describe("GraphQL", () => {
     await ao.ar.post({ tags: { test: "1" }, jwk })
     await ao.ar.post({ tags: { test: "2" }, jwk })
     await ao.ar.post({ tags: { test: "3" }, jwk })
-    const txs = await ao.ar.gql.txs({
-      first: 1,
-    })
+    const txs = await ao.ar.gql.txs({ first: 1 })
     assert.equal(txs[0].tags[0].value, "3")
     const txs2 = await ao.ar.gql.txs({
       next: true,
