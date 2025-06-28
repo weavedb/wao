@@ -7,6 +7,7 @@ export default class HyperBEAM {
   constructor({
     port = 10001,
     cu = 6363,
+    as = ["genesis_wasm"],
     bundler,
     gateway,
     wallet,
@@ -47,9 +48,10 @@ export default class HyperBEAM {
     this.cmake = cmake
     this.port = port
     this.bundler = bundler
+    const _as = as.length === 0 ? [] : ["as", as.join(", ")]
     this.hbeam = spawn(
       "rebar3",
-      ["shell", "--eval", this.genEval({ gateway, wallet })],
+      [..._as, "shell", "--eval", this.genEval({ gateway, wallet })],
       {
         env: { ...process.env, ...this.genEnv() },
         cwd: resolve(process.cwd(), cwd),
@@ -88,8 +90,9 @@ export default class HyperBEAM {
     const _bundler = this.bundler
       ? `, bundler_httpsig => <<"http://localhost:${this.bundler}">>`
       : ""
+    /*
     const _routes = `, routes => [#{ <<"template">> => <<"/result/.*">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${this.cu}">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:${this.cu}\">> } }, #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [#{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => httpc, protocol => http2 } }, #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }] }, #{ <<"template">> => <<"/raw">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } } }]`
-
+    */
     const _p4_non_chargable = this.p4_lua
       ? `, p4_non_chargable_routes => [#{ <<"template">> => <<"/*~node-process@1.0/*">> }, #{ <<"template">> => <<"/~wao@1.0/*">> }, #{ <<"template">> => <<"/~p4@1.0/balance">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }]`
       : !this.simplePay
@@ -118,7 +121,7 @@ export default class HyperBEAM {
         : !isNil(this.faff)
           ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
           : ""
-    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_routes}${_on}${_p4_non_chargable}${_operator}${_spp}${_node_processes}}).`
+    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_on}${_p4_non_chargable}${_operator}${_spp}${_node_processes}}).`
     return start
   }
 
