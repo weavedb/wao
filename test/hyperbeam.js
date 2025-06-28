@@ -39,7 +39,7 @@ const URL = "http://localhost:10001"
 describe("Hyperbeam Legacynet", function () {
   let hb, hb2, hbeam, jwk, server, addr, addr2
   before(async () => {
-    server = new Server({ port: 6359, log: true, hb_url: URL })
+    //server = new Server({ port: 6359, log: true, hb_url: URL })
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
@@ -56,10 +56,10 @@ describe("Hyperbeam Legacynet", function () {
   })
   after(async () => {
     hbeam.kill()
-    server.end()
+    //server.end()
   })
 
-  it("should interact with a hyperbeam node", async () => {
+  it.only("should interact with a hyperbeam node", async () => {
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
     const r = await hb.computeLegacy({ pid, slot })
@@ -201,7 +201,7 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(outbox2[0].Data, "Count: 2")
     console.log(await hb.computeLua({ pid, slot }))
   })
-  it.only("should upload module", async () => {
+  it("should upload module", async () => {
     const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
     await hb.schedule({ pid })
     await hb.schedule({ pid })
