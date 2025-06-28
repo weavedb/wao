@@ -44,10 +44,7 @@ describe("SDK", function () {
   before(() => {
     server = new Server({ port: 4000, log: true })
   })
-  after(() => {
-    server.end()
-    setTimeout(() => process.exit(), 100)
-  })
+  after(() => server.end())
 
   it("should dump wasm memory", async () => {
     let ao = await new AO(4000).init(acc[0])
