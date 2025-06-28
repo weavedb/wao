@@ -97,6 +97,7 @@ class AO {
     if (!ar && _port) ar = { port: _port }
     this.wao = opt.wao
     this.variant = opt.variant
+    this.module_type = module_type
     if (isNil(this.wao)) this.wao = in_memory || !isNil(ar?.port)
     if (!module) {
       switch (module_type) {
@@ -106,6 +107,10 @@ class AO {
         case "aos2":
           module = srcs.module_aos2
           break
+        case "mainnet":
+          module = srcs.module_mainnet
+          break
+
         default:
           module = srcs.module
       }
@@ -313,7 +318,8 @@ class AO {
   async postModule({ data, jwk, tags = {}, overwrite = false }) {
     const _tags = mergeLeft(tags, {
       "Data-Protocol": this.protocol ?? "ao",
-      Variant: this.variant ?? "ao.TN.1",
+      Variant:
+        (this.variant ?? this.module_type === "mainnet") ? "ao.N.1" : "ao.TN.1",
       Type: "Module",
       "Module-Format": "wasm64-unknown-emscripten-draft_2024_02_15",
       "Input-Encoding": "JSON-V1",
@@ -338,7 +344,8 @@ class AO {
   async postScheduler({ jwk, url, tags = {}, overwrite = false }) {
     const _tags = mergeLeft(tags, {
       "Data-Protocol": this.protocol ?? "ao",
-      Variant: this.variant ?? "ao.TN.1",
+      Variant:
+        (this.variant ?? this.module_type === "mainnet") ? "ao.N.1" : "ao.TN.1",
       Type: "Scheduler-Location",
       Url: url,
       "Time-To-Live": "3600000",
