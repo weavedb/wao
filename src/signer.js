@@ -1,5 +1,5 @@
 import base64url from "base64url"
-import crypto from "crypto"
+import { hash } from "fast-sha256"
 import { httpbis } from "http-message-signatures"
 import { parseItem, serializeList } from "structured-headers"
 const { verifyMessage } = httpbis
@@ -118,7 +118,24 @@ async function hasNewline(value) {
 }
 
 async function sha256(data) {
-  return crypto.subtle.digest("SHA-256", data)
+  // Convert data to Uint8Array if needed
+  let uint8Array
+  if (data instanceof ArrayBuffer) {
+    uint8Array = new Uint8Array(data)
+  } else if (data instanceof Uint8Array) {
+    uint8Array = data
+  } else if (ArrayBuffer.isView(data)) {
+    uint8Array = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  } else {
+    throw new Error("sha256 expects ArrayBuffer or ArrayBufferView")
+  }
+
+  // fast-sha256 returns Uint8Array, convert to ArrayBuffer
+  const hashResult = hash(uint8Array)
+  return hashResult.buffer.slice(
+    hashResult.byteOffset,
+    hashResult.byteOffset + hashResult.byteLength
+  )
 }
 
 function isBytes(value) {
@@ -504,8 +521,8 @@ async function encode(obj = {}) {
       )
 
       const allPartsBuffer = await new Blob(bodyParts).arrayBuffer()
-      const hash = await sha256(allPartsBuffer)
-      const boundary = base64url.encode(Buffer.from(hash))
+      const hashResult = await sha256(allPartsBuffer)
+      const boundary = base64url.encode(Buffer.from(hashResult))
 
       const finalParts = []
       for (const part of bodyParts) {
