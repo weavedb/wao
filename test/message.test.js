@@ -18,14 +18,13 @@ describe("Hyperbeam Device", function () {
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
-    hbeam = new HyperBEAM({
+    hbeam = await new HyperBEAM({
       clearCache: true,
       gateway: 6359,
       c: "12",
       cmake: "3.5",
       operator: addr,
-    })
-    await wait(5000)
+    }).ready()
   })
 
   beforeEach(async () => {

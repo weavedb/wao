@@ -231,6 +231,7 @@ const getTagVal = (get, res, from) => {
 }
 
 const srcs = {
+  module_mainnet: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
   module: "cNlipBptaF9JeFAf4wUmpi43EojNanIBos3EfNrEOWo",
   module_sqlite: "ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw",
   module_aos2: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
@@ -547,7 +548,8 @@ const toGraphObj = ({ query, variables }) => {
   if (fields) args.fields = fields
   if (args.sort && args.sort === "HEIGHT_ASC") args.asc = true
   delete args.sort
-  if (!Array.isArray(args.tags)) args.tags = [args.tags]
+  if (!args.tags) args.tags = []
+  else if (!Array.isArray(args.tags)) args.tags = [args.tags]
   if (args.tags) {
     let _tags = {}
     for (const v of args.tags) _tags[v.name] = v.values
