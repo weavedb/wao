@@ -110,7 +110,10 @@ export default class ArMemBase {
     this.msgs = {}
 
     this.wasms = {
-      "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s": { file: "aos2_0_6" },
+      "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s": {
+        file: "aos2_0_6",
+        variant: "ao.N.1",
+      },
       "WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g": {
         file: "aos2_0_4_32",
         format: "wasm32-unknown-emscripten4",
@@ -133,7 +136,7 @@ export default class ArMemBase {
         block: 0,
         tags: buildTags(null, {
           "Data-Protocol": "ao",
-          Variant: this.variant ?? "ao.TN.1",
+          Variant: w.variant ?? this.variant ?? "ao.TN.1",
           Type: "Module",
           "Module-Format":
             w.format ?? "wasm64-unknown-emscripten-draft_2024_02_15",

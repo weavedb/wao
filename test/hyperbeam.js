@@ -43,11 +43,10 @@ describe("Hyperbeam Legacynet", function () {
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
-    hbeam = new HyperBEAM({
+    hbeam = await new HyperBEAM({
       c: "12",
       cmake: "3.5",
-    })
-    await wait(5000)
+    }).ready()
   })
 
   beforeEach(async () => {
@@ -59,7 +58,7 @@ describe("Hyperbeam Legacynet", function () {
     //server.end()
   })
 
-  it.only("should interact with a hyperbeam node", async () => {
+  it("should interact with a hyperbeam node", async () => {
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
     const r = await hb.computeLegacy({ pid, slot })
@@ -188,7 +187,7 @@ describe("Hyperbeam Legacynet", function () {
     console.log(await hb.text("message", null, { hello: "world" }, "/keys"))
   })
 
-  it("should upload module", async () => {
+  it.only("should upload module", async () => {
     const { pid } = await hb.spawnLua()
     await hb.scheduleLua({ pid, action: "Eval", data })
     await hb.scheduleLua({ pid, action: "Inc" })

@@ -7,7 +7,6 @@ import HB from "../src/hb.js"
 import { isNotNil, filter, isNil, range } from "ramda"
 import { randomBytes } from "node:crypto"
 import { wait } from "../src/utils.js"
-import Server from "../src/server.js"
 import HyperBEAM from "../src/hyperbeam.js"
 import { readFileSync } from "fs"
 import { resolve } from "path"
@@ -92,21 +91,19 @@ end)`
 const URL = "http://localhost:10001"
 
 describe("Hyperbeam Signer", function () {
-  let hb, hb2, hbeam, jwk, server, addr, store_prefix
+  let hb, hb2, hbeam, jwk, addr, store_prefix
   before(async () => {
     store_prefix = "cache-mainnet-" + Math.floor(Math.random() * 10000000)
-    server = new Server({ port: 4000, log: true, hb_url: URL })
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
-    hbeam = new HyperBEAM({
+    hbeam = await new HyperBEAM({
+      as: [],
       store_prefix,
       c: "12",
       cmake: "3.5",
       gateway: 4000,
-      legacy: true,
       operator: addr,
-    })
-    await wait(5000)
+    }).ready()
   })
 
   beforeEach(async () => {
@@ -115,7 +112,6 @@ describe("Hyperbeam Signer", function () {
 
   after(async () => {
     hbeam.kill()
-    server.end()
   })
   it("should generate valid signatures", async () => {
     const { pid } = await hb.spawn()
