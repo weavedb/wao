@@ -375,3 +375,28 @@ export const toHttpSigner = signer => {
     }
   }
 }
+
+/**
+ * Utility function to extract the message ID from a signed message
+ * Based on the original code's hash calculation
+ */
+async function getMessageId(signedMessage) {
+  // Extract signature from the Signature header
+  const signatureHeader =
+    signedMessage.headers.Signature || signedMessage.headers.signature
+  const match = signatureHeader.match(/Signature:\s*'http-sig-[^:]+:([^']+)'/)
+  const signature = match ? match[1] : null
+
+  if (!signature) {
+    throw new Error("Could not extract signature from headers")
+  }
+
+  // Hash the signature to get message ID
+  const encoder = new TextEncoder()
+  const data = encoder.encode(signature)
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  const hashBase64 = btoa(String.fromCharCode(...hashArray))
+
+  return hashBase64
+}
