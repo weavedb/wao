@@ -11,7 +11,12 @@ const seed = num => {
 }
 
 class HB {
-  constructor({ url = "http://localhost:10001", jwk } = {}) {
+  constructor({
+    url = "http://localhost:10001",
+    cu = "http://localhost:6363",
+    jwk,
+  } = {}) {
+    this.cu = cu
     this.url = url
     this.dev = {}
     this.dev.hyperbuddy = {
@@ -393,14 +398,14 @@ class HB {
 
   async dryrun({ tags = {}, pid, action, data } = {}) {
     if (typeof action === "string") tags.Action = action
-    let json = { Tags: buildTags(tags) }
+    let json = { Tags: buildTags({ ...tags }), Owner: this.addr }
     if (data) json.Data = data
     const res = await this.post({
       path: "/~relay@1.0/call",
       "relay-method": "POST",
-      "relay-path": `/dry-run?process-id=${pid}`,
+      "relay-path": `${this.cu}/dry-run?process-id=${pid}`,
       "content-type": "application/json",
-      body: JSON.stringify(json),
+      "relay-body": JSON.stringify(json),
     })
     return JSON.parse(res.body)
   }
