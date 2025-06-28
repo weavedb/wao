@@ -38,8 +38,10 @@ describe("HyperBEAM", function () {
     hb = await new HB({}).init(jwk)
     hb2 = await new HB({}).init(jwk2)
   })
-
-  after(async () => hbeam.kill())
+  after(async () => {
+    hbeam.kill()
+    server.end()
+  })
 
   it("should query wao device", async () => {
     assert.equal(await hb.text("wao", "info/version"), "1.0")

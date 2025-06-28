@@ -39,7 +39,11 @@ describe("Hyperbeam Legacynet", function () {
     hb2 = await new HB({}).init(acc[0].jwk)
   })
 
-  after(async () => hbeam.kill())
+  after(async () => {
+    hbeam.kill()
+    server.end()
+  })
+
   it("should test simple pay", async () => {
     await hb.send({
       path: "/~simple-pay@1.0/topup",
