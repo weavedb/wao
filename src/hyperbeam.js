@@ -63,7 +63,6 @@ export default class HyperBEAM {
     this.hbeam.on("close", code =>
       console.log(`child process exited with code ${code}`)
     )
-    return this.hbeam
   }
 
   genEnv() {

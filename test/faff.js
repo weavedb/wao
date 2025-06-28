@@ -36,8 +36,10 @@ describe("Hyperbeam Legacynet", function () {
     hb = await new HB({}).init(jwk)
     hb2 = await new HB({}).init(acc[0].jwk)
   })
-
-  after(async () => hbeam.kill())
+  after(async () => {
+    hbeam.kill()
+    server.end()
+  })
 
   it("should test faff", async () => {
     const { pid } = await hb.spawn()

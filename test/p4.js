@@ -38,7 +38,10 @@ describe("Hyperbeam Legacynet", function () {
     hb2 = await new HB({}).init(acc[0].jwk)
   })
 
-  after(async () => hbeam.kill())
+  after(async () => {
+    hbeam.kill()
+    server.end()
+  })
 
   it("should handle payment with lua", async () => {
     const process = readFileSync(
