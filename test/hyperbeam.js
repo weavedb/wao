@@ -200,6 +200,7 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(outbox2[0].Data, "Count: 2")
     console.log(await hb.computeLua({ pid, slot }))
   })
+
   it("should upload module", async () => {
     const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
     await hb.schedule({ pid })
@@ -209,17 +210,16 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal((await hb.now({ pid })).count, 5)
     assert.equal((await hb.now({ pid })).count, 5)
   })
+
   it("should test WAMR", async () => {
     const { pid } = await hb.spawnAOS()
     await hb.scheduleAOS({ pid, action: "Eval", data: src_data })
     await hb.scheduleAOS({ pid, action: "Add", tags: { Plus: "3" } })
     await hb.scheduleAOS({ pid, action: "Get" })
-    //console.log(await hb.now({ pid }))
     console.log("compute: 0", await hb.computeAOS({ pid, slot: 0 }))
     console.log("compute: 1", await hb.computeAOS({ pid, slot: 1 }))
     console.log("compute: 3", await hb.computeAOS({ pid, slot: 3 }))
     console.log("compute: 3", await hb.computeAOS({ pid, slot: 3 }))
     console.log("compute: 2", await hb.computeAOS({ pid, slot: 2 }))
-    //console.log(await hb.now({ pid }))
   })
 })
