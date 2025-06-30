@@ -8,6 +8,6 @@
     "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
-    "wao": "^0.22.1"
+    "wao": "^0.26.1"
   }
 }

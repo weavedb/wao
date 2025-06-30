@@ -121,7 +121,7 @@ describe("Hyperbeam Signer", function () {
   })
   it("should parse nested header values", async () => {
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       body: { a: { b: 5, c: 3 } },
       data: { d: { e: 5, f: 3 } },
       key: { g: { h: 5, i: 3 } },
@@ -138,11 +138,10 @@ describe("Hyperbeam Signer", function () {
     assert.deepEqual(num, keys.num)
     assert.deepEqual(list, keys.list)
     assert.deepEqual(str, keys.str)
-    assert.deepEqual(path, "httpsig_to_json")
   })
   it("should sign data", async () => {
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       data: { a: 3, b: 4 },
     }
     const msg = await hb.sign(keys)
@@ -150,7 +149,7 @@ describe("Hyperbeam Signer", function () {
     assert.deepEqual(data, keys.data)
 
     const keys2 = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       body: { a: { c: 3 }, b: 4 },
     }
     const msg2 = await hb.sign(keys2)
@@ -168,7 +167,7 @@ describe("Hyperbeam Signer", function () {
   })
   it("should sign nested data and body", async () => {
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       data: { a: 3, b: { c: { d: 4 } } },
       body: { a: 3, b: { c: { d: 4 } } },
     }
@@ -179,7 +178,7 @@ describe("Hyperbeam Signer", function () {
   })
   it("should sign atom", async () => {
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       float: 1.23,
       int: 1,
       bool: true,
@@ -203,7 +202,7 @@ describe("Hyperbeam Signer", function () {
 
   it("should sign list", async () => {
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       list: [1, "abc", true, Symbol("atom"), 1.23],
       body: [1, "abc", true, Symbol("atom"), 1.23],
       data: [
@@ -234,7 +233,7 @@ describe("Hyperbeam Signer", function () {
   })
   it("should sign null/undefined & empty values", async () => {
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       null: null,
       undefined: undefined,
       body: { list: [], map: {} },
@@ -250,7 +249,7 @@ describe("Hyperbeam Signer", function () {
     const binary = Buffer.from([4, 5, 6])
     const empty = Buffer.from([])
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       empty,
       nested: [binary, empty],
     }
@@ -264,7 +263,7 @@ describe("Hyperbeam Signer", function () {
     const binary = Buffer.from([4, 5, 6])
     const empty = Buffer.from([])
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       binary,
     }
     const msg = await hb.sign(keys)
@@ -275,7 +274,7 @@ describe("Hyperbeam Signer", function () {
     const binary = Buffer.from([4, 5, 6])
     const empty = Buffer.from([])
     const keys = {
-      path: "/~wao@1.0/httpsig_to_json",
+      path: "/~wao@1.0/httpsig",
       bin: binary,
       bin2: binary,
     }
