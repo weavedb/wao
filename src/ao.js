@@ -2,6 +2,7 @@ import * as WarpArBundles from "warp-arbundles"
 const pkg = WarpArBundles.default ?? WarpArBundles
 const { createData, ArweaveSigner } = pkg
 import AR from "./ar.js"
+import HB from "./hb.js"
 import md5 from "md5"
 import {
   createDataItemSigner,
@@ -39,6 +40,7 @@ import {
   wait,
   isLocalhost,
   tag,
+  tags as _tags,
   ltags,
   action,
   isData,
@@ -83,6 +85,7 @@ class AO {
       opt = {}
     }
     let {
+      hb: _hb,
       authority = srcs.authority,
       module,
       module_type = "aos2",
@@ -92,6 +95,7 @@ class AO {
       in_memory = false,
       port,
     } = opt
+    if (_hb) this.hb = new HB()
     if (!_port && port) _port = port
     if (!aoconnect && _port) aoconnect = optAO(_port)
     if (!ar && _port) ar = { port: _port }
@@ -155,6 +159,8 @@ class AO {
       this.module = module ?? srcs.module_wao
       this.scheduler = srcs.scheduler_wao
       this.authority = srcs.authority_wao
+    } else if (this.module_type === "mainnet") {
+      this.module = module ?? srcs.module_mainnet
     } else {
       this.module = module
       this.scheduler = scheduler
@@ -164,6 +170,7 @@ class AO {
 
   async init(jwk) {
     await this.ar.init(jwk)
+    if (this.hb) await this.hb.init(this.ar.jwk)
     return this
   }
 
@@ -319,7 +326,9 @@ class AO {
     const _tags = mergeLeft(tags, {
       "Data-Protocol": this.protocol ?? "ao",
       Variant:
-        (this.variant ?? this.module_type === "mainnet") ? "ao.N.1" : "ao.TN.1",
+        (this.variant ?? this.module_type === "mainnet")
+          ? "ao.TN.1"
+          : "ao.TN.1",
       Type: "Module",
       "Module-Format": "wasm64-unknown-emscripten-draft_2024_02_15",
       "Input-Encoding": "JSON-V1",
@@ -345,7 +354,9 @@ class AO {
     const _tags = mergeLeft(tags, {
       "Data-Protocol": this.protocol ?? "ao",
       Variant:
-        (this.variant ?? this.module_type === "mainnet") ? "ao.N.1" : "ao.TN.1",
+        (this.variant ?? this.module_type === "mainnet")
+          ? "ao.TN.1"
+          : "ao.TN.1",
       Type: "Scheduler-Location",
       Url: url,
       "Time-To-Live": "3600000",
@@ -360,7 +371,7 @@ class AO {
 
   async spwn({
     boot,
-    module = this.module,
+    module,
     scheduler = this.scheduler,
     memory,
     jwk,
@@ -375,17 +386,23 @@ class AO {
     try {
       if (boot) tags["On-Boot"] = boot
       if (auth) tags.Authority = auth
-      if (!tags.Authority && this.authority) tags.Authority = this.authority
-      let _tags = buildTags(null, tags)
-      pid = await this.spawn({
-        variant: this.variant,
-        memory,
-        module,
-        scheduler,
-        signer: this.toSigner(jwk),
-        tags: _tags,
-        data: jsonToStr(data),
-      })
+      if (this.hb) {
+        ;({ pid } = await this.hb.spawnLegacy({ module, tags, data }))
+        await this.hb.computeLegacy({ pid, slot: 0 })
+      } else {
+        module ??= this.module
+        if (!tags.Authority && this.authority) tags.Authority = this.authority
+        let _tags = buildTags(null, tags)
+        pid = await this.spawn({
+          variant: this.variant,
+          memory,
+          module,
+          scheduler,
+          signer: this.toSigner(jwk),
+          tags: _tags,
+          data: jsonToStr(data),
+        })
+      }
     } catch (e) {
       err = e
     }
@@ -399,7 +416,7 @@ class AO {
     mid,
     check = [],
     get,
-    timeout = 0,
+    timeout = 5000,
     mode = "aoconnect",
     limit = 25,
   }) {
@@ -462,7 +479,12 @@ class AO {
     try {
       if (!is(Array, check)) check = [check]
       let _txs = [{ id: mid, from: await this.ar.toAddr(jwk) }]
-      res = await this.result({ process: pid, message: mid })
+      if (this.hb) {
+        res = await this.hb.computeLegacy({ pid, slot: mid })
+        await this.hb.get({ path: `/${pid}/push`, slot: mid })
+      } else {
+        res = await this.result({ process: pid, message: mid })
+      }
       hash = getHash(res)
       let _txmap = { [mid]: { checked: false, res } }
       results.push({ mid, res })
@@ -515,31 +537,50 @@ class AO {
     tags = {},
     check = [],
     get,
-    timeout = 0,
+    timeout = 5000,
     mode = "aoconnect",
     limit = 25,
   }) {
     let err
     ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
     if (err) return { err }
-    let _tags = buildTags(act, tags)
-    const mid = await this.message({
-      variant: this.variant,
-      process: pid,
-      signer: this.toSigner(jwk),
-      tags: _tags,
-      data: jsonToStr(data),
-    })
-    return await this.res({
-      pid,
-      mid,
-      jwk,
-      check,
-      get,
-      timeout,
-      mode,
-      limit,
-    })
+    if (this.hb) {
+      const { slot: mid } = await this.hb.scheduleLegacy({
+        pid,
+        tags: tags ?? {},
+        action: act,
+        data,
+      })
+      return await this.res({
+        pid,
+        mid,
+        jwk,
+        check,
+        get,
+        timeout,
+        mode,
+        limit,
+      })
+    } else {
+      let _tags = buildTags(act, tags)
+      const mid = await this.message({
+        variant: this.variant,
+        process: pid,
+        signer: this.toSigner(jwk),
+        tags: _tags,
+        data: jsonToStr(data),
+      })
+      return await this.res({
+        pid,
+        mid,
+        jwk,
+        check,
+        get,
+        timeout,
+        mode,
+        limit,
+      })
+    }
   }
 
   async asgn({ pid, mid, jwk, check = [], get }) {
@@ -575,13 +616,21 @@ class AO {
     let [res, out] = [null, null]
     let _tags = buildTags(act, tags)
     try {
-      const _res = await this.dryrun({
-        process: pid,
-        signer: this.toSigner(jwk),
-        tags: _tags,
-        data: jsonToStr(data),
-      })
-      res = _res
+      if (this.hb) {
+        res = await this.hb.dryrun({
+          action: act,
+          pid,
+          tags,
+          data: jsonToStr(data),
+        })
+      } else {
+        res = await this.dryrun({
+          process: pid,
+          signer: this.toSigner(jwk),
+          tags: _tags,
+          data: jsonToStr(data),
+        })
+      }
       let checks = []
       if (!is(Array, check)) check = [check]
       if (!allChecked(check, res)) err = "something went wrong"
@@ -599,7 +648,11 @@ class AO {
     let res = null
     try {
       let sort = asc ? "ASC" : "DESC"
-      res = await this.results({ process: pid, limit, sort, cursor })
+      if (this.hb) {
+        res = await this.hb.results({ process: pid, limit, sort, from: cursor })
+      } else {
+        res = await this.results({ process: pid, limit, sort, from: cursor })
+      }
       if (!res.edges) return null
       msgs = map(v => ({ cursor: v.cursor, ...v.node }))(res.edges)
       if (res.page_info.has_next_page) {
@@ -608,7 +661,7 @@ class AO {
             process: pid,
             limit,
             sort,
-            cursor: last(res.edges).cursor,
+            from: last(res.edges).cursor,
           })
         }
       }
@@ -799,10 +852,10 @@ const getParams = (tags, opts) => {
     isNil(opts)
   ) {
     _opts = tags
-    _tags = null
+    _tags = {}
   }
 
-  if (isNil(_opts)) _opts = { get: true }
+  if (isNil(_opts)) _opts = { get: false }
   else if (is(Boolean, _opts) || is(String, _opts)) _opts = { get: _opts }
   return { _tags, _opts }
 }

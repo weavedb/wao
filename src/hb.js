@@ -278,6 +278,7 @@ class HB {
       Type: "Process",
       image,
       "execution-device": "stack@1.0",
+      "push-device": "push@1.0",
       "device-stack": [
         "wasi@1.0",
         "json-iface@1.0",
@@ -312,6 +313,7 @@ class HB {
       Type: "Process",
       module: lua,
       "execution-device": "lua@5.3a",
+      "push-device": "push@1.0",
       "patch-from": "/results/outbox",
     })
     const pid = res.headers.process
@@ -354,6 +356,10 @@ class HB {
     if (path && !/^\//.test(path)) path = "/" + path
     return await this.getJSON({ path: `/${pid}/now${path}` })
   }
+  async slot({ pid, path = "" }) {
+    if (path && !/^\//.test(path)) path = "/" + path
+    return await this.getJSON({ path: `/${pid}/slot${path}` })
+  }
 
   async messages({ pid, from, to, limit } = {}) {
     let params = `target=${pid}`
@@ -373,8 +379,7 @@ class HB {
   }
 
   async spawnLegacy({ module, tags = {}, data } = {}) {
-    tags = mergeLeft(tags, {
-      data,
+    let t = {
       Type: "Process",
       "Data-Protocol": "ao",
       Variant: "ao.TN.1",
@@ -382,24 +387,44 @@ class HB {
       Authority: this._info.address,
       "scheduler-location": this._info.address,
       "random-seed": seed(16),
-      module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
+      module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
       device: "process@1.0",
       "scheduler-device": "scheduler@1.0",
       "execution-device": "stack@1.0",
+      "push-device": "push@1.0",
       "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
       "patch-from": "/results/outbox",
       "stack-keys": ["init", "compute", "snapshot", "normalize"],
-    })
+    }
+    if (data) t.data = data
+    tags = mergeLeft(tags, t)
     return await this.spawn(tags)
   }
-
+  async results({ process, limit, sort = "DESC", from, to } = {}) {
+    let params = ""
+    const addParam = (key, val) => {
+      params += params === "" ? "?" : "&"
+      params += `${key}=${val}`
+    }
+    if (limit) addParam("limit", limit)
+    if (sort) addParam("sort", sort)
+    if (from) addParam("from", from)
+    if (to) addParam("to", to)
+    const res = await this.post({
+      path: "/~relay@1.0/call",
+      method: "GET",
+      "relay-path": `${this.cu}/results/${process}${params}`,
+      "content-type": "application/json",
+    })
+    return JSON.parse(res.body)
+  }
   async dryrun({ tags = {}, pid, action, data } = {}) {
     if (typeof action === "string") tags.Action = action
     let json = { Tags: buildTags({ ...tags }), Owner: this.addr }
     if (data) json.Data = data
     const res = await this.post({
       path: "/~relay@1.0/call",
-      "relay-method": "POST",
+      method: "POST",
       "relay-path": `${this.cu}/dry-run?process-id=${pid}`,
       "content-type": "application/json",
       "relay-body": JSON.stringify(json),
