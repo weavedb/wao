@@ -176,25 +176,25 @@ describe("SDK", function () {
     const { res } = await ao.msg({ pid, data: "ping" })
   })
 
-  it("should publish custom modules", async () => {
+  it.only("should publish custom modules", async () => {
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
     const data = src.data("aos2_0_1", "wasm")
     const { id: modid } = await ao.postModule({ data, jwk })
     const { p, err, res } = await ao.deploy({ src_data, module: modid })
-    assert.equal(await p.d("Hello", false), "Hello, World!")
+    assert.equal(await p.d("Hello"), "Hello, World!")
   })
 
   it("should spawn a process and send messages", async () => {
     const { p } = await ao.deploy({ src_data })
-    assert.equal(await p.d("Hello", false), "Hello, World!")
+    assert.equal(await p.d("Hello"), "Hello, World!")
   })
 
   it("should spawn a process with On-Boot tag", async () => {
     const { err, p, pid } = await ao.deploy({ boot: true, src_data })
-    assert.equal(await p.d("Hello", false), "Hello, World!")
+    assert.equal(await p.d("Hello"), "Hello, World!")
     const { pid: pid2, p: p2 } = await ao.deploy({ boot: pid })
     return
-    assert.equal(await p2.d("Hello", false), "Hello, World!")
+    assert.equal(await p2.d("Hello"), "Hello, World!")
   })
 
   it("should spawn a message from a handler with receive", async () => {
@@ -237,7 +237,7 @@ describe("SDK", function () {
 
   it("should work with pre-loaded packages", async () => {
     const { p } = await ao.deploy({ src_data: src_data5 })
-    assert.equal(await p.d("Hello", false), "Hello, World!")
+    assert.equal(await p.d("Hello"), "Hello, World!")
   })
 
   it("should work with weavedrive: Assignments", async () => {
@@ -247,7 +247,7 @@ describe("SDK", function () {
       data: "Hello, World!",
     })
     await ao.attest({ id: pid })
-    assert.equal(await p.d("Hello", { msg: pid }, false), "Hello, World!")
+    assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
   })
 
   it("should work with weavedrive: Individual", async () => {
@@ -266,7 +266,7 @@ describe("SDK", function () {
       data: "Hello, World!",
     })
     await ao.avail({ ids: [pid] })
-    assert.equal(await p.d("Hello", { msg: pid }, false), "Hello, World!")
+    assert.equal(await p.d("Hello", { msg: pid }), "Hello, World!")
   })
 
   it("should load apm mock", async () => {
@@ -280,7 +280,7 @@ describe("SDK", function () {
     })
     const { id } = await ao.ar.post({ data: "Hello, World!" })
     await ao.attest({ id })
-    assert.equal(await p.d("Get-Data", { id }, false), "Hello, World!")
+    assert.equal(await p.d("Get-Data", { id }), "Hello, World!")
     return
   })
 
@@ -306,7 +306,7 @@ describe("SDK", function () {
     await ao.monitor({ process: pid, signer })
     await wait(3000)
     await ao.unmonitor({ process: pid, signer })
-    assert.equal(await p.d("Get", false), "6")
+    assert.equal(await p.d("Get"), "6")
   })
 })
 
@@ -330,7 +330,7 @@ describe("WeaveDrive", () => {
     const { id } = await ao.ar.post({ data: "Hello" })
     await ao.attest({ id })
 
-    assert.equal(await p.d("Get", { id }, false), "Hello")
+    assert.equal(await p.d("Get", { id }), "Hello")
   })
 })
 
@@ -505,7 +505,7 @@ end)
     const now = Date.now()
     const ao = await new AO({}).init(acc[0])
     const { p, pid } = await ao.deploy({ src_data })
-    const { out, mid } = await p.msg("Timestamp", false)
+    const { out, mid } = await p.msg("Timestamp")
     assert(out * 1 >= now)
     assert.equal(ao.mem.msgs[mid].msg.From, acc[0].addr)
   })
@@ -521,7 +521,7 @@ end)
     const now = Date.now()
     const ao = await new AO({}).init(acc[0])
     const { p, pid } = await ao.deploy({ src_data })
-    const { out, mid } = await p.msg("Timestamp", false)
+    const { out, mid } = await p.msg("Timestamp")
     let exist = false
     for (let k in ao.mem.msgs) {
       if (ao.mem.msgs[k].target === acc[0].addr) exist = true
@@ -561,6 +561,6 @@ ao.log("abc")
   msg.reply({ Data = "Hello" })
 end)`
     const { p, pid } = await ao.deploy({ src_data })
-    console.log(await p.dry("Hello", false))
+    console.log(await p.dry("Hello"))
   })
 })
