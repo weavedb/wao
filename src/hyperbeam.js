@@ -15,14 +15,15 @@ export default class HyperBEAM {
     cwd = "./HyperBEAM",
     c,
     cmake,
-    legacy = false,
     faff,
     simplePay = false,
     simplePayPrice,
     p4_lua,
     store_prefix,
     operator,
+    console = true,
   } = {}) {
+    this.console = console
     if (clearCache) {
       const dirname = resolve(process.cwd(), cwd)
       for (let v of readdirSync(dirname)) {
@@ -69,14 +70,16 @@ export default class HyperBEAM {
         cwd: resolve(process.cwd(), this.cwd),
       }
     )
-    this.hbeam.stdout.on("data", chunk => console.log(chunk.toString()))
-    this.hbeam.stderr.on("data", err => console.error(err.toString()))
-    this.hbeam.on("error", err =>
-      console.error(`failed to start process: ${err}`)
-    )
-    this.hbeam.on("close", code =>
-      console.log(`child process exited with code ${code}`)
-    )
+    if (this.console) {
+      this.hbeam.stdout.on("data", chunk => console.log(chunk.toString()))
+      this.hbeam.stderr.on("data", err => console.error(err.toString()))
+      this.hbeam.on("error", err =>
+        console.error(`failed to start process: ${err}`)
+      )
+      this.hbeam.on("close", code =>
+        console.log(`child process exited with code ${code}`)
+      )
+    }
   }
   async ok() {
     try {

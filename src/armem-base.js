@@ -112,7 +112,7 @@ export default class ArMemBase {
     this.wasms = {
       "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s": {
         file: "aos2_0_6",
-        variant: "ao.N.1",
+        variant: "ao.TN.1",
       },
       "WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g": {
         file: "aos2_0_4_32",
