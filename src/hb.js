@@ -2,8 +2,6 @@ import { connect, createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft } from "ramda"
 import { toAddr, buildTags } from "./utils.js"
 import { send as _send, createRequest } from "./signer.js"
-import { resolve } from "path"
-import { readFileSync } from "fs"
 import hyper_aos from "./lua/hyper-aos.js"
 import aos_wamr from "./lua/aos_wamr.js"
 
@@ -99,7 +97,7 @@ class HB {
 
   async getImage() {
     const wasm = Buffer.from(aos_wamr, "base64")
-    const id = await this.cacheModule(wasm, "application/wasm")
+    const id = await this.cacheBinary(wasm, "application/wasm")
     this.image ??= id
     return id
   }
@@ -212,7 +210,7 @@ class HB {
     return { res, pid: res.headers.process }
   }
 
-  async cacheModule2(data, type) {
+  async cacheModule(data, type) {
     if (!this.cache) {
       const { pid } = await this.spawn({})
       this.cache = pid
@@ -226,7 +224,7 @@ class HB {
     return msgs.edges[0].node.message.Id
   }
 
-  async cacheModule(data, type) {
+  async cacheBinary(data, type) {
     const res = await this.post({ path: "/~wao@1.0/cache_module", data, type })
     return res.headers.id
   }
