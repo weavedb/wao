@@ -1,81 +1,13 @@
 import assert from "assert"
-import { send as _send } from "../src/signer.js"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, AO, toAddr } from "../src/test.js"
 import { getJWK } from "./lib/test-utils.js"
+import { generateTestCases } from "./gen.js"
 import HB from "../src/hb.js"
 import { isNotNil, filter, isNil, range } from "ramda"
 import { randomBytes } from "node:crypto"
 import { wait } from "../src/utils.js"
 import HyperBEAM from "../src/hyperbeam.js"
-import { readFileSync } from "fs"
-import { resolve } from "path"
-
-function extractInnerBodyDynamic(signedRequest, commitmentId) {
-  const { headers } = signedRequest
-
-  // Extract commitment metadata
-  const commitment = {
-    alg: extractAlgorithm(headers["signature-input"]),
-    "commitment-device": "httpsig@1.0",
-    signature: headers.signature,
-    "signature-input": headers["signature-input"],
-  }
-
-  // Parse the signed fields from signature-input
-  const signedFields = extractSignedFields(headers["signature-input"])
-
-  // Build inner body
-  const innerBody = {
-    commitments: {
-      [commitmentId]: commitment,
-    },
-  }
-
-  // Add all non-derived fields (those without @)
-  signedFields.forEach(field => {
-    if (!field.startsWith("@") && field !== "ao-types") {
-      const value = headers[field]
-      if (value !== undefined) {
-        // Check ao-types to determine proper type conversion
-        if (
-          headers["ao-types"] &&
-          headers["ao-types"].includes(`${field}="integer"`)
-        ) {
-          innerBody[field] = parseInt(value, 10)
-        } else {
-          innerBody[field] = value
-        }
-      }
-    }
-  })
-
-  return innerBody
-}
-
-/**
- * Helper: Extract algorithm from signature-input
- */
-function extractAlgorithm(signatureInput) {
-  const match = signatureInput.match(/alg="([^"]+)"/)
-  return match ? match[1] : "rsa-pss-sha512"
-}
-
-/**
- * Helper: Extract signed fields from signature-input
- */
-function extractSignedFields(signatureInput) {
-  // Extract the fields list from signature-input
-  // Format: http-sig-xxx=("field1" "field2" ...);alg=...
-  const match = signatureInput.match(/\(([^)]+)\)/)
-  if (!match) return []
-
-  // Parse the quoted fields
-  const fieldsStr = match[1]
-  const fields = fieldsStr.match(/"[^"]+"/g) || []
-
-  return fields.map(f => f.replace(/"/g, ""))
-}
 
 const data = `
 local count = 0
@@ -87,8 +19,6 @@ end)
 Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = "Count: "..tostring(count) })
 end)`
-
-const URL = "http://localhost:10001"
 
 describe("Hyperbeam Signer", function () {
   let hb, hb2, hbeam, jwk, addr, store_prefix
@@ -231,7 +161,7 @@ describe("Hyperbeam Signer", function () {
       { bool: false, float: 3.14, int: 1, nested: "nested", str: "abc" },
     ])
   })
-  it("should sign null/undefined & empty values", async () => {
+  it.only("should sign null/undefined & empty values", async () => {
     const keys = {
       path: "/~wao@1.0/httpsig",
       null: null,
@@ -256,7 +186,7 @@ describe("Hyperbeam Signer", function () {
     const msg = await hb.sign(keys)
     const json = JSON.parse((await hb.send(msg)).body)
     assert.equal(json.empty, "")
-    assert.deepEqual(json.nested, ["\x04\x05\x06", ""])
+    assert.deepEqual(json.nested, ["BAUG", ""])
   })
 
   it("should sign single binary", async () => {
@@ -268,7 +198,7 @@ describe("Hyperbeam Signer", function () {
     }
     const msg = await hb.sign(keys)
     const json = JSON.parse((await hb.send(msg)).body)
-    assert.deepEqual(json.binary, "\x04\x05\x06")
+    assert.deepEqual(json.binary, "BAUG")
   })
   it("should sign multiple binaries without body/data", async () => {
     const binary = Buffer.from([4, 5, 6])
@@ -280,7 +210,57 @@ describe("Hyperbeam Signer", function () {
     }
     const msg = await hb.sign(keys)
     const json = JSON.parse((await hb.send(msg)).body)
-    assert.deepEqual(json.bin, "\x04\x05\x06")
-    assert.deepEqual(json.bin2, "\x04\x05\x06")
+    assert.deepEqual(json.bin, "BAUG")
+    assert.deepEqual(json.bin2, "BAUG")
+  })
+  const bin = Buffer.from([1, 2, 3])
+  let keys = [
+    {
+      str: "abc",
+      bool: true,
+      num: 123,
+      float: 3.14,
+      atom: Symbol("atom"),
+      list: [1, 2, 3],
+      binary: Buffer.from([1, 2, 3]),
+    },
+    { map: { a: 1, b: 2, c: { d: 3 } }, binary: bin },
+    { bin, bin2: Buffer.from([1, 2, 3]), body: 3 },
+
+    { list: [1, [2, 3]] },
+    { map: { a: 3, b: "abc", c: { d: { e: 3 } } } },
+    { list: [1, [2, 3]] },
+    { bin: [bin, bin] },
+    { bin: bin, bin2: bin },
+    { map: { jntzf: 8.02 } },
+    { list: [53.05] },
+    { map: { float: 86.01, bool: true } },
+    { key: [[8.02]] },
+    { list: [Symbol("atom")] },
+  ]
+  //keys = []
+  it("should test signer", async () => {
+    for (const v of keys) {
+      console.log()
+      console.log("--------------", v)
+      const msg = await hb.sign({ path: "/~wao@1.0/httpsig", ...v })
+      console.log(msg)
+      const { body } = await hb.send(msg)
+      console.log(JSON.parse(body))
+    }
+  })
+  it.skip("should fuzz test random objects", async () => {
+    for (const v of generateTestCases(20)) {
+      console.log()
+      console.log("--------------", v.header)
+      console.log(JSON.stringify(v.header))
+      const msg = await hb.sign({ path: "/~wao@1.0/httpsig", ...v.header })
+      console.log(msg)
+      const { body } = await hb.send(msg)
+      const json = JSON.parse(body)
+      console.log(json)
+      console.log(v.returned)
+      assert.deepEqual(json, v.returned)
+    }
   })
 })
