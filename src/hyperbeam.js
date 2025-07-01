@@ -7,7 +7,7 @@ export default class HyperBEAM {
   constructor({
     port = 10001,
     cu = 6363,
-    as = ["genesis_wasm"],
+    as,
     bundler,
     gateway,
     wallet,
@@ -22,7 +22,9 @@ export default class HyperBEAM {
     store_prefix,
     operator,
     console = true,
+    shell = true,
   } = {}) {
+    as ??= shell ? [] : ["genesis_wasm"]
     this.console = console
     if (clearCache) {
       const dirname = resolve(process.cwd(), cwd)
@@ -53,11 +55,11 @@ export default class HyperBEAM {
     this.gateway = gateway
     this.wallet = wallet
     this.cwd = cwd
-    this.run()
+    if (shell) this.shell()
   }
-  run() {
+  shell() {
     const _as = this.as.length === 0 ? [] : ["as", this.as.join(", ")]
-    this.hbeam = spawn(
+    this._shell = spawn(
       "rebar3",
       [
         ..._as,
@@ -71,15 +73,60 @@ export default class HyperBEAM {
       }
     )
     if (this.console) {
-      this.hbeam.stdout.on("data", chunk => console.log(chunk.toString()))
-      this.hbeam.stderr.on("data", err => console.error(err.toString()))
-      this.hbeam.on("error", err =>
+      this._shell.stdout.on("data", chunk => console.log(chunk.toString()))
+      this._shell.stderr.on("data", err => console.error(err.toString()))
+      this._shell.on("error", err =>
         console.error(`failed to start process: ${err}`)
       )
-      this.hbeam.on("close", code =>
+      this._shell.on("close", code => {
         console.log(`child process exited with code ${code}`)
-      )
+        delete this._shell
+      })
     }
+  }
+  eunit(module, test) {
+    return new Promise(res => {
+      let isTest = !isNil(test)
+      if (Array.isArray(module)) {
+        for (const v of module) {
+          if (Array.isArray(v) || /:/.test(v)) {
+            isTest = true
+            break
+          }
+        }
+      }
+      const _as = this.as.length === 0 ? [] : ["as", this.as.join(", ")]
+      const _test = Array.isArray(test) ? test.join("+") : test
+      let _module = ""
+
+      if (Array.isArray(module)) {
+        for (const v of module) {
+          _module += _module === "" ? "" : ","
+          if (Array.isArray(v)) _module += `${v[0]}:${v[1].join("+")}`
+          else _module += v
+        }
+      } else {
+        _module = test ? `${module}:${_test}` : module
+      }
+
+      const _arg = isTest ? "--test" : "--module"
+      let params = [..._as, "eunit", _arg, _module]
+      const _eunit = spawn("rebar3", params, {
+        env: { ...process.env, ...this.genEnv() },
+        cwd: resolve(process.cwd(), this.cwd),
+      })
+      if (this.console) {
+        _eunit.stdout.on("data", chunk => console.log(chunk.toString()))
+        _eunit.stderr.on("data", err => console.error(err.toString()))
+        _eunit.on("error", err =>
+          console.error(`failed to start process: ${err}`)
+        )
+        _eunit.on("close", code => {
+          console.log(`child process exited with code ${code}`)
+          res()
+        })
+      }
+    })
   }
   async ok() {
     try {
@@ -111,6 +158,7 @@ export default class HyperBEAM {
   }
   genEnv() {
     let _env = {}
+    if (this.diagnostic) _env.DIAGNOSTIC = this.diagnostic
     if (this.c) {
       _env.CC = `gcc-${this.c}`
       _env.CXX = `g++-${this.c}`
@@ -168,6 +216,6 @@ export default class HyperBEAM {
   }
 
   kill() {
-    this.hbeam.kill("SIGKILL")
+    this._shell.kill("SIGKILL")
   }
 }
