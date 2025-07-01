@@ -87,7 +87,9 @@ class HB {
 
   async init(jwk) {
     this._init(jwk)
-    this._info = await this.dev.meta.info({})
+    try {
+      this._info = await this.dev.meta.info({})
+    } catch (e) {}
     return this
   }
 
