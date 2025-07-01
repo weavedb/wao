@@ -23,33 +23,43 @@ export function hbEncodeValue(value) {
 
   if (Array.isArray(value)) {
     if (value.length === 0) return ["empty-list", undefined]
-    if (value.some(isPojo)) {
-      throw new Error(
-        `Array with objects should have been lifted: ${JSON.stringify(value)}`
-      )
+
+    // Check if this is a simple array (no nested arrays or objects)
+    const hasComplexValues = value.some(v => Array.isArray(v) || isPojo(v))
+
+    if (hasComplexValues) {
+      // Arrays with complex values should be lifted
+      throw new Error("Arrays must be lifted to numbered maps")
     }
 
-    const encoded = value
-      .map(v => {
-        if (typeof v === "string") {
-          if (v === "") return `"(ao-type-empty-binary) "`
-          const escaped = v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-          return `"${escaped}"`
-        } else if (typeof v === "number") return String(v)
-        else if (typeof v === "boolean") return v ? "?1" : "?0"
-        else if (typeof v === "symbol") {
-          const desc = v.description || "symbol"
-          const escaped = desc.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-          return `"(ao-type-atom) ${escaped}"`
-        } else if (v === null) return `"(ao-type-atom) null"`
-        else if (v === undefined) return `"(ao-type-atom) undefined"`
-        else if (Array.isArray(v) && v.length === 0) {
-          return `"(ao-type-empty-list) "`
+    // Simple arrays can be encoded as structured field lists
+    const items = value.map(item => {
+      if (typeof item === "string") {
+        const escaped = item.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+        return `"${escaped}"`
+      } else if (typeof item === "number") {
+        const [type, encoded] = hbEncodeValue(item)
+        if (type) {
+          return `"(ao-type-${type}) ${encoded}"`
         }
-        return `"${String(v)}"`
-      })
-      .join(", ")
-    return ["list", encoded]
+        return encoded
+      } else if (typeof item === "boolean") {
+        return `"(ao-type-atom) ${item ? "true" : "false"}"`
+      } else if (typeof item === "symbol") {
+        const desc = item.description || "symbol"
+        // Don't escape the symbol description inside the ao-type prefix
+        return `"(ao-type-atom) ${desc}"`
+      } else if (item === null) {
+        return `"(ao-type-atom) null"`
+      } else if (item === undefined) {
+        return `"(ao-type-atom) undefined"`
+      } else {
+        // This shouldn't happen for simple arrays
+        return `"${String(item)}"`
+      }
+    })
+
+    return ["list", items.join(", ")]
   }
 
   if (typeof value === "number") {
@@ -58,17 +68,22 @@ export function hbEncodeValue(value) {
   }
 
   if (typeof value === "boolean") {
-    return ["atom", `"${value ? "true" : "false"}"`]
+    return ["atom", value ? "true" : "false"]
   }
 
   if (typeof value === "symbol") {
     const desc = value.description || "symbol"
-    return ["atom", `"${desc}"`]
+    return ["atom", desc]
   }
 
-  if (value === null) return ["atom", `"null"`]
+  if (value === null) return ["atom", "null"]
 
-  if (value === undefined) return ["atom", `"undefined"`]
+  if (value === undefined) return ["atom", "undefined"]
+
+  if (isPojo(value)) {
+    // Objects should be handled by the lift function
+    throw new Error("Objects must be lifted")
+  }
 
   throw new Error(`Cannot encode value: ${String(value)}`)
 }
@@ -165,7 +180,8 @@ function hbEncodeLift(obj, parent = "", top = {}) {
       if (Array.isArray(value)) {
         const hasObjects = value.some(isPojo)
         const hasBinary = value.some(isBytes)
-        if (hasObjects || hasBinary) {
+        const hasNestedArrays = value.some(v => Array.isArray(v))
+        if (hasObjects || hasBinary || hasNestedArrays) {
           const indexedObj = value.reduce(
             (obj, v, idx) => Object.assign(obj, { [idx]: v }),
             {}
@@ -186,6 +202,7 @@ function hbEncodeLift(obj, parent = "", top = {}) {
       if (isPojo(value)) {
         if (Object.keys(value).length === 0) {
           acc[1][key.toLowerCase()] = "empty-message"
+          // Don't add any value for empty messages
           return acc
         }
 
@@ -216,6 +233,7 @@ function hbEncodeLift(obj, parent = "", top = {}) {
               acc[1][`${key.toLowerCase()}%2f${subKey}`] = "atom"
             } else if (typeof v === "string") {
               if (v === "") {
+                // Don't add empty strings to items, just track the type
                 acc[1][`${key.toLowerCase()}%2f${subKey}`] = "empty-binary"
               } else {
                 const escaped = v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
@@ -238,6 +256,7 @@ function hbEncodeLift(obj, parent = "", top = {}) {
               acc[1][`${key.toLowerCase()}%2f${subKey}`] = "atom"
             } else if (Array.isArray(v) && !v.some(item => isPojo(item))) {
               if (v.length === 0) {
+                // Empty lists are represented as () in structured fields
                 items.push(`${subKey}=()`)
                 acc[1][`${key.toLowerCase()}%2f${subKey}`] = "empty-list"
               } else {
@@ -262,6 +281,7 @@ function hbEncodeLift(obj, parent = "", top = {}) {
                 items.push(`${subKey}=(${listItems.join(" ")})`)
               }
             } else if (isPojo(v) && Object.keys(v).length === 0) {
+              // Empty objects are represented without a value in structured fields
               items.push(`${subKey}`)
               acc[1][`${key.toLowerCase()}%2f${subKey}`] = "empty-message"
             }
@@ -269,20 +289,9 @@ function hbEncodeLift(obj, parent = "", top = {}) {
 
           const encodedValue = items.join(", ")
 
-          const hasOnlyEmptyValues = Object.entries(value).every(([k, v]) => {
-            return (
-              v === null ||
-              v === undefined ||
-              v === "" ||
-              (Array.isArray(v) && v.length === 0) ||
-              (isPojo(v) && Object.keys(v).length === 0)
-            )
-          })
-
-          if (!hasAnyNonEmptyValues) {
+          // If there are no items (all values were empty), just track the type
+          if (items.length === 0) {
             acc[1][key.toLowerCase()] = "map"
-          } else if (encodedValue === "") {
-            acc[1][key.toLowerCase()] = "empty-message"
           } else {
             acc[0][key] = encodedValue
             acc[1][key.toLowerCase()] = "map"
@@ -339,15 +348,22 @@ function encodePart(name, { headers = {}, body }) {
       ? Array.from(headers.entries())
       : Object.entries(headers || {})
 
-  const parts = headerEntries.reduce(
-    (acc, [name, value]) => {
-      acc.push(`${name}: `, value, "\r\n")
-      return acc
-    },
-    [`content-disposition: form-data;name="${name}"\r\n`]
-  )
+  const parts = []
 
-  if (body) parts.push("\r\n", body)
+  // Add content-disposition first
+  parts.push(`content-disposition: form-data; name="${name}"\r\n`)
+
+  // Add other headers
+  headerEntries.forEach(([headerName, value]) => {
+    parts.push(`${headerName}: ${value}\r\n`)
+  })
+
+  if (body) {
+    parts.push("\r\n", body)
+  } else {
+    // Empty body - just need the double CRLF
+    parts.push("\r\n")
+  }
 
   return new Blob(parts)
 }
@@ -388,7 +404,7 @@ async function encode(obj = {}) {
                     value.byteLength
                   )
         flattened[key] = new Blob([
-          `content-disposition: form-data;name="${key}"\r\n\r\n`,
+          `content-disposition: form-data; name="${key}"\r\n\r\n`,
           uint8Array,
         ])
         return
@@ -403,7 +419,7 @@ async function encode(obj = {}) {
       ) {
         bodyKeys.push(key)
         flattened[key] = new Blob([
-          `content-disposition: form-data;name="${key}"\r\n\r\n`,
+          `content-disposition: form-data; name="${key}"\r\n\r\n`,
           value,
         ])
         return
@@ -413,27 +429,49 @@ async function encode(obj = {}) {
     })
   )
 
+  // Filter internal fields from headers
   const headers = {}
   headerKeys.forEach(key => {
-    headers[key] = flattened[key]
+    if (!key.startsWith("_")) {
+      const value = flattened[key]
+      // Only add to headers if value is defined
+      if (value !== undefined) {
+        headers[key] = value
+      }
+    }
   })
 
-  if ("data" in originalObj && !bodyKeys.includes("data")) {
-    bodyKeys.push("data")
+  if ("data" in originalObj) {
+    if (!bodyKeys.includes("data")) {
+      bodyKeys.push("data")
+    }
     delete headers["data"]
   }
 
-  if ("body" in originalObj && !bodyKeys.includes("body")) {
-    bodyKeys.push("body")
+  if ("body" in originalObj) {
+    if (!bodyKeys.includes("body")) {
+      bodyKeys.push("body")
+    }
     delete headers["body"]
   }
 
-  if (bodyKeys.length > 0) {
-    headers["body-keys"] = encode_body_keys(bodyKeys)
+  // Filter out parent keys that have child keys in bodyKeys
+  const filteredBodyKeys = bodyKeys.filter(key => {
+    // Check if this key has any children in bodyKeys
+    const hasChildren = bodyKeys.some(
+      otherKey => otherKey !== key && otherKey.startsWith(key + "/")
+    )
+    return !hasChildren
+  })
+
+  // Only add body-keys for structures with body keys
+  if (filteredBodyKeys.length > 0) {
+    headers["body-keys"] = encode_body_keys(filteredBodyKeys)
   }
 
   let body = undefined
   let promoteToBody = true
+
   if (bodyKeys.length > 0) {
     if (bodyKeys.length === 1) {
       const bodyKey = bodyKeys[0]
@@ -458,9 +496,15 @@ async function encode(obj = {}) {
             const [type, encoded] = hbEncodeValue(originalValue)
             body = new Blob([encoded || originalValue.toString()])
           } else body = new Blob([originalValue.toString()])
-        } else body = new Blob([originalValue || flattenedValue])
-        headers["inline-body-key"] = bodyKey
-      } else promoteToBody = false
+        } else {
+          body = new Blob([originalValue || flattenedValue])
+        }
+        if (promoteToBody) {
+          headers["inline-body-key"] = bodyKey
+        }
+      } else {
+        promoteToBody = false
+      }
     }
 
     if (!promoteToBody || bodyKeys.length > 1) {
@@ -474,7 +518,7 @@ async function encode(obj = {}) {
             typeof flattened[name] === "string"
           ) {
             const partBlob = new Blob([
-              `content-disposition: form-data;name="${name}"\r\n\r\n`,
+              `content-disposition: form-data; name="${name}"\r\n\r\n`,
               flattened[name],
             ])
             return partBlob
@@ -507,12 +551,12 @@ async function encode(obj = {}) {
                         valueToEncode.byteLength
                       )
             partBlob = new Blob([
-              `content-disposition: form-data;name="${name}"\r\n\r\n`,
+              `content-disposition: form-data; name="${name}"\r\n\r\n`,
               uint8Array,
             ])
           } else {
             partBlob = new Blob([
-              `content-disposition: form-data;name="${name}"\r\n\r\n`,
+              `content-disposition: form-data; name="${name}"\r\n\r\n`,
               valueToEncode,
             ])
           }
@@ -685,6 +729,7 @@ export function createRequest(config) {
     return result
   }
 }
+
 export async function send(signedMsg, fetchImpl = fetch) {
   const fetchOptions = {
     method: signedMsg.method,
