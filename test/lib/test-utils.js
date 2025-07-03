@@ -1,5 +1,6 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
-import { send as _send, createRequest } from "../../src/signer.js"
+import { signer } from "../../src/signer.js"
+import { send as _send } from "../../src/send.js"
 import { wait, toAddr } from "../../src/utils.js"
 import { acc } from "../../src/test.js"
 import { run } from "../../src/hyperbeam-server.js"
@@ -10,8 +11,8 @@ const prepare = async (port = 10001, port2 = 4000, jwk) => {
   await wait(5000)
   const server = run(port2)
   jwk ??= acc[0].jwk
-  const signer = createSigner(jwk, `http://localhost:${port}`)
-  const request = createRequest({ signer })
+  const _signer = createSigner(jwk, `http://localhost:${port}`)
+  const request = signer({ signer: _signer })
   const send = async args => {
     const msg = await request(args)
     return await _send(msg)

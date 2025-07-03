@@ -1,7 +1,8 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft } from "ramda"
 import { toAddr, buildTags } from "./utils.js"
-import { send as _send, createRequest } from "./signer.js"
+import { signer } from "./signer.js"
+import { send as _send } from "./send.js"
 import hyper_aos from "./lua/hyper-aos.js"
 import aos_wamr from "./lua/aos_wamr.js"
 
@@ -73,7 +74,7 @@ class HB {
   _init(jwk) {
     this.signer = createSigner(jwk, this.url)
     this.addr = toAddr(jwk.n)
-    this.sign = createRequest({ signer: this.signer, url: this.url })
+    this.sign = signer({ signer: this.signer, url: this.url })
 
     const { request } = connect({
       MODE: "mainnet",
