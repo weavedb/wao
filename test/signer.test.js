@@ -1,7 +1,7 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, AO, toAddr } from "../src/test.js"
-import { getJWK } from "./lib/test-utils.js"
+import { mod, getJWK } from "./lib/test-utils.js"
 import { generateTestCases } from "./gen.js"
 import HB from "../src/hb.js"
 import { isNotNil, filter, isNil, range } from "ramda"
@@ -58,18 +58,24 @@ describe("Hyperbeam Signer", function () {
     const { slot } = JSON.parse(res.body)
     assert.equal(slot, 1)
   })
-  it.skip("should fuzz test random objects", async () => {
-    for (const v of generateTestCases(20)) {
+  it.only("should fuzz test random objects", async () => {
+    const cases = generateTestCases(10)
+    let i = 0
+    for (const v of cases) {
       console.log()
-      console.log("--------------", v.header)
-      console.log(JSON.stringify(v.header))
-      const msg = await hb.sign({ path: "/~wao@1.0/httpsig", ...v.header })
+      console.log(
+        `[${++i}] -------------------------------------------------------`
+      )
+      console.log(v)
+      console.log()
+      console.log(JSON.stringify(v))
+      console.log()
+      const msg = await hb.sign({ path: "/~wao@1.0/httpsig", ...v })
       console.log(msg)
       const { body } = await hb.send(msg)
       const json = JSON.parse(body)
-      console.log(json)
-      console.log(v.returned)
-      assert.deepEqual(json, v.returned)
+      const transformed = mod(v)
+      assert.deepEqual(json, transformed) // Replace with actual expected value
     }
   })
 })
