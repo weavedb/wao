@@ -143,8 +143,6 @@ const ok2 = [
 const err = [
   //  { binary: Buffer.from([1, 2, 3]), binary2: Buffer.from([1, 2, 3]) },
   //{ bin: [bin, bin] },
-  //{ body: bin, data: bin },
-  //{ list: [Symbol("ok")] },
   //{ list: [Symbol("ok"), [bin]] },
 ]
 
@@ -166,6 +164,10 @@ let keys = [
   { list: [53.05] },
   { map: { float: 86.01, bool: true } },
   { key: [[8.02]] },
+  { body: bin, data: bin },
+  { list: [Symbol("ok")] },
 ]
 
 export default [...ok, ...ok2, ...keys]
+
+//export default []
