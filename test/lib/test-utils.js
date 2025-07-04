@@ -28,4 +28,49 @@ const seed = num => {
   return crypto.getRandomValues(array)
 }
 
-export { prepare, getJWK, seed }
+// Recursively transform values to match expected format
+function mod(obj) {
+  // Handle undefined - convert to string "undefined"
+  if (obj === undefined) return "undefined"
+
+  // Handle symbols - convert to their description or "symbol"
+  if (typeof obj === "symbol") {
+    return obj.description || "symbol"
+  }
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => mod(item))
+  }
+
+  // Handle binary data (Buffer, Uint8Array, etc.)
+  if (
+    obj instanceof Uint8Array ||
+    obj instanceof ArrayBuffer ||
+    Buffer.isBuffer(obj)
+  ) {
+    // Convert to base64
+    const buffer = Buffer.isBuffer(obj) ? obj : Buffer.from(obj)
+    return buffer.toString("base64")
+  }
+
+  // Handle objects
+  if (typeof obj === "object" && obj !== null) {
+    const result = {}
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = mod(value)
+    }
+    return result
+  }
+
+  // Handle strings - check if it's already an atom-like string
+  if (typeof obj === "string" && obj.match(/^[a-z_][a-zA-Z0-9_]*$/)) {
+    // This looks like an atom value, keep as is
+    return obj
+  }
+
+  // Return primitive values as-is (strings, numbers, booleans)
+  return obj
+}
+
+export { prepare, getJWK, seed, mod }
