@@ -1,7 +1,5 @@
 const bin = Buffer.from([1, 2, 3])
-
-const undone = []
-
+const empty = Buffer.from([])
 const ok = [
   { data: { test: [1.23, "str", 1, Symbol("ok"), [1, 2, 3]] } },
   { key: [{ str: "abc" }] },
@@ -101,8 +99,6 @@ const ok = [
     values: [1, 2, 3, 4, 5],
     states: [Symbol("active"), Symbol("inactive"), Symbol("pending")],
   },
-]
-const ok2 = [
   {
     body: { a: { b: 5, c: 3 } },
     data: { d: { e: 5, f: 3 } },
@@ -139,14 +135,6 @@ const ok2 = [
   { body: { list: [], map: {} }, nested: { list: [], map: {} } },
   { empty: Buffer.from([]), nested: [Buffer.from([]), 3] },
   { binary: Buffer.from([1, 2, 3]) },
-]
-const err = [
-  //  { binary: Buffer.from([1, 2, 3]), binary2: Buffer.from([1, 2, 3]) },
-  //{ bin: [bin, bin] },
-  //{ list: [Symbol("ok"), [bin]] },
-]
-
-let keys = [
   {
     str: "abc",
     bool: true,
@@ -166,8 +154,347 @@ let keys = [
   { key: [[8.02]] },
   { body: bin, data: bin },
   { list: [Symbol("ok")] },
+  { base64: Buffer.from([1, 2, 3]).toString("base64") },
+  { bin: empty },
+  { body: empty },
+  { bin: empty, body: empty },
+  { bin: {} },
+  { data: {} },
+  { body: {} },
+  { data: {}, body: {} },
+  { bin: {}, data: {} },
+  { bin: {}, body: {} },
+  { bin: {}, data: {}, body: {} },
+  { bin: [] },
+  { data: [] },
+  { body: [] },
+  { data: [], body: [] },
+  { bin: [], data: [] },
+  { bin: [], body: [] },
+  { bin: [], data: [], body: [] },
+  { bin },
+  { data: bin },
+  { body: bin },
+  { data: bin, body: bin },
+  { bin, data: bin },
+  { bin, body: bin },
+  { bin, data: bin, body: bin },
+  { num: Symbol("atom") },
+  { data: Symbol("atom") },
+  { body: Symbol("atom") },
+  { data: Symbol("atom"), body: Symbol("atom") },
+  { num: Symbol("atom"), data: Symbol("atom") },
+  { num: Symbol("atom"), body: Symbol("atom") },
+  { num: Symbol("atom"), data: Symbol("atom"), body: Symbol("atom") },
+  { num: 3.14 },
+  { data: 3.14 },
+  { body: 3.14 },
+  { data: 3.14, body: 3.14 },
+  { num: 3.14, data: 3.14 },
+  { num: 3.14, body: 3.14 },
+  { num: 3.14, data: 3.14, body: 3.14 },
+  { data: "abc" },
+  { body: "abc" },
+  { data: "abc", body: "abc" },
+  { str: "abc" },
+  { data: "abc", str: "abc" },
+  { body: "abc", str: "abc" },
+  { data: "abc", body: "abc", str: "abc" },
+  { ok: true },
+  { data: true },
+  { body: true },
+  { data: true, body: true },
+  { ok: true, data: true },
+  { ok: true, body: true },
+  { ok: true, data: true, body: true },
+  { num: 1 },
+  { data: 1 },
+  { body: 1 },
+  { data: 1, body: 1 },
+  { num: 1, data: 1 },
+  { num: 1, body: 1 },
+  { num: 1, data: 1, body: 1 },
+]
+const err = [
+  { binary: Buffer.from([1, 2, 3]), binary2: Buffer.from([1, 2, 3]) },
+  { bin: [bin, bin] },
+  { list: [Symbol("ok"), [bin]] },
+  { data: empty },
+  { data: empty, body: empty },
+  { bin: empty, data: empty },
+  { bin: empty, data: empty, body: empty },
 ]
 
-export default [...ok, ...ok2, ...keys]
+const internal_fails = [
+  // Pattern: Arrays of maps/objects
+  { users: [{ id: 1 }, { id: 2 }] },
+  {
+    items: [
+      { name: "a", value: 1 },
+      { name: "b", value: 2 },
+    ],
+  },
+  {
+    mixed_maps: [
+      { type: "binary", data: [1, 2, 3] },
+      { type: "text", data: "hello" },
+    ],
+  },
+  { nested_array_maps: [{ items: [1, 2, 3] }, { items: [4, 5, 6] }] },
+  { empty_map_array: [{}, { a: 1 }, {}, { b: 2 }] },
+  { maps_different_keys: [{ x: 1 }, { y: 2 }, { z: 3 }] },
+  { deep_map_array: [{ level: { deep: 1 } }, { level: { deep: 2 } }] },
+  { maps_with_arrays: [{ arr: [1, 2] }, { arr: [3, 4] }] },
 
-//export default []
+  // Pattern: Large integers (64-bit boundaries)
+  { max_int32: 2147483647 },
+  { min_int32: -2147483648 },
+  { max_int64: 9223372036854775807 },
+  { min_int64: -9223372036854775808 },
+  { large_positive: 1000000000000000 },
+  { large_negative: -1000000000000000 },
+  { int_array: [9223372036854775807, -9223372036854775808, 0] },
+  { boundary_ints: { max: 9223372036854775807, min: -9223372036854775808 } },
+
+  // Pattern: Mixed empty values in arrays
+  { empty_nested: [[], [[]], [[], []]] },
+  { empty_maps_list: [{}, {}, {}] },
+  { mixed_empty_full: ["", [1], {}, { a: 1 }] },
+  { empty_in_maps: [{ empty: "" }, { empty: [] }, { empty: {} }] },
+  { complex_empty: { lists: [[]], maps: [{}] } },
+
+  // Pattern: Case-sensitive field names
+  { data: 1, Data: 2, DATA: 3 },
+  { body: "a", Body: "b", BODY: "c" },
+  { test: 1, Test: 2, TEST: 3, TeSt: 4 },
+  { _field: 1, field: 2, field_: 3 },
+  { a1: 1, A1: 2, "1a": 3, "1A": 4 },
+  { "data-field": 1, data_field: 2, dataField: 3 },
+  { 123: "numeric", abc: "alpha", ABC: "ALPHA" },
+  { "field!": 1, "field?": 2, "field#": 3 },
+  { "": "empty_key", " ": "space_key", "  ": "two_spaces" },
+
+  // Pattern: Complex nested structures (without direct binaries)
+  {
+    matrix: [
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ],
+  },
+  { tree: { value: 1, children: [{ value: 2 }, { value: 3 }] } },
+  { layers: [{ data: [1, 2] }, { data: [3, 4] }] },
+  { mixed_types: [{ int: 2, str: "three" }] },
+  { nested_maps: { a: [{ val: 1 }], b: [{ val: 2 }] } },
+  {
+    config: [
+      { setting: "on", value: 1 },
+      { setting: "off", value: 0 },
+    ],
+  },
+
+  // Pattern: Mixed types in arrays
+  { chaos: [1, "three", true, Symbol("ok"), null, [], {}, 4.5] },
+  { types: ["", 0, "", false, Symbol("undefined"), [], {}, -1] },
+  { alternating: [1, "one", 2, "two", 3, "three"] },
+  { wrapped: [[1], [2], ["three"], [true], [Symbol("ok")]] },
+  {
+    indexed: [
+      { idx: 1, data: 1 },
+      { idx: 2, data: "two" },
+    ],
+  },
+  {
+    flagged: [
+      { flag: true, value: 1 },
+      { flag: false, value: 0 },
+    ],
+  },
+  {
+    tagged: [
+      { tag: "num", val: 123 },
+      { tag: "str", val: "hello" },
+    ],
+  },
+  { recursive: [1, [2, [3, [4]]]] },
+  { mixed_empty: ["", 0, [], "", {}, null, false] },
+
+  // Pattern: Complex combinations
+  { protocol: { header: [1, 2, 3, 4], body: { data: [9, 10, 11] } } },
+  { messages: [{ from: 1, to: 2, data: "hello" }] },
+  { network: { nodes: [{ ip: "127.0.0.1", port: 8080 }] } },
+  {
+    files: [
+      { name: "file1", size: 123 },
+      { name: "file2", size: 456 },
+    ],
+  },
+  { stream: { chunks: ["part1", "part2", "part3"], eof: true } },
+
+  // Pattern: Maximum stress tests
+  {
+    data: [1, 9223372036854775807, "text", { val: 2 }],
+    Data: [3, -9223372036854775808, [], {}],
+    DATA: ["", null, Symbol("undefined"), Symbol("ok")],
+  },
+  {
+    users: [
+      { id: 9223372036854775807, name: "user1", tags: ["a", "b"] },
+      { id: -9223372036854775808, name: "user2", tags: [] },
+    ],
+  },
+  {
+    matrix: [
+      [
+        { x: 1, y: 1 },
+        { x: 2, y: 2 },
+      ],
+      [
+        { x: 3, y: 3 },
+        { x: 4, y: 4 },
+      ],
+    ],
+  },
+  {
+    levels: {
+      1: [1],
+      2: [1, 2],
+      3: [1, 2, 3],
+      empty: [],
+    },
+  },
+  {
+    types: [
+      { type: "integer", value: 9223372036854775807 },
+      { type: "empty", value: "" },
+      { type: "list", value: [1, 2] },
+    ],
+  },
+  {
+    nested: {
+      nums: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      maps: [{ n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }, { n: 5 }],
+      empty: ["", [], {}, null],
+    },
+  },
+  {
+    field: 1,
+    Field: [2],
+    FIELD: { data: 3 },
+    FiElD: [{ val: 4 }],
+  },
+  {
+    all: [
+      0,
+      255,
+      9223372036854775807,
+      -9223372036854775808,
+      "",
+      [],
+      {},
+      { a: 1 },
+      [2, 3],
+      null,
+      Symbol("undefined"),
+      Symbol("ok"),
+    ],
+  },
+  {
+    ultimate: [
+      { id: 1, data: "small", meta: { empty: "" } },
+      { id: 9223372036854775807, data: [4, 5, 6], meta: {} },
+      { id: -9223372036854775808, data: "", meta: { list: [7] } },
+    ],
+    Data: 255,
+    data: 0,
+    DATA: [128],
+  },
+]
+
+function genSimple() {
+  const values = {
+    emptyBuf: Buffer.from([]),
+    buf: Buffer.from([1, 2, 3]),
+    emptyObj: {},
+    emptyArr: [],
+    str: "abc",
+    int: 1,
+    float: 3.14,
+    bool: true,
+    sym: Symbol("atom"),
+    null: null,
+    undef: undefined,
+  }
+
+  const testCases = []
+
+  // Helper to check if we should skip this combination
+  function shouldSkip(obj) {
+    // Skip if data has empty buffer (known server issue)
+    if (obj.data && Buffer.isBuffer(obj.data) && obj.data.length === 0) {
+      return true
+    }
+    return false
+  }
+
+  // Just data/body
+  for (const [, dataVal] of Object.entries(values)) {
+    for (const [, bodyVal] of Object.entries(values)) {
+      const testCase = { data: dataVal, body: bodyVal }
+      if (!shouldSkip(testCase)) {
+        testCases.push(testCase)
+      }
+    }
+  }
+
+  // data/body + num (only number values)
+  const numValues = [values.int, values.float, 0]
+  for (const [, dataVal] of Object.entries(values)) {
+    for (const [, bodyVal] of Object.entries(values)) {
+      for (const numVal of numValues) {
+        const testCase = { data: dataVal, body: bodyVal, num: numVal }
+        if (!shouldSkip(testCase)) {
+          testCases.push(testCase)
+        }
+      }
+    }
+  }
+
+  // data/body + str (only string values)
+  for (const [, dataVal] of Object.entries(values)) {
+    for (const [, bodyVal] of Object.entries(values)) {
+      const testCase = { data: dataVal, body: bodyVal, str: "abc" }
+      if (!shouldSkip(testCase)) {
+        testCases.push(testCase)
+      }
+    }
+  }
+
+  // data/body + ok (only boolean values)
+  for (const [, dataVal] of Object.entries(values)) {
+    for (const [, bodyVal] of Object.entries(values)) {
+      const testCase = { data: dataVal, body: bodyVal, ok: true }
+      if (!shouldSkip(testCase)) {
+        testCases.push(testCase)
+      }
+    }
+  }
+
+  // data/body + bin (only buffer values)
+  const binValues = [values.emptyBuf, values.buf]
+  for (const [, dataVal] of Object.entries(values)) {
+    for (const [, bodyVal] of Object.entries(values)) {
+      for (const binVal of binValues) {
+        const testCase = { data: dataVal, body: bodyVal, bin: binVal }
+        if (!shouldSkip(testCase)) {
+          testCases.push(testCase)
+        }
+      }
+    }
+  }
+
+  return testCases
+}
+//export default genSimple()
+export default ok
+//export default internal_fails
