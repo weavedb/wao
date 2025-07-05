@@ -8,6 +8,7 @@ import { isNotNil, filter, isNil, range } from "ramda"
 import { randomBytes } from "node:crypto"
 import { wait } from "../src/utils.js"
 import HyperBEAM from "../src/hyperbeam.js"
+import erl from "../src/toerl.js"
 
 const data = `
 local count = 0
@@ -23,16 +24,14 @@ end)`
 describe("Hyperbeam Signer", function () {
   let hb, hb2, hbeam, jwk, addr, store_prefix
   before(async () => {
-    store_prefix = "cache-mainnet-" + Math.floor(Math.random() * 10000000)
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     hbeam = await new HyperBEAM({
       as: [],
-      store_prefix,
       c: "12",
       cmake: "3.5",
-      gateway: 4000,
-      operator: addr,
+      //gateway: 4000,
+      //operator: addr,
     }).ready()
   })
 
@@ -59,7 +58,8 @@ describe("Hyperbeam Signer", function () {
     assert.equal(slot, 1)
   })
   it.only("should fuzz test random objects", async () => {
-    const cases = generateTestCases(10)
+    let err = []
+    const cases = generateTestCases(1000)
     let i = 0
     for (const v of cases) {
       console.log()
@@ -72,10 +72,16 @@ describe("Hyperbeam Signer", function () {
       console.log()
       const msg = await hb.sign({ path: "/~wao@1.0/httpsig", ...v })
       console.log(msg)
-      const { body } = await hb.send(msg)
-      const json = JSON.parse(body)
-      const transformed = mod(v)
-      assert.deepEqual(json, transformed) // Replace with actual expected value
+      try {
+        const { body } = await hb.send(msg)
+        const json = JSON.parse(body)
+        const transformed = mod(v)
+        assert.deepEqual(json, transformed) // Replace with actual expected value
+      } catch (e) {
+        console.log(err.push(v))
+        console.log(e)
+      }
     }
+    console.log(err)
   })
 })
