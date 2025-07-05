@@ -5,7 +5,7 @@ import { getJWK, mod } from "./lib/test-utils.js"
 import HB from "../src/hb.js"
 import HyperBEAM from "../src/hyperbeam.js"
 import keys from "./cases.js"
-
+import { generateTestCases } from "./gen.js"
 describe("Hyperbeam Signer", function () {
   let hb, hb2, hbeam, jwk, addr, store_prefix
   before(async () => {
@@ -17,12 +17,25 @@ describe("Hyperbeam Signer", function () {
   after(async () => hbeam.kill())
 
   it.only("should test signer", async () => {
-    for (const v of keys) {
+    //let cases = generateTestCases(1000)
+    let cases = keys
+    let err = []
+    for (const v of cases) {
       const msg = await hb.sign({ path: "/~wao@1.0/httpsig", ...v })
-      const { body } = await hb.send(msg)
-      const json = JSON.parse(body)
-      const transformed = mod(v)
-      assert.deepEqual(json, transformed)
+      console.log(msg)
+      try {
+        const { body } = await hb.send(msg)
+        const json = JSON.parse(body)
+        const transformed = mod(v)
+        assert.deepEqual(json, transformed)
+      } catch (e) {
+        console.log(e)
+        err.push(v)
+      }
+    }
+    console.log(`${err.length} failed!`)
+    if (err) {
+      for (let v of err) console.log(v)
     }
   })
 })

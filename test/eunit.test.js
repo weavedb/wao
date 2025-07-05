@@ -28,8 +28,8 @@ describe("Hyperbeam Signer", function () {
 
   after(async () => {})
 
-  it("should run eunit", async () => {
+  it.only("should run eunit", async () => {
     //await hbeam.eunit("find_failed")
-    await hbeam.eunit("wao_test")
+    await hbeam.eunit("wao_test4")
   })
 })
