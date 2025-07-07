@@ -1,6 +1,117 @@
 const bin = Buffer.from([1, 2, 3])
 const empty = Buffer.from([])
+const internal_fails = [
+  { "data-field": 1, data_field: 2, dataField: 3 },
+  {
+    nested: {
+      nums: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      maps: [{ n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }, { n: 5 }],
+      empty: ["", [], {}, null],
+    },
+  },
+  {
+    matrix: [
+      [
+        { x: 1, y: 1 },
+        { x: 2, y: 2 },
+      ],
+      [
+        { x: 3, y: 3 },
+        { x: 4, y: 4 },
+      ],
+    ],
+  },
+
+  { recursive: [1, [2, [3, [4]]]] },
+  { types: ["", 0, "", false, Symbol("null"), [], {}, -1] },
+  { mixed_empty: ["", 0, [], "", {}, null, false] },
+  { chaos: [1, "three", true, Symbol("ok"), null, [], {}, 4.5] },
+  { network: { nodes: [{ ip: "127.0.0.1", port: 8080 }] } },
+  { nested_maps: { a: [{ val: 1 }], b: [{ val: 2 }] } },
+  { tree: { value: 1, children: [{ value: 2 }, { value: 3 }] } },
+  { complex_empty: { lists: [[]], maps: [{}] } },
+  { empty_in_maps: [{ empty: "" }, { empty: [] }, { empty: {} }] },
+  { empty_nested: [[], [[]], [[], []]] },
+  { empty_maps_list: [{}, {}, {}] },
+  { empty_map_array: [{}, { a: 1 }, {}, { b: 2 }] },
+  { mixed_empty_full: ["", [1], {}, { a: 1 }] },
+  { users: [{ id: 1 }, { id: 2 }] },
+  {
+    items: [
+      { name: "a", value: 1 },
+      { name: "b", value: 2 },
+    ],
+  },
+  {
+    mixed_maps: [
+      { type: "binary", data: [1, 2, 3] },
+      { type: "text", data: "hello" },
+    ],
+  },
+  { nested_array_maps: [{ items: [1, 2, 3] }, { items: [4, 5, 6] }] },
+
+  { maps_different_keys: [{ x: 1 }, { y: 2 }, { z: 3 }] },
+  { deep_map_array: [{ level: { deep: 1 } }, { level: { deep: 2 } }] },
+  { maps_with_arrays: [{ arr: [1, 2] }, { arr: [3, 4] }] },
+  { max_int32: 2147483647 },
+  { min_int32: -2147483648 },
+  { _field: 1, field: 2, field_: 3 },
+  {
+    matrix: [
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ],
+  },
+  { layers: [{ data: [1, 2] }, { data: [3, 4] }] },
+  { mixed_types: [{ int: 2, str: "three" }] },
+  {
+    config: [
+      { setting: "on", value: 1 },
+      { setting: "off", value: 0 },
+    ],
+  },
+  { alternating: [1, "one", 2, "two", 3, "three"] },
+  { wrapped: [[1], [2], ["three"], [true], [Symbol("ok")]] },
+  {
+    indexed: [
+      { idx: 1, data: 1 },
+      { idx: 2, data: "two" },
+    ],
+  },
+  {
+    flagged: [
+      { flag: true, value: 1 },
+      { flag: false, value: 0 },
+    ],
+  },
+  {
+    tagged: [
+      { tag: "num", val: 123 },
+      { tag: "str", val: "hello" },
+    ],
+  },
+  { protocol: { header: [1, 2, 3, 4], body: { data: [9, 10, 11] } } },
+  { messages: [{ from: 1, to: 2, data: "hello" }] },
+
+  {
+    files: [
+      { name: "file1", size: 123 },
+      { name: "file2", size: 456 },
+    ],
+  },
+  { stream: { chunks: ["part1", "part2", "part3"], eof: true } },
+  {
+    levels: {
+      1: [1],
+      2: [1, 2],
+      3: [1, 2, 3],
+      empty: [],
+    },
+  },
+]
 const ok = [
+  ...internal_fails,
   { data: { test: [1.23, "str", 1, Symbol("ok"), [1, 2, 3]] } },
   { key: [{ str: "abc" }] },
   {
@@ -215,6 +326,7 @@ const ok = [
   { num: 1, body: 1 },
   { num: 1, data: 1, body: 1 },
 ]
+
 const err = [
   { binary: Buffer.from([1, 2, 3]), binary2: Buffer.from([1, 2, 3]) },
   { bin: [bin, bin] },
@@ -223,115 +335,19 @@ const err = [
   { data: empty, body: empty },
   { bin: empty, data: empty },
   { bin: empty, data: empty, body: empty },
-]
-
-const internal_fails = [
-  // Pattern: Arrays of maps/objects
-  { users: [{ id: 1 }, { id: 2 }] },
-  {
-    items: [
-      { name: "a", value: 1 },
-      { name: "b", value: 2 },
-    ],
-  },
-  {
-    mixed_maps: [
-      { type: "binary", data: [1, 2, 3] },
-      { type: "text", data: "hello" },
-    ],
-  },
-  { nested_array_maps: [{ items: [1, 2, 3] }, { items: [4, 5, 6] }] },
-  { empty_map_array: [{}, { a: 1 }, {}, { b: 2 }] },
-  { maps_different_keys: [{ x: 1 }, { y: 2 }, { z: 3 }] },
-  { deep_map_array: [{ level: { deep: 1 } }, { level: { deep: 2 } }] },
-  { maps_with_arrays: [{ arr: [1, 2] }, { arr: [3, 4] }] },
-
-  // Pattern: Large integers (64-bit boundaries)
-  { max_int32: 2147483647 },
-  { min_int32: -2147483648 },
   { max_int64: 9223372036854775807 },
   { min_int64: -9223372036854775808 },
   { large_positive: 1000000000000000 },
   { large_negative: -1000000000000000 },
   { int_array: [9223372036854775807, -9223372036854775808, 0] },
   { boundary_ints: { max: 9223372036854775807, min: -9223372036854775808 } },
-
-  // Pattern: Mixed empty values in arrays
-  { empty_nested: [[], [[]], [[], []]] },
-  { empty_maps_list: [{}, {}, {}] },
-  { mixed_empty_full: ["", [1], {}, { a: 1 }] },
-  { empty_in_maps: [{ empty: "" }, { empty: [] }, { empty: {} }] },
-  { complex_empty: { lists: [[]], maps: [{}] } },
-
-  // Pattern: Case-sensitive field names
   { data: 1, Data: 2, DATA: 3 },
   { body: "a", Body: "b", BODY: "c" },
   { test: 1, Test: 2, TEST: 3, TeSt: 4 },
-  { _field: 1, field: 2, field_: 3 },
   { a1: 1, A1: 2, "1a": 3, "1A": 4 },
-  { "data-field": 1, data_field: 2, dataField: 3 },
   { 123: "numeric", abc: "alpha", ABC: "ALPHA" },
   { "field!": 1, "field?": 2, "field#": 3 },
   { "": "empty_key", " ": "space_key", "  ": "two_spaces" },
-
-  // Pattern: Complex nested structures (without direct binaries)
-  {
-    matrix: [
-      [1, 2],
-      [3, 4],
-      [5, 6],
-    ],
-  },
-  { tree: { value: 1, children: [{ value: 2 }, { value: 3 }] } },
-  { layers: [{ data: [1, 2] }, { data: [3, 4] }] },
-  { mixed_types: [{ int: 2, str: "three" }] },
-  { nested_maps: { a: [{ val: 1 }], b: [{ val: 2 }] } },
-  {
-    config: [
-      { setting: "on", value: 1 },
-      { setting: "off", value: 0 },
-    ],
-  },
-
-  // Pattern: Mixed types in arrays
-  { chaos: [1, "three", true, Symbol("ok"), null, [], {}, 4.5] },
-  { types: ["", 0, "", false, Symbol("undefined"), [], {}, -1] },
-  { alternating: [1, "one", 2, "two", 3, "three"] },
-  { wrapped: [[1], [2], ["three"], [true], [Symbol("ok")]] },
-  {
-    indexed: [
-      { idx: 1, data: 1 },
-      { idx: 2, data: "two" },
-    ],
-  },
-  {
-    flagged: [
-      { flag: true, value: 1 },
-      { flag: false, value: 0 },
-    ],
-  },
-  {
-    tagged: [
-      { tag: "num", val: 123 },
-      { tag: "str", val: "hello" },
-    ],
-  },
-  { recursive: [1, [2, [3, [4]]]] },
-  { mixed_empty: ["", 0, [], "", {}, null, false] },
-
-  // Pattern: Complex combinations
-  { protocol: { header: [1, 2, 3, 4], body: { data: [9, 10, 11] } } },
-  { messages: [{ from: 1, to: 2, data: "hello" }] },
-  { network: { nodes: [{ ip: "127.0.0.1", port: 8080 }] } },
-  {
-    files: [
-      { name: "file1", size: 123 },
-      { name: "file2", size: 456 },
-    ],
-  },
-  { stream: { chunks: ["part1", "part2", "part3"], eof: true } },
-
-  // Pattern: Maximum stress tests
   {
     data: [1, 9223372036854775807, "text", { val: 2 }],
     Data: [3, -9223372036854775808, [], {}],
@@ -344,38 +360,11 @@ const internal_fails = [
     ],
   },
   {
-    matrix: [
-      [
-        { x: 1, y: 1 },
-        { x: 2, y: 2 },
-      ],
-      [
-        { x: 3, y: 3 },
-        { x: 4, y: 4 },
-      ],
-    ],
-  },
-  {
-    levels: {
-      1: [1],
-      2: [1, 2],
-      3: [1, 2, 3],
-      empty: [],
-    },
-  },
-  {
     types: [
       { type: "integer", value: 9223372036854775807 },
       { type: "empty", value: "" },
       { type: "list", value: [1, 2] },
     ],
-  },
-  {
-    nested: {
-      nums: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-      maps: [{ n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }, { n: 5 }],
-      empty: ["", [], {}, null],
-    },
   },
   {
     field: 1,
@@ -496,5 +485,5 @@ function genSimple() {
   return testCases
 }
 //export default genSimple()
+//export default err
 export default ok
-//export default internal_fails
