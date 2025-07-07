@@ -339,11 +339,8 @@ function collectBodyKeys(obj, prefix = "") {
             nestedPaths.push(fullPath)
           }
         }
-      } else if (isBytes(value)) {
-        const buffer = toBuffer(value)
-        if (buffer.length > 0) {
-          hasSimpleFields = true
-        }
+      } else if (isBytes(value) && value.length > 0) {
+        hasSimpleFields = true
       } else if (
         typeof value === "string" ||
         typeof value === "number" ||
@@ -631,15 +628,28 @@ function collectBodyKeys(obj, prefix = "") {
         }
       }
     } else if (isPojo(value)) {
-      console.log(`[main loop] Processing object at key: "${key}"`)
-      // Objects should be traversed, not have their fields individually added
-      traverse(value, key)
-    } else if (isBytes(value)) {
-      const buffer = toBuffer(value)
-      if (buffer.length > 0) {
-        console.log(`[main loop] Adding key for non-empty bytes: "${key}"`)
-        keys.push(key)
+      console.log(`[main loop] Traversing object at key: "${key}"`)
+      // Check if this object contains arrays with only empty elements
+      let hasArraysWithOnlyEmptyElements = false
+      for (const [k, v] of Object.entries(value)) {
+        if (
+          Array.isArray(v) &&
+          v.length > 0 &&
+          v.every(
+            item =>
+              (Array.isArray(item) && item.length === 0) ||
+              (isPojo(item) && Object.keys(item).length === 0) ||
+              (typeof item === "string" && item === "")
+          )
+        ) {
+          hasArraysWithOnlyEmptyElements = true
+          keys.push(`${key}/${k}`)
+        }
       }
+      traverse(value, key)
+    } else if (isBytes(value) && value.length > 0) {
+      console.log(`[main loop] Adding key for non-empty bytes: "${key}"`)
+      keys.push(key)
     } else if (typeof value === "string" && value.includes("\n")) {
       console.log(`[main loop] Adding key for string with newline: "${key}"`)
       keys.push(key)
@@ -852,9 +862,10 @@ async function encode(obj = {}) {
     }
   }
 
-  const bodyKeys = collectBodyKeys(obj)
   const headers = {}
   const headerTypes = []
+
+  const bodyKeys = collectBodyKeys(obj)
 
   for (const [key, value] of Object.entries(obj)) {
     const needsBody =
@@ -1103,16 +1114,6 @@ async function encode(obj = {}) {
       lines.push("")
       lines.push("")
       bodyParts.push(new Blob([lines.join("\r\n")]))
-      continue
-    }
-
-    // Handle direct binary values
-    if (isBytes(value)) {
-      console.log(`[Body part] Creating part for binary at ${bodyKey}`)
-      lines.push(`content-disposition: form-data;name="${bodyKey}"`)
-      const buffer = toBuffer(value)
-      const headerText = lines.join("\r\n") + "\r\n\r\n"
-      bodyParts.push(new Blob([headerText, buffer]))
       continue
     }
 
@@ -1439,7 +1440,340 @@ async function encode(obj = {}) {
       continue
     }
 
-    // This should not be reached for binary values as they're handled above
+    if (isPojo(value)) {
+      // Handle non-empty objects - skip empty ones
+      if (Object.keys(value).length === 0) {
+        // Check if this is a parent array context where empty objects should get parts
+        const parentPath = pathParts.slice(0, -1).join("/")
+        let parentValue = obj
+        for (const part of pathParts.slice(0, -1)) {
+          if (/^\d+$/.test(part)) {
+            parentValue = parentValue[parseInt(part) - 1]
+          } else {
+            parentValue = parentValue[part]
+          }
+        }
+
+        if (Array.isArray(parentValue)) {
+          // Check if parent array has mixed content
+          const hasEmptyStrings = parentValue.some(
+            item => typeof item === "string" && item === ""
+          )
+          const hasEmptyObjects = parentValue.some(
+            item => isPojo(item) && Object.keys(item).length === 0
+          )
+          const hasObjects = parentValue.some(item => isPojo(item))
+
+          if (hasObjects && (hasEmptyStrings || hasEmptyObjects)) {
+            // Special mixed array case - empty objects don't get parts
+            console.log(
+              `[Body part] Skipping empty object in mixed array at ${bodyKey}`
+            )
+            continue
+          }
+        }
+
+        // Normal case - empty objects might get parts
+        console.log(`[Body part] Empty object at ${bodyKey}`)
+        // For now, skip empty objects
+        continue
+      }
+
+      // Skip the special case where bodyKey is "data" and has only body:Buffer
+      if (
+        hasSpecialDataBody &&
+        bodyKey === "data" &&
+        Object.keys(value).length === 1 &&
+        value.body &&
+        isBytes(value.body)
+      ) {
+        continue
+      }
+
+      // Handle non-empty objects
+      const isInline =
+        bodyKey === "body" && headers["inline-body-key"] === "body"
+      if (isInline) {
+        lines.push(`content-disposition: inline`)
+      } else {
+        lines.push(`content-disposition: form-data;name="${bodyKey}"`)
+      }
+
+      // Continue with object processing...
+      const objectTypes = []
+      const fieldLines = []
+      const binaryFields = []
+
+      // First check if this object only contains empty collections
+      const hasOnlyEmptyCollections = Object.entries(value).every(([k, v]) => {
+        return (
+          (Array.isArray(v) && v.length === 0) ||
+          (isPojo(v) && Object.keys(v).length === 0) ||
+          (isBytes(v) && (v.length === 0 || v.byteLength === 0)) ||
+          (typeof v === "string" && v.length === 0)
+        )
+      })
+
+      // Also check if it contains arrays with only empty elements
+      const hasArraysWithOnlyEmptyElements = Object.entries(value).some(
+        ([k, v]) => {
+          return (
+            Array.isArray(v) &&
+            v.length > 0 &&
+            v.every(
+              item =>
+                (Array.isArray(item) && item.length === 0) ||
+                (isPojo(item) && Object.keys(item).length === 0) ||
+                (typeof item === "string" && item === "")
+            )
+          )
+        }
+      )
+
+      // Collect type information for arrays in the object BEFORE processing fields
+      const arrayTypes = []
+      for (const [k, v] of Object.entries(value)) {
+        if (Array.isArray(v)) {
+          arrayTypes.push(
+            `${k.toLowerCase()}="${v.length === 0 ? "empty-list" : "list"}"`
+          )
+        }
+      }
+
+      for (const [k, v] of Object.entries(value)) {
+        const childPath = `${bodyKey}/${k}`
+
+        if (sortedBodyKeys.includes(childPath)) {
+          continue
+        }
+
+        if (Array.isArray(v) && v.some(item => isPojo(item))) {
+          // Check if this array will have its own body part
+          if (sortedBodyKeys.includes(childPath)) {
+            continue
+          }
+          // Check if array has only empty elements
+          const hasOnlyEmpty = v.every(
+            item =>
+              (Array.isArray(item) && item.length === 0) ||
+              (isPojo(item) && Object.keys(item).length === 0) ||
+              (typeof item === "string" && item === "")
+          )
+          if (hasOnlyEmpty) {
+            continue
+          }
+        }
+
+        if (Array.isArray(v)) {
+          // Type info already added above in arrayTypes
+        } else if (
+          v === null ||
+          v === undefined ||
+          typeof v === "symbol" ||
+          typeof v === "boolean"
+        ) {
+          objectTypes.push(`${k.toLowerCase()}="atom"`)
+        } else if (typeof v === "number") {
+          objectTypes.push(
+            `${k.toLowerCase()}="${Number.isInteger(v) ? "integer" : "float"}"`
+          )
+        } else if (typeof v === "string" && v.length === 0) {
+          objectTypes.push(`${k.toLowerCase()}="empty-binary"`)
+        } else if (isBytes(v) && (v.length === 0 || v.byteLength === 0)) {
+          objectTypes.push(`${k.toLowerCase()}="empty-binary"`)
+        } else if (isPojo(v) && Object.keys(v).length === 0) {
+          objectTypes.push(`${k.toLowerCase()}="empty-message"`)
+        }
+
+        if (typeof v === "string") {
+          if (v.length === 0) {
+            // Empty strings are shown as "empty: " (with trailing space)
+            fieldLines.push(`${k}: `)
+          } else {
+            fieldLines.push(`${k}: ${v}`)
+          }
+        } else if (typeof v === "number") {
+          fieldLines.push(`${k}: ${v}`)
+        } else if (typeof v === "boolean") {
+          fieldLines.push(`${k}: "${v}"`)
+        } else if (v === null) {
+          fieldLines.push(`${k}: "null"`)
+        } else if (v === undefined) {
+          fieldLines.push(`${k}: "undefined"`)
+        } else if (typeof v === "symbol") {
+          const desc = v.description || "Symbol.for()"
+          fieldLines.push(`${k}: "${desc}"`)
+        } else if (isBytes(v)) {
+          const buffer = toBuffer(v)
+          binaryFields.push({ key: k, buffer })
+          continue
+        } else if (Array.isArray(v)) {
+          if (v.length === 0) {
+            // Don't add field line for empty array
+          } else {
+            // Check if this array will have its own body part
+            const childPath = `${bodyKey}/${k}`
+            if (!sortedBodyKeys.includes(childPath)) {
+              // Check if this array contains objects - if so, don't add field line
+              const hasObjects = v.some(item => isPojo(item))
+              if (!hasObjects) {
+                const encodedItems = v
+                  .map(item => encodeArrayItem(item))
+                  .join(", ")
+                fieldLines.push(`${k}: ${encodedItems}`)
+              }
+            }
+          }
+        } else if (isPojo(v) && Object.keys(v).length === 0) {
+          // Empty object - don't add field line
+        }
+      }
+
+      // Combine arrayTypes with objectTypes
+      const allTypes = [...arrayTypes, ...objectTypes]
+
+      // Check if this object should be skipped entirely
+      const shouldSkipObject = Object.entries(value).every(([k, v]) => {
+        const childPath = `${bodyKey}/${k}`
+        if (sortedBodyKeys.includes(childPath)) return true
+        if (Array.isArray(v) && v.some(item => isPojo(item))) {
+          // Check if array has only empty elements
+          const hasOnlyEmpty = v.every(
+            item =>
+              (Array.isArray(item) && item.length === 0) ||
+              (isPojo(item) && Object.keys(item).length === 0) ||
+              (typeof item === "string" && item === "")
+          )
+          return hasOnlyEmpty || sortedBodyKeys.includes(childPath)
+        }
+        return false
+      })
+
+      if (
+        shouldSkipObject &&
+        !hasOnlyEmptyCollections &&
+        !hasArraysWithOnlyEmptyElements
+      ) {
+        continue
+      }
+
+      const onlyEmptyCollections = Object.entries(value).every(([k, v]) => {
+        const childPath = `${bodyKey}/${k}`
+        if (sortedBodyKeys.includes(childPath)) return true
+        if (Array.isArray(v) && v.some(item => isPojo(item))) return true
+
+        return (
+          (Array.isArray(v) && v.length === 0) ||
+          (isPojo(v) && Object.keys(v).length === 0) ||
+          (isBytes(v) && (v.length === 0 || v.byteLength === 0))
+        )
+      })
+
+      if (isInline) {
+        const orderedLines = []
+
+        // FIXED: For inline body, put field lines FIRST
+        for (const line of fieldLines) {
+          orderedLines.push(line)
+        }
+
+        if (allTypes.length > 0) {
+          orderedLines.push(`ao-types: ${allTypes.sort().join(", ")}`)
+        }
+
+        orderedLines.push("content-disposition: inline")
+
+        const binaryFieldsForInline = Object.entries(value)
+          .filter(
+            ([k, v]) =>
+              isBytes(v) && !sortedBodyKeys.includes(`${bodyKey}/${k}`)
+          )
+          .map(([k, v]) => ({
+            key: k,
+            buffer: toBuffer(v),
+          }))
+
+        if (binaryFieldsForInline.length > 0) {
+          const parts = []
+          parts.push(Buffer.from(orderedLines.join("\r\n")))
+
+          for (const { key, buffer } of binaryFieldsForInline) {
+            parts.push(Buffer.from(`\r\n${key}: `))
+            parts.push(buffer)
+          }
+
+          parts.push(Buffer.from("\r\n"))
+
+          const fullBody = Buffer.concat(parts)
+          bodyParts.push(new Blob([fullBody]))
+        } else {
+          // Check if this is the last body part for special handling
+          const isLastBodyPart =
+            sortedBodyKeys.indexOf(bodyKey) === sortedBodyKeys.length - 1
+          const hasOnlyTypes = allTypes.length > 0 && fieldLines.length === 0
+
+          if (isLastBodyPart && hasOnlyTypes) {
+            // Don't add empty line for last part with only types
+            bodyParts.push(new Blob([orderedLines.join("\r\n")]))
+          } else if (fieldLines.length === 0) {
+            bodyParts.push(new Blob([orderedLines.join("\r\n")]))
+          } else {
+            bodyParts.push(new Blob([orderedLines.join("\r\n") + "\r\n"]))
+          }
+        }
+      } else {
+        // Put ao-types first, then content-disposition, then field lines
+        const orderedLines = []
+
+        if (allTypes.length > 0) {
+          orderedLines.push(`ao-types: ${allTypes.sort().join(", ")}`)
+        }
+
+        orderedLines.push(`content-disposition: form-data;name="${bodyKey}"`)
+
+        // Check if we have any binary fields
+        const hasBinaryFields = binaryFields && binaryFields.length > 0
+
+        // Add blank line before field lines if we have binary fields or no field lines
+        if (hasBinaryFields || fieldLines.length === 0) {
+          orderedLines.push("")
+        }
+
+        // Add field lines
+        for (const line of fieldLines) {
+          orderedLines.push(line)
+        }
+
+        if (binaryFields && binaryFields.length > 0) {
+          const parts = []
+          const headerText = orderedLines.join("\r\n")
+          parts.push(Buffer.from(headerText))
+
+          for (let i = 0; i < binaryFields.length; i++) {
+            const { key, buffer } = binaryFields[i]
+            if (i > 0) {
+              parts.push(Buffer.from("\r\n"))
+            }
+            parts.push(Buffer.from(`${key}: `))
+            parts.push(buffer)
+          }
+
+          parts.push(Buffer.from("\r\n"))
+          const fullBody = Buffer.concat(parts)
+          bodyParts.push(new Blob([fullBody]))
+        } else {
+          // Add trailing blank line if we have field lines
+          if (fieldLines.length > 0) {
+            bodyParts.push(new Blob([orderedLines.join("\r\n") + "\r\n"]))
+          } else {
+            bodyParts.push(new Blob([orderedLines.join("\r\n")]))
+          }
+        }
+      }
+
+      continue
+    }
+
     const isInline = bodyKey === "body" && headers["inline-body-key"] === "body"
     if (isInline) {
       lines.push(`content-disposition: inline`)
@@ -1447,7 +1781,11 @@ async function encode(obj = {}) {
       lines.push(`content-disposition: form-data;name="${bodyKey}"`)
     }
 
-    if (typeof value === "string") {
+    if (isBytes(value)) {
+      const buffer = toBuffer(value)
+      const headerText = lines.join("\r\n") + "\r\n\r\n"
+      bodyParts.push(new Blob([headerText, buffer]))
+    } else if (typeof value === "string") {
       lines.push("")
       lines.push(value)
       bodyParts.push(new Blob([lines.join("\r\n")]))
