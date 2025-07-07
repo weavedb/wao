@@ -35,7 +35,13 @@ function mod(obj) {
 
   // Handle symbols - convert to their description or "symbol"
   if (typeof obj === "symbol") {
-    return obj.description || "symbol"
+    const desc = obj.description || "symbol"
+    // Special handling for symbols with descriptions that match special values
+    if (desc === "null") return null
+    if (desc === "undefined") return undefined
+    if (desc === "true") return true
+    if (desc === "false") return false
+    return desc
   }
 
   // Handle arrays
@@ -49,16 +55,17 @@ function mod(obj) {
     obj instanceof ArrayBuffer ||
     Buffer.isBuffer(obj)
   ) {
-    // Convert to base64
+    // Convert to empty string for empty buffers
     const buffer = Buffer.isBuffer(obj) ? obj : Buffer.from(obj)
-    return buffer.toString("base64")
+    return buffer.length === 0 ? "" : buffer.toString("base64")
   }
 
   // Handle objects
   if (typeof obj === "object" && obj !== null) {
     const result = {}
     for (const [key, value] of Object.entries(obj)) {
-      result[key] = mod(value)
+      // Lowercase the key when creating the result object
+      result[key.toLowerCase()] = mod(value)
     }
     return result
   }
@@ -69,8 +76,7 @@ function mod(obj) {
     return obj
   }
 
-  // Return primitive values as-is (strings, numbers, booleans)
+  // Return primitive values as-is (strings, numbers, booleans, null)
   return obj
 }
-
 export { prepare, getJWK, seed, mod }
