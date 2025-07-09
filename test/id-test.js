@@ -5,7 +5,7 @@ import {
   generateRsaCommitmentId,
   generateHmacCommitmentId,
   verifyCommitmentId,
-} from "./id.js"
+} from "../src/id.js"
 
 // Test data from the Erlang implementation
 const testMessage = {
