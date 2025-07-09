@@ -26,7 +26,6 @@ export async function send(signedMsg, fetchImpl = fetch) {
 
   // Use the URL as provided, ignoring any path header
   const response = await fetchImpl(signedMsg.url, fetchOptions)
-  //console.log(response)
   if (response.status >= 400) {
     throw new Error(`${response.status}: ${await response.text()}`)
   }
