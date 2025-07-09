@@ -5,9 +5,7 @@ import { getJWK } from "./lib/test-utils.js"
 import HB from "../src/hb.js"
 import { pick } from "ramda"
 import { wait } from "../src/utils.js"
-import Server from "../src/server.js"
 import HyperBEAM from "../src/hyperbeam.js"
-import { extractPublicKeyFromHeaders } from "../src/signer.js"
 const seed = num => {
   const array = new Uint8Array(num)
   return crypto.getRandomValues(array).toString()
@@ -16,18 +14,15 @@ const seed = num => {
 const URL = "http://localhost:10001"
 
 describe("Hyperbeam Device", function () {
-  let hb, hb2, hbeam, jwk, server, addr, addr2
+  let hb, hb2, hbeam, jwk, addr, addr2
   before(async () => {
-    server = new Server({ port: 6359, log: true, hb_url: URL })
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
     hbeam = await new HyperBEAM({
       clearCache: true,
-      gateway: 6359,
       c: "12",
       cmake: "3.5",
-      operator: addr,
     }).ready()
   })
 
@@ -38,7 +33,6 @@ describe("Hyperbeam Device", function () {
 
   after(async () => {
     hbeam.kill()
-    server.end()
   })
 
   it("should test cron@1.0", async () => {

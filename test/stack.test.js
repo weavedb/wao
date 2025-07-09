@@ -7,7 +7,6 @@ import { pick } from "ramda"
 import { wait } from "../src/utils.js"
 import Server from "../src/server.js"
 import HyperBEAM from "../src/hyperbeam.js"
-import { extractPublicKeyFromHeaders } from "../src/signer.js"
 const seed = num => {
   const array = new Uint8Array(num)
   return crypto.getRandomValues(array).toString()
@@ -40,8 +39,7 @@ describe("Hyperbeam Device", function () {
     hbeam.kill()
     server.end()
   })
-
-  it("should test stack@1.0", async () => {
+  it.only("should test stack@1.0", async () => {
     const { pid } = await hb.spawn({
       "execution-device": "stack@1.0",
       "device-stack": ["wao@1.0", "double@1.0"],

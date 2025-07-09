@@ -30,8 +30,6 @@ describe("Hyperbeam Signer", function () {
       as: [],
       c: "12",
       cmake: "3.5",
-      //gateway: 4000,
-      //operator: addr,
     }).ready()
   })
 

@@ -49,35 +49,6 @@ const getValueByPath = (obj, path) => {
   return value
 }
 
-const canArrayBeInHeader = array => {
-  // Empty arrays can be in headers
-  if (array.length === 0) return true
-
-  // Arrays with objects must go to body
-  if (array.some(item => isPojo(item))) return false
-
-  // Arrays with binary data must go to body
-  if (array.some(item => isBytes(item) && item.length > 0)) return false
-
-  // Arrays with non-ASCII strings must go to body
-  if (array.some(item => typeof item === "string" && hasNonAscii(item)))
-    return false
-
-  // Arrays with nested arrays must go to body (to match original behavior)
-  if (array.some(item => Array.isArray(item))) return false
-
-  // Arrays with nested arrays that have objects must go to body
-  if (
-    array.some(
-      item => Array.isArray(item) && item.some(subItem => isPojo(subItem))
-    )
-  )
-    return false
-
-  // Simple arrays of primitives can stay in headers
-  return true
-}
-
 // Array analysis helper
 const analyzeArray = array => {
   const analysis = {
@@ -144,10 +115,7 @@ class BodyKeyCollector {
       if (this.isSpecialDataBodyField(key, value, objKeys)) {
         this.keys.push(key)
       } else if (Array.isArray(value) && value.length > 0) {
-        // Check if array can stay in header
-        if (!canArrayBeInHeader(value)) {
-          this.processRootArray(key, value)
-        }
+        this.processRootArray(key, value)
       } else if (isPojo(value)) {
         this.processRootNestedObject(key, value)
       } else if (this.needsBodyKey(key, value)) {
@@ -334,10 +302,7 @@ class BodyKeyCollector {
 
           if (analysis.hasNonObjects) {
             hasSimpleFields = true
-            // Only add to keys if array can't be in header
-            if (!canArrayBeInHeader(value)) {
-              this.keys.push(fullPath)
-            }
+            this.keys.push(fullPath)
           }
         } else {
           hasSimpleFields = true

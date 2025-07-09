@@ -9,6 +9,8 @@ const {
 } = httpbis
 
 export async function send(signedMsg, fetchImpl = fetch) {
+  // IMPORTANT: Use the URL from signedMsg.url, NOT from any path header
+  // This ensures we send to the correct URL even if path header is different
   const fetchOptions = {
     method: signedMsg.method,
     headers: signedMsg.headers,
@@ -21,8 +23,10 @@ export async function send(signedMsg, fetchImpl = fetch) {
   ) {
     fetchOptions.body = signedMsg.body
   }
-  const response = await fetchImpl(signedMsg.url, fetchOptions)
 
+  // Use the URL as provided, ignoring any path header
+  const response = await fetchImpl(signedMsg.url, fetchOptions)
+  //console.log(response)
   if (response.status >= 400) {
     throw new Error(`${response.status}: ${await response.text()}`)
   }
@@ -90,10 +94,8 @@ export const toHttpSigner = signer => {
 
       signatureBaseArray.push(['"@signature-params"', [signatureInput]])
       signatureBase = formatSignatureBase(signatureBaseArray)
-
       return new TextEncoder().encode(signatureBase)
     }
-
     const result = await signer(create, "httpsig")
 
     if (!createCalled) {

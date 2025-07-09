@@ -293,29 +293,19 @@ async function handleSingleBodyKeyOptimization(
     const singleKey = bodyKeys[0]
     const value = getValueByPath(obj, singleKey)
 
-    // Apply optimization for binary data OR strings with newlines
-    if (
-      (isBytes(value) && value.length > 0) ||
-      (typeof value === "string" && value.includes("\n"))
-    ) {
-      let contentToHash
-      let bodyContent = value
+    const otherFieldsAreEmpty = Object.entries(obj).every(([key, val]) => {
+      if (key === singleKey) return true
+      return isEmpty(val)
+    })
 
-      if (isBytes(value)) {
-        const bodyBuffer = toBuffer(value)
-        contentToHash = bodyBuffer.buffer.slice(
-          bodyBuffer.byteOffset,
-          bodyBuffer.byteOffset + bodyBuffer.byteLength
-        )
-      } else {
-        // For strings, encode to UTF-8 for hashing
-        const encoder = new TextEncoder()
-        const encoded = encoder.encode(value)
-        contentToHash = encoded.buffer
-        bodyContent = value
-      }
+    if (otherFieldsAreEmpty && isBytes(value) && value.length > 0) {
+      const bodyBuffer = toBuffer(value)
+      const bodyArrayBuffer = bodyBuffer.buffer.slice(
+        bodyBuffer.byteOffset,
+        bodyBuffer.byteOffset + bodyBuffer.byteLength
+      )
 
-      const contentDigest = await sha256(contentToHash)
+      const contentDigest = await sha256(bodyArrayBuffer)
       const base64 = base64url.toBase64(base64url.encode(contentDigest))
       headers["content-digest"] = `sha-256=:${base64}:`
 
@@ -327,7 +317,7 @@ async function handleSingleBodyKeyOptimization(
         headers["ao-types"] = headerTypes.sort().join(", ")
       }
 
-      return { headers, body: bodyContent }
+      return { headers, body: value }
     }
   }
 
@@ -747,13 +737,16 @@ function createObjectBodyPart(
   const lines = []
 
   if (isInline) {
-    const orderedLines = []
+    lines.push(`content-disposition: inline`)
+  } else {
+    lines.push(`content-disposition: form-data;name="${bodyKey}"`)
+  }
 
-    // For inline mode: fields first, then headers
+  if (isInline) {
+    const orderedLines = []
     for (const line of fieldLines) {
       orderedLines.push(line)
     }
-
     if (allTypes.length > 0) {
       orderedLines.push(`ao-types: ${allTypes.sort().join(", ")}`)
     }
@@ -770,9 +763,7 @@ function createObjectBodyPart(
 
     if (binaryFieldsForInline.length > 0) {
       const parts = []
-      // Join all text lines first
       parts.push(Buffer.from(orderedLines.join("\r\n")))
-      // Then add binary fields
       for (const { key, buffer } of binaryFieldsForInline) {
         parts.push(Buffer.from(`\r\n${key}: `))
         parts.push(buffer)
@@ -781,10 +772,18 @@ function createObjectBodyPart(
       const fullBody = Buffer.concat(parts)
       return new Blob([fullBody])
     } else {
-      return new Blob([orderedLines.join("\r\n") + "\r\n"])
+      const isLastBodyPart =
+        sortedBodyKeys.indexOf(bodyKey) === sortedBodyKeys.length - 1
+      const hasOnlyTypes = allTypes.length > 0 && fieldLines.length === 0
+      if (isLastBodyPart && hasOnlyTypes) {
+        return new Blob([orderedLines.join("\r\n")])
+      } else if (fieldLines.length === 0) {
+        return new Blob([orderedLines.join("\r\n")])
+      } else {
+        return new Blob([orderedLines.join("\r\n") + "\r\n"])
+      }
     }
   } else {
-    // Non-inline mode remains the same
     const orderedLines = []
     if (allTypes.length > 0) {
       orderedLines.push(`ao-types: ${allTypes.sort().join(", ")}`)
@@ -1163,19 +1162,10 @@ async function encode(obj = {}) {
   // Step 12: Check for special data/body case
   const hasSpecialDataBody = checkSpecialDataBodyCase(obj, sortedBodyKeys)
 
-  // Only add body-keys header if there are actual body keys
-  if (sortedBodyKeys.length > 0) {
-    headers["body-keys"] = sortedBodyKeys.map(k => `"${k}"`).join(", ")
-  }
+  headers["body-keys"] = sortedBodyKeys.map(k => `"${k}"`).join(", ")
 
-  // Special case: single body key named "body" containing an object
-  if (
-    !hasSpecialDataBody &&
-    sortedBodyKeys.length === 1 &&
-    sortedBodyKeys[0] === "body"
-  ) {
-    const bodyValue = obj.body
-    if (isPojo(bodyValue)) {
+  if (!hasSpecialDataBody) {
+    if (sortedBodyKeys.includes("body") && sortedBodyKeys.length === 1) {
       headers["inline-body-key"] = "body"
     }
   }
@@ -1191,11 +1181,6 @@ async function encode(obj = {}) {
     headers,
     hasSpecialDataBody
   )
-
-  // If no body parts were created, return headers only
-  if (bodyParts.length === 0) {
-    return { headers, body: undefined }
-  }
 
   // Step 14: Generate multipart boundary
   const boundary = await generateBoundary(bodyParts)
