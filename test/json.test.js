@@ -45,7 +45,7 @@ describe("Hyperbeam Device", function () {
 
     assert.deepEqual(
       pick(["key", "key2", "key3", "key4"])(JSON.parse(res.body)),
-      { key: "1", key2: "2", key3: { 1: 1, 2: 2 }, key4: { a: 3 } }
+      { key: "1", key2: "2", key3: { 1: 1, 2: { a: [2, 3] } }, key4: { a: 3 } }
     )
 
     const { headers: h } = await hb.post({
