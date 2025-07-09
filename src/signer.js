@@ -20,7 +20,6 @@ export function signer(config) {
   }
 
   return async function sign(fields, { path: _path = false } = {}) {
-    console.log("fields", fields)
     const { path = "/relay/process", method = "POST", ...restFields } = fields
     const aoFields = { ...restFields }
     const encoded = await enc(aoFields)
@@ -75,8 +74,6 @@ export function signer(config) {
       },
       fields: signingFields,
     })
-    console.log(lowercaseHeaders)
-    console.log(signingFields)
     const finalHeaders = {}
 
     for (const [key, value] of Object.entries(headersObj)) {
@@ -89,8 +86,6 @@ export function signer(config) {
     if (headersObj["body-keys"]) {
       finalHeaders["body-keys"] = headersObj["body-keys"]
     }
-    console.log("url:", _url)
-    console.log(finalHeaders)
     const result = { url: _url, method, headers: finalHeaders }
 
     if (body) result.body = body
