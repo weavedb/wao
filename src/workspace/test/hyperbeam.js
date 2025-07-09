@@ -5,7 +5,7 @@ import { HB } from "wao"
 import { resolve } from "path"
 import { readFileSync } from "fs"
 
-const cwd = "../dev/wao/HyperBEAM"
+const cwd = "../../HyperBEAM"
 const wallet = ".wallet.json"
 
 describe("HyperBEAM", function () {
