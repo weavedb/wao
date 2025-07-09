@@ -1,5 +1,4 @@
 import assert from "assert"
-import { send as _send } from "../src/signer.js"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, AO, toAddr } from "../src/test.js"
 import { getJWK } from "./lib/test-utils.js"
@@ -39,7 +38,7 @@ const URL = "http://localhost:10001"
 describe("Hyperbeam Legacynet", function () {
   let hb, hb2, hbeam, jwk, server, addr, addr2
   before(async () => {
-    //server = new Server({ port: 6359, log: true, hb_url: URL })
+    server = new Server({ port: 6359, log: true, hb_url: URL })
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
@@ -55,10 +54,10 @@ describe("Hyperbeam Legacynet", function () {
   })
   after(async () => {
     hbeam.kill()
-    //server.end()
+    server.end()
   })
 
-  it("should interact with a hyperbeam node", async () => {
+  it.only("should interact with a hyperbeam node", async () => {
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
     const r = await hb.computeLegacy({ pid, slot })
@@ -71,7 +70,7 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(r3.Messages[0].Data, "Count: 2")
   })
 
-  it("should get messages and recover them", async () => {
+  it.only("should get messages and recover them", async () => {
     const address = (await hb.get({ path: "/~meta@1.0/info/address" })).body
     assert.equal(address, hb._info.address)
     const { pid } = await hb.spawnLegacy()
@@ -113,7 +112,7 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(r3.Messages[0].Data, `Count: ${++i}`)
   })
 
-  it("should deploy a process", async () => {
+  it.only("should deploy a process", async () => {
     const address = (await hb.get({ path: "/~meta@1.0/info/address" })).body
     assert.equal(address, hb._info.address)
     const { pid } = await hb.spawnLegacy()
@@ -187,7 +186,7 @@ describe("Hyperbeam Legacynet", function () {
     console.log(await hb.text("message", null, { hello: "world" }, "/keys"))
   })
 
-  it.only("should upload module", async () => {
+  it("should upload module", async () => {
     const { pid } = await hb.spawnLua()
     await hb.scheduleLua({ pid, action: "Eval", data })
     await hb.scheduleLua({ pid, action: "Inc" })

@@ -1876,6 +1876,42 @@ const bin = Buffer.from([1, 2, 3])
 const empty = Buffer.from([])
 
 const ok = [
+  { recursive: [1, [2, [3, [4]]]] },
+  { types: ["", 0, "", false, Symbol("null"), [], {}, -1] },
+  { chaos: [1, "three", true, Symbol("ok"), null, [], {}, 4.5] },
+  { mixed_empty_full: ["", [1], {}, { a: 1 }] },
+  { alternating: [1, "one", 2, "two", 3, "three"] },
+  {
+    binary_data: "some binary content",
+    symbols: [Symbol("success"), Symbol("failure"), Symbol("pending")],
+    numbers: [0, -1, 42, 3.14, -99.99],
+    strings: ["hello", "world", "test"],
+  },
+  {
+    count: 10,
+    active: true,
+    tags: ["alpha", "beta", "gamma"],
+  },
+  {
+    values: [1, 2, 3, 4, 5],
+    states: [Symbol("active"), Symbol("inactive"), Symbol("pending")],
+  },
+  {
+    data: [
+      1,
+      "abc",
+      true,
+      "ok",
+      1.23,
+      { bool: false, float: 3.14, int: 1, nested: "ok", str: "abc" },
+    ],
+  },
+  { empty: Buffer.from([]), nested: [Buffer.from([]), 3] },
+  { list: [1, [2, 3]] },
+  { list: [53.05] },
+  { list: [Symbol("ok")] },
+  { mixed_empty: ["", 0, [], "", {}, null, false] },
+
   { "data-field": 1, data_field: 2, dataField: 3 },
   {
     matrix: [
@@ -1890,10 +1926,6 @@ const ok = [
     ],
   },
 
-  { recursive: [1, [2, [3, [4]]]] },
-  { types: ["", 0, "", false, Symbol("null"), [], {}, -1] },
-  { mixed_empty: ["", 0, [], "", {}, null, false] },
-  { chaos: [1, "three", true, Symbol("ok"), null, [], {}, 4.5] },
   { network: { nodes: [{ ip: "127.0.0.1", port: 8080 }] } },
   { nested_maps: { a: [{ val: 1 }], b: [{ val: 2 }] } },
   { tree: { value: 1, children: [{ value: 2 }, { value: 3 }] } },
@@ -1902,7 +1934,6 @@ const ok = [
   { empty_nested: [[], [[]], [[], []]] },
   { empty_maps_list: [{}, {}, {}] },
   { empty_map_array: [{}, { a: 1 }, {}, { b: 2 }] },
-  { mixed_empty_full: ["", [1], {}, { a: 1 }] },
   { users: [{ id: 1 }, { id: 2 }] },
   {
     items: [
@@ -1939,7 +1970,6 @@ const ok = [
       { setting: "off", value: 0 },
     ],
   },
-  { alternating: [1, "one", 2, "two", 3, "three"] },
   { wrapped: [[1], [2], ["three"], [true], [Symbol("ok")]] },
   {
     indexed: [
@@ -2017,12 +2047,6 @@ const ok = [
     simple_list: [1, 2, 3, 4, 5],
   },
   {
-    binary_data: "some binary content",
-    symbols: [Symbol("success"), Symbol("failure"), Symbol("pending")],
-    numbers: [0, -1, 42, 3.14, -99.99],
-    strings: ["hello", "world", "test"],
-  },
-  {
     body: Buffer.from([1, 2, 3, 255, 0]),
     empty_list: [],
     empty_binary: Buffer.from([]),
@@ -2032,11 +2056,6 @@ const ok = [
       bytes: Buffer.from([0, 127, 255]),
       empty: { list: [], map: {} },
     },
-  },
-  {
-    count: 10,
-    active: true,
-    tags: ["alpha", "beta", "gamma"],
   },
   {
     data: "plain text",
@@ -2072,10 +2091,6 @@ const ok = [
     body: { data: Buffer.from([0]) },
   },
   {
-    values: [1, 2, 3, 4, 5],
-    states: [Symbol("active"), Symbol("inactive"), Symbol("pending")],
-  },
-  {
     body: { a: { b: 5, c: 3 } },
     data: { d: { e: 5, f: 3 } },
     key: { g: { h: 5, i: 3 } },
@@ -2096,20 +2111,9 @@ const ok = [
     data: { bool: true, nest: { atom: Symbol("ok") } },
   },
   { key: [{ str: "abc" }] },
-  {
-    data: [
-      1,
-      "abc",
-      true,
-      "ok",
-      1.23,
-      { bool: false, float: 3.14, int: 1, nested: "ok", str: "abc" },
-    ],
-  },
   { key: [{ int: 1 }] },
   { null: null, undefined: undefined },
   { body: { list: [], map: {} }, nested: { list: [], map: {} } },
-  { empty: Buffer.from([]), nested: [Buffer.from([]), 3] },
   { binary: Buffer.from([1, 2, 3]) },
   {
     str: "abc",
@@ -2123,13 +2127,10 @@ const ok = [
   { map: { a: 1, b: 2, c: { d: 3 } }, body: bin },
   { body: bin, data: bin },
   { map: { a: 3, b: "abc", c: { d: { e: 3 } } } },
-  { list: [1, [2, 3]] },
   { map: { jntzf: 8.02 } },
-  { list: [53.05] },
   { map: { float: 86.01, bool: true } },
   { key: [[8.02]] },
   { body: bin, data: bin },
-  { list: [Symbol("ok")] },
   { base64: Buffer.from([1, 2, 3]).toString("base64") },
   { bin: empty },
   { body: empty },
