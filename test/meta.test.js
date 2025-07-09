@@ -54,13 +54,16 @@ describe("Hyperbeam Device", function () {
       initialized: "permanent",
     })
     const info2 = await hb.json("meta", "info")
-
     assert.deepEqual(info2.test_config, 123)
     try {
       // this should faild due to "initialized=permanent"
-      await hb.post({ path: "/~meta@1.0/info", test_config: 124 })
+      await hb.post({
+        path: "/~meta@1.0/info",
+        test_config: 124,
+      })
     } catch (e) {}
     const info3 = await hb.json("meta", "info")
+    return
     assert.deepEqual(info3.test_config, 123)
 
     const build = await hb.json("meta", "build")

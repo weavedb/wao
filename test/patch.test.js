@@ -7,7 +7,7 @@ import { pick } from "ramda"
 import { wait } from "../src/utils.js"
 import Server from "../src/server.js"
 import HyperBEAM from "../src/hyperbeam.js"
-import { extractPublicKeyFromHeaders } from "../src/signer.js"
+
 const seed = num => {
   const array = new Uint8Array(num)
   return crypto.getRandomValues(array).toString()
@@ -64,7 +64,7 @@ describe("Hyperbeam Device", function () {
     server.end()
   })
 
-  it.only("should test patch@1.0", async () => {
+  it("should test patch@1.0", async () => {
     const { pid } = await hb.spawn({
       "execution-device": "stack@1.0",
       "device-stack": ["wao@1.0", "patch@1.0"],
@@ -95,6 +95,8 @@ describe("Hyperbeam Device", function () {
   it.only("should patch with legacy aos", async () => {
     const { pid } = await hb.spawnAOS()
     await hb.messageAOS({ pid, action: "Eval", tags: {}, data: src_data })
+    console.log(pid)
+
     await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
     assert.equal(
       (await hb.messageAOS({ pid, action: "Get" })).outbox["1"].data,
