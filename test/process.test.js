@@ -7,7 +7,7 @@ import { pick } from "ramda"
 import { wait } from "../src/utils.js"
 import Server from "../src/server.js"
 import HyperBEAM from "../src/hyperbeam.js"
-import { extractPublicKeyFromHeaders } from "../src/signer.js"
+
 const seed = num => {
   const array = new Uint8Array(num)
   return crypto.getRandomValues(array).toString()

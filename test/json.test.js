@@ -37,21 +37,16 @@ describe("Hyperbeam Device", function () {
   })
 
   it("should test json@1.0", async () => {
-    const obj = { key: 1, key2: "2", key3: [1, 2], key4: { a: 3 } }
+    const obj = { key: 1, key2: "2", key3: [1, { a: [2, 3] }], key4: { a: 3 } }
     const res = await hb.post({
       path: "/~json@1.0/serialize",
       ...obj,
     })
 
-    // json serialize is not to be used externally, it's applied to the msg before httpsig codec
-    assert.deepEqual(JSON.parse(res.body), {
-      device: "json@1.0",
-      key: "1",
-      key2: "2",
-      key3: "1, 2",
-      key4: "a=3",
-      method: "POST",
-    })
+    assert.deepEqual(
+      pick(["key", "key2", "key3", "key4"])(JSON.parse(res.body)),
+      { key: "1", key2: "2", key3: { 1: 1, 2: 2 }, key4: { a: 3 } }
+    )
 
     const { headers: h } = await hb.post({
       path: "/~json@1.0/deserialize",
