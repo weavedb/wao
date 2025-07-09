@@ -1,4 +1,4 @@
-import crypto from "crypto"
+import { hash, hmac } from "fast-sha256"
 
 /**
  * Parse structured field dictionary format
@@ -34,6 +34,28 @@ function parseStructuredFieldDictionary(input) {
 }
 
 /**
+ * Convert base64url string to base64
+ */
+function base64urlToBase64(str) {
+  return str.replace(/-/g, "+").replace(/_/g, "/")
+}
+
+/**
+ * Convert Uint8Array to base64url string
+ */
+function uint8ArrayToBase64url(bytes) {
+  // Convert to base64
+  let binary = ""
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  const base64 = btoa(binary)
+
+  // Convert to base64url
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
+}
+
+/**
  * Generate commitment ID for RSA-PSS and ECDSA signatures
  * The ID is the SHA256 hash of the raw signature bytes
  *
@@ -49,12 +71,14 @@ function generateRsaCommitmentId(commitment) {
   }
 
   const signatureBase64 = match[1]
-  const signatureBinary = Buffer.from(signatureBase64, "base64")
+  // Convert base64 to Uint8Array
+  const signatureBinary = Uint8Array.from(atob(signatureBase64), c =>
+    c.charCodeAt(0)
+  )
 
   // SHA256 hash of the raw signature
-  const hash = crypto.createHash("sha256")
-  hash.update(signatureBinary)
-  const id = hash.digest("base64url")
+  const hashResult = hash(signatureBinary)
+  const id = uint8ArrayToBase64url(hashResult)
 
   return id
 }
@@ -113,9 +137,12 @@ function generateHmacCommitmentId(message) {
   const signatureBase = lines.join("\n")
 
   // Generate HMAC with key "ao"
-  const hmac = crypto.createHmac("sha256", "ao")
-  hmac.update(signatureBase, "utf8")
-  return hmac.digest().toString("base64url")
+  // Convert string to Uint8Array
+  const messageBytes = new TextEncoder().encode(signatureBase)
+  const keyBytes = new TextEncoder().encode("ao")
+
+  const hmacResult = hmac(keyBytes, messageBytes)
+  return uint8ArrayToBase64url(hmacResult)
 }
 
 /**

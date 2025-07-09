@@ -1,9 +1,4 @@
-import {
-  generateCommitmentId,
-  generateRsaCommitmentId,
-  generateHmacCommitmentId,
-  verifyCommitmentId,
-} from "./id.js"
+import { rsaid, hmacid } from "../src/utils.js"
 
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
@@ -72,8 +67,8 @@ describe("Hyperbeam Legacynet", function () {
     const msg = await hb3.sign(obj, { path: true })
     const hmacMessage = msg.headers
 
-    const hmacId = generateHmacCommitmentId(hmacMessage)
-    const rsaId = generateRsaCommitmentId(msg.headers)
+    const hmacId = hmacid(hmacMessage)
+    const rsaId = rsaid(msg.headers)
     const committer = addr
     const sigs = {
       signature: msg.headers.signature,
