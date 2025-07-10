@@ -2,6 +2,7 @@ import { spawn } from "child_process"
 import { resolve } from "path"
 import { isNil, map } from "ramda"
 import { rmSync, readFileSync, readdirSync } from "fs"
+import devs from "./devs.js"
 
 export default class HyperBEAM {
   constructor({
@@ -23,7 +24,9 @@ export default class HyperBEAM {
     operator,
     console = true,
     shell = true,
+    devices,
   } = {}) {
+    this.devices = devices
     as ??= shell ? [] : ["genesis_wasm"]
     this.console = console
     if (clearCache) {
@@ -168,6 +171,18 @@ export default class HyperBEAM {
   }
 
   genEval({ gateway, wallet = ".wallet.json" }) {
+    let _devices = ""
+    if (this.devices) {
+      let _devs = []
+      for (const v of this.devices) {
+        if (devs[v])
+          _devs.push(
+            `#{<<"name">> => <<"${devs[v].name}">>, <<"module">> => ${devs[v].module}}`
+          )
+      }
+      _devices = `, preloaded_devices => [${_devs.join(", ")}]`
+    }
+
     const _wallet = `, priv_key_location => <<"${wallet}">>`
     const _gateway = gateway
       ? `, gateway => <<"http://localhost:${gateway}">>`
@@ -211,7 +226,7 @@ export default class HyperBEAM {
         : !isNil(this.faff)
           ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
           : ""
-    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_on}${_p4_non_chargable}${_operator}${_spp}${_node_processes}}).`
+    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_on}${_p4_non_chargable}${_operator}${_spp}${_devices}${_node_processes}}).`
     return start
   }
 
