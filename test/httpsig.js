@@ -4,11 +4,13 @@ import { acc, toAddr } from "../src/test.js"
 import { getJWK } from "./lib/test-utils.js"
 import HB from "../src/hb.js"
 import HyperBEAM from "../src/hyperbeam.js"
-
+import { resolve } from "path"
+import { writeFileSync } from "fs"
 const jwk = getJWK("../../HyperBEAM/.wallet.json")
 const addr = toAddr(jwk.n)
 
 let cases = [
+  { "Tbun4iRRQW93gUiSAmTmZJ2PGI-_yYaXsX69ETgzSRE": "ABC" },
   // 1-10: Basic types
   { simple_string: "hello world" },
   { simple_integer: 42 },
@@ -443,9 +445,6 @@ let cases = [
       },
     },
   },
-]
-
-const cases2 = [
   // 1-10: Numeric edge cases (avoiding MAX_SAFE_INTEGER)
   { medium_number: 1000000000 }, // 1 billion
   { float_precision: 3.141592653589793 }, // PI with more precision
@@ -829,8 +828,6 @@ const cases2 = [
       active: true,
     },
   },
-]
-const cases3 = [
   // Test mixed_depth pattern with all lowercase
   /*{
     mixed_depth: {
@@ -923,6 +920,7 @@ const cases3 = [
     },
   },
 ]
+
 describe("Hyperbeam Device", function () {
   let hb, hbeam
   before(async () => {
@@ -941,9 +939,9 @@ describe("Hyperbeam Device", function () {
   after(async () => hbeam.kill())
 
   it.only("should test wao@1.0", async () => {
-    //cases = [{ simple_boolean: true }]
     let i = 0
-    for (const json of cases3) {
+    let io = []
+    for (const json of cases) {
       const res = await hb.post({
         path: "/~wao@1.0/identity",
         body: JSON.stringify(json),
@@ -953,6 +951,22 @@ describe("Hyperbeam Device", function () {
       console.log(res)
       console.log(JSON.stringify(res.out))
       assert.deepEqual(json, res.out)
+      /*
+      delete res.headers.signature
+      delete res.headers["access-control-allow-methods"]
+      delete res.headers["access-control-allow-origin"]
+      delete res.headers["date"]
+      delete res.headers["server"]
+      delete res.headers["transfer-encoding"]
+      res.headers["signature-input"] =
+        res.headers["signature-input"].split(";")[0]
+        io.push({ in: json, out: { headers: res.headers, body: res.body } })
+        */
     }
+    /*
+    writeFileSync(
+      resolve(import.meta.dirname, "output.txt"),
+      JSON.stringify(io, undefined, 2)
+    )*/
   })
 })
