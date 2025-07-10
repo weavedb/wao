@@ -39,6 +39,17 @@ const extract = (http, components) => {
     }
   }
 
+  // Extract ao-ids if it's signed
+  const hasAoIds = components.some(
+    c => c.replace(/"/g, "").toLowerCase() === "ao-ids"
+  )
+  if (hasAoIds) {
+    const aoIds = http.headers["ao-ids"] || http.headers["Ao-Ids"]
+    if (aoIds) {
+      extracted["ao-ids"] = aoIds
+    }
+  }
+
   for (const component of components) {
     const cleanComponent = component.replace(/"/g, "")
 
@@ -140,6 +151,26 @@ export const toBuffer = body => {
 }
 
 /**
+ * Parse ao-ids dictionary
+ * @param {string} aoIds - The ao-ids header value
+ * @returns {Object} Parsed ID mappings
+ */
+const parseAoIds = aoIds => {
+  const result = {}
+
+  // Match pattern: ID="value"
+  const regex = /([A-Za-z0-9_-]{43})="([^"]*)"/g
+  let match
+
+  while ((match = regex.exec(aoIds)) !== null) {
+    const [, id, value] = match
+    result[id] = value
+  }
+
+  return result
+}
+
+/**
  * Convert message to JSON with proper type conversions
  * Following the logic from dev_codec_structured, dev_codec_httpsig_conv, and dev_codec_flat
  * @param {Object} msg - The message to convert
@@ -151,6 +182,14 @@ const toJSON = msg => {
   }
 
   let result = { ...msg }
+
+  // Handle ao-ids parsing
+  if (result["ao-ids"]) {
+    const parsedIds = parseAoIds(result["ao-ids"])
+    // Remove the ao-ids header and merge the parsed IDs
+    delete result["ao-ids"]
+    result = { ...result, ...parsedIds }
+  }
 
   // First, handle the multipart body if present
   const contentType = result["content-type"]
