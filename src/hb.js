@@ -5,6 +5,7 @@ import { signer } from "./signer.js"
 import { send as _send } from "./send.js"
 import hyper_aos from "./lua/hyper-aos.js"
 import aos_wamr from "./lua/aos_wamr.js"
+import { from } from "./httpsig.js"
 
 const seed = num => {
   const array = new Uint8Array(num)
@@ -453,11 +454,14 @@ class HB {
     const response = await fetch(`${this.url}${path}${_json}${_params}`)
     let headers = {}
     response.headers.forEach((v, k) => (headers[k] = v))
-    return {
-      response,
+    const http = {
       headers,
       body: await response.text(),
       status: response.status,
+    }
+    return {
+      out: from(http),
+      ...http,
     }
   }
   async postJSON(args) {
