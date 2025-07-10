@@ -7,6 +7,7 @@ const {
   createSigningParameters,
   formatSignatureBase,
 } = httpbis
+import { from } from "./httpsig.js"
 
 export async function send(signedMsg, fetchImpl = fetch) {
   // IMPORTANT: Use the URL from signedMsg.url, NOT from any path header
@@ -34,12 +35,10 @@ export async function send(signedMsg, fetchImpl = fetch) {
   if (response.headers && typeof response.headers.forEach === "function") {
     response.headers.forEach((v, k) => (headers[k] = v))
   } else headers = response.headers
-
+  const http = { headers, body: await response.text(), status: response.status }
   return {
-    response,
-    headers,
-    body: await response.text(),
-    status: response.status,
+    out: from(http),
+    ...http,
   }
 }
 
