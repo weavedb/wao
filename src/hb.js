@@ -460,7 +460,7 @@ class HB {
       status: response.status,
     }
     return {
-      out: from(http),
+      ...from(http),
       ...http,
     }
   }

@@ -1,7 +1,7 @@
 import { trim } from "ramda"
 import { decodeSigInput } from "./signer-utils.js"
 import base64url from "base64url"
-
+import { toAddr } from "./utils.js"
 /**
  * Get multipart boundary from content-type header
  */
@@ -319,7 +319,10 @@ const toJSON = msg => {
   for (const [key, value] of Object.entries(result)) {
     // Skip internal keys and headers we don't want in the final result
     if (key.startsWith("__")) continue
-    if (key.startsWith("@")) continue // Skip all @ fields
+
+    // Skip @ fields EXCEPT @path which we want to include
+    if (key.startsWith("@") && key !== "@path") continue
+
     if (key === "ao-types") continue
     if (key === "content-type") continue
     if (key === "content-digest") continue
@@ -853,11 +856,6 @@ const stringToBuffer = str => {
   return buffer
 }
 
-/**
- * Original from function - extracts and converts only signed components
- * @param {Object} http - HTTP message object with headers, body, and status
- * @returns {Object|null} Converted signed components or null if not signed
- */
 export const from = http => {
   const input =
     http.headers["signature-input"] || http.headers["Signature-Input"]
@@ -867,36 +865,60 @@ export const from = http => {
 
   // Decode signature inputs
   const inputs = decodeSigInput(input)
-
   // Process the first signature (following the original logic)
   for (const k in inputs) {
     const sigData = inputs[k]
-
     // Extract only the signed components
     const extractedComponents = extract(http, sigData.components)
+    let ret = { hashpath: sigData?.params?.tag ?? null }
+    try {
+      ret.signer = toAddr(sigData.params.keyid)
+    } catch (e) {}
 
-    // Check if ao-result header is present and points to body
+    // Check if @path was in the signed components
+    const hasPathComponent = sigData.components.some(
+      c => c.replace(/"/g, "") === "@path"
+    )
+
+    // If @path is signed, add the path header to extracted components
+    if (hasPathComponent) {
+      extractedComponents["path"] = http.headers.path
+    }
+
+    // Check if ao-result header is present
     const aoResult = http.headers["ao-result"] || http.headers["Ao-Result"]
-    if (aoResult === "body" && extractedComponents.body) {
+
+    // Handle ao-result pointing to body
+    if (aoResult === "body") {
+      // Handle empty body case
+      if (!extractedComponents.body) {
+        return { out: "", ...ret } // Return empty string for empty body
+      }
       // Check if body is binary data
       if (isBinaryString(extractedComponents.body)) {
-        return stringToBuffer(extractedComponents.body)
+        return { out: stringToBuffer(extractedComponents.body), ...ret }
       }
+      // Return body as-is if it's not binary
+      return { out: extractedComponents.body, ...ret }
     }
 
     // Convert the extracted components to JSON format
     const result = toJSON(extractedComponents)
 
-    // Handle ao-result if present
-    if (aoResult && result[aoResult] !== undefined) {
+    // Handle ao-result if present and pointing to other fields
+    if (aoResult && aoResult !== "body") {
       // Return the value of the key specified by ao-result
-      return result[aoResult]
+      // If the key doesn't exist, return undefined (or could return null/empty string)
+      return {
+        out: result[aoResult] !== undefined ? result[aoResult] : "",
+        ...ret,
+      }
     }
 
-    return result
+    return { out: result, ...ret }
   }
 
-  return null
+  return { out: null, hashpath: null }
 }
 
 /**
