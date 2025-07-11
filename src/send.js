@@ -10,8 +10,6 @@ const {
 import { from } from "./httpsig.js"
 
 export async function send(signedMsg, fetchImpl = fetch) {
-  // IMPORTANT: Use the URL from signedMsg.url, NOT from any path header
-  // This ensures we send to the correct URL even if path header is different
   const fetchOptions = {
     method: signedMsg.method,
     headers: signedMsg.headers,
@@ -25,7 +23,6 @@ export async function send(signedMsg, fetchImpl = fetch) {
     fetchOptions.body = signedMsg.body
   }
 
-  // Use the URL as provided, ignoring any path header
   const response = await fetchImpl(signedMsg.url, fetchOptions)
   if (response.status >= 400) {
     throw new Error(`${response.status}: ${await response.text()}`)
@@ -36,10 +33,7 @@ export async function send(signedMsg, fetchImpl = fetch) {
     response.headers.forEach((v, k) => (headers[k] = v))
   } else headers = response.headers
   const http = { headers, body: await response.text(), status: response.status }
-  return {
-    out: from(http),
-    ...http,
-  }
+  return { ...from(http), ...http }
 }
 
 const httpSigName = address => {
