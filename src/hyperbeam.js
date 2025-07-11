@@ -182,7 +182,6 @@ export default class HyperBEAM {
       }
       _devices = `, preloaded_devices => [${_devs.join(", ")}]`
     }
-
     const _wallet = `, priv_key_location => <<"${wallet}">>`
     const _gateway = gateway
       ? `, gateway => <<"http://localhost:${gateway}">>`
@@ -227,6 +226,7 @@ export default class HyperBEAM {
           ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
           : ""
     const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_on}${_p4_non_chargable}${_operator}${_spp}${_devices}${_node_processes}}).`
+    console.log(start)
     return start
   }
 

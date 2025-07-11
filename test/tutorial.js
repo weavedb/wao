@@ -15,15 +15,7 @@ describe("Hyperbeam Device", function () {
   let hb, hbeam
   before(async () => {
     hbeam = await new HyperBEAM({
-      /*devices: [
-        "meta",
-        "httpsig",
-        "structured",
-        "flat",
-        "json",
-        "wao",
-        "cache",
-      ],*/
+      devices: ["meta", "httpsig", "structured", "flat", "json", "wao"],
       clearCache: true,
       c: "12",
       cmake: "3.5",
