@@ -14,6 +14,7 @@ import {
   isBytes,
   isPojo,
 } from "./encode-utils.js"
+
 import encodeArrayItem from "./encode-array-item.js"
 import collectBodyKeys from "./collect-body-keys.js"
 const MAX_HEADER_LENGTH = 4096
@@ -1100,7 +1101,7 @@ function setFinalHeaders(headers, boundary, contentDigest, byteLength) {
   headers["content-length"] = String(byteLength)
 }
 
-async function encode(obj = {}) {
+export async function enc(obj = {}) {
   // Step 1: Process and normalize input values
   const processedObj = processInputValues(obj)
 
@@ -1212,8 +1213,4 @@ async function encode(obj = {}) {
 
   // Step 18: Return result
   return { headers, body }
-}
-
-export async function enc(fields) {
-  return await encode(fields)
 }
