@@ -25,7 +25,7 @@ describe("Hyperbeam Device", function () {
 
   after(async () => hbeam.kill())
 
-  it("should test local_name@1.0", async () => {
+  it("should test local-name@1.0", async () => {
     await hb.post({
       path: "/~local-name@1.0/register",
       value: "value",
