@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Flat codec (`dev_codec_flat`) transforms nested data structures into flat key-value pairs using path-based keys. It serves as an intermediate representation that preserves hierarchy while enabling efficient processing.
+The Flat codec (`dev_codec_flat`) transforms nested map structures into flat key-value pairs using path-based keys. It serves as a simple intermediate representation that preserves hierarchy while enabling efficient processing.
 
 ## Core Concepts
 
@@ -11,353 +11,262 @@ The Flat codec (`dev_codec_flat`) transforms nested data structures into flat ke
 Nested structures are flattened using `/` as a path separator:
 
 ```
-Nested: { "user": { "profile": { "name": "John" } } }
-Flat:   { "user/profile/name": "John" }
+Nested: #{ <<"user">> => #{ <<"name">> => <<"John">> } }
+Flat:   #{ <<"user/name">> => <<"John">> }
 ```
 
-### Value Types
+### Supported Value Types
 
-Only leaf values (non-objects) are preserved in the flat representation:
-- Strings, numbers, booleans, null → Preserved as-is
-- Objects and arrays → Decomposed into paths
+The flat codec **only** supports:
+- **Binary strings** as leaf values
+- **Maps** as containers (which get flattened)
 
-## Encoding Rules
+**Not supported:**
+- Numbers
+- Booleans
+- Lists/Arrays (as values)
+- Atoms (except as map keys)
+- Other Erlang terms
 
-### 1. Simple Object Flattening
+### Map Key Types
+
+Erlang maps allow any term as a key, including complex types that cannot be represented in JSON:
+- **Binary strings** (most common): `<<"key">>`
+- **Lists of binaries**: `[<<"part1">>, <<"part2">>]`
+- **Other Erlang terms** that `hb_path:to_binary/1` can convert to a path
+
+Note: This flexibility is unique to Erlang and cannot be represented in JSON or most other data formats.
+
+## Encoding Rules (`to/1`)
+
+### 1. Binary Passthrough
+
+Binary values at the top level pass through unchanged:
+
+```erlang
+Input:  <<"raw binary">>
+Output: <<"raw binary">>
+
+% In code:
+dev_codec_flat:to(<<"raw binary">>) % Returns: <<"raw binary">>
+```
+
+### 2. Simple Map Flattening
 
 Each nested level adds a path segment:
 
-```
+```erlang
 Input:
-{
-  "user": {
-    "name": "John",
-    "age": 30
-  }
+#{ <<"user">> => #{ <<"name">> => <<"John">> } }
+
+Output:
+#{ <<"user/name">> => <<"John">> }
+```
+
+### 3. Multiple Keys at Same Level
+
+Maps with multiple keys at the same level:
+
+```erlang
+Input:
+#{
+  <<"x">> => #{
+    <<"y">> => <<"1">>,
+    <<"z">> => <<"2">>
+  },
+  <<"a">> => <<"3">>
 }
 
 Output:
-{
-  "user/name": "John",
-  "user/age": 30
+#{
+  <<"x/y">> => <<"1">>,
+  <<"x/z">> => <<"2">>,
+  <<"a">> => <<"3">>
 }
 ```
 
-### 2. Deep Nesting
+### 4. Deep Nesting
 
 Arbitrary nesting depth is supported:
 
-```
+```erlang
 Input:
-{
-  "a": {
-    "b": {
-      "c": {
-        "d": "value"
-      }
-    }
-  }
-}
+#{ <<"a">> => #{ <<"b">> => #{ <<"c">> => #{ <<"d">> => <<"deep">> } } } }
 
 Output:
-{
-  "a/b/c/d": "value"
-}
+#{ <<"a/b/c/d">> => <<"deep">> }
 ```
 
-### 3. Array Handling
+## Decoding Rules (`from/1`)
 
-Arrays create numbered paths (1-based):
+### 1. Binary Input Deserialization
 
-```
-Input:
-{
-  "items": ["first", "second", "third"]
-}
+When input is binary, it's deserialized first (expecting key: value format with newlines):
 
-Output:
-{
-  "items/1": "first",
-  "items/2": "second",
-  "items/3": "third"
-}
+```erlang
+Input:  <<"key: value\n">>
+Output: #{ <<"key">> => <<"value">> }
+
+% Example with multiple entries:
+Input:  <<"user/name: John\nuser/age: 30\n">>
+Output: #{ <<"user">> => #{ <<"name">> => <<"John">>, <<"age">> => <<"30">> } }
 ```
 
-### 4. Mixed Structures
-
-Objects containing arrays and nested objects:
-
-```
-Input:
-{
-  "data": {
-    "users": [
-      { "name": "Alice" },
-      { "name": "Bob" }
-    ],
-    "count": 2
-  }
-}
-
-Output:
-{
-  "data/users/1/name": "Alice",
-  "data/users/2/name": "Bob",
-  "data/count": 2
-}
-```
-
-### 5. Empty Values
-
-Empty objects and arrays are preserved:
-
-```
-Input:
-{
-  "config": {
-    "values": [],
-    "settings": {}
-  }
-}
-
-Output:
-{
-  "config/values": [],
-  "config/settings": {}
-}
-```
-
-### 6. Special Path Characters
-
-Paths with special characters (including `/`):
-
-```
-Input:
-{
-  "filesystem": {
-    "/": {
-      "home": "data"
-    }
-  }
-}
-
-Output:
-{
-  "filesystem///home": "data"
-}
-```
-
-## Decoding Rules
-
-### 1. Path Parsing
+### 2. Path Parsing
 
 Split paths by `/` and reconstruct hierarchy:
 
-```
-Input:  { "a/b/c": "value" }
-Output: { "a": { "b": { "c": "value" } } }
-```
-
-### 2. Array Reconstruction
-
-Numeric path segments indicate array indices:
-
-```
-Input:
-{
-  "items/1": "first",
-  "items/2": "second",
-  "items/3": "third"
-}
-
-Output:
-{
-  "items": ["first", "second", "third"]
-}
+```erlang
+Input:  #{ <<"a/b/c">> => <<"value">> }
+Output: #{ <<"a">> => #{ <<"b">> => #{ <<"c">> => <<"value">> } } }
 ```
 
-### 3. Sparse Arrays
+### 3. Path Collision Handling
 
-Missing indices create sparse arrays:
+If a path collision occurs (trying to set a value where a map already exists), an error is thrown:
 
-```
-Input:
-{
-  "data/1": "first",
-  "data/3": "third"
-}
-
-Output:
-{
-  "data": {
-    "1": "first",
-    "3": "third"
+```erlang
+% This will throw {path_collision, {key, Key}, {existing, OldValue}, {value, NewValue}}
+% Example: Trying to flatten this would cause an error
+#{
+  <<"a">> => <<"value1">>,        % "a" is a value
+  <<"a">> => #{                   % "a" is also a map - collision!
+    <<"b">> => <<"value2">>
   }
 }
 ```
 
-### 4. Path Collision Handling
+### 4. Map Merging
 
-Later values override earlier ones:
+When two paths lead to the same map key and both values are maps, they are merged:
 
-```
+```erlang
 Input:
-{
-  "a/b": "value1",
-  "a/b/c": "value2"  // This would cause a collision
-}
-
-Error: Path collision detected
-```
-
-## Special Cases
-
-### 1. Root-Level Arrays
-
-Arrays at root level use numeric keys:
-
-```
-Input:  ["a", "b", "c"]
-Output: { "1": "a", "2": "b", "3": "c" }
-```
-
-### 2. Mixed Numeric/String Keys
-
-Objects with both numeric and non-numeric keys:
-
-```
-Input:
-{
-  "data": {
-    "1": "numeric",
-    "a": "alpha"
-  }
+#{
+  <<"a/b">> => <<"1">>,
+  <<"a/c">> => <<"2">>
 }
 
 Output:
-{
-  "data/1": "numeric",
-  "data/a": "alpha"
-}
+#{ <<"a">> => #{ <<"b">> => <<"1">>, <<"c">> => <<"2">> } }
 ```
 
-### 3. Consecutive Slashes
+## Serialization Format
 
-Multiple slashes are preserved:
+The codec includes `serialize/1` and `deserialize/1` functions for text representation:
 
+### Serialize Format
 ```
-Input:  { "a//b": { "c": "value" } }
-Output: { "a//b/c": "value" }
+path/to/key: value
+another/path: another value
+```
+
+- Each line contains one key-value pair
+- Format: `<path>: <value>`
+- Paths use `/` as separator
+- Values are binary strings
+
+### Example Serialization
+```erlang
+Input Map:
+#{ <<"user/name">> => <<"John">>, <<"user/age">> => <<"30">> }
+
+Serialized Output:
+user/name: John
+user/age: 30
 ```
 
 ## Integration with Other Codecs
 
-The flat codec works as an intermediate step:
+The flat codec delegates signature-related functions to `dev_codec_httpsig`:
+- `commit/3`
+- `verify/3`
+- `committed/3`
 
-1. **Structured → Flat**: Complex types are first encoded with type information
-2. **Flat → HTTPSig**: Flat paths determine multipart structure
-3. **HTTPSig → Flat**: Multipart paths are reconstructed
-4. **Flat → Structured**: Types are reapplied to values
+## Limitations
+
+1. **Values must be binaries**: No support for numbers, atoms, or other Erlang terms as values
+2. **No array support**: Lists cannot be flattened or reconstructed
+3. **Simple format**: This is a basic flattening mechanism, not a full data transformation codec
+4. **Path character restrictions**: The implementation doesn't handle special cases like paths containing the separator character
 
 ## Complete Examples
 
 ### Example 1: User Profile
-```
+```erlang
 Input:
-{
-  "user": {
-    "id": 123,
-    "profile": {
-      "name": "John Doe",
-      "email": "john@example.com"
+#{
+  <<"user">> => #{
+    <<"profile">> => #{
+      <<"name">> => <<"John Doe">>,
+      <<"email">> => <<"john@example.com">>
     },
-    "settings": {
-      "theme": "dark",
-      "notifications": true
+    <<"settings">> => #{
+      <<"theme">> => <<"dark">>,
+      <<"notifications">> => <<"true">>  % Note: must be string, not boolean
     }
   }
 }
 
 Output:
-{
-  "user/id": 123,
-  "user/profile/name": "John Doe",
-  "user/profile/email": "john@example.com",
-  "user/settings/theme": "dark",
-  "user/settings/notifications": true
+#{
+  <<"user/profile/name">> => <<"John Doe">>,
+  <<"user/profile/email">> => <<"john@example.com">>,
+  <<"user/settings/theme">> => <<"dark">>,
+  <<"user/settings/notifications">> => <<"true">>
 }
 ```
 
-### Example 2: E-commerce Order
-```
+### Example 2: Configuration
+```erlang
 Input:
-{
-  "order": {
-    "id": "ORD-001",
-    "items": [
-      {
-        "product": "Widget",
-        "quantity": 2,
-        "price": 9.99
-      },
-      {
-        "product": "Gadget",
-        "quantity": 1,
-        "price": 19.99
+#{
+  <<"config">> => #{
+    <<"database">> => #{
+      <<"host">> => <<"localhost">>,
+      <<"port">> => <<"5432">>,  % Note: must be string
+      <<"credentials">> => #{
+        <<"user">> => <<"admin">>,
+        <<"pass">> => <<"secret">>
       }
-    ],
-    "total": 39.97
-  }
-}
-
-Output:
-{
-  "order/id": "ORD-001",
-  "order/items/1/product": "Widget",
-  "order/items/1/quantity": 2,
-  "order/items/1/price": 9.99,
-  "order/items/2/product": "Gadget",
-  "order/items/2/quantity": 1,
-  "order/items/2/price": 19.99,
-  "order/total": 39.97
-}
-```
-
-### Example 3: Configuration
-```
-Input:
-{
-  "config": {
-    "database": {
-      "host": "localhost",
-      "port": 5432,
-      "credentials": {
-        "user": "admin",
-        "pass": "secret"
-      }
-    },
-    "cache": {
-      "enabled": true,
-      "ttl": 3600
     }
   }
 }
 
 Output:
-{
-  "config/database/host": "localhost",
-  "config/database/port": 5432,
-  "config/database/credentials/user": "admin",
-  "config/database/credentials/pass": "secret",
-  "config/cache/enabled": true,
-  "config/cache/ttl": 3600
+#{
+  <<"config/database/host">> => <<"localhost">>,
+  <<"config/database/port">> => <<"5432">>,
+  <<"config/database/credentials/user">> => <<"admin">>,
+  <<"config/database/credentials/pass">> => <<"secret">>
+}
+```
+
+### Example 3: Complex Keys (Erlang-specific)
+```erlang
+% This example uses list keys, which is valid in Erlang but not representable in JSON
+Input:
+#{
+  <<"x">> => #{
+    [<<"y">>, <<"z">>] => #{
+      <<"a">> => <<"2">>
+    },
+    <<"a">> => <<"2">>
+  }
+}
+
+Output:
+#{
+  <<"x/y/z/a">> => <<"2">>,  % The list key [<<"y">>, <<"z">>] becomes part of the path
+  <<"x/a">> => <<"2">>
 }
 ```
 
 ## Implementation Notes
 
-1. **Path Building**: Use `/` as separator, no leading or trailing slashes
-2. **Array Indices**: Always 1-based for compatibility with Erlang
-3. **Type Preservation**: Values maintain their types through flattening
-4. **Order Preservation**: Original key order should be maintained
-5. **Collision Detection**: Detect and error on path conflicts
+1. **Binary strings only**: All values must be binaries (Erlang binaries using `<<>>` syntax)
+2. **Map keys**: Keys in maps are typically binaries but can be other Erlang terms (lists, atoms, etc.)
+3. **Path building**: Uses `hb_path:to_binary/1` for path construction and `hb_path:term_to_path_parts/1` for parsing
+4. **Error handling**: Throws exceptions on path collisions rather than overwriting
+5. **No type conversion**: The codec does not convert between types - binaries in, binaries out
+6. **Message conversion**: Uses `hb_message:convert/3` or `hb_message:convert/4` for format transformations
