@@ -1,5 +1,7 @@
 # Introduction - Decoding HyperBEAM from Scratch
 
+![](/images/decoding-from-sctatch.png)
+
 :::note
 Welcome to the complete guide to understanding AO Core and HyperBEAM from the ground up.
 

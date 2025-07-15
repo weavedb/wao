@@ -121,7 +121,7 @@ The following is what you would get in the response.
 }
 ```
 
-## TABM <-> JSON
+## TABM \<-\> JSON
 
 One way to purify the return value is to return stringified JSON using the `json@1.0` device internally. The device has a `dev_codec_json:to/1` method to convert `TABM` to `JSON`.
 
