@@ -2,8 +2,8 @@
 // Adjust the path based on where you saved the hyperbeam-id-generators.js file
 import {
   generateCommitmentId,
-  generateRsaCommitmentId,
-  generateHmacCommitmentId,
+  rsaid,
+  hmacid,
   verifyCommitmentId,
 } from "../src/id.js"
 
@@ -54,7 +54,7 @@ console.log("=== HyperBEAM ID Generator Test Suite ===\n")
 console.log("Test 1: RSA-PSS Commitment ID Generation")
 const rsaCommitment =
   testMessage.commitments["PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE"]
-const rsaId = generateRsaCommitmentId(rsaCommitment)
+const rsaId = rsaid(rsaCommitment)
 console.log("Expected ID: PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE")
 console.log("Generated ID:", rsaId)
 console.log(
@@ -64,7 +64,7 @@ console.log(
 
 // Test 2: HMAC Commitment ID
 console.log("\nTest 2: HMAC Commitment ID Generation")
-const hmacId = generateHmacCommitmentId(hmacMessage)
+const hmacId = hmacid(hmacMessage)
 console.log("Expected ID: iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw")
 console.log("Generated ID:", hmacId)
 console.log(
@@ -111,7 +111,7 @@ const modifiedMessage = {
   signature:
     "http-sig-bba7e22451416f77=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:",
 }
-const hmacIdModified = generateHmacCommitmentId(modifiedMessage)
+const hmacIdModified = hmacid(modifiedMessage)
 console.log("HMAC with different RSA signature:", hmacIdModified)
 console.log(
   "Still the same ID:",
