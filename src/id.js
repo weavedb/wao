@@ -41,21 +41,6 @@ function base64urlToBase64(str) {
 }
 
 /**
- * Convert Uint8Array to base64url string
- */
-function uint8ArrayToBase64url(bytes) {
-  // Convert to base64
-  let binary = ""
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  const base64 = btoa(binary)
-
-  // Convert to base64url
-  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
-}
-
-/**
  * Generate commitment ID for RSA-PSS and ECDSA signatures
  * The ID is the SHA256 hash of the raw signature bytes
  *
@@ -211,8 +196,180 @@ function verifyCommitmentId(commitment, expectedId, fullMessage = null) {
   }
 }
 
+/**
+ * Convert Uint8Array to base64url string
+ */
+function uint8ArrayToBase64url(bytes) {
+  let binary = ""
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  const base64 = btoa(binary)
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
+}
+
+/**
+ * Parse structured field dictionary to extract components
+ * Handles format: name=(components);params
+ */
+function parseSignatureInput(sigInput) {
+  // Extract components from format: name=(components);params
+  const match = sigInput.match(/[^=]+=\(([^)]+)\)/)
+  if (!match) return []
+
+  // Split components and clean quotes
+  return match[1].split(" ").map(c => c.replace(/"/g, ""))
+}
+
+/**
+ * Calculate HMAC commitment ID for HyperBEAM messages
+ */
+async function calculateHmacId(message) {
+  if (!message["signature-input"]) {
+    throw new Error("HMAC calculation requires signature-input")
+  }
+
+  // Parse components from signature-input
+  const components = parseSignatureInput(message["signature-input"])
+
+  // Sort components AS-IS (with @ prefix)
+  const sortedComponents = [...components].sort()
+
+  // Build signature base in sorted order
+  const lines = []
+
+  for (const component of sortedComponents) {
+    let fieldName = component
+    let value
+
+    // For derived components (starting with @), remove @ in the signature base
+    if (component.startsWith("@")) {
+      fieldName = component.substring(1)
+      value = message[fieldName]
+    } else {
+      value = message[component]
+    }
+
+    if (value === undefined || value === null) {
+      value = ""
+    } else if (typeof value === "number") {
+      value = value.toString()
+    }
+
+    lines.push(`"${fieldName}": ${value}`)
+  }
+
+  // Add signature-params line with sorted components (keeping @ prefix)
+  const paramsComponents = sortedComponents.join(" ")
+  lines.push(
+    `"@signature-params": (${paramsComponents});alg="hmac-sha256";keyid="ao"`
+  )
+
+  const signatureBase = lines.join("\n")
+
+  // Generate HMAC with key "ao"
+  const messageBytes = new TextEncoder().encode(signatureBase)
+  const keyBytes = new TextEncoder().encode("ao")
+
+  const hmacResult = await hmac(keyBytes, messageBytes)
+  return uint8ArrayToBase64url(hmacResult)
+}
+
+/**
+ * Calculate unsigned message ID following the exact Erlang flow
+ */
+async function calculateUnsignedId(message) {
+  // Derived components from Erlang ?DERIVED_COMPONENTS
+  const DERIVED_COMPONENTS = [
+    "method",
+    "target-uri",
+    "authority",
+    "scheme",
+    "request-target",
+    "path",
+    "query",
+    "query-param",
+    "status",
+  ]
+
+  // Convert message for httpsig format
+  const httpsigMsg = {}
+  for (const [key, value] of Object.entries(message)) {
+    httpsigMsg[key.toLowerCase()] = value
+  }
+
+  // Get keys and add @ to derived components
+  const keys = Object.keys(httpsigMsg)
+  const componentsWithPrefix = keys
+    .map(key => {
+      // Check if this is a derived component
+      if (DERIVED_COMPONENTS.includes(key.replace(/_/g, "-"))) {
+        return "@" + key
+      }
+      return key
+    })
+    .sort() // Sort AFTER adding @ prefix
+
+  // Build signature base - use the components in order
+  const lines = []
+  for (const component of componentsWithPrefix) {
+    const key = component.replace("@", "")
+    const value = httpsigMsg[key]
+    const valueStr = typeof value === "string" ? value : String(value)
+    lines.push(`"${key}": ${valueStr}`)
+  }
+
+  // Add signature-params line with the @ prefixes
+  const componentsList = componentsWithPrefix.map(k => `"${k}"`).join(" ")
+  lines.push(
+    `"@signature-params": (${componentsList});alg="hmac-sha256";keyid="ao"`
+  )
+
+  const signatureBase = lines.join("\n")
+
+  // HMAC with key "ao"
+  const messageBytes = new TextEncoder().encode(signatureBase)
+  const keyBytes = new TextEncoder().encode("ao")
+
+  const hmacResult = await hmac(keyBytes, messageBytes)
+  return uint8ArrayToBase64url(hmacResult)
+}
+
+async function id(message) {
+  // Get commitment IDs
+  const commitmentIds = Object.keys(message.commitments || {})
+
+  if (commitmentIds.length === 0) {
+    // No commitments - calculate unsigned ID using HMAC
+    return calculateUnsignedId(message)
+  } else if (commitmentIds.length === 1) {
+    // Single commitment - the ID is just the commitment ID
+    return commitmentIds[0]
+  } else {
+    // Multiple commitments - sort, join with ", ", and hash
+    const sortedIds = commitmentIds.sort()
+    const idsLine = sortedIds.join(", ")
+
+    // Calculate SHA-256 hash
+    const encoder = new TextEncoder()
+    const data = encoder.encode(idsLine)
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data)
+    const hashArray = new Uint8Array(hashBuffer)
+
+    // Convert to base64url
+    const base64 = btoa(String.fromCharCode(...hashArray))
+    const base64url = base64
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "")
+
+    return base64url
+  }
+}
+
 // Export all functions
 export {
+  id,
   generateCommitmentId,
   generateRsaCommitmentId,
   generateHmacCommitmentId,

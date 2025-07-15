@@ -1,6 +1,5 @@
 import assert from "assert"
 import Server from "../src/server.js"
-import { send as _send } from "../src/signer.js"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, toAddr } from "../src/test.js"
 import { getJWK } from "./lib/test-utils.js"

@@ -17,8 +17,9 @@ export default class HyperBEAM {
     c,
     cmake,
     faff,
-    simplePay = false,
-    simplePayPrice,
+    simple_pay = false,
+    simple_pay_price,
+    p4_non_chargable_routes,
     p4_lua,
     store_prefix,
     operator,
@@ -27,6 +28,7 @@ export default class HyperBEAM {
     devices,
   } = {}) {
     this.devices = devices
+    this.p4_non_chargable_routes = p4_non_chargable_routes
     as ??= shell ? [] : ["genesis_wasm"]
     this.console = console
     if (clearCache) {
@@ -46,8 +48,8 @@ export default class HyperBEAM {
       ? "cache-mainnet-" + Math.floor(Math.random() * 10000000)
       : "cache-mainnet"
     this.p4_lua = p4_lua
-    this.simplePay = simplePay
-    this.spp = simplePayPrice
+    this.simple_pay = simple_pay
+    this.spp = simple_pay_price
     this.operator = operator
     this.faff = faff
     this.c = c
@@ -175,7 +177,11 @@ export default class HyperBEAM {
     if (this.devices) {
       let _devs = []
       for (const v of this.devices) {
-        if (devs[v])
+        if (typeof v === "object") {
+          _devs.push(
+            `#{<<"name">> => <<"${v.name}">>, <<"module">> => ${v.module}}`
+          )
+        } else if (devs[v])
           _devs.push(
             `#{<<"name">> => <<"${devs[v].name}">>, <<"module">> => ${devs[v].module}}`
           )
@@ -197,11 +203,16 @@ export default class HyperBEAM {
     /*
     const _routes = `, routes => [#{ <<"template">> => <<"/result/.*">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${this.cu}">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:${this.cu}\">> } }, #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [#{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => httpc, protocol => http2 } }, #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }] }, #{ <<"template">> => <<"/raw">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } } }]`
     */
-    const _p4_non_chargable = this.p4_lua
-      ? `, p4_non_chargable_routes => [#{ <<"template">> => <<"/*~node-process@1.0/*">> }, #{ <<"template">> => <<"/~wao@1.0/*">> }, #{ <<"template">> => <<"/~p4@1.0/balance">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }]`
-      : !this.simplePay
-        ? ""
-        : `, p4_non_chargable_routes => [#{ <<"template">> => <<"/~simple-pay@1.0/topup">> }, #{ <<"template">> => <<"/~p4@1.0/balance">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }, #{ <<"template">> => <<"/~p4@1.0/balance">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }]`
+    const _p4_non_chargable = this.p4_non_chargable
+      ? `, p4_non_chargable_routes => [${this.p4_non_chargable_routes
+          .map(() => `#{ <<"template">> => <<"/*~node-process@1.0/*">> }`)
+          .join(", ")}]`
+      : this.p4_lua
+        ? `, p4_non_chargable_routes => [#{ <<"template">> => <<"/*~node-process@1.0/*">> }, #{ <<"template">> => <<"/~wao@1.0/*">> }, #{ <<"template">> => <<"/~p4@1.0/balance">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }]`
+        : !this.simple_pay
+          ? ""
+          : `, p4_non_chargable_routes => [#{ <<"template">> => <<"/~simple-pay@1.0/topup">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }, #{ <<"template">> => <<"/~simple-pay@1.0/balance">> }]`
+
     const _operator = this.operator
       ? `, operator => <<"${this.operator}">>`
       : ""
@@ -220,7 +231,7 @@ export default class HyperBEAM {
 
     const _on = this.p4_lua
       ? `, on => #{ <<"request">> => ${processor}, <<"response">> => ${processor} }`
-      : this.simplePay
+      : this.simple_pay
         ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"simple-pay@1.0">>, <<"ledger-device">> => <<"simple-pay@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"simple-pay@1.0">>, <<"ledger-device">> => <<"simple-pay@1.0">> } }`
         : !isNil(this.faff)
           ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`

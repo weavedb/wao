@@ -61,15 +61,15 @@ describe("Hyperbeam Device", function () {
     })
   })
 
-  it.only("should test function chain", async () => {
+  it("should test function chain", async () => {
     const { hashpath, out } = await hb.post({
       path: "/~wao@1.0/inc/~wao@1.0/inc/~wao@1.0/inc",
     })
     assert.equal(out.chain.length, 3)
   })
 
-  it("should test httpsig", async () => {
-    const json = { list: [1, 2, 3] }
+  it.only("should test httpsig", async () => {
+    const json = { list: [1, 2, 3], map: { a: { b: { c: 4 } } } }
     console.log(json)
     const res = await hb.post({
       path: "/~wao@1.0/structured_from",
@@ -82,6 +82,7 @@ describe("Hyperbeam Device", function () {
       body: JSON.stringify(structured),
     })
     const encoded = JSON.parse(res2.out)
+    console.log(encoded)
     const signed_msg = await sign({
       jwk,
       msg: encoded,

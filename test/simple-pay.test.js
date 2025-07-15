@@ -1,30 +1,33 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
-import { acc, mu, AO, toAddr } from "../src/test.js"
-import { getJWK } from "./lib/test-utils.js"
+import { acc, toAddr } from "../src/test.js"
 import HB from "../src/hb.js"
 import HyperBEAM from "../src/hyperbeam.js"
+import { readFileSync } from "fs"
+import { resolve } from "path"
 
-const URL = "http://localhost:10001"
+const cwd = "./HyperBEAM"
+const wallet = resolve(process.cwd(), cwd, ".wallet.json")
+const jwk = JSON.parse(readFileSync(wallet, "utf8"))
+
+let operator = { jwk, addr: toAddr(jwk.n) }
+let user = acc[0]
 
 describe("Hyperbeam Legacynet", function () {
-  let hb, hb2, hbeam, jwk, addr, addr2
+  let hbeam
   before(async () => {
-    jwk = getJWK("../../HyperBEAM/.wallet.json")
-    addr = toAddr(jwk.n)
-    addr2 = toAddr(acc[0].jwk.n)
     hbeam = await new HyperBEAM({
       c: "12",
       cmake: "3.5",
-      operator: addr,
-      simplePay: true,
-      simplePayPrice: 2,
+      operator: operator.addr,
+      simple_pay: true,
+      simple_pay_price: 2,
     }).ready()
   })
 
   beforeEach(async () => {
-    hb = await new HB({}).init(jwk)
-    hb2 = await new HB({}).init(acc[0].jwk)
+    operator.hb = await new HB({}).init(operator.jwk)
+    user.hb = await new HB({}).init(user.jwk)
   })
 
   after(async () => {
@@ -32,13 +35,38 @@ describe("Hyperbeam Legacynet", function () {
   })
 
   it("should test simple pay", async () => {
-    await hb.post({
+    // cost = simplePayPrice * 3
+    const msg = { path: "/~message@1.0/set/hello", hello: "world" }
+
+    // balance is non_chargable
+    const balance = { path: "/~simple-pay@1.0/balance" }
+
+    // info is non_chargable
+    const info = { path: "/~meta@1.0/info" }
+
+    // topup user
+    await operator.hb.post({
       path: "/~simple-pay@1.0/topup",
-      amount: 10,
-      recipient: addr2,
+      amount: 15,
+      recipient: user.addr,
     })
-    const { pid } = await hb2.spawn()
-    const res = await hb2.post({ path: "/~simple-pay@1.0/balance" })
-    assert.equal(res.body, "6")
+    assert.equal((await user.hb.post(balance)).out, "15")
+    assert(await user.hb.post(msg)) // cost = 2 * 3 = 6
+    assert.equal((await user.hb.post(balance)).out, "9")
+    return
+    const { out: info1 } = await operator.hb.get(info)
+    assert.equal(info1.simple_pay_price, 2)
+
+    // change simple_pay_price
+    assert(await operator.hb.post({ ...info, simple_pay_price: 3 }))
+
+    const { out: info2 } = await operator.hb.get(info)
+    assert.equal(info2.simple_pay_price, 3)
+
+    assert(await user.hb.post(msg)) // cost = 3 * 3 = 9
+    assert.equal((await user.hb.post(balance)).out, "0")
+
+    // this should fail for insufficient fund
+    await assert.rejects(user.hb.post(msg)) // cost = 3 * 3 = 9
   })
 })
