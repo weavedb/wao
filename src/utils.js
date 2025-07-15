@@ -1,13 +1,6 @@
 import { graphql, parse, validate, buildSchema } from "graphql"
 import sha256 from "fast-sha256"
-import {
-  id,
-  generateCommitmentId,
-  generateRsaCommitmentId,
-  generateHmacCommitmentId,
-  verifyCommitmentId,
-} from "./id.js"
-export { generateRsaCommitmentId as rsaid, generateHmacCommitmentId as hmacid }
+export { id, base, hashpath, rsaid, hmacid } from "./id.js"
 import {
   clone,
   is,

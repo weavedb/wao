@@ -34,7 +34,8 @@ const { mid, res, out, err } = await p.msg(
   { get: true, check: { TagA: "valueA" }, jwk }
 )
 ```
-The default third argument is `{ get: true }` to return the JSON decoded `Data`.
+
+The default third argument is `{ get: false }` to return the text `Data`.
 
 ```js
 const { mid, out } = await p.msg("Action", { Tag1: "value1", Tag2: "value2" })
