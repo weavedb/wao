@@ -1,6 +1,6 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft } from "ramda"
-import { toAddr, buildTags } from "./utils.js"
+import { rsaid, hmacid, toAddr, buildTags } from "./utils.js"
 import { sign, signer } from "./signer.js"
 import { send as _send } from "./send.js"
 import hyper_aos from "./lua/hyper-aos.js"
@@ -455,7 +455,26 @@ class HB {
     })
     return JSON.parse(res.body)
   }
+  async commit(obj, opts) {
+    const msg = await this.sign(obj, opts)
+    const hmacId = hmacid(msg.headers)
+    const rsaId = rsaid(msg.headers)
+    const committer = this.addr
+    const meta = { alg: "rsa-pss-sha512", "commitment-device": "httpsig@1.0" }
+    const meta2 = { alg: "hmac-sha256", "commitment-device": "httpsig@1.0" }
 
+    const sigs = {
+      signature: msg.headers.signature,
+      "signature-input": msg.headers["signature-input"],
+    }
+    return {
+      commitments: {
+        [rsaId]: { ...meta, committer, ...sigs },
+        [hmacId]: { ...meta2, ...sigs },
+      },
+      ...obj,
+    }
+  }
   async post(obj, json) {
     const _json = json ? "/~json@1.0/serialize" : ""
     obj.path += _json
