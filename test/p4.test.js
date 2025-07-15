@@ -30,7 +30,6 @@ describe("Hyperbeam Legacynet", function () {
   beforeEach(async () => (hb = await new HB({}).init(jwk)))
 
   after(async () => hbeam.kill())
-
   it("should handle payment with lua", async () => {
     const port = 10002
     const addr2 = toAddr(acc[0].jwk.n)
@@ -40,11 +39,63 @@ describe("Hyperbeam Legacynet", function () {
         "../HyperBEAM/scripts/p4-payment-process.lua"
       )
     )
-    const pid = await hb.cacheBinary(process, "application/lua")
+    const { pid: cache_pid } = await hb.spawn({})
+    const { slot } = await hb.schedule({
+      pid: cache_pid,
+      data: process,
+      "content-type": "application/lua",
+    })
+    const {
+      out: { body },
+    } = await hb.get({
+      path: "/~scheduler@1.0/schedule",
+      target: cache_pid,
+      from: slot,
+      accept: "application/aos-2",
+    })
+    const {
+      edges: [msg],
+    } = JSON.parse(body)
+    const pid = msg.node.message.Id
+    console.log(pid)
     const client = readFileSync(
       resolve(import.meta.dirname, "../HyperBEAM/scripts/p4-payment-client.lua")
     )
-    const cid = await hb.cacheBinary(client, "application/lua")
+    const { slot: slot2 } = await hb.schedule({
+      pid: cache_pid,
+      data: client,
+      "content-type": "application/lua",
+    })
+    const {
+      out: { body: body2 },
+    } = await hb.get({
+      path: "/~scheduler@1.0/schedule",
+      target: cache_pid,
+      from: slot2,
+      accept: "application/aos-2",
+    })
+    const {
+      edges: [msg2],
+    } = JSON.parse(body2)
+    const cid = msg2.node.message.Id
+    console.log(cid)
+    return
+  })
+  it.only("should handle payment with lua", async () => {
+    const port = 10002
+    const addr2 = toAddr(acc[0].jwk.n)
+    const process = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../HyperBEAM/scripts/p4-payment-process.lua"
+      )
+    )
+    const pid = await hb.cacheScript(process)
+    const client = readFileSync(
+      resolve(import.meta.dirname, "../HyperBEAM/scripts/p4-payment-client.lua")
+    )
+    const cid = await hb.cacheScript(client)
+
     const hbeam2 = await new HyperBEAM({
       c: "12",
       cmake: "3.5",
@@ -52,12 +103,13 @@ describe("Hyperbeam Legacynet", function () {
       operator: addr,
       p4_lua: { processor: pid, client: cid },
     }).ready()
+
     const hb3 = await new HB({ url: `http://localhost:${port}` }).init(jwk)
     const hb4 = await new HB({ url: `http://localhost:${port}` }).init(
       acc[0].jwk
     )
     const obj = {
-      path: "/credit-notice",
+      path: "credit-notice",
       quantity: 100,
       recipient: addr2,
     }
@@ -81,25 +133,27 @@ describe("Hyperbeam Legacynet", function () {
       },
       ...obj,
     }
-    const { slot } = await hb3.postJSON({
+    await hb3.post({
       path: "/ledger~node-process@1.0/schedule",
       body: res4,
     })
-    const msg4 = await hb3.postJSON({
-      path: "/ledger~node-process@1.0/compute",
-      params: { slot },
+    const { out: balance } = await hb3.get({
+      path: `/ledger~node-process@1.0/now/balance/${addr2}`,
     })
-    const balance = (
-      await hb3.get({
-        path: `/ledger~node-process@1.0/now/balance/${addr2}`,
-      })
-    ).body
     assert.equal(balance, "100")
     const now = (
       await hb3.get({
         path: `/ledger~node-process@1.0/now/balance`,
       })
     ).body
+
+    const hello = { path: "/~message@1.0/set/hello", hello: "world" }
+    assert(await hb4.post(hello))
+
+    const { out: balance2 } = await hb3.get({
+      path: `/ledger~node-process@1.0/now/balance/${addr2}`,
+    })
+    console.log(balance2)
     hbeam2.kill()
   })
 })
