@@ -541,6 +541,12 @@ const committed_lua_msg = {
 }
 ```
 
+WAO has, of course, a convenient method to create commitment.
+
+```js
+const committed_lua_msg = await operator.hb.commit(obj, { path: true })
+```
+
 Finally, we can send it to `/ledger~node-process@1.0/schedule`.
 
 ```js
