@@ -767,7 +767,7 @@ class AO {
     jwk,
     tags = {},
     data,
-  }) {
+  } = {}) {
     let [fns, isBoot] = [[], false]
     if (boot === true && !data) {
       isBoot = true

@@ -1,6 +1,6 @@
 {
   "name": "wao",
-  "version": "0.29.2",
+  "version": "0.29.3",
   "bin": "./src/cli.js",
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -29,6 +29,10 @@
     "./web": {
       "require": "./cjs/web.js",
       "import": "./esm/web.js"
+    },
+    "./signer": {
+      "require": "./cjs/signer.js",
+      "import": "./esm/signer.js"
     }
   },
   "dependencies": {
