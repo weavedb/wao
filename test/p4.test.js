@@ -113,29 +113,10 @@ describe("Hyperbeam Legacynet", function () {
       quantity: 100,
       recipient: addr2,
     }
-    const meta = { alg: "rsa-pss-sha512", "commitment-device": "httpsig@1.0" }
-    const meta2 = { alg: "hmac-sha256", "commitment-device": "httpsig@1.0" }
-
-    const msg = await hb3.sign(obj, { path: true })
-    const hmacMessage = msg.headers
-
-    const hmacId = hmacid(hmacMessage)
-    const rsaId = rsaid(msg.headers)
-    const committer = addr
-    const sigs = {
-      signature: msg.headers.signature,
-      "signature-input": msg.headers["signature-input"],
-    }
-    const res4 = {
-      commitments: {
-        [rsaId]: { ...meta, committer: addr, ...sigs },
-        [hmacId]: { ...meta2, ...sigs },
-      },
-      ...obj,
-    }
+    const lua_msg = await hb3.commit(obj, { path: true })
     await hb3.post({
       path: "/ledger~node-process@1.0/schedule",
-      body: res4,
+      body: lua_msg,
     })
     const { out: balance } = await hb3.get({
       path: `/ledger~node-process@1.0/now/balance/${addr2}`,
@@ -153,7 +134,7 @@ describe("Hyperbeam Legacynet", function () {
     const { out: balance2 } = await hb3.get({
       path: `/ledger~node-process@1.0/now/balance/${addr2}`,
     })
-    console.log(balance2)
+    assert.equal(balance2, "97")
     hbeam2.kill()
   })
 })
