@@ -764,5 +764,4 @@ export {
   isJSON,
   dirname,
   toAddr,
-  id,
 }
