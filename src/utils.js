@@ -1,6 +1,7 @@
 import { graphql, parse, validate, buildSchema } from "graphql"
 import sha256 from "fast-sha256"
 import {
+  id,
   generateCommitmentId,
   generateRsaCommitmentId,
   generateHmacCommitmentId,
@@ -770,4 +771,5 @@ export {
   isJSON,
   dirname,
   toAddr,
+  id,
 }

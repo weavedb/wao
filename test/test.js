@@ -176,7 +176,7 @@ describe("SDK", function () {
     const { res } = await ao.msg({ pid, data: "ping" })
   })
 
-  it.only("should publish custom modules", async () => {
+  it("should publish custom modules", async () => {
     const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
     const data = src.data("aos2_0_1", "wasm")
     const { id: modid } = await ao.postModule({ data, jwk })
@@ -184,7 +184,7 @@ describe("SDK", function () {
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
 
-  it("should spawn a process and send messages", async () => {
+  it.only("should spawn a process and send messages", async () => {
     const { p } = await ao.deploy({ src_data })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })

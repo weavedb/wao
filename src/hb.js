@@ -1,15 +1,16 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft } from "ramda"
 import { toAddr, buildTags } from "./utils.js"
-import { signer } from "./signer.js"
+import { sign, signer } from "./signer.js"
 import { send as _send } from "./send.js"
 import hyper_aos from "./lua/hyper-aos.js"
 import aos_wamr from "./lua/aos_wamr.js"
 import { from } from "./httpsig.js"
 
 const seed = num => {
-  const array = new Uint8Array(num)
-  return crypto.getRandomValues(array).toString()
+  const array = new Array(num)
+  for (let i = 0; i < num; i++) array[i] = Math.floor(Math.random() * 256)
+  return Buffer.from(array).toString("base64")
 }
 
 class HB {
@@ -71,8 +72,17 @@ class HB {
     }
     if (jwk) this._init(jwk)
   }
-
+  async signEncoded(encoded) {
+    const { path, ...msg } = encoded
+    return await sign({
+      jwk: this.jwk,
+      msg,
+      path,
+      url: this.url,
+    })
+  }
   _init(jwk) {
+    this.jwk = jwk
     this.signer = createSigner(jwk, this.url)
     this.addr = toAddr(jwk.n)
     this.sign = signer({ signer: this.signer, url: this.url })
@@ -108,7 +118,7 @@ class HB {
 
   async getLua() {
     const lua = Buffer.from(hyper_aos, "base64")
-    const id = await this.cacheModule(lua, "application/lua")
+    const id = await this.cacheScript(lua, "application/lua")
     this.lua ??= id
     return id
   }
@@ -132,7 +142,11 @@ class HB {
     const { slot, pid } = await this.scheduleAOS(args)
     return { slot, outbox: await this.computeAOS({ pid, slot }) }
   }
-
+  async messageLegacy(args) {
+    const { slot, pid } = await this.scheduleLegacy(args)
+    console.log(slot, pid, args)
+    return { slot, res: await this.computeLegacy({ pid, slot }) }
+  }
   path({
     dev = "message",
     path,
@@ -214,7 +228,7 @@ class HB {
     return { res, pid: res.headers.process }
   }
 
-  async cacheModule(data, type) {
+  async cacheScript(data, type = "application/lua") {
     if (!this.cache) {
       const { pid } = await this.spawn({})
       this.cache = pid
@@ -261,7 +275,7 @@ class HB {
     })
     if (data) _tags.data = data
     let res = await this.post(_tags)
-    return { slot: res.headers.slot, res }
+    return { slot: res.headers.slot, res, pid }
   }
 
   async spawnAOS(image) {
@@ -368,13 +382,21 @@ class HB {
     if (isNotNil(from)) params += `&from=${from}`
     if (isNotNil(to)) params += `&to=${to}`
     params += `&accept=application/aos-2`
+    const {
+      out: { body },
+    } = await this.get({
+      path: "/~scheduler@1.0/schedule",
+      target: pid,
+      from,
+      accept: "application/aos-2",
+    })
     let res = await fetch(`${this.url}/~scheduler@1.0/schedule?${params}`).then(
       r => r.json()
     )
     if (res.page_info.has_next_page) {
       res.next = async () => {
         const from2 = last(res.edges).cursor + 1
-        return await this.message({ pid, from: from2, to, limit })
+        return await this.messages({ pid, from: from2, to, limit })
       }
     }
     return res

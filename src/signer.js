@@ -1,6 +1,7 @@
 import { toHttpSigner } from "./send.js"
 import { enc } from "./encode.js"
 import { createSigner } from "@permaweb/aoconnect"
+export { verify } from "./signer-utils.js"
 
 const joinUrl = ({ url, path }) => {
   if (path.startsWith("http://") || path.startsWith("https://")) return path
@@ -50,12 +51,12 @@ async function _sign({
   )
 
   if (_path) signingFields.push("path")
-
+  /*
   if (signingFields.length === 0 && !body) {
-    lowercaseHeaders["content-length"] = "0"
-    signingFields.push("content-length")
+    //lowercaseHeaders["content-length"] = "0"
+    //signingFields.push("content-length")
   }
-
+  */
   const signedRequest = await toHttpSigner(signer)({
     request: { url: _url, method, headers: lowercaseHeaders },
     fields: signingFields,
