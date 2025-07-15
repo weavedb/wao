@@ -39,6 +39,64 @@ export default defineConfig({
       link: '/hub',
     },
     {
+      text: 'HyperBEAM',
+      collapsed: false,
+      items: [
+	{
+          text: 'Decoding from Scratch',
+          link: '/hyperbeam/decoding-from-scratch',
+        },
+	{
+          text: 'Installing HB and WAO',
+          link: '/hyperbeam/installing-hb-wao',
+        },
+	{
+          text: 'Devices and Pathing',
+          link: '/hyperbeam/devices-pathing'
+        },
+	{
+          text: 'Custom Devices and Codecs',
+          link: '/hyperbeam/custom-devices-codecs'
+        },
+	{
+          text: 'Flat Codec',
+          link: '/hyperbeam/codec-flat'
+        },
+	{
+          text: 'Structured Codec',
+          link: '/hyperbeam/codec-structured'
+        },
+	{
+          text: 'Httpsig Codec',
+          link: '/hyperbeam/codec-httpsig'
+        },
+	{
+          text: 'Http Message Signatures',
+          link: '/hyperbeam/http-message-signatures'
+        },
+	{
+          text: 'Hashpaths',
+          link: '/hyperbeam/hashpaths'
+        },
+	{
+          text: 'Device Composition',
+          link: '/hyperbeam/device-composition'
+        },
+	{
+          text: 'Processes and Scheduler',
+          link: '/hyperbeam/processes-scheduler'
+        },
+	{
+          text: 'Legacynet Compatible AOS',
+          link: '/hyperbeam/legacynet-aos'
+        },
+	{
+          text: 'Payment System',
+          link: '/hyperbeam/payment-system'
+        },
+      ],
+    },
+    {
       text: 'Tutorials',
       collapsed: false,
       items: [
