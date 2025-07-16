@@ -21,55 +21,6 @@ class HB {
   } = {}) {
     this.cu = cu
     this.url = url
-    this.dev = {}
-    this.dev.hyperbuddy = {
-      metrics: async (args = {}) => {
-        return this.parseMetrics(
-          await this.fetch(
-            this.path({ dev: "hyperbuddy", path: "metrics", json: false }),
-            false
-          )
-        )
-      },
-    }
-    this.dev.json = {
-      commit: async args => {
-        return await this.post({ path: "/~json@1.0/commit", ...args })
-      },
-      verify: async args => {
-        return await this.post({ path: "/~json@1.0/verify", ...args })
-      },
-      deserialize: async args => {
-        return await this.post({ path: "/~json@1.0/deserialize", ...args })
-      },
-      serialize: async args => {
-        return await this.post({ path: "/~json@1.0/serialize", ...args })
-      },
-    }
-    this.dev.meta = {
-      info: async (args = {}) => {
-        let { method = "GET", json = true, key } = args
-        if (method.toLowerCase() === "post") {
-          return await this.post({ path: "/~meta@1.0/info", ...args })
-        } else {
-          return key
-            ? await this.fetch(
-                this.path({
-                  dev: "meta",
-                  path: `info/${key}`,
-                  json: args.json ?? false,
-                }),
-                args.json ?? false
-              )
-            : await this.fetch(
-                this.path({ dev: "meta", path: "info", json: json })
-              )
-        }
-      },
-      build: async () => {
-        return await this.fetch(this.path({ dev: "meta", path: "build" }))
-      },
-    }
     if (jwk) this._init(jwk)
   }
   async signEncoded(encoded) {
@@ -81,6 +32,7 @@ class HB {
       url: this.url,
     })
   }
+
   _init(jwk) {
     this.jwk = jwk
     this.signer = createSigner(jwk, this.url)
@@ -97,11 +49,17 @@ class HB {
     this._request = request
   }
 
+  async setInfo() {
+    if (!this._info) {
+      try {
+        this._info = await this.g("/~meta@1.0/info")
+      } catch (e) {}
+    }
+  }
+
   async init(jwk) {
     this._init(jwk)
-    try {
-      this._info = await this.dev.meta.info({})
-    } catch (e) {}
+    await this.setInfo()
     return this
   }
 
@@ -122,6 +80,7 @@ class HB {
     this.lua ??= id
     return id
   }
+
   async scheduleAOS({ pid, action = "Eval", tags = {}, data }) {
     pid ??= this.pid
     let _tags = mergeLeft(tags, {
@@ -129,70 +88,25 @@ class HB {
       method: "POST",
       path: `/${pid}~process@1.0/schedule`,
       scheduler: this.scheduler,
-      Type: "Message",
+      type: "Message",
       Action: action,
-      Target: pid,
+      target: pid,
     })
     if (data) _tags.data = data
     let res = await this.post(_tags)
     const slot = res.headers.slot
     return { slot, res, pid }
   }
+
   async messageAOS(args) {
     const { slot, pid } = await this.scheduleAOS(args)
     return { slot, outbox: await this.computeAOS({ pid, slot }) }
   }
+
   async messageLegacy(args) {
     const { slot, pid } = await this.scheduleLegacy(args)
     console.log(slot, pid, args)
     return { slot, res: await this.computeLegacy({ pid, slot }) }
-  }
-  path({
-    dev = "message",
-    path,
-    json = true,
-    params = {},
-    pid = "",
-    tail = "",
-  }) {
-    if (!/@/.test(dev)) dev += "@1.0"
-    let _params = ""
-    if (!isEmpty(params)) {
-      let i = 0
-      for (const k in params) {
-        _params += `${i === 0 ? "?" : "&"}${k}=${params[k]}`
-        i++
-      }
-    }
-    if (path && !/^\//.test(path)) path = "/" + path
-    return `/${pid}~${dev}${path ?? ""}${tail}${json ? "/~json@1.0/serialize" : ""}${_params}`
-  }
-
-  async text(dev, path, params = {}, tail) {
-    let pid = ""
-    if (/^[a-zA-Z0-9_-]{43}$/.test(dev)) {
-      pid = dev
-      dev = "process"
-    }
-    return await this.fetch(
-      this.path({ dev, path, json: false, params, pid, tail }),
-      false
-    )
-  }
-
-  async json(dev, path, params = {}, tail) {
-    let pid = ""
-    if (/^[a-zA-Z0-9_-]{43}$/.test(dev)) {
-      pid = dev
-      dev = "process"
-    }
-    return await this.fetch(
-      this.path({ dev, path, json: true, params, pid, tail })
-    )
-  }
-
-  async fetch(path, json = true) {
-    return await fetch(this.url + path).then(r => (json ? r.json() : r.text()))
   }
 
   async computeAOS({ pid, slot }) {
@@ -214,14 +128,14 @@ class HB {
   }
 
   async spawn(tags = {}) {
-    const addr = await this.dev.meta.info({ key: "address" })
+    const addr = await this.g("/~meta@1.0/info/address")
     this.scheduler ??= addr
     const _tags = mergeLeft(tags, {
       device: "process@1.0",
       path: "/schedule",
       scheduler: this.scheduler,
       "random-seed": seed(16),
-      Type: "Process",
+      type: "Process",
       "execution-device": "test-device@1.0",
     })
     const res = await this.post(_tags)
@@ -246,12 +160,14 @@ class HB {
     const res = await this.post({ path: "/~wao@1.0/cache_module", data, type })
     return res.headers.id
   }
+
   async message(args) {
     const pid = args.pid
     const { slot } = await this.schedule(args)
     const res = await this.compute({ pid, slot })
     return { slot, pid, res }
   }
+
   async scheduleLegacy({
     pid,
     action = "Eval",
@@ -262,16 +178,18 @@ class HB {
     if (action) tags.Action = action
     return await this.schedule({ pid, tags, data, scheduler })
   }
+
   async scheduleLua(...args) {
     return await this.scheduleLegacy(...args)
   }
+
   async schedule({ pid, tags = {}, data } = {}) {
     pid ??= this.pid
     let _tags = mergeLeft(tags, {
       method: "POST",
       path: `/${pid}/schedule`,
-      Type: "Message",
-      Target: pid,
+      type: "Message",
+      target: pid,
     })
     if (data) _tags.data = data
     let res = await this.post(_tags)
@@ -279,19 +197,19 @@ class HB {
   }
 
   async spawnAOS(image) {
-    const addr = await this.dev.meta.info({ key: "address" })
+    const addr = await this.g("/~meta@1.0/info/address")
     this.scheduler ??= addr
     image ??= this.image ?? (await this.getImage())
     const res = await this.post({
       device: "process@1.0",
       path: "/schedule",
       scheduler: this.scheduler,
-      "Data-Protocol": "ao",
-      Variant: "ao.N.1",
+      "data-protocol": "ao",
+      variant: "ao.N.1",
       "scheduler-location": this.scheduler,
-      Authority: this.scheduler,
+      authority: this.scheduler,
       "random-seed": seed(16),
-      Type: "Process",
+      type: "Process",
       image,
       "execution-device": "stack@1.0",
       "push-device": "push@1.0",
@@ -314,19 +232,19 @@ class HB {
   }
 
   async spawnLua(lua) {
-    const addr = await this.dev.meta.info({ key: "address" })
+    const addr = await this.g("/~meta@1.0/info/address")
     this.scheduler ??= addr
     lua ??= this.lua ?? (await this.getLua())
     const res = await this.post({
       device: "process@1.0",
       path: "/schedule",
       scheduler: this.scheduler,
-      "Data-Protocol": "ao",
-      Variant: "ao.N.1",
+      "data-protocol": "ao",
+      variant: "ao.N.1",
       "scheduler-location": this.scheduler,
-      Authority: this.scheduler,
+      authority: this.scheduler,
       "random-seed": seed(16),
-      Type: "Process",
+      type: "Process",
       module: lua,
       "execution-device": "lua@5.3a",
       "push-device": "push@1.0",
@@ -337,41 +255,11 @@ class HB {
     return { pid, res }
   }
 
-  parseMetrics(txt) {
-    const parts = txt.split(/\r?\n/)
-    let index = 0
-    let _metrics = {}
-    let vals = []
-    let desc = []
-    for (const v of parts) {
-      if (/^# /.test(v)) {
-        const [_, type, name, ...rest] = v.split(" ")
-        if (!_metrics[name]) _metrics[name] = { index: ++index, values: [] }
-        _metrics[name][type] = rest.join(" ")
-      } else if (v !== "") {
-        if (/{/.test(v)) {
-          const [name, rest] = v.split("{")
-          if (!_metrics[name]) _metrics[name] = { index: ++index, values: [] }
-          const [params, val] = rest.split("}")
-          let _params = {}
-          for (const v of params.split(",")) {
-            const [key, val] = v.trim().split("=")
-            _params[key] = val.replace(/"/g, "")
-          }
-          _metrics[name].values.push({ value: val.trim(), params: _params })
-        } else {
-          const [name, val] = v.split(" ")
-          if (!_metrics[name]) _metrics[name] = { index: ++index, values: [] }
-          _metrics[name].values.push({ value: val })
-        }
-      }
-    }
-    return _metrics
-  }
   async now({ pid, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
     return await this.getJSON({ path: `/${pid}/now${path}` })
   }
+
   async slot({ pid, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
     return await this.getJSON({ path: `/${pid}/slot${path}` })
@@ -382,10 +270,7 @@ class HB {
     if (isNotNil(from)) params += `&from=${from}`
     if (isNotNil(to)) params += `&to=${to}`
     params += `&accept=application/aos-2`
-    const {
-      out: { body },
-    } = await this.get({
-      path: "/~scheduler@1.0/schedule",
+    const { body } = await this.g("/~scheduler@1.0/schedule", {
       target: pid,
       from,
       accept: "application/aos-2",
@@ -403,12 +288,13 @@ class HB {
   }
 
   async spawnLegacy({ module, tags = {}, data } = {}) {
+    await this.setInfo()
     let t = {
-      Type: "Process",
-      "Data-Protocol": "ao",
-      Variant: "ao.TN.1",
+      type: "Process",
+      "data-protocol": "ao",
+      variant: "ao.TN.1",
       scheduler: this._info.address,
-      Authority: this._info.address,
+      authority: this._info.address,
       "scheduler-location": this._info.address,
       "random-seed": seed(16),
       module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
@@ -424,6 +310,7 @@ class HB {
     tags = mergeLeft(tags, t)
     return await this.spawn(tags)
   }
+
   async results({ process, limit, sort = "DESC", from, to } = {}) {
     let params = ""
     const addParam = (key, val) => {
@@ -442,6 +329,7 @@ class HB {
     })
     return JSON.parse(res.body)
   }
+
   async dryrun({ tags = {}, pid, action, data } = {}) {
     if (typeof action === "string") tags.Action = action
     let json = { Tags: buildTags({ ...tags }), Owner: this.addr }
@@ -455,6 +343,7 @@ class HB {
     })
     return JSON.parse(res.body)
   }
+
   async commit(obj, opts) {
     const msg = await this.sign(obj, opts)
     const hmacId = hmacid(msg.headers)
@@ -462,7 +351,6 @@ class HB {
     const committer = this.addr
     const meta = { alg: "rsa-pss-sha512", "commitment-device": "httpsig@1.0" }
     const meta2 = { alg: "hmac-sha256", "commitment-device": "httpsig@1.0" }
-
     const sigs = {
       signature: msg.headers.signature,
       "signature-input": msg.headers["signature-input"],
@@ -475,11 +363,25 @@ class HB {
       ...obj,
     }
   }
+
+  async p(path, ...args) {
+    args[0] ??= {}
+    args[0].path ??= path
+    return (await this.post(...args))?.out ?? null
+  }
+
   async post(obj, json) {
     const _json = json ? "/~json@1.0/serialize" : ""
     obj.path += _json
     return await this.send(await this.sign(obj))
   }
+
+  async g(path, ...args) {
+    args[0] ??= {}
+    args[0].path ??= path
+    return (await this.get(...args))?.out ?? null
+  }
+
   async get({ path, ...params }, json = false) {
     const _json = json ? "/~json@1.0/serialize" : ""
     path ??= "/~message@1.0"
@@ -505,10 +407,12 @@ class HB {
       ...http,
     }
   }
+
   async postJSON(args) {
     const res = await this.post(args, true)
     return JSON.parse(res.body)
   }
+
   async getJSON(args) {
     const res = await this.get(args, true)
     return JSON.parse(res.body)
