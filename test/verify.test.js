@@ -13,7 +13,7 @@ describe("Hyperbeam Signer", function () {
   before(async () => {
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
-    hbeam = await new HyperBEAM({ as: [], c: "12", cmake: "3.5" }).ready()
+    hbeam = await new HyperBEAM({ clearCache: true }).ready()
   })
   beforeEach(async () => (hb = await new HB({}).init(jwk)))
   after(async () => hbeam.kill())

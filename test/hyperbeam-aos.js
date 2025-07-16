@@ -27,11 +27,7 @@ describe("HyperBEAM", function () {
 
   before(async () => {
     server = new Server({ port: 6359, log: true, hb_url: URL })
-    hbeam = await new HyperBEAM({
-      c: "12",
-      cmake: "3.5",
-      gateway: 6359,
-    }).ready()
+    hbeam = await new HyperBEAM({ gateway: 6359 }).ready()
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     jwk2 = getJWK("../../HyperBEAM/hyperbeam-key.json")
