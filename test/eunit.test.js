@@ -15,11 +15,7 @@ describe("Hyperbeam Signer", function () {
   before(async () => {
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
-    hbeam = new HyperBEAM({
-      c: "12",
-      cmake: "3.5",
-      shell: false,
-    })
+    hbeam = new HyperBEAM({ shell: false })
   })
 
   beforeEach(async () => {

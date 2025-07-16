@@ -17,8 +17,6 @@ describe("Hyperbeam Device", function () {
     hbeam = await new HyperBEAM({
       devices: ["meta", "httpsig", "structured", "flat", "json", "wao"],
       clearCache: true,
-      c: "12",
-      cmake: "3.5",
     }).ready()
   })
 

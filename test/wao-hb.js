@@ -1,5 +1,4 @@
 import assert from "assert"
-import Server from "../src/server.js"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, toAddr } from "../src/test.js"
 import { getJWK } from "./lib/test-utils.js"
@@ -36,17 +35,12 @@ end)
 `
 
 describe("Hyperbeam Legacynet", function () {
-  let hbeam, jwk, addr, addr2, ao, ao2, server
+  let hbeam, jwk, addr, addr2, ao, ao2
   before(async () => {
-    //server = new Server({ port: 6359, log: true })
     jwk = getJWK("../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
-    hbeam = await new HyperBEAM({
-      c: "12",
-      cmake: "3.5",
-      clearCache: true,
-    }).ready()
+    hbeam = await new HyperBEAM({ clearCache: true }).ready()
   })
 
   beforeEach(async () => {

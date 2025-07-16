@@ -13,14 +13,14 @@ const jwk = JSON.parse(readFileSync(wallet, "utf8"))
 const addr = toAddr(jwk.n)
 
 describe("HyperBEAM", function () {
-  let hbeam, hb, jwk
+  let hbeam, hb
 
   before(async () => (hbeam = await new HyperBEAM({ cwd }).ready()))
   beforeEach(async () => (hb = await new HB({}).init(jwk)))
   after(async () => hbeam.kill())
 
   it("should run a HyperBEAM node", async () => {
-    const { out } = await hb.getJSON({ path: "/~meta@1.0/build" })
+    const { out } = await hb.get({ path: "/~meta@1.0/build" })
     assert.equal(out.node, "HyperBEAM")
   })
 })
