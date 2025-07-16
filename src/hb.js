@@ -1,5 +1,5 @@
 import { connect, createSigner } from "@permaweb/aoconnect"
-import { isEmpty, last, isNotNil, mergeLeft } from "ramda"
+import { isEmpty, last, isNotNil, mergeLeft, clone } from "ramda"
 import { rsaid, hmacid, toAddr, buildTags } from "./utils.js"
 import { sign, signer } from "./signer.js"
 import { send as _send } from "./send.js"
@@ -105,7 +105,6 @@ class HB {
 
   async messageLegacy(args) {
     const { slot, pid } = await this.scheduleLegacy(args)
-    console.log(slot, pid, args)
     return { slot, res: await this.computeLegacy({ pid, slot }) }
   }
 
@@ -360,9 +359,10 @@ class HB {
   }
 
   async p(path, ...args) {
-    args[0] ??= {}
-    args[0].path ??= path
-    return (await this.post(...args))?.out ?? null
+    let _args = clone(args)
+    _args[0] ??= {}
+    _args[0].path ??= path
+    return (await this.post(..._args))?.out ?? null
   }
 
   async post(obj, json) {
@@ -372,9 +372,10 @@ class HB {
   }
 
   async g(path, ...args) {
-    args[0] ??= {}
-    args[0].path ??= path
-    return (await this.get(...args))?.out ?? null
+    let _args = clone(args)
+    _args[0] ??= {}
+    _args[0].path ??= path
+    return (await this.get(..._args))?.out ?? null
   }
 
   async get({ path, ...params }, json = false) {

@@ -12,6 +12,7 @@ describe("Hyperbeam Legacynet", function () {
   before(async () => {
     hbeam = await new HyperBEAM({
       faff: [HyperBEAM.OPERATOR, allowed_user.addr],
+      reset: true,
     }).ready()
   })
   beforeEach(async () => {
