@@ -2,6 +2,8 @@
 
 `structured@1.0` turns complex objects into strings with extended `ao-types` according to the HTTP Structured Field Values ([RFC-9651](https://datatracker.ietf.org/doc/rfc9651/)) specification.
 
+This object type is called `TABM (Type Annotated Binary Message)` in HyperBEAM.
+
 `ao-types` has the following types:
 
 - `integer` : `123`
@@ -14,25 +16,27 @@
 - `empty-message` : `{}`
 
 
-```erlang
+```erlang [/HyperBEAM/src/dev_mydev.erl]
+-export([ structured_to/3, structured_from/3 ]).
+
 structured_to(Msg1, Msg2, Opts) ->
     Body = maps:get(<<"body">>, Msg1),
-    TABM = dev_codec_json:from(Body),
-    FLAT = dev_codec_structured:to(TABM),
-    JSON = dev_codec_json:to(FLAT),
+    OBJ = dev_codec_json:from(Body),
+    TABM = dev_codec_structured:to(OBJ),
+    JSON = dev_codec_json:to(TABM),
     {ok, JSON}.
-
+ 
 structured_from(Msg1, Msg2, Opts) ->
     Body = maps:get(<<"body">>, Msg1),
     TABM = dev_codec_json:from(Body),
-    FLAT = dev_codec_structured:from(TABM),
-    JSON = dev_codec_json:to(FLAT),
+    OBJ = dev_codec_structured:from(TABM),
+    JSON = dev_codec_json:to(OBJ),
     {ok, JSON}.
 ```
 
 Encode JSON with `dev_codec_structured:from`.
 
-```js
+```js [/test/codec-structured.test.js]
 const cases = [
   { list: [1, true, "abc"] },
   { nested_list: [1, [2, 3]] },
@@ -42,7 +46,7 @@ const cases = [
 ]
 for (const v of cases) {
   const { out } = await hb.post({
-    path: "/~wao@1.0/structured_from",
+    path: "/~mydev@1.0/structured_from",
     body: JSON.stringify(v),
   })
   console.log(JSON.parse(out))
@@ -100,7 +104,7 @@ You can specify `ao-types` of the values at the same level, annotate keys with `
 
 Let's decode the encoded values.
 
-```js
+```js [/test/codec-structured.test.js]
 const cases = [
   {
     'ao-types': 'list="list"',
@@ -127,7 +131,7 @@ const cases = [
 ]
 for (const v of cases) {
   const { out } = await hb.post({
-    path: "/~wao@1.0/structured_to",
+    path: "/~mydev@1.0/structured_to",
     body: JSON.stringify(v),
   })
   console.log(JSON.parse(out))

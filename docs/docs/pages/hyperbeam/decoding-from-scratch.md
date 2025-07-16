@@ -145,18 +145,18 @@ Ready to begin? The next chapter will walk you through setting up HyperBEAM and 
 
 ## Learning Steps
 
-1. [Installing HyperBEAM and WAO](./installing-hb-wao.md)
-2. [Devices and Pathing](./devices-pathing.md)
-3. [Custom Devices and Codecs](./custom-devices-codecs.md)
-4. [Flat Codec](./codec-flat.md)
-5. [Structured Codec](./codec-structured.md)
-6. [Httpsig Codec](./codec-httpsig.md)
-7. [HTTP Message Signatures](./http-message-signatures.md)
-8. [Hashpaths](./hashpaths.md)
-9. [Device Composition](./device-composition.md)
-10. [Processes and Scheduler](./processes-scheduler.md)
-11. [Legacynet Compatible AOS](./legacynet-aos.md)
-12. [Payment System](./payment-system.md)
+1. [Installing HyperBEAM and WAO](/hyperbeam/installing-hb-wao)
+2. [Devices and Pathing](/hyperbeam/devices-pathing)
+3. [Custom Devices and Codecs](/hyperbeam/custom-devices-codecs)
+4. [Flat Codec](/hyperbeam/codec-flat)
+5. [Structured Codec](/hyperbeam/codec-structured)
+6. [Httpsig Codec](/hyperbeam/codec-httpsig)
+7. [HTTP Message Signatures](/hyperbeam/http-message-signatures)
+8. [Hashpaths](/hyperbeam/hashpaths)
+9. [Device Composition](/hyperbeam/device-composition)
+10. [Processes and Scheduler](/hyperbeam/processes-scheduler)
+11. [Legacynet Compatible AOS](/hyperbeam/legacynet-aos)
+12. [Payment System](/hyperbeam/payment-system)
 
 ---
 

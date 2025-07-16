@@ -6,66 +6,57 @@
 
 The node operator can update `faff_allow_list` via `/~meta@1.0/info` to manage the allowed accounts.
 
-```js
+```js [/test/payment-system.test.js]
 import assert from "assert"
-import { after, describe, it, before, beforeEach } from "node:test"
-import { acc, toAddr, HyperBEAM } from "wao/test"
-import { HB } from "wao"
-import { readFileSync } from "fs"
-import { resolve } from "path"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { HyperBEAM, acc } from "wao/test"
+import HB from "../../src/hb.js"
+import { rsaid, hmacid } from "wao/utils"
 
-const cwd = "./HyperBEAM"
-const hb_dir = resolve(process.cwd(), cwd)
-const wallet = resolve(hb_dir, ".wallet.json")
-const jwk = JSON.parse(readFileSync(wallet, "utf8"))
+const cwd = "../HyperBEAM"
 
-let operator = { jwk, addr: toAddr(jwk.n) }
-let allowed_user = acc[0]
-let disallowed_user = acc[1]
-
-describe("Hyperbeam Payment", function () {
-  let hbeam
+describe("Payment System faff@1.0", function () {
+  let hbeam, hb, operator
+  let allowed_user = acc[0]
+  let disallowed_user = acc[1]
 
   before(async () => {
-    hbeam = await new HyperBEAM({ 
-	  cwd, 
-	  clearCache: true,
-	  faff: [operator.addr, allowed_user.addr]
-	}).ready()
+    hbeam = await new HyperBEAM({
+      cwd,
+      reset: true,
+      faff: [HyperBEAM.OPERATOR, allowed_user.addr],
+    }).ready()
   })
   beforeEach(async () => {
-    operator.hb = await new HB({}).init(operator.jwk)
-    allowed_user.hb = await new HB({}).init(allowed_user.jwk)
-    disallowed_user.hb = await new HB({}).init(disallowed_user.jwk)
+    operator = hbeam
+    allowed_user.hb = new HB({ jwk: allowed_user.jwk })
+    disallowed_user.hb = new HB({ jwk: disallowed_user.jwk })
   })
   after(async () => hbeam.kill())
 
   it("should test faff@1.0", async () => {
-    const msg = { path: "/~message@1.0/set/hello", hello: "world" }
-    const info = { path: "/~meta@1.0/info" }
+    const msg = ["/~message@1.0/set/hello", { hello: "world" }]
 
     // GET
-    assert(await operator.hb.get(msg))
-    assert(await allowed_user.hb.get(msg))
-    assert(await disallowed_user.hb.get(msg))
+    assert(await operator.hb.g(...msg))
+    assert(await allowed_user.hb.g(...msg))
+    assert(await disallowed_user.hb.g(...msg))
 
     // POST
-    assert(await operator.hb.post(msg))
-    assert(await allowed_user.hb.post(msg))
-    await assert.rejects(disallowed_user.hb.post(msg))
+    assert(await operator.hb.p(...msg))
+    assert(await allowed_user.hb.p(...msg))
+    await assert.rejects(disallowed_user.hb.p(...msg))
 
-    const { out: info1 } = await operator.hb.get(info)
-    assert.deepEqual(info1.faff_allow_list, [operator.addr, allowed_user.addr])
+    const info = await operator.hb.g("/~meta@1.0/info")
+    assert.deepEqual(info.faff_allow_list, [operator.addr, allowed_user.addr])
 
     // remove allowed_user
-    await operator.hb.post({ ...info, faff_allow_list: [operator.addr] })
-    const { out: info2 } = await operator.hb.get({
-      path: "/~meta@1.0/info",
-    })
+    await operator.hb.p("/~meta@1.0/info", { faff_allow_list: [operator.addr] })
+    const info2 = await operator.hb.g("/~meta@1.0/info")
     assert.deepEqual(info2.faff_allow_list, [operator.addr])
 
     // now previously allowed_user fails too
-    await assert.rejects(allowed_user.hb.post(msg))
+    await assert.rejects(allowed_user.hb.p(...msg))
   })
 })
 ```
@@ -90,84 +81,55 @@ The `HyperBEAM` SDK automatically puts the following paths onto the `p4_non_char
 - `/~simple-pay@1.0/topup`
 - `/~simple-pay@1.0/balance`
 
-```js
-import assert from "assert"
-import { after, describe, it, before, beforeEach } from "node:test"
-import { acc, toAddr, HyperBEAM } from "wao/test"
-import { HB } from "wao"
-import { readFileSync } from "fs"
-import { resolve } from "path"
-
-const cwd = "./HyperBEAM"
-const hb_dir = resolve(process.cwd(), cwd)
-const wallet = resolve(hb_dir, ".wallet.json")
-const jwk = JSON.parse(readFileSync(wallet, "utf8"))
-
-let operator = { jwk, addr: toAddr(jwk.n) }
-let user = acc[0]
-
-const p4_non_chargable_routes = [
-  "/~meta@1.0/*", 
-  "/~simple-pay@1.0/topup", 
-  "/~simple-pay@1.0/balance"
-]
-
-describe("Hyperbeam Legacynet", function () {
-  let hbeam
+```js [/test/payment-system.test.js]
+describe("Payment System simple-pay@1.0", function () {
+  let hbeam, hb, operator
+  let user = acc[0]
   before(async () => {
     hbeam = await new HyperBEAM({
       cwd,
-      clearCache: true,
-	  // p4_non_chargable_routes,
-      operator: operator.addr,
+      reset: true,
+      operator: HyperBEAM.OPERATOR,
       simple_pay: true,
       simple_pay_price: 2,
     }).ready()
   })
-
   beforeEach(async () => {
-    operator.hb = await new HB({}).init(operator.jwk)
+    operator = hbeam
     user.hb = await new HB({}).init(user.jwk)
   })
+  after(async () => hbeam.kill())
 
-  after(async () => {
-    hbeam.kill()
-  })
-
-  it("should test simple pay", async () => {
+  it("should test simple-pay@1.0", async () => {
     // cost = simplePayPrice * 3
-    const msg = { path: "/~message@1.0/set/hello", hello: "world" }
+    const msg = ["/~message@1.0/set/hello", { hello: "world" }]
 
     // balance is non_chargable
-    const balance = { path: "/~simple-pay@1.0/balance" }
-
-    // info is non_chargable
-    const info = { path: "/~meta@1.0/info" }
+    const balance = "/~simple-pay@1.0/balance"
 
     // topup user
-    await operator.hb.post({
-      path: "/~simple-pay@1.0/topup",
+    await operator.hb.p("/~simple-pay@1.0/topup", {
       amount: 15,
       recipient: user.addr,
     })
-    assert.equal((await user.hb.post(balance)).out, "15")
-    assert(await user.hb.post(msg)) // cost = 2 * 3 = 6
-    assert.equal((await user.hb.post(balance)).out, "9")
+    assert.equal(await user.hb.p(balance), "15")
+    assert(await user.hb.p(...msg)) // cost = 2 * 3 = 6
+    assert.equal(await user.hb.p(balance), "9")
 
-    const { out: info1 } = await operator.hb.get(info)
+    const info1 = await operator.hb.g("/~meta@1.0/info")
     assert.equal(info1.simple_pay_price, 2)
 
     // change simple_pay_price
-    assert(await operator.hb.post({ ...info, simple_pay_price: 3 }))
+    assert(await operator.hb.p("/~meta@1.0/info", { simple_pay_price: 3 }))
 
-    const { out: info2 } = await operator.hb.get(info)
+    const info2 = await operator.hb.g("/~meta@1.0/info")
     assert.equal(info2.simple_pay_price, 3)
 
-    assert(await user.hb.post(msg)) // cost = 3 * 3 = 9
-    assert.equal((await user.hb.post(balance)).out, "0")
+    assert(await user.hb.p(...msg)) // cost = 3 * 3 = 9
+    assert.equal(await user.hb.p(balance), "0")
 
-    // this should fail for insufficient funds
-    await assert.rejects(user.hb.post(msg)) // cost = 3 * 3 = 9
+    // this should fail for insufficient fund
+    await assert.rejects(user.hb.p(...msg)) // cost = 3 * 3 = 9
   })
 })
 ```
@@ -395,43 +357,45 @@ You can spawn a process and upload these 2 scripts as messages.
 
 `schedule` only returns `slot` and not the message ID. You can get message IDs via `/~scheduler@1.0/schedule`, which returns a list of scheduled messages for the `target` process and contains IDs.
 
-```js
+```js [/test/payment-system.test.js]
+const process = hbeam.file("scripts/p4-payment-process.lua")
 const { pid: cache_pid } = await hb.spawn({})
-
-const process = readFileSync(`${hb_dir}/scripts/p4-payment-process.lua`)
-const { slot } = await hb.schedule({ 
-  pid: cache_pid, 
+const { slot } = await hb.schedule({
+  pid: cache_pid,
   data: process,
-  "content-type": "application/lua"
+  "content-type": "application/lua",
 })
-const { out: { body } } = await hb.get({
-  path: "/~scheduler@1.0/schedule", 
-  target: cache_pid, 
-  from: slot, 
-  accept: "application/aos-2"
+const { body } = await hb.g("/~scheduler@1.0/schedule", {
+  target: cache_pid,
+  from: slot,
+  accept: "application/aos-2",
 })
-const { edges: [msg] } = JSON.parse(body)
+const {
+  edges: [msg],
+} = JSON.parse(body)
 const pid = msg.node.message.Id
-
-const client = readFileSync(`${hb_dir}/scripts/p4-payment-client.lua`)
-const { slot: slot2 } = await hb.schedule({ 
-  pid: cache_pid, 
+assert(pid)
+const client = hbeam.file("scripts/p4-payment-client.lua")
+const { slot: slot2 } = await hb.schedule({
+  pid: cache_pid,
   data: client,
-  "content-type": "application/lua"
+  "content-type": "application/lua",
 })
-const { out: { body: body2 } } = await hb.get({
-  path: "/~scheduler@1.0/schedule", 
-  target: cache_pid, 
-  from: slot2, 
-  accept: "application/aos-2"
+const { body: body2 } = await hb.g("/~scheduler@1.0/schedule", {
+  target: cache_pid,
+  from: slot2,
+  accept: "application/aos-2",
 })
-const { edges: [msg2] } = JSON.parse(body2)
+const {
+  edges: [msg2],
+} = JSON.parse(body2)
 const cid = msg2.node.message.Id
+assert(cid)
 ```
 
 `HB` has a convenient method for `/~scheduler@1.0/schedule`.
 
-```js
+```js [/test/payment-system.test.js]
 const msgs = await this.messages({ pid, from: slot, to: slot })
 const pid = msgs.edges[0].node.message.Id
 
@@ -441,7 +405,7 @@ const cid = msgs2.edges[0].node.message.Id
 
 Indeed, it has a convenient method to cache scripts.
 
-```js
+```js [/test/payment-system.test.js]
 const process = readFileSync(`${hb_dir}/scripts/p4-payment-process.lua`)
 const pid = await hb.cacheScript(process)
 
@@ -455,35 +419,34 @@ Once you get script IDs, you need to start another HyperBEAM node with the same 
 
 For `p4@1.0` to work, we need to pass the payment `operator` address and `p4_lua`, and the complex settings will be handled for you.
 
-```js
-// comment out clearCache to use the same store where we cached Lua scripts
+```js [/test/payment-system.test.js]
+// comment out reset to use the same store where we cached Lua scripts
 const hbeam2 = await new HyperBEAM({
-  //clearCache: true,	
+  //reset: true,	
+  cwd,
   port: 10002,
   operator: addr,
   p4_lua: { processor: pid, client: cid },
 }).ready()
-
 ```
+
 Now we have a new HyperBEAM node with the `p4@1.0` Lua scripts running at `http://localhost:10002`.
 
 Let's set up 2 new HyperBEAM clients for the operator and a new user for the new node.
 
-```js
-const url = "http://localhost:10002"
-let operator = { jwk, addr: toAddr(jwk.n) }
-let user = acc[0]
-operator.hb = await new HB({ url }).init(operator.jwk)
-user.hb = await new HB({ url }).init(user.jwk)
+```js [/test/payment-system.test.js]
+const operator = hbeam2
+const user = acc[0]
+user.hb = await new HB({ url: hbeam2.url }).init(user.jwk)
 ```
 
 Now to topup the user account, we need to send `credit-notice` to the Lua script with the operator account. But this gets extra tricky since HyperBEAM first verifies the whole message sent to the node, then the Lua script extracts and verifies a nested message placed in `body`. So we need to somehow create a signed message with the correct commitment format internally used in HyperBEAM, then wrap that message in `body` and sign the parent message again. This is indeed extra complex, and the crux of this tutorial series where you need to put everything you learned so far together.
 
-### Create Commitment
+### Create Commitments
 
 If you recall from the previous chapter, HyperBEAM internally signs and creates 2 commitments with sha256 hash of the signature and hmac-sha256 hash of the signed content. We can first construct this internal message to be passed to the Lua script. The WAO signer automatically excludes the `path` field for some compatibility reasons, but you can set `path=true` to the 2nd parameter of `hb.sign`.
 
-```js
+```js [/test/payment-system.test.js]
 const obj = {
   path: "credit-notice",
   quantity: 100,
@@ -511,7 +474,7 @@ Now we got a signed message with `path` included in `signature-input`.
 
 We can get the 2 hashes required to construct `commitments`.
 
-```js
+```js [/test/payment-system.test.js]
 import { rsaid, hmacid } from "wao/utils"
 
 const hmacId = hmacid(lua_msg.headers)
@@ -520,7 +483,7 @@ const rsaId = rsaid(lua_msg.headers)
 
 Now, we can construct `commitments` and the wrapped message.
 
-```js
+```js [/test/payment-system.test.js]
 const committed_lua_msg = {
 	commitments: {
 	  [ rsaId ]: {
@@ -549,7 +512,7 @@ const committed_lua_msg = await operator.hb.commit(obj, { path: true })
 
 Finally, we can send it to `/ledger~node-process@1.0/schedule`.
 
-```js
+```js [/test/payment-system.test.js]
 await operator.hb.post({
   path: "/ledger~node-process@1.0/schedule",
   body: committed_lua_msg,
@@ -558,7 +521,7 @@ await operator.hb.post({
 
 Let's check the balance of the user.
 
-```js
+```js [/test/payment-system.test.js]
 const { out: balance } = await operator.hb.get({
     path: `/ledger~node-process@1.0/now/balance/${user.addr}`,
 })
@@ -567,7 +530,7 @@ assert.equal(balance, 100)
 
 Now try executing some messages with the user.
 
-```js
+```js [/test/payment-system.test.js]
 // this costs 3
 const hello = { path: "/~message@1.0/set/hello", hello: "world" }
 assert(await user.hb.post(hello))

@@ -13,6 +13,7 @@ describe("Hyperbeam Legacynet", function () {
       operator: HyperBEAM.OPERATOR,
       simple_pay: true,
       simple_pay_price: 2,
+      reset: true,
     }).ready()
   })
 
