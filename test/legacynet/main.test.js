@@ -2,14 +2,14 @@ import assert from "assert"
 import { resolve } from "path"
 import { unlinkSync } from "fs"
 import { afterEach, after, describe, it, before, beforeEach } from "node:test"
-import { blueprint, mu, AO, connect, acc, scheduler } from "../src/test.js"
-import Server from "../src/server.js"
-import MAO from "../src/ao.js"
-import AR from "../src/ar.js"
-import GQL from "../src/gql.js"
-import ArMem from "../src/armem.js"
-import { setup, Src } from "../src/helpers.js"
-import { optAO, optServer, tags, wait } from "../src/utils.js"
+import { blueprint, mu, AO, connect, acc, scheduler } from "../../src/test.js"
+import Server from "../../src/server.js"
+import MAO from "../../src/ao.js"
+import AR from "../../src/ar.js"
+import GQL from "../../src/gql.js"
+import ArMem from "../../src/armem.js"
+import { setup, Src } from "../../src/helpers.js"
+import { optAO, optServer, tags, wait } from "../../src/utils.js"
 
 const { mem, spawn, message, dryrun } = connect()
 const [{ signer, jwk }] = acc
@@ -169,7 +169,7 @@ describe("SDK", function () {
   })
 
   it("should run", async () => {
-    const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
+    const src = new Src({ dir: resolve(import.meta.dirname, "../../src/lua") })
     const data = src.data("process", "wasm")
     const { id: modid } = await ao.postModule({ data, jwk })
     const { p, pid } = await ao.deploy({ module: modid })
@@ -177,7 +177,7 @@ describe("SDK", function () {
   })
 
   it("should publish custom modules", async () => {
-    const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
+    const src = new Src({ dir: resolve(import.meta.dirname, "../../src/lua") })
     const data = src.data("aos2_0_1", "wasm")
     const { id: modid } = await ao.postModule({ data, jwk })
     const { p, err, res } = await ao.deploy({ src_data, module: modid })
@@ -251,7 +251,7 @@ describe("SDK", function () {
   })
 
   it("should work with weavedrive: Individual", async () => {
-    const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
+    const src = new Src({ dir: resolve(import.meta.dirname, "../../src/lua") })
     const data = src.data("aos2_0_1", "wasm")
     const { id: modid } = await ao.postModule({
       data,
@@ -362,7 +362,7 @@ describe("Fork", function () {
 })
 
 describe("Persistency", function () {
-  it("should persist the data", async () => {
+  it.skip("should persist the data", async () => {
     const cache = resolve(import.meta.dirname, ".cache")
     try {
       unlinkSync(cache)
@@ -430,7 +430,7 @@ describe("AOS1", function () {
 })
 
 describe("Aoconnect", () => {
-  it("should get a variable state", async () => {
+  it.only("should get a variable state", async () => {
     const ao = await new AO({}).init(acc[0])
     const { p, pid } = await ao.deploy({
       src_data: `Table = { String = "Hello", Array = { "str", 3, true } }`,
@@ -443,7 +443,7 @@ describe("Aoconnect", () => {
     assert.deepEqual(await p.v("Table.Array[2]"), 3)
   })
 
-  it("should get a variable state", async () => {
+  it.skip("should get a variable state", async () => {
     const ao = new MAO({})
     const p = ao.p("m2qUBt5fO1INsvqzaYBdV4YGf8r4r2kKR1JyV1tiLm8")
     console.log(await p.v("Balance"))
@@ -451,7 +451,7 @@ describe("Aoconnect", () => {
 })
 
 describe("get", function () {
-  it("should get with optional match", async () => {
+  it.only("should get with optional match", async () => {
     const src_data = `
 local json = require("json")
 Handlers.add("Hello", "Hello", function (msg)

@@ -2,14 +2,14 @@ import assert from "assert"
 import { resolve } from "path"
 import { readFileSync, unlinkSync } from "fs"
 import { afterEach, after, describe, it, before, beforeEach } from "node:test"
-import { blueprint, mu, AO, connect, acc, scheduler } from "../src/test.js"
-import Server from "../src/server.js"
-import MAO from "../src/ao.js"
-import AR from "../src/ar.js"
-import GQL from "../src/gql.js"
-import ArMem from "../src/armem.js"
-import { setup, Src } from "../src/helpers.js"
-import { optAO, optServer, tags, wait } from "../src/utils.js"
+import { blueprint, mu, AO, connect, acc, scheduler } from "../../src/test.js"
+import Server from "../../src/server.js"
+import MAO from "../../src/ao.js"
+import AR from "../../src/ar.js"
+import GQL from "../../src/gql.js"
+import ArMem from "../../src/armem.js"
+import { setup, Src } from "../../src/helpers.js"
+import { optAO, optServer, tags, wait } from "../../src/utils.js"
 
 const { mem, spawn, message, dryrun } = connect()
 const [{ signer, jwk }] = acc
@@ -39,7 +39,7 @@ describe("LLM", function () {
       resolve(import.meta.dirname, "../../tinyllama.gguf")
     )
     const { id } = await ao.ar.post({ data: model })
-    const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
+    const src = new Src({ dir: resolve(import.meta.dirname, "../../src/lua") })
     const data = src.data("llama", "wasm")
     const { id: modid } = await ao.postModule({ data })
     const { p, pid, err } = await ao.deploy({

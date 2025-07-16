@@ -5,7 +5,7 @@ import {
   rsaid,
   hmacid,
   verifyCommitmentId,
-} from "../src/id.js"
+} from "../../src/id.js"
 
 // Test data from the Erlang implementation
 const testMessage = {
