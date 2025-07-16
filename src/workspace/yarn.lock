@@ -1220,6 +1220,11 @@ detect-libc@^2.0.1:
   resolved "https://registry.yarnpkg.com/detect-libc/-/detect-libc-2.0.4.tgz#f04715b8ba815e53b4d8109655b6508a6865a7e8"
   integrity sha512-3UDv+G9CsCKO1WKMGw9fwq/SWJYbI0c5Y7LU1AXYoDdbhE2AHQ6N6Nb34sG8Fj7T5APy8qXDCKuuIHd1BR0tVA==
 
+dotenv@^17.2.0:
+  version "17.2.0"
+  resolved "https://registry.yarnpkg.com/dotenv/-/dotenv-17.2.0.tgz#e19678fdabcf86d4bfdb6764a758d7d44efbb6a2"
+  integrity sha512-Q4sgBT60gzd0BB0lSyYD3xM4YxrXA9y4uBDof1JNYGzOXrQdQ6yX+7XIAqoFOGQFOTK1D3Hts5OllpxMDZFONQ==
+
 dunder-proto@^1.0.1:
   version "1.0.1"
   resolved "https://registry.yarnpkg.com/dunder-proto/-/dunder-proto-1.0.1.tgz#d7ae667e1dc83482f8b70fd0f6eefc50da30f58a"
@@ -2721,10 +2726,10 @@ vlq@^2.0.4:
   resolved "https://registry.yarnpkg.com/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.30.2:
-  version "0.30.2"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.30.2.tgz#5737cbb61092bda546ae7376d66b58267fafe3e1"
-  integrity sha512-lIsQ2yDwu1/zd2y5nSOS0MwIdUQ6LC71zb49n43CmF5qvM7vBj862ELPyyndQuxVOjjH40yrw/O6wjdTcbLFNQ==
+wao@^0.30.4:
+  version "0.30.4"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.30.4.tgz#a4f995c839cd6940a3b72a317038bb9c1a8caadc"
+  integrity sha512-vSQij56mPpKD2LEGqM4BItPT/bOjW17v4kDskBrSe/1y65zzbD2BPpBKjpGCt2/ZHoLaglrQjeY/t8dKA58p2A==
   dependencies:
     "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"
@@ -2740,6 +2745,7 @@ wao@^0.30.2:
     buffer "^6.0.3"
     chokidar "^4.0.3"
     cors "^2.8.5"
+    dotenv "^17.2.0"
     express "^5.1.0"
     fast-sha256 "^1.3.0"
     graphql "^16.10.0"

@@ -1,3 +1,4 @@
+.env.hyperbeam
 .db/
 .wallet.json
 # Logs
