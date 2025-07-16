@@ -10,33 +10,24 @@ The minimum viable devices to run a HyperBEAM node are `flat@1.0`, `httpsig@1.0`
 
 You can pass these device names to the WAO `HyperBEAM` class to preload only specific devices.
 
-```js
+```js [/test/devices-pathing.test.js]
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM, toAddr } from "wao/test"
-import { HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { HyperBEAM } from "wao/test"
 
-const cwd = "../dev/wao/HyperBEAM"
-const wallet = resolve(process.cwd(), cwd, ".wallet.json")
-const jwk = JSON.parse(readFileSync(wallet, "utf8"))
-const addr = toAddr(jwk.n)
+const cwd = "../HyperBEAM"
+const devices = ["json", "structured", "httpsig", "flat", "meta"]
 
 describe("HyperBEAM", function () {
   let hbeam, hb
   before(async () => {
-    // only preload 5 devices instead of the default 40 devices
-    hbeam = await new HyperBEAM({
-      devices: ["json", "structured", "httpsig", "flat", "meta"],
-      cwd,
-    }).ready()
+    hbeam = await new HyperBEAM({ cwd, devices, reset: true }).ready()
   })
-  beforeEach(async () => (hb = await new HB({}).init(jwk)))
+  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
   it("should run a test case", async () => {
-    /* write your tests here */
+    /* write your test here */
   })
 })
 ```
@@ -47,7 +38,7 @@ From this point on, we'll assume you're writing any scripts within a test case c
 
 You can execute a method on a device by `NODE_URL/~DEVICE/METHOD`. Don't forget the `~` before the device name. So to execute `info` on the `meta@1.0` device on a node running at `http://localhost:10001`, the URL will be `http://localhost:10001/~meta@1.0/info`.
 
-```js
+```js [/test/devices-pathing.test.js]
 const res = await fetch("http://localhost:10001/~meta@1.0/info")
 const headers = res.headers
 const body = await res.text()
@@ -202,7 +193,7 @@ Neither reading `headers` nor `body` alone gives you the complete picture of the
 
 But for now, let's say WAO handles everything behind the scenes for you so you can get the final output with the following snippet. You only need to pass `path` without the node hostname.
 
-```js
+```js [/test/devices-pathing.test.js]
 const { out } = await hb.get({ path: '/~meta@1.0/info' })
 console.log(out)
 ```
@@ -282,7 +273,7 @@ To send a POST message, you need to construct the encoded headers and body just 
 
 We'll dig into it later, but it's too complex for now, so WAO handles the complex message signing for you.
 
-```js
+```js [/test/devices-pathing.test.js]
 // set a new config
 await hb.post({ 
   path: '/~meta@1.0/info',
@@ -300,7 +291,7 @@ assert.deepEqual(out.test_config3, { abc: 123 })
 
 You can also get a specific key only:
 
-```js
+```js [/test/devices-pathing.test.js]
 // getting the node operator wallet address
 const { out: address } = await hb.get({ path: "/~meta@1.0/info/address" })
 assert.equal(address, hb.addr)
@@ -310,31 +301,55 @@ When a certain path like `/~meta@1.0/info` returns an object, you can chain a ke
 
 Once you set `initialized` to `permanent`, you'll no longer be able to change any config.
 
-```js
+```js [/test/devices-pathing.test.js]
 await hb.post({ path: "/~meta@1.0/info", initialized: "permanent" })
-try{
-  await hb.post({ path: "/~meta@1.0/info", test_config: "def" })
-}catch(e){
-  console.log(e)
-}
+
+ // this should fail
+await assert.rejects(
+  hb.post({ path: "/~meta@1.0/info", test_config: "def" })
+)
 
 const { out: test_config } = await hb.get({ 
   path: '/~meta@1.0/info/test_config'
 })
 assert.equal(test_config, "abc")
 ```
+
+## Shortcut Methods for `get` and `post`
+
+WAO provices shortcut methods for `get` and `post` to make your codebase even more consice.
+
+With `g` and `p`, the 1st argument is the `path` and the 2nd is the rest, which returns only the decoded resonse. So,
+
+- ` const { out, headers, body, hashpath } = hb.post({ path, ...rest })`
+
+becomes
+
+- `const out = hb.p(path, rest)`
+
+and the same goes with `get` and `g`, too.
+
+```js [/test/devices-pathing.test.js]
+// set a new config
+await hb.p("/~meta@1.0/info", { test_config4: "def" })
+
+// get info
+const { test_config4 } = await hb.g("/~meta@1.0/info")
+assert.equal(test_config4, "def")
+```
+
+We are going to use these shortcut formats from this point on.
+
 ## json@1.0
 
 You can also chain another method and device in the URL. For instance, `json@1.0` converts TABM to JSON with `serialize`.
 
-```js
-const { out: { body: json }  } = await hb.get({ 
-  path: "/~meta@1.0/info/~json@1.0/serialize"
-})
+```js [/test/devices-pathing.test.js]
+const { body: json } = await hb.g("/~meta@1.0/info/~json@1.0/serialize")
 console.log(JSON.parse(json))
 ```
 
-Chaining `/~json@1.0/serialize` comes in handy in certain cases, but sometimes the response comes back malformed with additional data attached due to complex message mutation and HTTP transport. `hb.get` and `hb.post` produce cleaner results, so you won't need `/~json@1.0/serialize` externally. It's still an essential codec device used internally on HyperBEAM.
+Chaining `/~json@1.0/serialize` comes in handy in certain cases, but sometimes the response comes back malformed with additional data attached due to complex message mutation and HTTP transport. `hb.get | hb.g` and `hb.post | hb.p` produce cleaner results, so you won't need `/~json@1.0/serialize` externally. It's still an essential codec device used internally on HyperBEAM.
 
 ## Basic Pathing Summary
 

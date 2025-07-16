@@ -20,12 +20,12 @@ Or you can use `id` from `wao/utils`.
 
 ```js
 import { id } from "wao/utils"
-const id = await id(msg)
+const msg_id = id(msg)
 ```
 
 ## Message Resolving
 
-As we've learned so far, URLs like `http://localhost:10001/~wao@1.0/forward` are automatically resolved to the `forward` method of the `wao@1.0` device with 3 arguments `(Msg1, Msg2, Opts)`.
+As we've learned so far, URLs like `http://localhost:10001/~mydev@1.0/forward` are automatically resolved to the `forward` method of the `mydev@1.0` device with 3 arguments `(Msg1, Msg2, Opts)`.
 
 We can internally do the same with `hb_ao:resolve(Msg1, Msg2, Opts)` to result in a new message `Msg3`.
 
@@ -33,18 +33,22 @@ But recall from the previous chapter, `Msg1` needs to contain `device`, and `Msg
 
 Let's create an `add/3` method, which takes a message with `num` and `plus`, then executes `num = num + plus`. It returns `device` in addition to the new `num` since this will be chained and the first message to `hb_ao:resolve` needs to contain `device`.
 
-```erlang
+```erlang [/HyperBEAM/src/dev_mydev.erl]
+-export([ add/3 ]).
+
 add(Msg1, Msg2, Opts)->
   Num = maps:get(<<"num">>, Msg1),
   Plus = maps:get(<<"plus">>, Msg2),
-  {ok, #{ <<"device">> => <<"wao@1.0">>, <<"num">> => Num + Plus }}.
+  {ok, #{ <<"device">> => <<"mydev@1.0">>, <<"num">> => Num + Plus }}.
 ```
 
 Also, create a `resolve` method that chains messages and resolves to `add` 3 times with incremental `plus`.
 
-```erlang
+```erlang [/HyperBEAM/src/dev_mydev.erl]
+-export([ resolve/3 ]).
+
 resolve(_, _, Opts)->
-  Msg1 = #{ <<"device">> => <<"wao@1.0">>, <<"num">> => 0 },
+  Msg1 = #{ <<"device">> => <<"mydev@1.0">>, <<"num">> => 0 },
   io:format("Msg1 ID: ~p~n", [hb_message:id(Msg1)]),
 
   Msg2 = #{ <<"path">> => <<"add">>, <<"plus">> => 1 },
@@ -72,18 +76,18 @@ resolve(_, _, Opts)->
 
 It's supposed to go...
 
-- `Msg1` : `{ device: "wao@1.0", num: 0 }`
+- `Msg1` : `{ device: "mydev@1.0", num: 0 }`
 - `Msg2` : `{ path: "add", plus: 1 }`
-- `Msg3 = resolve(Msg1, Msg2, Opts)` : `{ device: "wao@1.0", num: 1 }`
+- `Msg3 = resolve(Msg1, Msg2, Opts)` : `{ device: "mydev@1.0", num: 1 }`
 - `Msg4` : `{ path: "add", plus: 2 }`
-- `Msg5 = resolve(Msg3, Msg4, Opts)` : `{ device: "wao@1.0", num: 3 }`
+- `Msg5 = resolve(Msg3, Msg4, Opts)` : `{ device: "mydev@1.0", num: 3 }`
 - `Msg6` : `{ path: "add", plus: 3 }`
-- `Msg7 = resolve(Msg5, Msg6, Opts)` : `{ device: "wao@1.0", num: 6 }`
+- `Msg7 = resolve(Msg5, Msg6, Opts)` : `{ device: "mydev@1.0", num: 6 }`
 
 Let's execute it:
 
-```js
-await hb.post({ path: "/~wao@1.0/resolve" })
+```js [/test/hashpaths.test.js]
+await hb.p("/~mydev@1.0/resolve")
 ```
 
 and we get the logs.
@@ -93,7 +97,7 @@ Msg1 ID: <<"M3yMP4CqvdUkLXMM2tWQN8PnbT8iy0y70Pf3Mv_x2oA">>
  
 Msg2 ID: <<"MFHRUaRJM96_-rtuJ5fEvQXZB5upG1FEQTnWAVoSLOc">>
  
-Msg3: #{<<"device">> => <<"wao@1.0">>,<<"num">> => 1,
+Msg3: #{<<"device">> => <<"mydev@1.0">>,<<"num">> => 1,
         <<"priv">> =>
             #{<<"hashpath">> =>
                   <<"M3yMP4CqvdUkLXMM2tWQN8PnbT8iy0y70Pf3Mv_x2oA/MFHRUaRJM96_-rtuJ5fEvQXZB5upG1FEQTnWAVoSLOc">>}}
@@ -102,7 +106,7 @@ Msg3 ID: <<"SGXsgupRFDL40G5-rQQBIVRQ9eIJUoxx6g3xfMbASqE">>
  
 Msg4 ID: <<"Yf4umWKkjUe4MaBN_ya7DOixRCUrSTG2jqE0DlicC2Q">>
  
-Msg5: #{<<"device">> => <<"wao@1.0">>,<<"num">> => 3,
+Msg5: #{<<"device">> => <<"mydev@1.0">>,<<"num">> => 3,
         <<"priv">> =>
             #{<<"hashpath">> =>
                   <<"20vIiC-SsCktGvR3UeU6zrYkBS8GALoL5jRWKcB1QTo/Yf4umWKkjUe4MaBN_ya7DOixRCUrSTG2jqE0DlicC2Q">>}}
@@ -111,12 +115,12 @@ Msg5 ID: <<"IEb0vP4sXNGmsTgL1cvN-uo4ulD9uAz7y9cSUiD7Yxw">>
  
 Msg6 ID: #{<<"path">> => <<"add">>,<<"plus">> => 3}
  
-Msg7: #{<<"device">> => <<"wao@1.0">>,<<"num">> => 6,
+Msg7: #{<<"device">> => <<"mydev@1.0">>,<<"num">> => 6,
         <<"priv">> =>
             #{<<"hashpath">> =>
                   <<"McDwn8fpdVA4UORmdqvhzYxIn3sEytmK4IrNeE-aDrk/02-Vjx59gbI2vdl5fJNfCSlKDmmj9p0KKGZGn0fi7V4">>}}
  
-Msg7 ID: #{<<"device">> => <<"wao@1.0">>,<<"num">> => 6,
+Msg7 ID: #{<<"device">> => <<"mydev@1.0">>,<<"num">> => 6,
            <<"priv">> =>
                #{<<"hashpath">> =>
                      <<"McDwn8fpdVA4UORmdqvhzYxIn3sEytmK4IrNeE-aDrk/02-Vjx59gbI2vdl5fJNfCSlKDmmj9p0KKGZGn0fi7V4">>}}
@@ -146,9 +150,11 @@ Now, if you sign the 2nd messages to `hb_ao:resolve`, a new hashpath contains th
 
 You can sign a message with the operator wallet using `hb_message:commit(Msg, Opts)`.
 
-```erlang
-resolve(_, _, Opts)->
-  Msg1 = #{ <<"device">> => <<"wao@1.0">>, <<"num">> => 0 },
+```erlang [/HyperBEAM/src/dev_mydev.erl]
+-export([ resolve2/3 ]).
+
+resolve2(_, _, Opts)->
+  Msg1 = #{ <<"device">> => <<"mydev@1.0">>, <<"num">> => 0 },
   io:format("Msg1 ID: ~p~n", [hb_message:id(Msg1)]),
 
   Msg2 = hb_message:commit(#{ <<"path">> => <<"add">>, <<"plus">> => 1 }, Opts),
@@ -185,9 +191,11 @@ or with their IDs using
 
 - `hb_cache:write(Msg, Opts)`.
 
-```erlang
-resolve(_, _, Opts)->
-  Msg1 = #{ <<"device">> => <<"wao@1.0">>, <<"num">> => 0 },
+```erlang [/HyperBEAM/src/dev_mydev.erl]
+-export([ resolve3/3 ]).
+
+resolve3(_, _, Opts)->
+  Msg1 = #{ <<"device">> => <<"mydev@1.0">>, <<"num">> => 0 },
   io:format("Msg1 ID: ~p~n", [hb_message:id(Msg1)]),
 
   Msg2 = hb_message:commit(#{ <<"path">> => <<"add">>, <<"plus">> => 1 }, Opts),
@@ -227,13 +235,16 @@ You can internally read any cached messages with `hb_cache:read(ID, Opts)` or `h
 
 But also, HyperBEAM makes cached messages accessible from external URL paths with `/[msg_id]` and `/[hashpath]` format.
 
-```js
-const { out } = await hb.post({ path: "/~wao@1.0/resolve" })
-const { out: msg3 } = await hb.get({ path: `/${out.hashpath_3}` })
-const { out: msg5 } = await hb.get({ path: `/${out.hashpath_5}` })
-const { out: msg7 } = await hb.get({ path: `/${out.hashpath_7}` })
+```js [/test/hashpaths.test.js]
+const out = await hb.p("/~mydev@1.0/resolve3")
+const msg3 = await hb.g(`/${out.hashpath_3}`)
+const msg5 = await hb.g(`/${out.hashpath_5}`)
+const msg7 = await hb.g(`/${out.hashpath_7}`)
 
-console.log(msg3, msg5, msg7)
+assert.deepEqual({ device: "mydev@1.0", num: 1 }, msg3)
+assert.deepEqual({ device: "mydev@1.0", num: 3 }, msg5)
+assert.deepEqual({ device: "mydev@1.0", num: 6 }, msg7)
+
 ```
 You can chain compute steps using this URL schema, but we'll talk about it in the next chapter.
 
@@ -243,18 +254,15 @@ Any signed request to a HyperBEAM node returns a hashpath as `tag` in `signature
 
 `hb.post` automatically extracts it from the response for you.
 
-```js
-const { out, hashpath } = await hb.post({ path: "/~wao@1.0/resolve" })
+```js [/test/hashpaths.test.js]
+import { id } from "wao/utils"
+
+const { out, hashpath } = await hb.post({ path: "/~mydev@1.0/forward" })
+const { msg1, msg2 } = JSON.parse(out)
+assert.equal(`${id(msg1)}/${id(msg2)}`, hashpath)
 ```
 
-This hashpath contains the IDs of the messages passed to our `resolve` method in this case.
-
-```erlang
-resolve(_Msg1, _Msg2, Opts)->
-  io:format("_Msg1 ID: ~p~n", [hb_message:id(_Msg1)]),
-  io:format("_Msg2 ID: ~p~n", [hb_message:id(_Msg2)]),
-  ...
-```
+This hashpath contains the IDs of the messages passed to our `forward` method in this case.
 
 - `hashpath` : `_msg1_id/_msg2_id`
 

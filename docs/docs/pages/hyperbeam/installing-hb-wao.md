@@ -19,16 +19,17 @@ mkdir myapp && cd myapp && yarn init && yarn add wao
 mkdir test && touch test/hyperbeam.js
 ```
 
-Edit `package.json` to enable ESM and test commands with the `--experimental-wasm-memory64` flag:
+Edit `package.json` to enable ESM and test commands with the `--experimental-wasm-memory64` flag and disable concurrency so the test won't try running multiple HyperBEAM nodes:
 
-```json
+```json [/package.json]
 {
   "name": "myapp",
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-wasm-memory64",
-    "test-only": "node --experimental-wasm-memory64 --test-only",
+    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
+    "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
+    "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js"
   },
   "dependencies": {
     "wao": "^0.29.2"
@@ -44,81 +45,69 @@ Make sure you have an Arweave wallet JWK at `HyperBEAM/.wallet.json` for the nod
 
 Here's the minimum viable test code. The `HyperBEAM` class starts up a HyperBEAM node and kills it once your tests complete, creating a sandbox environment for each test suite.
 
-You can interact with any HyperBEAM node from JS using the `HB` class.
 
-With these two classes, you can write complete test suites for your HyperBEAM node, devices, processes, and modules running on top (such as AOS) using only JavaScript.
-
-```js
+```js [/test/hyperbeam.test.js]
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM, toAddr } from "wao/test"
-import { HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { HyperBEAM } from "wao/test"
 
 /*
   The link to your HyperBEAM node directory.
   It's relative to your app root folder, not the test folder.
 */
-const cwd = "../../HyperBEAM"
-
-// operator wallet location
-const wallet = resolve(process.cwd(), cwd, ".wallet.json")
-
-const jwk = JSON.parse(readFileSync(wallet, "utf8")) // operator
-const addr = toAddr(jwk.n) // operator address
+const cwd = "../HyperBEAM"
 
 describe("HyperBEAM", function () {
-  let hbeam, hb 
-  before(async () => {
-    // start a hyperbeam node and wait till it's ready
-    hbeam = await new HyperBEAM({ cwd }).ready()
-  })
+  let hbeam, hb
 
-  beforeEach(async () => {
-    // instantiate HB SDK with the operator wallet
-	hb = await new HB({}).init(jwk)
-  })
+  // start a hyperbeam node and wait till it's ready, reset storage for test
+  before(async () => {
+    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
+  }) 
+
+  // HB class from hbeam has the node operator signer
+  beforeEach(async () => (hb = hbeam.hb))
 
   // kill the node after testing
   after(async () => hbeam.kill())
 
   it("should run a HyperBEAM node", async () => {
-    // get build info
-    const { out } = await hb.get({ path: "/~meta@1.0/build" })
-    assert.equal(out.version, toAddr(jwk.n))
+    // change config
+    await hb.post({ path: "/~meta@1.0/info", test_config: "abc" })
+
+    // get config
+    const { out } = await hb.get({ path: "/~meta@1.0/info" })
+    assert.equal(out.test_config, "abc")
   })
 })
 ```
 
+You can interact with any HyperBEAM node from JS using the `HB` class.
+
+With these two classes, you can write complete test suites for your HyperBEAM node, devices, processes, and modules running on top (such as AOS) using only JavaScript.
+
 If you can't run HyperBEAM on your local machine, skip the `HyperBEAM` class and pass the remote node `url` to `HB`:
 
-```js
+```js [/test/hb.test.js]
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { toAddr } from "wao/test"
+import { acc } from "wao/test"
 import { HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
 
-// operator wallet location
-const wallet = resolve(process.cwd(), cwd, ".wallet.json")
-
-const jwk = JSON.parse(readFileSync(wallet, "utf8")) // operator
-const addr = toAddr(jwk.n) // operator address
+const cwd = "../HyperBEAM"
 
 describe("HyperBEAM", function () {
-  let hb 
-  
+  let hb
+
+  // using one of the pre-generated non-operator accounts for test
   beforeEach(async () => {
-    // instantiate HB SDK with the operator wallet
-	hb = await new HB({ url: "http://localhost:10001" }).init(jwk)
+    hb = new HB({ jwk: acc[0].jwk, url: "http://localhost:10001" })
   })
 
-  it("should run a HyperBEAM node", async () => {
+  it("should connect to a HyperBEAM node", async () => {
     // get build info
-    const { out } = await hb.get({ path: "/~meta@1.0/build" })
-    assert.equal(out.version, toAddr(jwk.n))
+    const build = await hb.g("/~meta@1.0/build")
+    assert.equal(build.node, "HyperBEAM")
   })
 })
 ```
@@ -126,7 +115,8 @@ describe("HyperBEAM", function () {
 Run tests:
 
 ```bash
-yarn test test/hyperbeam.js
+yarn test test/hyperbeam.test.js
+# yarn test test/hb.testjs
 ```
 
 Now we're ready to decode HyperBEAM.

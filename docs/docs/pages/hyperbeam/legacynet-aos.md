@@ -4,13 +4,12 @@ Legacynet compatible AOS uses `genesis-wasm@1.0` to delegate compute to an exter
 
 Let's use the production AOS2.0.6 module stored at `ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s` for now.
 
-```js
+```js [/test/legacynet-aos.test.js]
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM, toAddr } from "wao/test"
-import { HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { HyperBEAM } from "wao/test"
+
+const cwd = "../HyperBEAM"
 
 const seed = num => {
   const array = new Array(num)
@@ -18,74 +17,71 @@ const seed = num => {
   return Buffer.from(array).toString("base64")
 }
 
-const cwd = "../dev/wao/HyperBEAM"
-const wallet = resolve(process.cwd(), cwd, ".wallet.json")
-const jwk = JSON.parse(readFileSync(wallet, "utf8"))
-const addr = toAddr(jwk.n)
-
-const src_data = `local count = 0
+const data = `
+local count = 0
 Handlers.add("Inc", "Inc", function (msg)
   count = count + 1
+  msg.reply({ Data = "Count: "..tostring(count) })
 end)
 
 Handlers.add("Get", "Get", function (msg)
-  msg.reply({ Data = tostring(count) })
+  msg.reply({ Data = "Count: "..tostring(count) })
 end)`
 
-describe("HyperBEAM", function () {
+describe("Processes and Scheduler", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ cwd, as: ["genesis_wasm"] }).ready()
+    hbeam = await new HyperBEAM({
+      cwd,
+      reset: true,
+      as: ["genesis_wasm"],
+    }).ready()
   })
-  beforeEach(async () => (hb = await new HB({}).init(jwk)))
+  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
-  
+
   it("should spawn a legacynet AOS process", async () => {
-    const {
-      out: { process: pid },
-    } = await hb.post({
+    const { process: pid } = await hb.p("/schedule", {
       device: "process@1.0",
-      path: "/schedule",
-      Type: "Process",
+      type: "Process",
       "data-protocol": "ao",
       variant: "ao.TN.1",
-      scheduler: addr,
-      authority: addr,
+      scheduler: hb.addr,
+      "scheduler-location": hb.addr,
+      authority: hb.addr,
       "random-seed": seed(16),
       module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
       "scheduler-device": "scheduler@1.0",
       "execution-device": "stack@1.0",
-	  "device-stack" : ["genesis-wasm@1.0", "patch@1.0"],
-	  "push-device": "push@1.0",
+      "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
+      "push-device": "push@1.0",
+      "patch-from": "/results/outbox",
     })
-    await hb.post({
-      path: `/${pid}/schedule`,
+
+    const tags = {
+      "patch-from": "/results/outbox",
+      "stack-keys": ["init", "compute", "snapshot", "normalize"],
+    }
+
+    await hb.p(`/${pid}/schedule`, {
       type: "Message",
       target: pid,
       action: "Eval",
-      data: src_data,
+      data,
     })
-    await hb.post({
-      path: `/${pid}/schedule`,
+
+    await hb.p(`/${pid}/schedule`, {
       type: "Message",
       target: pid,
       action: "Inc",
     })
-    const {
-      out: { slot },
-    } = await hb.post({
-      path: `/${pid}/schedule`,
+    const { slot } = await hb.p(`/${pid}/schedule`, {
       type: "Message",
       target: pid,
       action: "Inc",
     })
-    const {
-      out: { results: { outbox } },
-    } = await hb.get({
-      path: `/${pid}/compute`,
-      slot,
-    })
-    assert.equal(outbox["1"].data, "Count: 2")
+    const { results } = await hb.g(`/${pid}/compute`, { slot })
+    assert.equal("Count: 2", results.outbox["1"].data)
   })
 })
 ```
@@ -94,7 +90,7 @@ describe("HyperBEAM", function () {
 
 HyperBEAM introduces the `patch@1.0` device and disables the traditional dryruns for performance reasons, but we can use the `call` method on the `relay@1.0` device to access the `http://localhost:6363/dry-run` endpoint on the local CU server.
 
-```js
+```js [/test/legacynet-aos.test.js]
 const { body } = await hb.post({
   path: "/~relay@1.0/call",
   method: "POST",
@@ -112,9 +108,9 @@ assert.equal(JSON.parse(body).Messages[0].Data, "Count: 2")
 
 The `HB` class has convenient methods for legacynet AOS. To write the same tests:
 
-```js
+```js [/test/legacynet-aos.test.js]
 const { pid } = await hb.spawnLegacy()
-await hb.scheduleLegacy({ pid, data: src_data })
+await hb.scheduleLegacy({ pid, data })
 const { slot } = await hb.scheduleLegacy({ pid, action: "Inc" })
 const res = await hb.computeLegacy({ pid, slot })
 assert.equal(res.Messages[0].Data, "Count: 1")
@@ -126,14 +122,15 @@ assert.equal(res3.Messages[0].Data, "Count: 2")
 
 The `AO` class makes the code even more concise.
 
-```js
+```js [/test/legacynet-aos.test.js]
 import { AO } from "wao"
 
-const ao = await new AO({
-  module_type: "mainnet",
-  hb: "http://localhost:10001",
-}).init(jwk)
-const { p } = await ao.deploy({ src_data })
+const ao = await new AO({ module_type: "mainnet", hb: hbeam.url }).init(
+  hbeam.jwk
+)
+const { p } = await ao.deploy({ src_data: data })
 await p.m("Inc")
 assert.equal(await p.d("Get"), "Count: 1")
+await p.m("Inc")
+assert.equal(await p.d("Get"), "Count: 2")
 ```

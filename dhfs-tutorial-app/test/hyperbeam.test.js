@@ -11,8 +11,10 @@ const cwd = "../HyperBEAM"
 describe("HyperBEAM", function () {
   let hbeam, hb
 
-  // start a hyperbeam node and wait till it's ready
-  before(async () => (hbeam = await new HyperBEAM({ cwd }).ready()))
+  // start a hyperbeam node and wait till it's ready, reset storage for test
+  before(async () => {
+    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
+  })
 
   beforeEach(async () => (hb = hbeam.hb))
 
