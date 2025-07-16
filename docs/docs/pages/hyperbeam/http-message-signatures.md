@@ -4,9 +4,9 @@ So far, we've been virtually testing the encoding process by exposing internal c
 
 Let's go back to the message tested in an earlier chapter and encode it with the pipeline from the previous chapter.
 
-```js
+```js [/test/http-message-signatures.test.js]
 const msg = {
-  path: "/~wao@1.0/forward",
+  path: "/~mydev@1.0/forward",
   key: "abc",
   list: [1, 2, 3],
   map: { abc: "123" },
@@ -14,16 +14,16 @@ const msg = {
   body: "test_body",
 }
 const res = await hb.post({
-  path: "/~wao@1.0/structured_from",
+  path: "/~mydev@1.0/structured_from",
   body: JSON.stringify(msg),
 })
-const structured = JSON.parse(res.out)
+const structured = JSON.parse(res.body)
 console.log(structured)
 const res2 = await hb.post({
-  path: "/~wao@1.0/httpsig_to",
+  path: "/~mydev@1.0/httpsig_to",
   body: JSON.stringify(structured),
 })
-const encoded = JSON.parse(res2.out)
+const encoded = JSON.parse(res2.body)
 console.log(encoded)
 ```
 
@@ -46,12 +46,12 @@ This is the encoded message:
   'content-type': 'multipart/form-data; boundary="x8jUsRrtoRCInzE6Nwgl_uoK-D2Oe-9i_RKeFskZk8c"',
   key: 'abc',
   list: '"(ao-type-integer) 1", "(ao-type-integer) 2", "(ao-type-integer) 3"',
-  path: '/~wao@1.0/forward'
+  path: '/~mydev@1.0/forward'
 }
 ```
 You can sign it with `hb.signEncoded`.
 
-```js
+```js [/test/http-message-signatures.test.js]
 const signed = await hb.signEncoded(encoded)
 ```
 
@@ -59,7 +59,7 @@ This is the signed message:
 
 ```js
 {
-  url: 'http://localhost:10001/~wao@1.0/forward',
+  url: 'http://localhost:10001/~mydev@1.0/forward',
   method: 'POST',
   headers: {
     'ao-types': 'bool="atom", list="list"',
@@ -69,7 +69,7 @@ This is the signed message:
     'content-type': 'multipart/form-data; boundary="x8jUsRrtoRCInzE6Nwgl_uoK-D2Oe-9i_RKeFskZk8c"',
     key: 'abc',
     list: '"(ao-type-integer) 1", "(ao-type-integer) 2", "(ao-type-integer) 3"',
-    path: '/~wao@1.0/forward',
+    path: '/~mydev@1.0/forward',
     'content-length': '236',
     signature: 'http-sig-bba7e22451416f77=:D8jgRQXCC0WIdTaKs4v9cjvmzZy13VdoFNzWeXxT8ErP8inUeLyXQy0V4aUaodbAueMSG0sk8Ut5EmMaeV6AX4mHO6YtZHWj7TL7x8h2Sa8dlvcYNHjauNlygs0URoeKIaE0eZoWM1LWD6F+qqLPL4mm2C4Ex5UttPkNb8kT4UI5AuxlGWmIgOBZZngWT4xoRsFIlanr2bz4Px4IeiTJgLAS2QwRsJTAJ60EumZ5xCBTU6Ir98W45PrHUf2MUjVxmcaVFZb3nrB4mC/3IjXIBlHmMkjD4lRr7/FuIr8JwuBDzlpA+/VUmfx+0L2qVp+F0rL0VhBiFB7KiRCpPqNDXO5bw2bei1cxoQHmcwhAxO+BIisJrBrbylHo+7yw4LLzAGebunMgsfVzl5DIxZRcjxNCF/4vSYllB+oybEgqTw9MP0Iwip59yCnzsnCrvo1m8PvQ9izJBVL7OrasjFTj5i+iOwOJt7YAZ8Yea93m7c2lMFJNocEme3Otj3oWU9MwPv+qyId5Q59A9uSzKD5wKMrUcICRYduw3NmGzcxKzPMHoC4lZQEDtzZvIvsjm/EVPQpIt/oPLMp3y5ZHEuPUoZx1xT9ahMWyg8eNw01+TQPsDK6QDE7eeRvWleBuaIMkBVH6mXSiR5J+vteSXox1xK0cV9evc10inWZd9LtPfxM=:',
     'signature-input': 'http-sig-bba7e22451416f77=("ao-types" "bool" "content-digest" "content-type" "key" "list" "content-length");alg="rsa-pss-sha512";keyid="o1kvTqZQ0wbS_WkdwX70TFCk7UF76ldnJ85l8iRV7t6mSlzkXBYCecb-8RXsNEQQmO0KergtHOvhuBJmB6YXaYe_UftI_gendojfIa6jlTgw-qmH6g4_oErI8djDRbQSm-5nCfGVRuYxsNZLYDeqw4gFb9K3b1h7tuMoLd6-d5pkaLfTMUNcvs2OqpkLo0i_av746FieaURdWozwFqO0APtdA7pLHDqQZDMNdTmsUBJFszL6SOa1bKe5cUWnrq4uaW4NAN3JAQniILKGsKZENeKtfXwiKVaFJtriWWsbhOaNT0JLcuBAwXQAP59RXzcr8bRY6XFn8zBmEmZBGszOD9c9ssDENRFDa5uyVhk8XgIgQjErAWYd9T6edrYcIp3R78jhNK_nLiIBBz8_Oz3bLjL5i_aiV2gpfIbd44DCHihuuxSWRAPJxhEy9TS0_QbVOIWhcDTIeEJE3aRPTwSTMt1_Fec7i9HJWN0mvMbAAJw8k6HxjA3pFZiCowZJw7FBwMAeYgEwIeB82f-S2-PtFLwR9i0tExo36hEBHqaS4Y-O3NGgQ8mKnhT7Z1EfxEbA2BpR9oL8rJFEnPIrHHu7B88OHDDfnfRD3D79fKktnisC7XOuwbHG3TQo0_j4_mElH7xj_7IyAbmCUHDd-eRa482wOYXBB01DGnad901qaHU"'
@@ -82,7 +82,7 @@ The signing added `signature` and `signature-input` to `headers`. Let's break do
 
 You can also verify the signature, which gives you the decomposition of the message if you ever need it.
 
-```js
+```js [/test/http-message-signatures.test.js]
 import { verify } from "wao/signer"
 const { 
   valid, // should be true
@@ -118,11 +118,11 @@ HyperBEAM also resolves the method and device to route the message to using the 
 - `@target-uri`
 - `@method`
 
-You can now send the signed message with `hb.send`. We're sending it to `/~wao@1.0/forward`. 
+You can now send the signed message with `hb.send`. We're sending it to `/~mydev@1.0/forward`. 
 
-```js
-const { out } = await hb.send(signed)
-const { msg1, msg2, opts } = JSON.parse(out)
+```js [/test/http-message-signatures.test.js]
+const { body } = await hb.send(signed)
+const { msg1, msg2, opts } = JSON.parse(body)
 console.log(msg2)
 ```
 
@@ -156,6 +156,7 @@ body: 'test_body',
   path: 'forward'
 }
 ```
+
 Your `signature` is in the `commitments`. And there are 2 entries with different `alg`.
 
 - `Fg0kC92eBhUH3t894aH0IHMBiGIlLU80gt5Zjyip_bU` : `rsa-pss-sha512`
@@ -163,7 +164,7 @@ Your `signature` is in the `commitments`. And there are 2 entries with different
 
 These commitment IDs are important for HyperBEAM to verify the message. The former is the sha-256 hash of the signature bytes, and the latter is the hmac-sha256 hash of the signed content with `ao` as the key. You can generate each ID with `rsaid` and `hmacid` methods from `wao/utils`. You can execute node internal scripts by manually creating commitments. We'll discuss this in a later chapter.
 
-```js
+```js [/test/http-message-signatures.test.js]
 import { rsaid, hmacid } from "wao/utils"
 const rsa_id = rsaid(signed.headers)
 const hmac_id = hmacid(signed.headers)
@@ -172,11 +173,22 @@ assert.deepEqual(
   [rsa_id, hmac_id].sort(),
 )
 ```
-In practice, you don't have to go through all these steps to construct signed messages. `hb.post` handles everything for you.
 
-```js
+FYI, you can use `hb_message:commit` to sign a message on HyperBEAM.
+
+```erlang
+% get operator wallet
+Wallet = hb_opts:get(priv_wallet, not_found, Opts),
+Signed = hb_message:commit( Msg, Wallet ),
+```
+
+## WAO HB SDK
+
+In practice, you don't have to go through all these steps to construct signed messages. `hb.post` handles everything for you. You can get the decoded message in `out` instead of `headers` and `body`.
+
+```js [/test/http-message-signatures.test.js]
 const { out } = await hb.post({
-  path: "/~wao@1.0/forward",
+  path: "/~mydev@1.0/forward",
   key: "abc",
   list: [1, 2, 3],
   map: { abc: "123" },
@@ -185,12 +197,18 @@ const { out } = await hb.post({
 })
 ```
 
+`get` and `g` work the same.
+
 This is all you need to encode, sign, and send a message.
 
-FYI, you can use `hb_message:commit` to sign a message on HyperBEAM.
+`p` is a shortcut method for `post` to get only the decoded message.
 
-```erlang
-% get operator wallet
-Wallet = hb_opts:get(priv_wallet, not_found, Opts),
-Signed = hb_message:commit( Msg, Wallet ),
+```js [/test/http-message-signatures.test.js]
+const out = await hb.p("/~mydev@1.0/forward", {
+  key: "abc",
+  list: [1, 2, 3],
+  map: { abc: "123" },
+  bool: true,
+  body: "test_body",
+})
 ```

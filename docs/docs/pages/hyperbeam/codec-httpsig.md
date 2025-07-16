@@ -4,19 +4,21 @@
 
 Create custom methods to expose `dev_codec_httpsig:from` and `dev_codec_httpsig:to`.
 
-```erlang
+```erlang [/HyperBEAM/src/dev_mydev.erl]
+-export([ httpsig_to/3, httpsig_from/3 ]).
+
 httpsig_to(Msg1, Msg2, Opts) ->
     Body = maps:get(<<"body">>, Msg1),
     TABM = dev_codec_json:from(Body),
-    FLAT = dev_codec_httpsig:to(TABM),
-    JSON = dev_codec_json:to(FLAT),
+    HTTPSIG = dev_codec_httpsig:to(TABM),
+    JSON = dev_codec_json:to(HTTPSIG),
     {ok, JSON}.
-
+ 
 httpsig_from(Msg1, Msg2, Opts) ->
     Body = maps:get(<<"body">>, Msg1),
-    TABM = dev_codec_json:from(Body),
-    FLAT = dev_codec_httpsig:from(TABM),
-    JSON = dev_codec_json:to(FLAT),
+    HTTPSIG = dev_codec_json:from(Body),
+    TABM = dev_codec_httpsig:from(HTPSIHG),
+    JSON = dev_codec_json:to(TABM),
     {ok, JSON}.
 ```
 
@@ -26,8 +28,8 @@ Let's convert one complex object.
 
 The structured encoded representation is the following.
 
-```js
-const case = [{
+```js [/test/codec-httpsig.test.js]
+const cases = [{
   a: {
     "ao-types": 'b="list"',
     b: '"(ao-type-integer) 1", "(ao-type-integer) 2", "(ao-type-integer) 3"',
@@ -39,11 +41,11 @@ const case = [{
 }]
 
 for (const v of cases) {
-  const { out } = await hb.post({
-    path: "/~wao@1.0/httpsig_to",
+  const { body } = await hb.post({
+    path: "/~mydev@1.0/httpsig_to",
     body: JSON.stringify(v),
   })
-  console.log(JSON.parse(out))
+  console.log(JSON.parse(body))
 }
 ```
 We get an httpsig-encoded value ready to be signed.
@@ -89,7 +91,7 @@ const parts = {
 
 You can decode the encoded value with `dev_codec_structured:to`.
 
-```js
+```js [/test/codec-httpsig.test.js]
 const cases = [
   {
     body: '--rqDK_isKBhMozuATy4K6NFgdADGNHedXoUEDN10AANo\r\n' +
@@ -107,11 +109,11 @@ const cases = [
   }
 ]
 for (const v of cases) {
-  const { out } = await hb.post({
-    path: "/~wao@1.0/httpsig_from",
+  const { body } = await hb.post({
+    path: "/~mydev@1.0/httpsig_from",
     body: JSON.stringify(v),
   })
-  console.log(JSON.parse(out))
+  console.log(JSON.parse(body))
 }
 ```
 
@@ -137,31 +139,31 @@ The encoded value is:
 
 You can validate the encoding-decoding of any value with the following pipeline.
 
-```js
+```js [/test/codec-httpsig.test.js]
 const cases = [
   { list: [1, true, "abc"] },
   { nested_list: [1, [2, 3]] },
   { a: { b: [1, 2, 3] } },
   { a: [1, 2], b: [3, 4] },
   { empty_list: [], empty_binary: "", empty_message: {} },
-  { data: "abc", [addr]: 123 },
+  { data: "abc", [hb.addr]: 123 },
   { list: [1, 2, 3], map: { a: { b: { c: 4 } } } },
 ]
 for(const json of cases){
   const res = await hb.post({
-    path: "/~wao@1.0/structured_from",
+    path: "/~mydev@1.0/structured_from",
     body: JSON.stringify(json),
   })
-  const structured = JSON.parse(res.out)
+  const structured = JSON.parse(res.body)
   console.log(structured)
   const res2 = await hb.post({
-    path: "/~wao@1.0/httpsig_to",
+    path: "/~mydev@1.0/httpsig_to",
     body: JSON.stringify(structured),
   })
-  const encoded = JSON.parse(res2.out)
+  const encoded = JSON.parse(res2.body)
   console.log(encoded)
   const res3 = await hb.post({
-    path: "/~wao@1.0/httpsig_from",
+    path: "/~mydev@1.0/httpsig_from",
     body: JSON.stringify(encoded),
   })
   
@@ -171,13 +173,13 @@ for(const json of cases){
     "content-type": __,
 	"inline-body-key": ___,
     ...decoded
-  } = JSON.parse(res3.out)
+  } = JSON.parse(res3.body)
   console.log(decoded)
   const res4 = await hb.post({
-    path: "/~wao@1.0/structured_to",
+    path: "/~mydev@1.0/structured_to",
     body: JSON.stringify(decoded),
   })
-  const json2 = JSON.parse(res4.out)
+  const json2 = JSON.parse(res4.body)
   assert.deepEqual(json,json2)
 }
 ````
