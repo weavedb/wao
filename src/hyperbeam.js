@@ -1,20 +1,23 @@
 import { spawn } from "child_process"
 import { resolve } from "path"
 import { isNil, map } from "ramda"
+import { toAddr } from "./test.js"
+import HB from "./hb.js"
 import { rmSync, readFileSync, readdirSync } from "fs"
 import devs from "./devs.js"
 import dotenv from "dotenv"
 dotenv.config({ path: ".env.hyperbeam" })
 
 export default class HyperBEAM {
+  static OPERATOR = Symbol("operator")
   constructor({
     port = 10001,
     cu = 6363,
-    as,
+    as = [],
     bundler,
     gateway,
-    wallet,
-    clearCache,
+    wallet = ".wallet.json",
+    reset,
     cwd = "./HyperBEAM",
     c,
     cmake,
@@ -25,20 +28,24 @@ export default class HyperBEAM {
     p4_lua,
     store_prefix,
     operator,
-    console = true,
+    logs = true,
     shell = true,
     devices,
   } = {}) {
     this.devices = devices
     this.p4_non_chargable_routes = p4_non_chargable_routes
-    as ??= shell ? [] : ["genesis_wasm"]
-    this.console = console
-    if (clearCache) {
-      const dirname = resolve(process.cwd(), cwd)
-      for (let v of readdirSync(dirname)) {
+    this.logs = logs
+    this.cwd = cwd
+    this.dirname = resolve(process.cwd(), this.cwd)
+    this.wallet = wallet
+    this.wallet_location = resolve(this.dirname, this.wallet)
+    this.jwk = JSON.parse(this.file(this.wallet_location))
+    this.addr = toAddr(this.jwk.n)
+    if (reset) {
+      for (let v of readdirSync(this.dirname)) {
         if (/^cache-/.test(v)) {
           try {
-            rmSync(resolve(dirname, v), { recursive: true, force: true })
+            rmSync(resolve(this.dirname, v), { recursive: true, force: true })
           } catch (e) {
             console.log(e)
           }
@@ -53,15 +60,24 @@ export default class HyperBEAM {
     this.simple_pay = simple_pay
     this.spp = simple_pay_price
     this.operator = operator
+    if (this.operator === HyperBEAM.OPERATOR) this.operator = this.addr
     this.faff = faff
     this.c = c
     this.cmake = cmake
     this.port = port
+    this.url = `http://localhost:${this.port}`
     this.bundler = bundler
     this.as = as
     this.gateway = gateway
-    this.wallet = wallet
-    this.cwd = cwd
+    if (Array.isArray(this.faff)) {
+      let i = 0
+      for (let v of this.faff) {
+        if (typeof v === "symbol" && v === HyperBEAM.OPERATOR) {
+          this.faff[i] = this.addr
+        }
+        i++
+      }
+    }
     if (shell) this.shell()
   }
   shell() {
@@ -79,7 +95,7 @@ export default class HyperBEAM {
         cwd: resolve(process.cwd(), this.cwd),
       }
     )
-    if (this.console) {
+    if (this.logs) {
       this._shell.stdout.on("data", chunk => console.log(chunk.toString()))
       this._shell.stderr.on("data", err => console.error(err.toString()))
       this._shell.on("error", err =>
@@ -90,6 +106,9 @@ export default class HyperBEAM {
         delete this._shell
       })
     }
+  }
+  file(path, type = "utf8") {
+    return readFileSync(resolve(this.dirname, path), type)
   }
   eunit(module, test) {
     return new Promise(res => {
@@ -122,7 +141,7 @@ export default class HyperBEAM {
         env: { ...process.env, ...this.genEnv() },
         cwd: resolve(process.cwd(), this.cwd),
       })
-      if (this.console) {
+      if (this.logs) {
         _eunit.stdout.on("data", chunk => console.log(chunk.toString()))
         _eunit.stderr.on("data", err => console.error(err.toString()))
         _eunit.on("error", err =>
@@ -137,10 +156,13 @@ export default class HyperBEAM {
   }
   async ok() {
     try {
-      const address = await fetch(
-        `http://localhost:${this.port}/~meta@1.0/info/address`
-      ).then(r => r.text())
-      return address ? true : false
+      const address = await fetch(`${this.url}/~meta@1.0/info/address`).then(
+        r => r.text()
+      )
+      if (address) {
+        this.hb = await new HB({ url: this.url }).init(this.jwk)
+        return true
+      } else return false
     } catch (e) {
       return false
     }
@@ -239,7 +261,6 @@ export default class HyperBEAM {
           ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
           : ""
     const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_on}${_p4_non_chargable}${_operator}${_spp}${_devices}${_node_processes}}).`
-    console.log(start)
     return start
   }
 

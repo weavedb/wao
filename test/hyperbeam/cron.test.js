@@ -1,35 +1,19 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
-import { acc, toAddr } from "../src/test.js"
-import { getJWK } from "./lib/test-utils.js"
-import HB from "../src/hb.js"
-import { pick } from "ramda"
-import { wait } from "../src/utils.js"
-import HyperBEAM from "../src/hyperbeam.js"
-const seed = num => {
-  const array = new Uint8Array(num)
-  return crypto.getRandomValues(array).toString()
-}
+import { wait } from "../../src/utils.js"
+import HyperBEAM from "../../src/hyperbeam.js"
 
 const URL = "http://localhost:10001"
 
 describe("Hyperbeam Device", function () {
-  let hb, hb2, hbeam, jwk, addr, addr2
+  let hb, hbeam
   before(async () => {
-    jwk = getJWK("../../HyperBEAM/.wallet.json")
-    addr = toAddr(jwk.n)
-    addr2 = toAddr(acc[0].jwk.n)
     hbeam = await new HyperBEAM({ clearCache: true }).ready()
   })
 
-  beforeEach(async () => {
-    hb = await new HB({}).init(jwk)
-    hb2 = await new HB({}).init(acc[0].jwk)
-  })
+  beforeEach(async () => (hb = hbeam.hb))
 
-  after(async () => {
-    hbeam.kill()
-  })
+  after(async () => hbeam.kill())
 
   it("should test cron@1.0", async () => {
     const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
