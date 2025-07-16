@@ -2,13 +2,13 @@
 
 Most things we've learned so far to do manually, such as device method composition, message caching, and commitments for message verification, are handled automatically by `message@1.0`, `process@1.0`, and `scheduler@1.0`.
 
-You can `spawn` a process, `schedule` messages to process slots, and `compute` the process state going through the allocated messages using multiple execution devices.
+You can `spawn` a process, `schedule` messages to process slots, and `compute` the process state going through the allocated messages using multiple execution devices with `stack@1.0`.
 
 Let's create a new custom device `dev_inc.erl`. The minimum viable device to be compatible with `process@1.0` requires 4 methods:
 
 `init`, `normalize`, `compute`, and `snapshot`.
 
-```erlang
+```erlang [/HyperBEAM/src/dev_inc.erl]
 -module(dev_inc).
 -export([ compute/3, init/3, snapshot/3, normalize/3 ]).
 -include_lib("eunit/include/eunit.hrl").
@@ -28,7 +28,7 @@ normalize(Msg, _Msg2, _Opts) -> {ok, Msg}.
 
 Don't forget to add it to `preloaded_devices` in `hb_opts.erl`.
 
-```erlang
+```erlang [/HyperBEAM/src/hb_opts.erl]
 preloaded_devices => [
   ...
   #{ <<"name">> => <<"inc@1.0">>, <<"module">> => dev_inc }
@@ -53,13 +53,14 @@ You can use the following paths to `spawn`, `schedule`, and `compute`:
 
 `pid` is the process message ID returned by the `spawn` message.
 
-```js
+At this point, you could simply remove the `devices` parameter and preload all existing devices in our test file.
+
+```js [/test/processes-scheduler.test.js]
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM, toAddr } from "wao/test"
-import { HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { HyperBEAM } from "wao/test"
+
+const cwd = "../HyperBEAM"
 
 const seed = num => {
   const array = new Array(num)
@@ -67,62 +68,34 @@ const seed = num => {
   return Buffer.from(array).toString("base64")
 }
 
-const cwd = "../dev/wao/HyperBEAM"
-const wallet = resolve(process.cwd(), cwd, ".wallet.json")
-const jwk = JSON.parse(readFileSync(wallet, "utf8"))
-const addr = toAddr(jwk.n)
-
-describe("HyperBEAM", function () {
+describe("Processes and Scheduler", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({
-      cwd,
-      devices: [
-        "json",
-        "structured",
-        "httpsig",
-        "flat",
-        "meta",
-        "wao",
-        "stack",
-	    "message",
-        "process",
-        "scheduler",
-		{ name: "inc@1.0", module: "dev_inc"}
-      ],
-    }).ready()
+    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
   })
-
-  beforeEach(async () => (hb = await new HB({}).init(jwk)))
+  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
-  
+
   it("should spawn a process", async () => {
-    const {
-      out: { process : pid },
-    } = await hb.post({
+    const { process: pid } = await hb.p("/schedule", {
       device: "process@1.0",
-      path: "/schedule",
       type: "Process",
-      scheduler: addr,
+      scheduler: hb.addr,
       "random-seed": seed(16),
       "execution-device": "inc@1.0",
     })
     console.log(`Process ID: ${pid}`)
 
-    const {
-      out: { slot },
-    } = await hb.post({ path: `/${pid}/schedule`, type: "Message" })
+    const { slot } = await hb.p(`/${pid}/schedule`, { type: "Message" })
     console.log(`Allocated Slot: ${slot}`)
 
-    const { out } = await hb.get({ path: `/${pid}/compute`, slot: slot })
+    const out = await hb.g(`/${pid}/compute`, { slot })
     assert.equal(out.num, 2)
-	
-    const {
-      out: { slot: slot2 },
-    } = await hb.post({ path: `/${pid}/schedule`, type: "Message" })
+
+    const { slot: slot2 } = await hb.p(`/${pid}/schedule`, { type: "Message" })
     console.log(`Allocated Slot: ${slot2}`)
 
-    const { out: out2 } = await hb.get({ path: `/${pid}/compute`, slot: slot2 })
+    const out2 = await hb.g(`/${pid}/compute`, { slot: slot2 })
     assert.equal(out2.num, 3)
   })
 })
@@ -132,7 +105,7 @@ describe("HyperBEAM", function () {
 
 `/[pid]/now` gives you the latest process state.
 
-```js
+```js [/test/processes-scheduler.test.js]
 const {
   out: { slot: slot3 },
 } = await hb.post({ path: `/${pid}/schedule`, type: "Message" })
@@ -146,7 +119,8 @@ assert.equal(out3.num, 4)
 
 WAO has convenient APIs for process management.
 
-```js
+
+```js [/test/processes-scheduler.test.js]
 const { pid } = await hb.spawn({ "execution-device": "inc@1.0" })
 const { slot } = await hb.schedule({ pid })
 const { num } = await hb.compute({ pid, slot })
@@ -167,7 +141,7 @@ Just like the previous chapter, you can stack multiple devices and let the state
 
 Let's create `double@1.0` and `square@1.0` devices.
 
-```erlang
+```erlang [/HyperBEAM/src/dev_double.erl]
 -module(dev_double).
 -export([ compute/3, init/3, snapshot/3, normalize/3 ]).
 -include_lib("eunit/include/eunit.hrl").
@@ -185,7 +159,7 @@ snapshot(Msg, _Msg2, _Opts) -> {ok, Msg}.
 normalize(Msg, _Msg2, _Opts) -> {ok, Msg}.
 ```
 
-```erlang
+```erlang [/HyperBEAM/src/dev_square.erl]
 -module(dev_square).
 -export([ compute/3, init/3, snapshot/3, normalize/3 ]).
 -include_lib("eunit/include/eunit.hrl").
@@ -205,15 +179,9 @@ normalize(Msg, _Msg2, _Opts) -> {ok, Msg}.
 
 Don't forget to add `double@1.0` and `square@1.0` to `hb_opts.erl`.
 
-At this point, you could simply remove the `devices` parameter and preload all existing devices in our test file.
-
-```js
-hbeam = await new HyperBEAM({ cwd }).ready()
-```
-
 Then test the `stack@1.0` process with multiple devices.
 
-```js
+```js [/test/processes-scheduler.test.js]
 const { pid } = await hb.spawn({
   "execution-device": "stack@1.0",
   "device-stack": ["inc@1.0", "double@1.0", "square@1.0"],
@@ -225,13 +193,14 @@ assert.equal(num, 4) // ((0 + 1) * 2) * ((0 + 1) * 2)
 const { res: { num: num2 } } = await hb.message({ pid })
 assert.equal(num2, 100) // ((4 + 1) * 2) * ((4 + 1) * 2)
 ```
+
 ## patch@1.0
 
 `patch@1.0` allows you to cache any pieces of data to arbitrary URLs. You can pass `patch-from` to specify where the data to patch comes from in the resulting messages, and `patch-to` to specify a URL endpoint to expand the cache to. So let's set `patch-from="/results"` and `patch-to="/cache"`.
 
 First, let's create a modified version of the inc device and call it `inc2@1.0`, which increments `num` and caches `double` and `square` values of `num`. We return these caches under `results:1`.
 
-```erlang
+```erlang [/HyperBEAM/src/dev_inc2.erl]
 -module(dev_inc2).
 -export([ compute/3, init/3, snapshot/3, normalize/3 ]).
 -include_lib("eunit/include/eunit.hrl").
@@ -264,7 +233,7 @@ normalize(Msg, _Msg2, _Opts) -> {ok, Msg}.
 
 Now `/now/cache/double` and `/now/cache/square` will be accessible with the cached latest values.
 
-```js
+```js [/test/processes-scheduler.test.js]
 const { pid } = await hb.spawn({
   "execution-device": "stack@1.0",
   "device-stack": ["inc2@1.0", "patch@1.0"],
