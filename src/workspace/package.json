@@ -9,7 +9,6 @@
     "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
-    "dotenv": "^17.2.0",
-    "wao": "^0.30.4"
+    "wao": "^0.31.0"
   }
 }
