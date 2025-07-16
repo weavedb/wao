@@ -15,7 +15,9 @@ const addr = toAddr(jwk.n)
 describe("HyperBEAM", function () {
   let hbeam, hb
 
-  before(async () => (hbeam = await new HyperBEAM({ cwd }).ready()))
+  before(
+    async () => (hbeam = await new HyperBEAM({ cwd, reset: true }).ready())
+  )
   beforeEach(async () => (hb = await new HB({}).init(jwk)))
   after(async () => hbeam.kill())
 
