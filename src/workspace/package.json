@@ -3,8 +3,9 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-wasm-memory64",
-    "test-only": "node --experimental-wasm-memory64 --test-only",
+    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
+    "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
+    "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js",
     "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
