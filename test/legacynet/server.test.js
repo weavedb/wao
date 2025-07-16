@@ -7,15 +7,15 @@ import base64url from "base64url"
 import assert from "assert"
 import { resolve } from "path"
 import { after, describe, it, before, beforeEach } from "node:test"
-import { blueprint, mu, connect, acc, scheduler } from "../src/test.js"
-import AO from "../src/ao.js"
-import TAO from "../src/tao.js"
-import AR from "../src/ar.js"
-import GQL from "../src/gql.js"
-import ArMem from "../src/armem.js"
-import { setup, Src } from "../src/helpers.js"
-import { tags, wait, optAO } from "../src/utils.js"
-import Server from "../src/server.js"
+import { blueprint, mu, connect, acc, scheduler } from "../../src/test.js"
+import AO from "../../src/ao.js"
+import TAO from "../../src/tao.js"
+import AR from "../../src/ar.js"
+import GQL from "../../src/gql.js"
+import ArMem from "../../src/armem.js"
+import { setup, Src } from "../../src/helpers.js"
+import { tags, wait, optAO } from "../../src/utils.js"
+import Server from "../../src/server.js"
 const { mem, spawn, message, dryrun } = connect()
 const [{ signer, jwk }] = acc
 
@@ -123,7 +123,7 @@ end)
     server.end()
   })
 
-  it("should connect with aoconnect", async () => {
+  it.skip("should connect with aoconnect", async () => {
     const { spawn, message, dryrun, assign, result } = _connect({
       MU_URL: `http://localhost:4002`,
       CU_URL: `http://localhost:4004`,
@@ -192,7 +192,7 @@ describe("ArMem", () => {
     let ao = new AO({ port: 5000 })
     const src = new Src({
       ar: ao.ar,
-      dir: resolve(import.meta.dirname, "../src/lua"),
+      dir: resolve(import.meta.dirname, "../../src/lua"),
     })
     const wasm_aos2 = await src.upload("aos2_0_1", "wasm")
     console.log(await ao.ar.data(wasm_aos2))

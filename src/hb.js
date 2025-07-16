@@ -270,11 +270,6 @@ class HB {
     if (isNotNil(from)) params += `&from=${from}`
     if (isNotNil(to)) params += `&to=${to}`
     params += `&accept=application/aos-2`
-    const { body } = await this.g("/~scheduler@1.0/schedule", {
-      target: pid,
-      from,
-      accept: "application/aos-2",
-    })
     let res = await fetch(`${this.url}/~scheduler@1.0/schedule?${params}`).then(
       r => r.json()
     )

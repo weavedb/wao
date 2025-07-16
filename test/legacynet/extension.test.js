@@ -1,9 +1,9 @@
 import assert from "assert"
 import { resolve } from "path"
 import { describe, it } from "node:test"
-import { AO, acc } from "../src/test.js"
-import { ok, fail, Src } from "../src/helpers.js"
-import weavedb from "../src/weavedb.js"
+import { AO, acc } from "../../src/test.js"
+import { ok, fail, Src } from "../../src/helpers.js"
+import weavedb from "../../src/weavedb.js"
 import { encode, Encoder, Bundle } from "arjson"
 
 let attestor = acc[0]
@@ -54,10 +54,10 @@ describe("WeaveDrive", function () {
     )
     const { id } = await ao.ar.post({ data: "Hello" })
     await ao.attest({ id })
-    assert.equal(await p.d("Data", { id }, false), "Hello")
-    assert.equal((await p.d("Block", { height: "2" })).height, 2)
-    assert.equal((await p.d("Tx", { id })).id, id)
-    assert.equal((await p.d("Tx2", { id: mid })).id, mid)
+    assert.equal(await p.d("Data", { id }), "Hello")
+    assert.equal((await p.d("Block", { height: "2" }, true)).height, 2)
+    assert.equal((await p.d("Tx", { id }, true)).id, id)
+    assert.equal((await p.d("Tx2", { id: mid }, true)).id, mid)
   })
 })
 
@@ -83,7 +83,7 @@ class DB {
     return b
   }
   async init() {
-    const src = new Src({ dir: resolve(import.meta.dirname, "../src/lua") })
+    const src = new Src({ dir: resolve(import.meta.dirname, "../../src/lua") })
     const data = src.data("weavedb_mock")
     const { p } = await this.ao.deploy({
       tags: { Extension: "WeaveDB" },
@@ -93,10 +93,14 @@ class DB {
     return this
   }
   async get(col, doc, eq) {
-    const res = await this.p.d("Get", {
-      col: col.toString(),
-      doc: doc.toString(),
-    })
+    const res = await this.p.d(
+      "Get",
+      {
+        col: col.toString(),
+        doc: doc.toString(),
+      },
+      true
+    )
     if (typeof eq !== "undefined") assert.deepEqual(res, eq)
     return res
   }
