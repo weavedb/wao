@@ -17,8 +17,6 @@ describe("Hyperbeam Legacynet", function () {
   let hbeam
   before(async () => {
     hbeam = await new HyperBEAM({
-      c: "12",
-      cmake: "3.5",
       operator: operator.addr,
       simple_pay: true,
       simple_pay_price: 2,
