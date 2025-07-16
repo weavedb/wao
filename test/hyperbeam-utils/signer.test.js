@@ -1,41 +1,17 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
-import { acc, mu, AO, toAddr } from "../src/test.js"
-import { mod, getJWK } from "./lib/test-utils.js"
-import { generateTestCases } from "./gen.js"
-import HB from "../src/hb.js"
-import { isNotNil, filter, isNil, range } from "ramda"
-import { randomBytes } from "node:crypto"
-import { wait } from "../src/utils.js"
-import HyperBEAM from "../src/hyperbeam.js"
-import erl from "../src/toerl.js"
-
-const data = `
-local count = 0
-Handlers.add("Inc", "Inc", function (msg)
-  count = count + 1
-  msg.reply({ Data = "Count: "..tostring(count) })
-end)
-
-Handlers.add("Get", "Get", function (msg)
-  msg.reply({ Data = "Count: "..tostring(count) })
-end)`
+import { mod } from "../lib/test-utils.js"
+import { generateTestCases } from "../lib/gen.js"
+import HB from "../../src/hb.js"
+import HyperBEAM from "../../src/hyperbeam.js"
 
 describe("Hyperbeam Signer", function () {
-  let hb, hb2, hbeam, jwk, addr, store_prefix
-  before(async () => {
-    jwk = getJWK("../../HyperBEAM/.wallet.json")
-    addr = toAddr(jwk.n)
-    hbeam = await new HyperBEAM({}).ready()
-  })
+  let hb, hbeam
+  before(async () => (hbeam = await new HyperBEAM({ reset: true }).ready()))
 
-  beforeEach(async () => {
-    hb = await new HB({}).init(jwk)
-  })
+  beforeEach(async () => (hb = hbeam.hb))
 
-  after(async () => {
-    hbeam.kill()
-  })
+  after(async () => hbeam.kill())
   it("should generate valid signatures", async () => {
     const { pid } = await hb.spawn()
     const { slot } = await hb.schedule({ pid })
