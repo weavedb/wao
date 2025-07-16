@@ -3,6 +3,8 @@ import { resolve } from "path"
 import { isNil, map } from "ramda"
 import { rmSync, readFileSync, readdirSync } from "fs"
 import devs from "./devs.js"
+import dotenv from "dotenv"
+dotenv.config({ path: ".env.hyperbeam" })
 
 export default class HyperBEAM {
   constructor({

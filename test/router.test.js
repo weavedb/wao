@@ -13,8 +13,6 @@ describe("Router Device Comprehensive Test Suite", function () {
     addr = toAddr(jwk.n)
     hbeam = await new HyperBEAM({
       clearCache: true,
-      c: "12",
-      cmake: "3.5",
     }).ready()
   })
 

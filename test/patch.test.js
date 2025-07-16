@@ -48,8 +48,6 @@ describe("Hyperbeam Device", function () {
     hbeam = await new HyperBEAM({
       clearCache: true,
       gateway: 6359,
-      c: "12",
-      cmake: "3.5",
       operator: addr,
     }).ready()
   })

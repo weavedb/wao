@@ -21,8 +21,6 @@ describe("Hyperbeam Legacynet", function () {
     addr = toAddr(jwk.n)
     hbeam = await new HyperBEAM({
       clearCache: true,
-      c: "12",
-      cmake: "3.5",
       operator: addr,
     }).ready()
   })
