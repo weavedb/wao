@@ -3,6 +3,12 @@ import { defineConfig } from 'vocs'
 export default defineConfig({
   iconUrl: '/favicon.ico',
   title: 'WAO',
+  ogImageUrl: 'https://vocs.dev/api/og?logo=%logo&title=%title&description=%description',
+  topNav: [ 
+    { text: 'Get Started', link: '/getting-started' },
+    { text: 'HyperBEAM', link: '/hyperbeam/decoding-from-scratch' }, 
+    { text: 'API', link: '/api/ao' }, 
+  ],   
   socials: [
     {
       icon: 'discord',
