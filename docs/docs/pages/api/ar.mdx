@@ -1,20 +1,8 @@
-### AR
+# AR
 
 `AR` handles operations on the base Arweave Storage layer as well as wallet connections.
 
-- [Instantiate](#instantiate)
-- [Set or Generate Wallet](#set-or-generate-wallet)
-- [toAddr](#toaddr)
-- [mine](#mine)
-- [balance | toAR | toWinston](#balance--toar--towinston)
-- [transfer](#transfer)
-- [checkWallet](#checkwallet)
-- [post](#post)
-- [tx](#tx)
-- [data](#data)
-- [bundle](#bundle)
-
-#### Instantiate
+## Instantiate
 
 ```js
 import { AR } from "wao"
@@ -39,7 +27,7 @@ const ao = new AO()
 const ar = ao.ar
 ```
 
-#### Set or Generate Wallet
+## Set or Generate Wallet
 
 You can initialize AR with a wallet JWK or ArConnect.
 
@@ -59,9 +47,9 @@ You can go on without calling `init` or `gen`, in this case, AR generates a rand
 
 Once a wallet is set, `ar.jwk` and `ar.addr` will be available.
 
-#### Token Related Methods
+## Token Related Methods
 
-##### toAddr
+### toAddr
 
 Convert a jwk to the corresponding address.
 
@@ -69,7 +57,7 @@ Convert a jwk to the corresponding address.
 const addr = await ar.toAddr(jwk)
 ```
 
-##### mine
+### mine
 
 Mine pending blocks (only for arlocal).
 
@@ -77,7 +65,7 @@ Mine pending blocks (only for arlocal).
 await ar.mine()
 ```
 
-##### balance | toAR | toWinston
+### balance | toAR | toWinston
 
 Get the current balance of the specified address in AR. `addr` will be `ar.addr` if omitted.
 
@@ -88,7 +76,7 @@ const balance_AR2 = ar.toAR(balance_Winston)
 const balance_AR3 = await ar.balance(addr) // specify wallet address
 ```
 
-##### transfer
+### transfer
 
 Transfer AR token. `amount` is in AR, not in winston for simplicity.
 
@@ -105,7 +93,7 @@ const { id } = await ar.transfer(amount, to, jwk)
 For most write functions, `jwk` can be specified as the last parameter or a field like `{ data, tags, jwk }`.
 
 
-##### checkWallet
+### checkWallet
 
 `checkWallet` is mostly used internally, but it returns `this.jwk` if a wallet has been assigned with `init`, or else it generates a random wallet to use. The following pattern is used in many places. With this pattern, if a wallet is set with `init` and the `jwk` the user is passing is different, `checkWallet` produces an error to prevent the wrong wallet. If no wallet has been set with `init` or `gen` and the `jwk` is not passed, it generates and returns a random wallet.
 
@@ -119,9 +107,9 @@ some_class_method({ jwk }){
 }
 ```
 
-#### Storage Related Methods
+## Storage Related Methods
 
-##### post 
+### post 
 
 Post a data to Arweave.
 
@@ -141,8 +129,7 @@ If you must use the same name for multiple tags, the value can be an Array.
 const tags = { Name: [ "name-tag-1", "name-tag-2" ] }
 ```
 
-
-##### tx
+### tx
 
 Get a transaction.
 
@@ -150,7 +137,7 @@ Get a transaction.
 const tx = await ar.tx(txid)
 ```
 
-##### data
+### data
 
 Get a data.
 
@@ -158,7 +145,7 @@ Get a data.
 const data = await ar.data(txid, true) // true if string
 ```
 
-##### bundle
+### bundle
 
 Bundle ANS-104 dataitems.
 
