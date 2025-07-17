@@ -1,86 +1,53 @@
-### HB
+# HB
 
 `HB` handles interactions with a [Hyperbeam](https://permaweb.github.io/HyperBEAM/) node.
 
-- [Instantiate](#instantiate-5)
-- [path](#path)
-- [get](#get)
-- [fetch](#fetch)
-- [text](#text)
-- [json](#json)
-- [post](#post)
-- [spawn](#spawn)
-- [schedule](#schedule)
-- [compute](#compute)
-- [messages](#messages)
-- [Legacynet AOS](#legacynet-aos)
-- [Mainnet AOS](#mainnet-aos)
-- [Devices](#devices)
-
-#### Instantiate
+## Instantiate
 
 ```js
 import { HB } from "wao"
 const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
 ```
 
-#### path
+## HTTP Requests
 
-Create a path to request.
+### get
 
-```js
-const device = "meta"
-const path = "info"
-const json = true
-const params = {}
-const pid = ""
-const tail = ""
+Send a GET request without a signed http message. You can get the decoded data in `out`.
 
-const path = hb.path({ device, path, pid, json, params tail }) 
-// /~meta@1.0/info/serialize~json@1.0
-```
-
-#### fetch
-
-Request without a signature.
+- `out = decode( headers, body )`
 
 ```js
-const result = await hb.fetch(path, json)
-```
-
-#### text
-
-Request a text response without a signature.
-
-```js
-const result = await hb.text(device, path, params, tail)
-```
-
-#### json
-
-Request a json response without a signature.
-
-```js
-const result = await hb.json(device, path, params, tail)
-```
-
-#### get
-
-Send a GET request without a signed http message. 
-
-```js
-const result = await hb.get({ ...headers })
+const { out, headers, body } = await hb.get({ path, ...params})
 ```
  
-#### post
+### post
 
-Send a POST request with a signed http message. `data` will be set to http body with auto-generated `content-digest`and `inline-body-key` in the header.
+Send a POST request with a signed http message. `data` will be set to http body with auto-generated `content-digest` and `inline-body-key` in the header.
 
 ```js
-const result = await hb.post({ ...headers })
+const { out, headers, body, hashpath } = await hb.post({ path, ...fields})
 ```
 
-#### spawn
+### g
+
+A shortcut for `get`.
+
+```js
+const out = await hb.g( path, params )
+```
+
+### p
+
+A shortcut for `post`.
+
+```js
+const out = await hb.p( path, params )
+```
+
+## Processes
+
+### spawn
 
 Spawn a process.
 
@@ -88,7 +55,7 @@ Spawn a process.
 const { pid } = await hb.spawn({ ...tags })
 ```
 
-#### schedule
+### schedule
 
 Equivalent to sending a message.
 
@@ -96,16 +63,31 @@ Equivalent to sending a message.
 const { slot } = await hb.schedule({ tags, data, pid })
 ```
 
-#### compute
+### compute
 
 Equivalent to getting a result.
 
 ```js
 const res = await hb.compute({ pid, slot })
-const { Messages, Spawns, Assignments, Output } = res
 ```
 
-#### messages
+### message
+
+`message` = `schedule` + `compute`.
+
+```js
+const { pid, slot, res } = await hb.message({ tags, data, pid })
+```
+
+### now
+
+Compute up to the latest slot.
+
+```js
+const res = await hb.now({ pid })
+```
+
+### messages
 
 Get messages on a process. You can get next messages by `message.next`. 
 
@@ -120,9 +102,35 @@ if(msgs.next) const msgs2 = await msg.next()
 - `pid` : a process id
 - `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawed the process. `to` is inclusive. Both are optional. 
 
-#### Legacynet AOS
+## Utilities
 
-##### spawnLegacy
+### sign
+
+Sign a message without sending it.
+
+```js
+const signed_msg = await hb.sign(msg)
+```
+
+### send
+
+Send a signed message.
+
+```js
+const res = await hb.send(signed_msg)
+```
+
+### commit
+
+Sign a message with commitments.
+
+```js
+const committed_msg = await hb.commit(msg)
+```
+
+## Legacynet AOS
+
+### spawnLegacy
 
 Spawn Legacynet AOS.
 
@@ -130,7 +138,7 @@ Spawn Legacynet AOS.
 const { pid } = await hb.spawnLegacy({ tags, data })
 ```
 
-##### scheduleLegacy
+### scheduleLegacy
 
 Schedule a legacynet aos message.
 
@@ -138,7 +146,7 @@ Schedule a legacynet aos message.
 const { slot } = await hb.scheduleLegacy({ tags, data, pid, action })
 ```
 
-##### computeLegacy
+### computeLegacy
 
 Compute legacynet AOS state.
 
@@ -147,7 +155,7 @@ const res = await hb.computeLegacy({ pid, slot })
 const { Messages, Spawns, Assignments, Output } = res
 ```
 
-##### dryrun
+### dryrun
 
 `dryrun` is only for legacynet AOS. Mainnet AOS disabled this feature for a performance reason.
 
@@ -156,11 +164,11 @@ const res = await hb.dryrun({ tags, data, pid, action })
 const { Messages, Spawns, Assignments, Output } = res
 ```
 
-#### Hyper AOS
+## Hyper AOS
 
 AOS with Lua VM (`lua@5.3a`) instead of Wasm.
 
-##### spawnLua
+### spawnLua
 
 The AOS module is fetched from the Arweave mainnet.
 
@@ -168,7 +176,7 @@ The AOS module is fetched from the Arweave mainnet.
 const { pid } = await hb.spanw("8DvyaxF8xpHMgPdmpMnhcb1mjY-M8qr2kGxnCpGMb60")
 ```
 
-##### scheduleLua
+### scheduleLua
 
 This is an alias of `scheduleLegacy`.
 
@@ -176,23 +184,23 @@ This is an alias of `scheduleLegacy`.
 const { slot } = await hb.scheduleLua({ tags, data, pid, action })
 ```
 
-##### computeLua
+### computeLua
 
 ```js
 const { outbox, output } = await hb.computeLua({ slot, pid })
 ```
 
-#### Mainnet AOS
+## Mainnet AOS
 
 Mainnet AOS processes have dedicated API.
 
-##### spawnAOS
+### spawnAOS
 
 ```js
 const { pid } = await hb.spawnAOS()
 ```
 
-##### messageAOS
+### messageAOS
 
 `messageAOS` = `schedule` + `computeAOS`.
 
@@ -200,30 +208,8 @@ const { pid } = await hb.spawnAOS()
 const result = await hb.messageAOS({ pid, action, tags, data })
 ```
 
-##### computeAOS
+### computeAOS
 
 ```js
 const result = await hb.computeAOS({ pid, slot })
 ```
-
-#### Devices
-
-Each device has its own API based on the paths.
-
-##### meta
-
-```js
-const info = await hb.meta.info()
-const address = await hb.meta.info({ key: "address" })
-await hb.meta.info({ method: "POST", configA: "valA" }) // update node config
-
-const build = await hb.meta.build()
-```
-
-##### hyperbuddy
-
-```js
-const metrics = await hb.hyperbuddy.metrics()
-```
-
-More devices will be added soon.

@@ -264,7 +264,7 @@ class HB {
     return await this.getJSON({ path: `/${pid}/slot${path}` })
   }
 
-  async messages({ pid, from, to, limit } = {}) {
+  async messages({ pid, from, to } = {}) {
     let params = `target=${pid}`
     if (isNotNil(from)) params += `&from=${from}`
     if (isNotNil(to)) params += `&to=${to}`
@@ -275,7 +275,7 @@ class HB {
     if (res.page_info.has_next_page) {
       res.next = async () => {
         const from2 = last(res.edges).cursor + 1
-        return await this.messages({ pid, from: from2, to, limit })
+        return await this.messages({ pid, from: from2, to })
       }
     }
     return res
