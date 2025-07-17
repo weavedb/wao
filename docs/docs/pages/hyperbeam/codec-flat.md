@@ -57,3 +57,22 @@ for (const v of cases) {
   console.log(JSON.parse(body))
 }
 ```
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [codec-flat.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/codec-flat.test.js)
+
+Run tests:
+
+```bash
+yarn test test/codec-flat.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)

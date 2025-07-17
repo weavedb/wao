@@ -134,3 +134,27 @@ assert.equal(await p.d("Get"), "Count: 1")
 await p.m("Inc")
 assert.equal(await p.d("Get"), "Count: 2")
 ```
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [legacynet-aos.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/legacynet-aos.test.js)
+
+Run tests:
+
+```bash
+yarn test test/legacynet-aos.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [Device: ~relay@1.0](https://hyperbeam.ar.io/build/devices/relay-at-1-0.html)
+- [Building ao Processes](https://hyperbeam.ar.io/build/building-on-ao.html)
+- [AO Cookbook](https://cookbook_ao.arweave.net/)
+- [AO Class API](/api/ao)
+- [Process Class API](/api/process)
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)

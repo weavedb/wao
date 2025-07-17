@@ -1,27 +1,17 @@
-#### 1. Create an APP
+#### Run a Single Test File
 
 ```bash
-npx wao create waoapp && cd waoapp
+yarn test test/hypermbeam.test.js
 ```
 
-#### 2. Run WAO Proxy
+### Run Test Cases with `only`
 
 ```bash
-npx wao proxy
+yarn test-only test/hypermbeam.test.js
 ```
 
-#### 3. Connect the Browser to the Proxy
-
-Go to [the web app](https://preview.wao.eco) and open `Networks`, then click `Proxy`.
-
-#### 4. Run Test
+#### Run All Test Files
 
 ```bash
-yarn test test/test.js
-```
-
-#### 5. Deploy a Process to AO Testnet
-
-```bash
-yarn deploy src/counter.lua --wallet PATH_TO_WALLET_JSON
+yarn test-all
 ```

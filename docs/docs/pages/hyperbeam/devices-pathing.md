@@ -6,7 +6,7 @@ For instance, the `meta@1.0` device lets you get and set node configurations wit
 
 Let's get the info with bare JS `fetch`. `http://localhost:10001` is the default hostname when running a node with WAO.
 
-The minimum viable devices to run a HyperBEAM node are `flat@1.0`, `httpsig@1.0`, `structured@1.0`, `json@1.0`, and `meta@1.0`. These are codec devices except for `meta@1.0`, which handles node configuration and is the starting point of device resolution in the system. To gain deep understanding of AO Core and HyperBEAM, we should understand these codecs first. 
+The minimum viable devices to run a HyperBEAM node are `flat@1.0`, `httpsig@1.0`, `structured@1.0`, `json@1.0`, and `meta@1.0`. These are codec devices except for `meta@1.0`, which handles node configuration and is the starting point of device resolution in the system. To gain deep understanding of AO-Core and HyperBEAM, we should understand these codecs first. 
 
 You can pass these device names to the WAO `HyperBEAM` class to preload only specific devices.
 
@@ -355,21 +355,47 @@ Chaining `/~json@1.0/serialize` comes in handy in certain cases, but sometimes t
 
 In this chapter, you saw three basic URL schemes to access HyperBEAM:
 
-### 1. Device and Method
+**1. Device and Method**
 
-/~device_name@version/method_name
+> /~device_name@version/method_name
 
 - `/~meta@1.0/info`
 - `/~meta@1.0/build`
 
-### 2. Accessing Key
+**2. Accessing Key**
 
 - `/~meta@1.0/info/address`
 - `/~meta@1.0/info/preloaded_devices`
 
-### 3. Chaining Another Device
+**3. Chaining Another Device**
 
 - `/~meta@1.0/info/~json@1.0/serialize`
 
 
 These patterns are the same with any other devices.
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [devices-pathing.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/devices-pathing.test.js)
+
+Run tests:
+
+```bash
+yarn test test/devices-pathing.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [Intro to HyperBEAM](https://hyperbeam.ar.io/build/introduction/what-is-hyperbeam.html)
+- [Intro to AO-Core](https://hyperbeam.ar.io/build/introduction/what-is-ao-core.html)
+- [HyperBEAM Core Capabilities](https://hyperbeam.ar.io/build/hyperbeam-capabilities.html)
+- [Pathing in HyperBEAM](https://hyperbeam.ar.io/build/pathing-in-hyperbeam.html)
+- [HyperBEAM Devices](https://hyperbeam.ar.io/build/devices/hyperbeam-devices.html)
+- [Device: ~meta@1.0](https://hyperbeam.ar.io/build/devices/meta-at-1-0.html)
+- [Device: ~json@1.0](https://hyperbeam.ar.io/build/devices/json-at-1-0.html)
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)

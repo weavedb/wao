@@ -137,3 +137,23 @@ for (const v of cases) {
   console.log(JSON.parse(out))
 }
 ```
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [codec-structured.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/codec-structured.test.js)
+
+Run tests:
+
+```bash
+yarn test test/codec-structured.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [Structured Field Values for HTTP [RFC-9651]](https://datatracker.ietf.org/doc/rfc9651/)
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)
