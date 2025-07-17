@@ -1,25 +1,35 @@
-### HyperBEAM
-
+# HyperBEAM
 
 HperBEAM class can start and manage a HyperBEAM node from within JS code for testing.
 
+You should first install HyperBEAM on your local machine by following [the official docs](https://hyperbeam.ar.io/run/running-a-hyperbeam-node.html).
+
+## Basic Usage
+
 ```js
-import { HyperBEAM, wait } from "wao/test"
+import { HyperBEAM } from "wao/test"
 import { describe, it, before, after } from "node:test"
 
 describe("HyperBEAM", function () {
   let hbeam
   before(async () => {
-	hbeam = new HyperBEAM({ 
-      port: 10001, // port to run HyperBEAM node
-      c: "12", // C version for compilers
-      cmake: "3.5", // minimum cmake version
-      gateway: 4000, // change gateway url
-      legacy: true, // true if running legacynet AOS
-	  wallet: ".wallet.json", // operator wallet location relative to cwd
-      cwd: "../HyperBEAM" // HyperBEAM node directory
-    })
-	await wait(5000)
+	hbeam = await new HyperBEAM({ 
+      port: 10001,
+	  wallet: ".wallet.json",
+      cwd: "../HyperBEAM", 
+      reset: true,
+	  bundler: 4001,
+	  gateway: 4000,
+	  logs: true,
+	  shell: true,
+	  as: [ "genesis_wasm" ],
+	  devices: [ "flat", "structured", "httpsig", "json", "meta" ],
+	  faff: [ addr, addr2, addr3 ],
+	  simple_pay: true,
+	  simple_pay_price: 3,
+	  p4_lua: { processor: pid, client: cid },
+	  operator: addr
+    }).ready()
   })
   after(() => hbeam.kill())
   it("should run", async () => {
@@ -30,12 +40,162 @@ describe("HyperBEAM", function () {
 hbeam.kill()
 ```
 
-`c` and `cmake` define environment variables to run HyperBEAM with. You might not need them at all.
+## Parameters
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `port` | `10001` | Port number for the HyperBEAM node |
+| `cwd` | `../HyperBEAM` | node directory relative to current working directory |
+| `wallet` | `.wallet.json` | node operator jwk location relative to cwd |
+| `reset` | `false` | clear storage to start fresh |
+| `bundler` | - | bundler service port |
+| `gateway` | - | gateway service port |
+| `logs` | `true` | set `false` to disable HyperBEAM logs |
+| `shell` | `true` | `false` to not auto-start `rebar3 shell` |
+| `as` | `[]` | `rocksdb`, `genesis_wasm`, `http3` |
+| `devices` | - | array of preloaded devices, `undefined` to load everything |
+| `faff` | - | array of addresses (likely for funding/faucet) |
+| `simple_pay` | `false` | enable simple-pay@1.0 |
+| `simple_pay_price` | - | base price for transactions |
+| `p4_lua` | - | `{ processor: pid, client: cid }` |
+| `operator` | - | payment operator address |
+
+## Environment Variables
+
+If your installation requires environment variables to run `rebar3`, define then in `.env.hyperbeam`.
+
+```dotenv [.env.hyperbeam]
+CC=gcc-12
+CXX=g++-12
+CMAKE_POLICY_VERSION_MINIMUM=3.5
+```
+## Preloaded Devices
+
+| Key | Name | Module |
+|-----|------|--------|
+| `meta` | `meta@1.0` | `dev_meta` |
+| `json` | `json@1.0` | `dev_codec_json` |
+| `flat` | `flat@1.0` | `dev_codec_flat` |
+| `httpsig` | `httpsig@1.0` | `dev_codec_httpsig` |
+| `structured` | `structured@1.0` | `dev_codec_structured` |
+| `process` | `process@1.0` | `dev_process` |
+| `message` | `message@1.0` | `dev_message` |
+| `scheduler` | `scheduler@1.0` | `dev_scheduler` |
+| `delegated-compute` | `delegated-compute@1.0` | `dev_delegated_compute` |
+| `genesis-wasm` | `genesis-wasm@1.0` | `dev_genesis_wasm` |
+| `lua` | `lua@5.3a` | `dev_lua` |
+| `wasi` | `wasi@1.0` | `dev_wasi` |
+| `wasm-64` | `wasm-64@1.0` | `dev_wasm` |
+| `json-iface` | `json-iface@1.0` | `dev_json_iface` |
+| `test-device` | `test-device@1.0` | `dev_test` |
+| `patch` | `patch@1.0` | `dev_patch` |
+| `push` | `push@1.0` | `dev_push` |
+| `stack` | `stack@1.0` | `dev_stack` |
+| `multipass` | `multipass@1.0` | `dev_multipass` |
+| `faff` | `faff@1.0` | `dev_faff` |
+| `p4` | `p4@1.0` | `dev_p4` |
+| `node-process` | `node-process@1.0` | `dev_node_process` |
+| `simple-pay` | `simple-pay@1.0` | `dev_simple_pay` |
+| `cron` | `cron@1.0` | `dev_cron` |
+| `relay` | `relay@1.0` | `dev_relay` |
+| `router` | `router@1.0` | `dev_router` |
+| `cache` | `cache@1.0` | `dev_cache` |
+| `local-name` | `local-name@1.0` | `dev_local_name` |
+| `lookup` | `lookup@1.0` | `dev_lookup` |
+| `name` | `name@1.0` | `dev_name` |
+| `compute` | `compute@1.0` | `dev_cu` |
+| `dedup` | `dedup@1.0` | `dev_dedup` |
+| `manifest` | `manifest@1.0` | `dev_manifest` |
+| `monitor` | `monitor@1.0` | `dev_monitor` |
+| `snp` | `snp@1.0` | `dev_snp` |
+| `volume` | `volume@1.0` | `dev_volume` |
+| `poda` | `poda@1.0` | `dev_poda` |
+| `greenzone` | `greenzone@1.0` | `dev_green_zone` |
+| `hyperbuddy` | `hyperbuddy@1.0` | `dev_hyperbuddy` |
+| `ans104` | `ans104@1.0` | `dev_codec_ans104` |
+| `cacheviz` | `cacheviz@1.0` | `dev_cacheviz` |
+| `wao` | `wao@1.0` | `dev_wao` |
+
+If the device is not listed, you need to define it yourself.
+
+- `device = { name, module }`
 
 ```js
-const env = {
-  CC: `gcc-${c}`,
-  CXX: `g++-${c}`,
-  CMAKE_POLICY_VERSION_MINIMUM: cmake
-}
+const hbeam = await new HyperBEAM({
+  devices: [
+    "flat",
+	"structured",
+	"httpsig",
+	"json",
+	"meta",
+    { name: "mydev@1.0", module: "dev_mydev" }
+  ]
+}).ready()
+```
+
+## Node Operator Address
+
+You can use `HyperBEAM.OPERATOR` as a placeholder for the node operator address before instantiation.
+
+```js
+const hbeam = await new HyperBEAM({
+  operator: HyperBEAM.OPERATOR,
+  faff: [ HyperBEAM.OPERATOR, addr2, addr3 ]
+}).ready()
+```
+`HyperBEAM.OPERATOR` will be replaced with the actual node operator address on instantiation.
+
+## Eunit Testing
+
+You can run Erlang eunit tests from JS.
+
+```js
+import assert from "assert"
+import { after, describe, it, before, beforeEach } from "node:test"
+import HyperBEAM from "../../src/hyperbeam.js"
+
+describe("Hyperbeam Eunit", function () {
+  let hbeam
+  before(async () => {
+    hbeam = new HyperBEAM({ reset: true, shell: false }))
+  })
+  beforeEach(async () => (hb = hbeam.hb))
+  
+  it("should run a single module test", async () => {
+	await hbeam.eunit("dev_message")
+  })
+  
+  it("should run multiple module tests", async () => {
+	await hbeam.eunit([ "dev_message", "dev_process", "dev_schduler" ])
+  })
+  
+  it("should run a specific test", async () => {
+	await hbeam.eunit("dev_message", "verify_test")
+  })
+
+  it("should run multiple tests", async () => {
+	await hbeam.eunit([
+	  "dev_message:verify_test", 
+	  "dev_process:persistent_process_test"
+    )
+  })
+})
+```
+
+## Reading Local Files
+
+You can read local files under the HyperBEAM `cwd` directory with the `file` method.
+
+The following is reading lua scripts and caching them to the HyperBEAM node, then starting another node process on port `10002` with the `p4` payment service using the cached Lua scripts.
+
+```js
+const process = hbeam.file("scripts/p4-payment-process.lua")
+const pid = await hb.cacheScript(process)
+const client = hbeam.file("scripts/p4-payment-client.lua")
+const cid = await hb.cacheScript(client)
+const hbeam2 = await new HyperBEAM({
+  port: 10002,
+  operator: hb.addr,
+  p4_lua: { processor: pid, client: cid },
+}).ready()
 ```
