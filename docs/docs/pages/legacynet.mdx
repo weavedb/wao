@@ -152,16 +152,16 @@ end)
 ```
 
 ```js
-// by default it extracts JSON decoded Data
+// by default it extracts string Data
 const out = await p.d("Hello")
 assert.deepEqual(out, { Name: "Bob" })
 
 // equivalent
-const out2 = await p.d("Hello", { get: true })
+const out2 = await p.d("Hello", { get: false })
 assert.deepEqual(out2, { Name: "Bob" })
 
-// get string Data
-const out3 = await p.d("Hello2", { get: false })
+// get JSON decoded Data
+const out3 = await p.d("Hello2", { get: true })
 assert.equal(out3, "Hello, World!")
 
 // get a tag
