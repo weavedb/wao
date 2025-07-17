@@ -1,162 +1,70 @@
-# Introduction - Decoding HyperBEAM from Scratch
+# Decoding HyperBEAM from Scratch
 
 ![](/images/decoding-from-sctatch.png)
 
-:::note
-Welcome to the complete guide to understanding AO Core and HyperBEAM from the ground up.
+Welcome to the complete guide to understanding HyperBEAM from the ground up.
 
-If you've ever wondered how the Arweave compute layer actually works under the hood, or felt overwhelmed by the complexity of decentralized computing protocols, this tutorial series is for you.
-:::
+## What This Tutorial Is For
 
----
+This tutorial series takes you on a deep dive into HyperBEAM internals, teaching you everything from basic concepts to advanced implementations. You'll learn by doing - writing tests with WAO (HyperBEAM SDK in JS) that interact directly with HyperBEAM nodes.
 
-## What You'll Learn
+### Why WAO + HyperBEAM?
 
-This isn't just another "hello world" tutorial. We're going to systematically decode every aspect of HyperBEAM by building, breaking, and rebuilding its components. 
+WAO transforms the complex world of HyperBEAM development into something approachable:
 
-| **Topic** | **What You'll Master** |
-|-----------|------------------------|
-| **Device Architecture** | How HyperBEAM's modular device system works and how to build your own custom devices |
-| **Message Encoding/Decoding** | The complete journey of a message through structured encoding, flat encoding, HTTP signatures, and back |
-| **Hashpaths & Verifiability** | How compute steps are chained and made cryptographically verifiable |
-| **Process Management** | Spawning processes, scheduling messages, and managing state transitions |
-| **Advanced Patterns** | Device composition, payment systems, and AOS integration |
+- **JavaScript-First Development**: Everything is JavaScript - no need to context-switch between languages during testing
+- **Sandbox Testing Environment**: WAO automatically spins up isolated HyperBEAM nodes for each test suite, ensuring clean, reproducible tests
+- **Simplified APIs with Syntactic Sugar**: WAO's succinct API abstracts away complexity while giving you full control when needed
+- **Automatic Codec & Signing Handling**: Complex encoding/decoding pipelines and HTTP message signatures are handled seamlessly in the background
 
----
+### What You'll Master
 
-## Why This Matters
+By working through this tutorial series, you'll gain:
 
-:::warning
-HyperBEAM isn't just another blockchain project - it's a fundamental reimagining of how computation can be distributed, verified, and composed.
-:::
+- **Deep Protocol Knowledge**: Understand how messages flow through HyperBEAM's codec pipeline, from structured encoding to HTTP signatures
+- **Device Development Skills**: Build custom HyperBEAM devices that extend the platform's capabilities
+- **Process Management Expertise**: Learn to spawn, schedule, and manage stateful computations
+- **AOS Integration Know-How**: Connect HyperBEAM with the broader AO ecosystem
+- **Payment System Understanding**: Implement complex payment flows using HyperBEAM's built-in devices
 
-Understanding its internals gives you the power to:
-
-1. **Build Better Applications**  
-   When you understand the protocol, you can design more efficient and powerful applications
-
-2. **Debug with Confidence**  
-   No more black box mysteries - you'll know exactly what's happening at every step
-
-3. **Contribute to the Ecosystem**  
-   The AO ecosystem needs developers who deeply understand the technology
-
-4. **Push Boundaries**  
-   With deep knowledge comes the ability to innovate and extend the platform in ways others can't imagine
-
----
-
-## Our Approach
-
-### **Hands-On, Test-Driven Learning**
-
-We'll use a hands-on, test-driven approach throughout this series. Every concept will be explored through actual code you can run and modify. We'll start with the basics and gradually build up to complex systems like payment processors and AOS modules.
-
-### **Tools We'll Use**
-
-| Tool | Purpose |
-|------|---------|
-| **HyperBEAM** | A local node running on your machine |
-| **WAO** | A testing framework and SDK that makes interacting with HyperBEAM intuitive |
-| **JavaScript/Node.js** | For writing tests and exploring the system |
-| **Erlang** | For building custom HyperBEAM devices (minimal usage) |
-
-:::tip
-Don't worry if you're not familiar with Erlang - we'll introduce concepts as needed, and most of your interaction will be through JavaScript.
-:::
-
----
+This isn't just theoretical knowledge - you'll have practical tools and patterns to build production-ready applications on HyperBEAM and interact seamlessly with AOS processes.
 
 ## The Journey Ahead
 
 This series follows a carefully crafted path from basics to advanced topics. Each chapter builds on the previous ones, so it's important to follow them in order:
 
 ### **Part 1: Foundations**
-| Chapter | Topic | What You'll Learn |
-|---------|-------|-------------------|
-| 1 | **Installing HyperBEAM and WAO** | Setting up your development environment |
-| 2 | **Devices and Pathing** | Understanding HyperBEAM's URL routing and device system |
-| 3 | **Custom Devices and Codecs** | Building your first custom device and learning about codecs |
+| Chapter | Topic |
+|---------|-------|
+| 1 | **[Installing HyperBEAM and WAO](/hyperbeam/installing-hb-wao)** - Setting up your development environment |
+| 2 | **[Devices and Pathing](/hyperbeam/devices-pathing)** - Understanding HyperBEAM's URL routing and device system |
+| 3 | **[Custom Devices and Codecs](/hyperbeam/custom-devices-codecs)** - Building your first custom device and learning about codecs |
 
 ### **Part 2: The Codec System**
-| Chapter | Topic | What You'll Learn |
-|---------|-------|-------------------|
-| 4 | **Flat Codec** | Deep dive into path flattening for HTTP compatibility |
-| 5 | **Structured Codec** | Handling complex data types with AO's type system |
-| 6 | **Httpsig Codec** | Preparing messages for HTTP signatures |
+| Chapter | Topic |
+|---------|-------|
+| 4 | **[Flat Codec](/hyperbeam/codec-flat)** - Deep dive into path flattening for HTTP compatibility |
+| 5 | **[Structured Codec](/hyperbeam/codec-structured)** - Handling complex data types with AO's type system |
+| 6 | **[Httpsig Codec](/hyperbeam/codec-httpsig)** - Preparing messages for HTTP signatures |
 
 ### **Part 3: Security & Verification**
-| Chapter | Topic | What You'll Learn |
-|---------|-------|-------------------|
-| 7 | **HTTP Message Signatures** | Implementing RFC-9421 for message verification |
-| 8 | **Hashpaths** | Understanding compute verification through chained hashes |
+| Chapter | Topic |
+|---------|-------|
+| 7 | **[HTTP Message Signatures](/hyperbeam/http-message-signatures)** - Implementing RFC-9421 for message verification |
+| 8 | **[Hashpaths](/hyperbeam/hashpaths)** - Understanding compute verification through chained hashes |
 
 ### **Part 4: Advanced Concepts**
-| Chapter | Topic | What You'll Learn |
-|---------|-------|-------------------|
-| 9 | **Device Composition** | Combining devices for powerful workflows |
-| 10 | **Processes and Scheduler** | Managing stateful computations |
-| 11 | **Legacynet Compatible AOS** | Integrating with the AOS ecosystem |
-| 12 | **Payment System** | Building complex systems with faff@1.0 and p4@1.0 |
+| Chapter | Topic |
+|---------|-------|
+| 9 | **[Device Composition](/hyperbeam/device-composition)** - Combining devices for powerful workflows |
+| 10 | **[Processes and Scheduler](/hyperbeam/processes-scheduler)** - Managing stateful computations |
+| 11 | **[Legacynet Compatible AOS](/hyperbeam/legacynet-aos)** - Integrating with the AOS ecosystem |
+| 12 | **[Payment System](/hyperbeam/payment-system)** - Building complex payment systems with p4@1.0 |
 
----
+## Resources
 
-## Prerequisites
-
-To get the most out of this series, you should have:
-
-- **Basic JavaScript Knowledge**  
-  You should be comfortable with async/await, ES6 modules, and Node.js
-  
-- **Command Line Familiarity**  
-  We'll be running commands and managing processes
-  
-- **Curiosity**  
-  The most important prerequisite - a desire to understand how things really work
-
-:::note
-You don't need to be an expert in blockchain, cryptography, or distributed systems. We'll explain these concepts as we encounter them.
-:::
-
----
-
-## A Different Kind of Tutorial
-
-:::danger
-**Most tutorials show you how to _use_ a technology.**  
-**This series shows you how the technology _works_.**
-
-This means we'll sometimes write code that the SDK normally handles for you. We'll manually encode messages, construct signatures, and manage hashpaths. Why? Because true understanding comes from doing things the hard way first.
-:::
-
----
-
-## Getting Started
-
-Ready to begin? The next chapter will walk you through setting up HyperBEAM and WAO on your local machine. From there, we'll start our exploration with simple device interactions and gradually work our way up to building complex, production-ready systems.
-
-:::tip
-**Remember**: Every expert was once a beginner who refused to give up. The concepts might seem overwhelming at first, but stick with it. By the end of this series, you'll have a deep, practical understanding of one of the most innovative compute platforms in the decentralized web.
-:::
-
-**Let's decode HyperBEAM together.**
-
----
-
-## Learning Steps
-
-1. [Installing HyperBEAM and WAO](/hyperbeam/installing-hb-wao)
-2. [Devices and Pathing](/hyperbeam/devices-pathing)
-3. [Custom Devices and Codecs](/hyperbeam/custom-devices-codecs)
-4. [Flat Codec](/hyperbeam/codec-flat)
-5. [Structured Codec](/hyperbeam/codec-structured)
-6. [Httpsig Codec](/hyperbeam/codec-httpsig)
-7. [HTTP Message Signatures](/hyperbeam/http-message-signatures)
-8. [Hashpaths](/hyperbeam/hashpaths)
-9. [Device Composition](/hyperbeam/device-composition)
-10. [Processes and Scheduler](/hyperbeam/processes-scheduler)
-11. [Legacynet Compatible AOS](/hyperbeam/legacynet-aos)
-12. [Payment System](/hyperbeam/payment-system)
+- **[Working Test Suite](https://github.com/weavedb/wao/tree/master/dhfs-tutorial-app)** - Complete test files for all chapters
+- **[HyperBEAM Implementation with Tutorial Devices](https://github.com/weavedb/HyperBEAM/tree/wao)** - HyperBEAM fork with all custom devices from this tutorial
 
 ---
 

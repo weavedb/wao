@@ -545,3 +545,23 @@ It works!!
 
 Congratulations on having come this far!
 The `p4@1.0` payment system with internal Lua scripts using `node-processes@1.0` is one of the most advanced usages of HyperBEAM to be tested externally. If you got this to work, most other things are less complex, so you should be ready to build anything on top of HyperBEAM now.
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [payment-system.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/payment-system.test.js)
+
+Run tests:
+
+```bash
+yarn test test/payment-system.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [Device: ~lua@5.3a](https://hyperbeam.ar.io/build/devices/lua-at-5-3a.html)
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)

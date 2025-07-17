@@ -183,3 +183,22 @@ for(const json of cases){
   assert.deepEqual(json,json2)
 }
 ````
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [codec-httpsig.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/codec-httpsig.test.js)
+
+Run tests:
+
+```bash
+yarn test test/codec-httpsig.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)
