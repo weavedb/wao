@@ -12,7 +12,7 @@ export default class HyperBEAM {
   static OPERATOR = Symbol("operator")
   constructor({
     port = 10001,
-    cu = 6363,
+    //cu = 6363,
     as = [],
     bundler,
     gateway,
@@ -52,7 +52,7 @@ export default class HyperBEAM {
         }
       }
     }
-    this.cu = cu
+    //this.cu = cu
     this.store_prefix = store_prefix
       ? "cache-mainnet-" + Math.floor(Math.random() * 10000000)
       : "cache-mainnet"
