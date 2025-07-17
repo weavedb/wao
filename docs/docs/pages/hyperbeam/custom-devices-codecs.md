@@ -396,3 +396,24 @@ The node receives it, verifies the signature, then decodes it first with `struct
 3. `Msg2 = dev_codec_structured:to(Msg1) + Commitments + Path`
 
 `flat@1.0` is used to flatten and unflatten nested object paths in the `httpsig@1.0` device since HTTP headers and body can only handle string values, not nested structures.
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [custom-devices-codecs.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/custom-devices-codecs.test.js)
+
+Run tests:
+
+```bash
+yarn test test/custom-devices-codecs.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## Reference
+
+- [Extending HyperBEAM with Devices](https://hyperbeam.ar.io/build/devices/building-devices.html)
+- [Device: ~json@1.0](https://hyperbeam.ar.io/build/devices/json-at-1-0.html)
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)
