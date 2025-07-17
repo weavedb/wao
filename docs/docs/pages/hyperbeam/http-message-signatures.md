@@ -221,14 +221,17 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/http-message-signatures.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
 
+##### Specs
+
 - [HTTP Message Signatures [RFC-9421]](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-message-signatures)
+
+##### WAO API
+
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)

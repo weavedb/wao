@@ -192,13 +192,17 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/codec-httpsig.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
+
+##### Device API
+
+- [dev_codec_httpsig.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_codec_httpsig.html)
+
+##### WAO API
 
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)

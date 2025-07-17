@@ -256,16 +256,27 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/processes-scheduler.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
+
+##### Device Docs
 
 - [Device: ~message@1.0](https://hyperbeam.ar.io/build/devices/message-at-1-0.html)
 - [Device: ~process@1.0](https://hyperbeam.ar.io/build/devices/process-at-1-0.html)
 - [Device: ~scheduler@1.0](https://hyperbeam.ar.io/build/devices/scheduler-at-1-0.html)
+
+##### Device API
+
+- [dev_stack.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_stack.html)
+- [dev_message.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_message.html)
+- [dev_process.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_process.html)
+- [dev_scheduler.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_scheduler.html)
+- [dev_patch.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_patch.html)
+
+##### WAO API
+
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)

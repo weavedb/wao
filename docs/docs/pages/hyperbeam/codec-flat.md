@@ -66,13 +66,22 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/codec-flat.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
+
+##### General
+
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)
+
+##### Device API
+
+- [dev_codec_flat.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_codec_flat.html)
+
+##### WAO API
 
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)
