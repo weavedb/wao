@@ -143,17 +143,33 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/legacynet-aos.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
 
-- [Device: ~relay@1.0](https://hyperbeam.ar.io/build/devices/relay-at-1-0.html)
+##### General
+
 - [Building ao Processes](https://hyperbeam.ar.io/build/building-on-ao.html)
 - [AO Cookbook](https://cookbook_ao.arweave.net/)
+  
+##### Device Docs
+
+- [Device: ~relay@1.0](https://hyperbeam.ar.io/build/devices/relay-at-1-0.html)
+  
+##### Device API
+
+- [dev_stack.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_stack.html)
+- [dev_message.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_message.html)
+- [dev_process.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_process.html)
+- [dev_scheduler.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_scheduler.html)
+- [dev_patch.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_patch.html)
+- [dev_relay.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_relay.html)
+- [dev_genesis_wasm.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_genesis_wasm.html)
+  
+##### WAO API
+
 - [AO Class API](/api/ao)
 - [Process Class API](/api/process)
 - [HyperBEAM Class API](/api/hyperbeam)
