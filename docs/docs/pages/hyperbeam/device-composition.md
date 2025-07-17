@@ -155,3 +155,22 @@ describe("Device Composition", function () {
 ```
 
 You can stack multiple devices in `device-stack`, but the limitation is it executes the same method on each device specified in `path`. With `process@1.0`, it executes the `compute` method, which we'll talk about in the next chapter.
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [device-composition.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/device-composition.test.js)
+
+Run tests:
+
+```bash
+yarn test test/device-composition.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)

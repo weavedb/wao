@@ -212,3 +212,23 @@ const out = await hb.p("/~mydev@1.0/forward", {
   body: "test_body",
 })
 ```
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [http-message-signatures.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/http-message-signatures.test.js)
+
+Run tests:
+
+```bash
+yarn test test/http-message-signatures.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [HTTP Message Signatures [RFC-9421]](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-message-signatures)
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)

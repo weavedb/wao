@@ -1,3 +1,4 @@
+
 #### 1. Create an APP
 
 ```bash
@@ -17,7 +18,7 @@ Go to [the web app](https://preview.wao.eco) and open `Networks`, then click `Pr
 #### 4. Run Test
 
 ```bash
-yarn test test/test.js
+yarn test test/hyperbeam.test.js
 ```
 
 #### 5. Deploy a Process to AO Testnet

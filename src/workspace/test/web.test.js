@@ -11,17 +11,7 @@ const src_data = readFileSync(
   "utf8"
 )
 
-describe("WAO", function () {
-  // lightning-fast testing in memory
-  it("should spawn a process and send messages in memory", async () => {
-    const ao = await new AO().init(acc[0])
-    const { p, pid } = await ao.deploy({ src_data, scheduler: acc[0].addr })
-
-    assert.equal(await p.d("Hello", false), "Hello, World!")
-    assert.equal(await p.m("Inc", false), "Incremented!")
-    assert.equal(await p.d("Get", false), "1")
-  })
-
+describe("WAO the Web", function () {
   // WAO Proxy must be running on your computer => "npx wao proxy"
   it("should spawn a process and send messages to the browser", async () => {
     // connect with 4000 - 4004 ports
