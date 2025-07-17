@@ -34,34 +34,21 @@ Now you can execute the functions using the WAO `HB` class.
 ```js
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { wait, toAddr, Server } from "wao/test"
-import { HyperBEAM, HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { HyperBEAM } from "wao"
 
-const cwd = "../../HyperBEAM" // HyperBEAM directory
-const wallet = ".wallet.json" // operator wallet relative to cwd
-const port = 10001
-const gateway = 4000
-const url = `http://localhost:${port}`
+const cwd = "../HyperBEAM" // HyperBEAM directory
 
 describe("Hyperbeam Legacynet", function () {
-  let hbeam, hb, jwk, server
+  let hbeam, hb
   before(async () => {
-    server = new Server({ port: gateway, log: true, hb_url: url })
-    hbeam = new HyperBEAM({ cwd, wallet, port, gateway })
-    jwk = JSON.parse(
-      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
-    )
-    await wait(5000)
+    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
   })
-  beforeEach(async () => {
-    hb = await new HB({ url }).init(jwk)
-  })
+  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
   it("should query a custome device", async () => {
-    const res = await hb.text(hb.path("foo", "info"))
+    const { version } = await hb.g("/~foo@1.0/info")
+	assert.equal("1.0", version)
   })
 })
 ```
@@ -95,33 +82,18 @@ Now you can spawn a process by specifying `execution-device`.
 ```js
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { wait, toAddr, Server } from "wao/test"
-import { HyperBEAM, HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
 
-const cwd = "../../HyperBEAM" // HyperBEAM directory
-const wallet = ".wallet.json" // operator wallet relative to cwd
-const port = 10001
-const gateway = 4000
-const url = `http://localhost:${port}`
+const cwd = "../HyperBEAM" // HyperBEAM directory
 
 describe("Hyperbeam Legacynet", function () {
-  let hbeam, hb, jwk, server
+  let hbeam, hb
   before(async () => {
-    server = new Server({ port: gateway, log: true, hb_url: url })
-    hbeam = new HyperBEAM({ cwd, wallet, port, gateway })
-    jwk = JSON.parse(
-      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
-    )
-    await wait(5000)
+    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
   })
-  beforeEach(async () => {
-    hb = await new HB({ url }).init(jwk)
-  })
+  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
-  it("should query a custome device", async () => {
+  it("should query a custom device", async () => {
     const { pid } = await hb.spawn({"excecution-device": "foo@1.0"})
     const { slot, res } = await hb.message({ pid })
   })

@@ -11,17 +11,9 @@ Legacynet AOS on HyperBEAM uses `genesis-wasm@1.0` device and an external CU for
 ```js
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { wait, toAddr, Server } from "wao/test"
-import { HyperBEAM, HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { HyperBEAM } from "wao"
 
-const cwd = "../../HyperBEAM" // HyperBEAM directory
-const wallet = ".wallet.json" // operator wallet relative to cwd
-const port = 10001
-const gateway = 4000
-const url = `http://localhost:${port}`
-
+const cwd = "../HyperBEAM" // HyperBEAM directory
 
 const lua = `
 local count = 0
@@ -35,21 +27,19 @@ Handlers.add("Get", "Get", function (msg)
 end)`
 
 describe("Hyperbeam Legacynet", function () {
-  let hbeam, hb, jwk, server
+  let hbeam, hb
   before(async () => {
-    server = new Server({ port: gateway, log: true, hb_url: url })
-    hbeam = new HyperBEAM({ cwd, wallet, port, gateway, legacy: true })
-    jwk = JSON.parse(
-      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
-    )
-    await wait(5000)
+    hbeam = await new HyperBEAM({
+      cwd,
+      reset: true,
+      as: ["genesis_wasm"],
+    }).ready()
   })
-  beforeEach(async () => {
-    hb = await new HB({ url }).init(jwk)
-  })
+
+  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
-  it("should run a legacynet AOS process with a CU", async () => {
+  it("should run a legacynet AOS process with a local CU", async () => {
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.schedule({
       pid,
