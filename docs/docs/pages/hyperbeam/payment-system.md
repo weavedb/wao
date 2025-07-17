@@ -554,14 +554,25 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/payment-system.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
 
+##### Device Docs
+
 - [Device: ~lua@5.3a](https://hyperbeam.ar.io/build/devices/lua-at-5-3a.html)
+
+##### Device API
+
+- [dev_faff.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_faff.html)
+- [dev_simple_pay.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_simple_pay.html)
+- [dev_p4.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_p4.html)
+- [dev_node_process.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_node_process.html)
+- [dev_lua.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_lua.html)
+
+##### WAO API
+
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)
