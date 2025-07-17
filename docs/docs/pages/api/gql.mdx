@@ -1,12 +1,8 @@
-### GQL
+# GQL
 
 `GQL` simplifies [the Arwave GraphQL](https://gql-guide.vercel.app/) operations to query blocks and transactions.
 
-- [Instantiate](#instantiate-3)
-- [Txs](#txs)
-- [Blocks](#blocks)
-
-#### Instantiate
+## Instantiate
 
 You can instantiate the GQL class with an endpoint `url`.
 
@@ -28,7 +24,7 @@ const ar = new AR()
 const gql = ar.gql
 ```
 
-#### Txs
+## Txs
 
 Get latest transactions.
 
@@ -36,7 +32,7 @@ Get latest transactions.
 const txs = await gql.txs()
 ```
 
-##### asc
+### asc
 
 Get transactions in ascending order.
 
@@ -44,7 +40,7 @@ Get transactions in ascending order.
 const txs = await gql.txs({ asc: true })
 ```
 
-##### first
+### first
 
 Get the firxt X transactions.
 
@@ -52,7 +48,7 @@ Get the firxt X transactions.
 const txs = await gql.txs({ first: 3 })
 ```
 
-##### after
+### after
 
 Get transactions after a specific one to paginate. Pass a `cursor`.
 
@@ -61,7 +57,7 @@ const txs = await gql.txs({ first: 3 })
 const txs2 = await gql.txs({ first: 3, after: txs[2].cursor })
 ```
 
-##### next
+### next
 
 Easier pagination with `next`.
 
@@ -73,7 +69,7 @@ const { next: next3, data: txs6_8 } = await next2()
 
 `res.next` will be `null` if there's no more transactions to paginate.
 
-##### block
+### block
 
 Get transactions within a block height range.
 
@@ -90,7 +86,7 @@ const txs = await gql.txs({ block: [0, 10] })
 
 You can also specify only `min` or `max`.
 
-##### by Transaction IDs
+### by Transaction IDs
 
 Get transactions by transaction ids.
 
@@ -103,7 +99,7 @@ or
 const txs = await gql.txs({ ids: [ TXID1, TXID2, TXID3 ] })
 ```
 
-##### by Recipients
+### by Recipients
 
 Get transactions by recipients.
 
@@ -116,7 +112,7 @@ or
 const txs = await gql.txs({ recipients: [ ADDR1, ADDR2, ADDR3 ] })
 ```
 
-##### by Owners
+### by Owners
 
 Get transactions by owners.
 
@@ -129,7 +125,7 @@ or
 const txs = await gql.txs({ owners: [ ADDR1, ADDR2, ADDR3 ] })
 ```
 
-##### by Tags
+### by Tags
 
 Get transactions that match tags.
 
@@ -137,7 +133,7 @@ Get transactions that match tags.
 const txs = await gql.txs({ tags: { Name: "Bob", Age: "30" } })
 ```
 
-##### fields
+### fields
 
 Choose fields to be returned.
 
@@ -188,7 +184,7 @@ const tx_fields = `{
 }`
 ```
 
-#### Blocks
+## Blocks
 
 Get latest blocks.
 
@@ -196,7 +192,7 @@ Get latest blocks.
 const blocks = await gql.blocks()
 ```
 
-##### asc
+### asc
 
 Get blocks in ascending order.
 
@@ -204,7 +200,7 @@ Get blocks in ascending order.
 const blocks = await gql.blocks({ asc: true })
 ```
 
-##### first
+### first
 
 Get the firxt X blocks.
 
@@ -212,7 +208,7 @@ Get the firxt X blocks.
 const blocks = await gql.blocks({ first: 3 })
 ```
 
-##### after
+### after
 
 Get blocks after a specific one to paginate. Pass a `cursor`.
 
@@ -221,7 +217,7 @@ const blocks = await gql.blocks({ first: 3 })
 const blocks2 = await gql.blocks({ first: 3, after: blocks[2].cursor })
 ```
 
-##### by Block IDs
+### by Block IDs
 
 Get blocks by block ids.
 
@@ -234,7 +230,7 @@ or
 const blocks = await gql.blocks({ ids: [ BLKID1, BLKID2, BLKID3 ] })
 ```
 
-##### height
+### height
 
 Get blocks within a block height range.
 
@@ -249,7 +245,7 @@ or
 const blocks = await gql.blocks({ height: [0, 10] })
 ```
 
-##### next
+### next
 
 Easier pagination with `next`.
 
@@ -261,7 +257,7 @@ const { next: next3, data: blocks6_8 } = await next2()
 
 `res.next` will be `null` if there's no more blocks to paginate.
 
-##### fields
+### fields
 
 ```js
 const blocks = await gql.blocks({ 
