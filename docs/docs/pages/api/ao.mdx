@@ -1,24 +1,6 @@
-### AO
+# AO
 
-- [Instantiate](#instantiate-1)
-- [deploy](#deploy)
-- [msg](#msg)
-- [dry](#dry)
-- [res](#res)
-- [ress](#ress)
-- [asgn](#asgn)
-- [load](#load)
-- [eval](#eval)
-- [spwn](#spwn)
-- [aoconnect Functions](#aoconnect-functions)
-- [postModule](#postmodule)
-- [postScheduler](#postscheduler)
-- [attest](#attest)
-- [avail](#avail)
-- [wait](#wait)
-- [var](#var)
-
-#### Instantiate
+## Instantiate
 
 You can initialize AO in the same way as AR.
 
@@ -34,9 +16,9 @@ const addr = ao.ar.addr
 await ao.ar.post({ data, tags })
 ```
 
-#### AO Core Functions
+## AO Core Functions
 
-##### deploy
+### deploy
 
 Spawn a process, get a Lua source, and eval the script. `src` is an Arweave txid of the Lua script.
 
@@ -94,7 +76,7 @@ await p.m("Inc")
 assert.equal(await p.d("Get"), 1)
 ```
 
-##### msg
+### msg
 
 Send a message.
 
@@ -164,7 +146,7 @@ end)
 
 you can only get the first `Hello, World!`, but not the second `"Hello, " .. name .. "!"` from the aoconnect `result` function.
 
-##### dry
+### dry
 
 Dryrun a message without writing to Arweave.
 
@@ -173,7 +155,7 @@ Dryrun a message without writing to Arweave.
 const { err, res, out } = await ao.dry({ pid, data, action, tags, check, get })
 ```
 
-##### res
+### res
 
 `res` does the same thing as [msg](#msg) but for an existing result with `mid`.
 
@@ -181,7 +163,7 @@ const { err, res, out } = await ao.dry({ pid, data, action, tags, check, get })
 const { err, res, out } = await ao.res({ pid, mid, check, get })
 ```
 
-##### ress
+### ress
 
 `ress` gets multiple results from a process. 
 `next()` will be returned for pagenation if there are more messages.
@@ -199,7 +181,7 @@ if(next){
 - `asc` : messages are sorted descendingly by default, set `asc=true` to reverse
 - `from` : cursor to get from
 
-##### asgn
+### asgn
 
 Assign an existing message to a process.
 
@@ -207,7 +189,7 @@ Assign an existing message to a process.
 const { err, mid, res, out } = await ao.asgn({ pid, mid, check, get })
 ```
 
-##### load
+### load
 
 Get a Lua source script from Arweave and eval it on a process.
 
@@ -215,7 +197,7 @@ Get a Lua source script from Arweave and eval it on a process.
 const { err, res, mid } = await ao.load({ src, fills, pid })
 ```
 
-##### eval
+### eval
 
 Eval a Lua script on a process.
 
@@ -223,7 +205,7 @@ Eval a Lua script on a process.
 const { err, res, mid } = await ao.eval({ pid, data })
 ```
 
-##### spwn
+### spwn
 
 Spawn a process. `module` and `scheduler` are auto-set if omitted.
 
@@ -231,7 +213,7 @@ Spawn a process. `module` and `scheduler` are auto-set if omitted.
 const { err, res, pid } = await ao.spwn({ module, scheduler, tags, data })
 ```
 
-#### aoconnect Functions
+## aoconnect Functions
 
 The original aoconnect functions `message` | `spawn` | `result` | `assign` | `dryrun`  are also available.  
 `createDataItemSigner` is available as `toSigner`.
@@ -243,9 +225,9 @@ const message = await ao.message({ process, signer, tags, data })
 const result = await ao.result({ process, message })
 ```
 
-#### Advanced Functions
+## Advanced Functions
 
-##### postModule
+### postModule
 
 `data` should be wasm binary. `overwrite` to replace the default module set to the AO instance.
 
@@ -254,7 +236,7 @@ const { err, id: module } = await ao.postModule({ data, jwk, tags, overwrite })
 
 ```
 
-##### postScheduler
+### postScheduler
 
 This will post `Scheduler-Location` with the `jwk` address as the returning `scheduler`.
 
@@ -262,7 +244,7 @@ This will post `Scheduler-Location` with the `jwk` address as the returning `sch
 const { err, scheduler } = await ao.postScheduler({ url, jwk, tags, overwrite })
 ```
 
-##### attest
+### attest
 
 Attest Arweave transactions for WeaveDrive.
 
@@ -271,7 +253,7 @@ const { err, res, id } = await ao.attest({ id, tags, jwk })
 
 ```
 
-##### avail
+### avail
 
 Make Arweave transactions available for WeaveDrive.
 
@@ -280,7 +262,7 @@ const { err, res, id } = await ao.avail({ ids, tags, jwk })
 
 ```
 
-##### wait
+### wait
 
 `wait` until the process becomes available after `spwn`. This is mostly used internally with `deploy`.
 
@@ -288,7 +270,7 @@ const { err, res, id } = await ao.avail({ ids, tags, jwk })
 const { err } = await ao.wait({ pid })
 ```
 
-##### var
+### var
 
 `var` reads a Lua variable from the current state with `dryrun`.
 
