@@ -58,7 +58,7 @@ info(Msg1, Msg2_, Opts) ->
 
 Also, add the device to `preloaded_devices` in `hb_opts.erl`.
 
-```erlang
+```erlang [/HyperBEAM/src/hb_opts.erl]
 preloaded_devices => [
   ...
   #{<<"name">> => <<"json@1.0">>, <<"module">> => dev_codec_json},
@@ -103,7 +103,7 @@ Let's look into the returned `headers`. You receive what you return from the `in
 
 The following is what you would get in the response headers.
 
-```js
+```js [HTTP Headers]
 {
   'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'access-control-allow-origin': '*',
@@ -184,7 +184,7 @@ An HTTP message consists of `headers` and `body`, and AO Core and HyperBEAM util
 
 You can create any arbitrary methods in a device, but methods to expose via URL endpoints need to be in a specific format.
 
-```erlang
+```erlang [Minimum Viable URL Exposed Method]
 method(Msg1, Msg2_, Opts) ->
   % write method logic here
   {ok, Ret}.
@@ -207,14 +207,14 @@ forward(Msg1, Msg2, Opts) ->
 ```
 Let's send something very simple with `GET`. You can only send string parameters with `GET`.
 
-```js
+```js [/test/custom-devices-codecs.test.js]
 const { body } = await hb.get({ path: "/~mydev@1.0/forward", key: "abc" })
 console.log(JSON.parse(body))
 ```
 
 This is the response.
 
-```json
+```json [JSON Response]
 {
   "msg1": {
     "accept": "*/*",
@@ -280,7 +280,7 @@ We can strip the metadata down to these minimum differences.
 
 Things will be clearer when we send complex data with `POST`.
 
-```js
+```js [/test/custom-devices-codecs.test.js]
 const { out } = await hb.post({
   path: "/~wao@1.0/forward",
   key: "abc",
@@ -289,11 +289,12 @@ const { out } = await hb.post({
   bool: true,
   body: "test_body",
 })
+console.log(JSON.parse(out))
 ```
 
 And this is the response.
 
-```json
+```json [JSON Response]
 {
   "msg1": {
     "body": "test_body",
@@ -405,15 +406,25 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/custom-devices-codecs.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## Reference
 
+##### General
+
 - [Extending HyperBEAM with Devices](https://hyperbeam.ar.io/build/devices/building-devices.html)
+
+##### Device Docs
+
 - [Device: ~json@1.0](https://hyperbeam.ar.io/build/devices/json-at-1-0.html)
+
+##### Device API
+
+- [dev_codec_json.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_codec_json.html)
+
+##### WAO API
+
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)

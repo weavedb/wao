@@ -8,13 +8,13 @@ Follow [the HyperBEAM docs](https://hyperbeam.ar.io/run/running-a-hyperbeam-node
 
 Create a WAO project that comes with the `wao` SDK and testing framework:
 
-```bash
+```bash [Terminal]
 npx wao create myapp && cd myapp
 ```
 
 You can also create an empty directory and install `wao`:
 
-```bash
+```bash [Terminal]
 mkdir myapp && cd myapp && yarn init && yarn add wao
 mkdir test && touch test/hyperbeam.js
 ```
@@ -121,7 +121,7 @@ You can find the working test files for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/hyperbeam.test.js
 # yarn test test/hb.testjs
 ```
@@ -130,6 +130,10 @@ Now we're ready to decode HyperBEAM.
 
 ## References
 
+##### General
+
 - [HyperBEAM Installation Guide](https://hyperbeam.ar.io/run/running-a-hyperbeam-node.html)
+
+##### WAO API 
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)
