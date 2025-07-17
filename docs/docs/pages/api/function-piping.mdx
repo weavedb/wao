@@ -1,12 +1,6 @@
-### Function Piping
+# Function Piping
 
-- [pipe](#pipe)
-- [bind](#bind)
-- [then](#then)
-- [err](#err)
-- [cb](#cb)
-
-#### pipe
+## pipe
 
 Most functions return in the format of `{ err, res, out, pid, mid, id }`, and these function can be chained with `pipe`, which makes executing multiple messages a breeze.
 
@@ -25,7 +19,7 @@ let fns = [
 const { err, res, out, pid } = await this.pipe({ jwk, fns })
 ```
 
-#### bind
+## bind
 
 If the function comes from other instances rather than `AO`, use `bind`.
 
@@ -33,7 +27,7 @@ If the function comes from other instances rather than `AO`, use `bind`.
 const fns = [{ fn: "post", bind: this.ar, args: { data, tags }}]
 ```
 
-#### then
+## then
 
 You can pass values between functions with `then`. For instance, passing the result from the previous functions to the next function's arguments is a common operation.
 
@@ -87,7 +81,7 @@ let fns = [
 const { out: { key }, val } = await ao.pipe({ jwk, fns })
 ```
 
-#### err
+## err
 
 `err` has the same signature as `then`. If `err` returns a value, `pipe` will throw an `Error` with that value.
 
@@ -101,7 +95,7 @@ const val = await ao.pipe({ jwk, fns })
 
 ```
 
-#### cb
+## cb
 
 `cb` can report the current progress of `pipe` after every function execution.
 

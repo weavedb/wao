@@ -1,17 +1,8 @@
-### Process
+# Process
 
 You can go for even more concise syntax with `Process` class.
 
-- [Instantiate](#instantiate-2)
-- [msg](#msg-1)
-- [m](#m)
-- [dry](#dry-1)
-- [d](#d)
-- [res](#res-1)
-- [r](#r)
-- [v](#v)
-
-#### Instantiate
+## Instantiate
 
 ```js
 const p = ao.p(pid)
@@ -23,7 +14,7 @@ or
 const { p, pid } = await ao.deploy({ data, tags, src, fills })
 ```
 
-#### msg
+## msg
 
 The first argument is `Action`, the second argument is `Tags`, and the third argument is the rest of the options.
 
@@ -59,7 +50,7 @@ You can omit the second argument if there is no tag to pass to.
 const { mid, out } = await p.msg("Action", { check: "success!" }}
 ```
 
-#### m
+## m
 
 You can only get `out` with `m`. This is the most extreme form.
 
@@ -75,31 +66,31 @@ const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" }) // get Data
 assert.equal(out, EXPECTED_JSON)
 ```
 
-#### dry
+## dry
 
 ```js
 const { mid, out } = await p.dry("Action", { Tag1: "value1", Tag2: "value2" })
 ```
 
-#### d
+## d
 
 ```js
 const out = await p.d("Action", { Tag1: "value1", Tag2: "value2" })
 ```
 
-#### res
+## res
 
 ```js
 const { err, res, out } = await p.res({ mid, check, get })
 ```
 
-#### r
+## r
 
 ```js
 const out = await p.r({ mid, check, get })
 ```
 
-#### v
+## v
 
 `v` is a shortcut for [var](#var) to get a Lua variable with `dryrun`.
 
