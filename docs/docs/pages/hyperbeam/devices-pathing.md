@@ -48,7 +48,7 @@ console.log(body)
 
 This is the headers you get:
 
-```js
+```js [HTTP Headers]
 Headers {
   host: 'localhost',
   debug_print_indent: '2',
@@ -107,7 +107,7 @@ Headers {
 ```
 And this is the body you get:
 
-```js
+```js [HTTP Body]
 --Z9Om0uN1Z81Q-Sp3G0Mptr4AewbZNf_drHF9PkmdB8A
 ao-types: cache_control="list", force_message="atom"
 cache_control: "always"
@@ -200,7 +200,7 @@ console.log(out)
 
 This is the decoded output. HyperBEAM internally uses `TABM (Type Annotated Binary Message)` and it contains the Erlang `atom` type. So we convert it to `Symbol` when dealing with JS. Erlang doesn't have `boolean` and `null` types, so JS `true`, `false`, and `null` are all `atom` on the Erlang side.
 
-```js
+```js [Decoded Response]
 {
   access_remote_cache_for_client: false,
   address: 'Tbun4iRRQW93gUiSAmTmZJ2PGI-_yYaXsX69ETgzSRE',
@@ -357,7 +357,7 @@ In this chapter, you saw three basic URL schemes to access HyperBEAM:
 
 **1. Device and Method**
 
-> /~device_name@version/method_name
+/~device_name@version/method_name
 
 - `/~meta@1.0/info`
 - `/~meta@1.0/build`
@@ -382,20 +382,29 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/devices-pathing.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
+
+##### General
 
 - [Intro to HyperBEAM](https://hyperbeam.ar.io/build/introduction/what-is-hyperbeam.html)
 - [Intro to AO-Core](https://hyperbeam.ar.io/build/introduction/what-is-ao-core.html)
 - [HyperBEAM Core Capabilities](https://hyperbeam.ar.io/build/hyperbeam-capabilities.html)
 - [Pathing in HyperBEAM](https://hyperbeam.ar.io/build/pathing-in-hyperbeam.html)
 - [HyperBEAM Devices](https://hyperbeam.ar.io/build/devices/hyperbeam-devices.html)
+
+##### Device Docs
 - [Device: ~meta@1.0](https://hyperbeam.ar.io/build/devices/meta-at-1-0.html)
 - [Device: ~json@1.0](https://hyperbeam.ar.io/build/devices/json-at-1-0.html)
+
+##### Device API
+- [dev_meta.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_meta.html)
+- [dev_codec_json.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_codec_json.html)
+
+##### WAO API
+
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)

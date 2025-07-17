@@ -164,13 +164,17 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/device-composition.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
+
+##### Device API
+
+- [dev_stack.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_stack.html)
+
+##### WAO API
 
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)

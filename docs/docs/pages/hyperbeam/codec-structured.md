@@ -146,14 +146,21 @@ You can find the working test file for this chapter here:
 
 Run tests:
 
-```bash
+```bash [Terminal]
 yarn test test/codec-structured.test.js
 ```
 
-Now we're ready to decode HyperBEAM.
-
 ## References
 
+##### Specs
+
 - [Structured Field Values for HTTP [RFC-9651]](https://datatracker.ietf.org/doc/rfc9651/)
+
+##### Device API
+
+- [dev_codec_structured.erl](https://hyperbeam.ar.io/build/devices/source-code/dev_codec_structured.html)
+
+##### WAO API
+
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)
