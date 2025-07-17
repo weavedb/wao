@@ -42,7 +42,7 @@ describe("Hyperbeam Legacynet", function () {
     jwk = getJWK("../../../HyperBEAM/.wallet.json")
     addr = toAddr(jwk.n)
     addr2 = toAddr(acc[0].jwk.n)
-    hbeam = await new HyperBEAM({}).ready()
+    hbeam = await new HyperBEAM({ reset: true }).ready()
   })
 
   beforeEach(async () => {
