@@ -247,3 +247,25 @@ const double = (await hb.now({ pid, path: "/cache/double" })).body
 assert.equal(square, 9)
 assert.equal(double, 6)
 ```
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [processes-scheduler.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/processes-scheduler.test.js)
+
+Run tests:
+
+```bash
+yarn test test/processes-scheduler.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [Device: ~message@1.0](https://hyperbeam.ar.io/build/devices/message-at-1-0.html)
+- [Device: ~process@1.0](https://hyperbeam.ar.io/build/devices/process-at-1-0.html)
+- [Device: ~scheduler@1.0](https://hyperbeam.ar.io/build/devices/scheduler-at-1-0.html)
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)
