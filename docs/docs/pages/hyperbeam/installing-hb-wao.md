@@ -37,7 +37,7 @@ Edit `package.json` to enable ESM and test commands with the `--experimental-was
 }
 ```
 
-## Running Tests
+## Writing Tests
 
 Import the `HyperBEAM` and `HB` classes from `wao` to interact with your HyperBEAM node.
 
@@ -60,7 +60,7 @@ const cwd = "../HyperBEAM"
 describe("HyperBEAM", function () {
   let hbeam, hb
 
-  // start a hyperbeam node and wait till it's ready, reset storage for test
+  // start a hyperbeam node and wait till it's ready, reset node storage
   before(async () => {
     hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
   }) 
@@ -112,6 +112,13 @@ describe("HyperBEAM", function () {
 })
 ```
 
+## Running Tests
+
+You can find the working test files for this chapter here:
+
+- [hyperbeam.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/hyperbeam.test.js)
+- [hb.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/hyperbeam.test.js)
+
 Run tests:
 
 ```bash
@@ -120,3 +127,9 @@ yarn test test/hyperbeam.test.js
 ```
 
 Now we're ready to decode HyperBEAM.
+
+## References
+
+- [HyperBEAM Installation Guide](https://hyperbeam.ar.io/run/running-a-hyperbeam-node.html)
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)

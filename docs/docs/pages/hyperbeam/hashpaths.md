@@ -267,3 +267,22 @@ This hashpath contains the IDs of the messages passed to our `forward` method in
 - `hashpath` : `_msg1_id/_msg2_id`
 
 This would be extremely useful if the hashpaths were automatically cached as they contain the compute results, but unfortunately, this doesn't seem to be the case with the current HyperBEAM implementation.
+
+## Running Tests
+
+You can find the working test file for this chapter here:
+
+- [hashpaths.test.js](https://github.com/weavedb/wao/blob/master/dhfs-tutorial-app/test/hashpaths.test.js)
+
+Run tests:
+
+```bash
+yarn test test/hashpaths.test.js
+```
+
+Now we're ready to decode HyperBEAM.
+
+## References
+
+- [HyperBEAM Class API](/api/hyperbeam)
+- [HB Class API](/api/hb)
