@@ -9,7 +9,7 @@ git clone --branch wao https://github.com/weavedb/HyperBEAM.git
 Mainnet AOS requires `stack@1.0` device with `wasi@1.0`, `json-iface@1.0`, `wasm-64@1.0`, and `multipass@1.0`. The required http header tags look like the following.
 
 ```js
-const scheduler = (await hb.meta.info()).address
+const scheduler = (await hb.g("/~meta@1.0/info")).address
 
 const headers = {
   device: "process@1.0",
@@ -46,16 +46,9 @@ Dryruns are disabled on mainnet AOS processes.
 ```js
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { wait, toAddr, Server } from "wao/test"
-import { HyperBEAM, HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { HyperBEAM } from "wao"
 
-const cwd = "../../HyperBEAM" // HyperBEAM directory
-const wallet = ".wallet.json" // operator wallet relative to cwd
-const port = 10001
-const gateway = 4000
-const url = `http://localhost:${port}`
+const cwd = "../HyperBEAM" // HyperBEAM directory
 
 const data = `
 local count = 0
@@ -68,18 +61,12 @@ Handlers.add("Get", "Get", function (msg)
 end)`
 
 describe("Hyperbeam Legacynet", function () {
-  let hbeam, hb, jwk, server
+  let hbeam, hb
   before(async () => {
-    server = new Server({ port: gateway, log: true, hb_url: url })
-    hbeam = new HyperBEAM({ cwd, wallet, port, gateway })
-    jwk = JSON.parse(
-      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
-    )
-    await wait(5000)
+    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
   })
-  beforeEach(async () => {
-    hb = await new HB({ url }).init(jwk)
-  })
+
+  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
   it("should handle counter with Add and Get handlers", async () => {

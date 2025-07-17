@@ -34,67 +34,96 @@ mkdir myapp && cd myapp && yarn init && yarn add wao
 mkdir test && touch test/test.js
 ```
 
-Make sure your `package.json` looks something like the following to enable ES6 and test commands with `wasm64`. The wasm64 flag is unnecessary for NodeJS v24 and later.
+Make sure your `package.json` looks something like the following to enable ES6 and test commands with `wasm64`. The wasm64 flag is unnecessary for NodeJS v24 and later. Also, you need to disable concurrency so the test won't try to run multiple HyperBEAM nodes on duplicate ports.
 
-```json
+```json [/package.json]
 {
   "name": "myapp",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-wasm-memory64",
-    "test-only": "node --experimental-wasm-memory64 --test-only"
+    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
+    "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
+    "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js"
   },
   "dependencies": {
     "wao": "^0.22.1"
   }
 }
 ```
+
+If your HyperBEAM installation requires environment variables, define them in `.env.hyperbeam`.
+
+```dotenv [/.env.hyperbeam]
+CC=gcc-12
+CXX=g++-12
+CMAKE_POLICY_VERSION_MINIMUM=3.5
+```
 ## Write Tests
 
 `HyperBEAM` class let you create a HyperBEAM sandbox by starting a fresh HyperBEAM node before testing and shutting it down when tests are complete.
-You can interact with the HyperBEAM node with `HB`.
+You can interact with the HyperBEAM node with `HB` (`hbeam.hb`).
 
-The WAO server needs to be running if you plan to use `process@1.0` device.
-
-You can also skip the `HyperBEAM` class and connect with an already running remote node by specifying the node `url` to `HB`.
-
-```js
+```js [/test/hyperbeam.test.js]
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { wait, toAddr, Server } from "wao/test"
-import { HyperBEAM, HB } from "wao"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { HyperBEAM } from "wao/test"
 
-const cwd = "../../HyperBEAM" // HyperBEAM directory
-const wallet = ".wallet.json" // operator wallet relative to cwd
-const port = 10001
-const gateway = 4000
-const url = `http://localhost:${port}`
+/*
+  The link to your HyperBEAM node directory.
+  It's relative to your app root folder, not the test folder.
+*/
+const cwd = "../HyperBEAM"
 
 describe("HyperBEAM", function () {
-  let hbeam, hb, jwk, server
+  let hbeam, hb
+
+  // start a hyperbeam node and wait till it's ready, reset storage for test
   before(async () => {
-    server = new Server({ port: 4000, log: true, hb_url: url })
-    hbeam = new HyperBEAM({ cwd, wallet, port, gateway })
-    jwk = JSON.parse(
-      readFileSync(resolve(import.meta.dirname, cwd, wallet), "utf8")
-    )
-    await wait(5000)
+    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
   })
-  beforeEach(async () => {
-    hb = await new HB({ url }).init(jwk)
-  })
+
+  beforeEach(async () => (hb = hbeam.hb))
+
+  // kill the node after testing
   after(async () => hbeam.kill())
 
   it("should run a HyperBEAM node", async () => {
-    const info = await hb.meta.info()
-    assert.equal(info.address, toAddr(jwk.n))
+    // change config
+    await hb.post({ path: "/~meta@1.0/info", test_config: "abc" })
+
+    // get config
+    const { out } = await hb.get({ path: "/~meta@1.0/info" })
+    assert.equal(out.test_config, "abc")
   })
 })
 ```
 
+You can also skip the `HyperBEAM` class and connect with an already running remote node by specifying the node `url` to `HB`.
+
+```js [/test/hb.test.js]
+import assert from "assert"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { acc } from "wao/test"
+import { HB } from "wao"
+
+const cwd = "../HyperBEAM"
+
+describe("HyperBEAM", function () {
+  let hb
+
+  // using one of the pre-generated accounts from acc for test
+  beforeEach(async () => {
+    hb = new HB({ jwk: acc[0].jwk, url: "http://localhost:10001" })
+  })
+
+  it("should connect to a HyperBEAM node", async () => {
+    // get build info
+    const build = await hb.g("/~meta@1.0/build")
+    assert.equal(build.node, "HyperBEAM")
+  })
+})
+```
 HyperBEAM has [a test device](https://github.com/permaweb/HyperBEAM/blob/main/src/dev_test.erl) to test basic features with the HB methods.
 - `spawn` : spawn a process
 - `schedule` : schedule a message to a process
@@ -114,43 +143,113 @@ it("should test test-device@1.0", async () => {
 })
 ```
 
-## AO-Core Pathing
+## AO-Core Pathing and HTTP Message Signatures
 
-It is extremely important to understand [the pathing scheme](https://github.com/permaweb/HyperBEAM/blob/main/docs/introduction/pathing-in-ao-core.md) of AO-Core protocol when interacting with HyperBEAM nodes.
+It is extremely important to understand [the pathing scheme](https://github.com/permaweb/HyperBEAM/blob/main/docs/introduction/pathing-in-ao-core.md) of AO-Core protocol and HTTP Message Signature ([RFC 9421](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-message-signatures)) when interacting with HyperBEAM nodes.
 
-`path` helps you to construct paths to query devices on a HyperBEAM node. 
-
-- `path( device, path, json = true, params = {} )`
-
-And you can `fetch` a `text` or `json` response.
+`get` and `post` help you to construct complex messages and send signed requests to HyperBEAM nodes.
 
 ```js
-it("should query test-device@1.0", async () => {
-
-  const info_path = hb.path("meta", "info")
-  // => /~meta@1.0/info/serialize~json@1.0
-
-  const address_path = hb.path("meta", "info/address", false)
-  // => /~meta@1.0/info/address
+it("should interact with meta@1.0", async () => {
+  // change node configuration
+  await hb.post({ path: "/~meta@1.0/info", test_config: 123 })
   
-  const info = await hb.fetch(info_path)
-  const info2 = await hb.json("meta", "info")
-
-  const addr = await hb.fetch(address_path, false)
-  const addr2 = await hb.text("meta", "info/address")
+  const { out } = await hb.get({ path: "/~meta@1.0/info" })
+  assert.equal(out.test_config, 123)
 })
 ```
 
-## Send Signed Http Messages
-
-If you are updating anything on HyperBEAM, you need to send a signed http message. AO-Core uses the web standard http message signatures defined in [RFC 9421](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-message-signatures).
-
-`send` creates a signed http message with specified headers, and send it to a HyperBEAM node.
+`g` and `p` are the shortcut methods for `get` and `post`.
 
 ```js
-it("should query test-device@1.0", async () => {
-  const res = await hb.send({ path: "/~meta@1.0/info", configA: "valA"})
-  const configA = await hb.text({ path: hb.path("meta","info/configA") })
-  assert.equal(configA, "valA")
+it("should interact with meta@1.0 #2", async () => {
+  await hb.p("/~meta@1.0/info", { test_config2: "abc" })
+  
+  const out = await hb.g("/~meta@1.0/info")
+  assert.equal(out.test_config2, "abc")
+})
+```
+
+## Spawn AOS Processes
+
+You can also spawn and interact with AOS processes on HyperBEAM.
+
+```js
+const data = `
+local count = 0
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)`
+
+it("should spawn a legacynet compatible AOS process", async () => {
+  const { pid } = await hb.spawnLegacy()
+  const { slot } = await hb.scheduleLegacy({ pid, data })
+  const r = await hb.computeLegacy({ pid, slot })
+  const { slot: slot2 } = await hb.scheduleLegacy({ pid, action: "Inc" })
+  const r2 = await hb.computeLegacy({ pid, slot: slot2 })
+  assert.equal(r2.Messages[0].Data, "Count: 1")
+  const { slot: slot3 } = await hb.scheduleLegacy({ pid, action: "Inc" })
+  const r4 = await hb.computeLegacy({ pid, slot: slot3 })
+  const r3 = await hb.dryrun({ pid, action: "Get" })
+  assert.equal(r3.Messages[0].Data, "Count: 2")
+})
+```
+
+## Create Custom Devices
+
+You can create your own custom devices in Erlang, Rust, and C++.
+
+Create your device under `/HyperBEAM/src`.
+
+```erlang [/HyperBEAM/src/dev_foo.erl]
+const data = `
+local count = 0
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)`
+``
+`
+Define it in `preloaded_devices` in `/HyperBEAM/src/hb_opts.erl`
+
+```erlang [/HyperBEAM/src/hb_opts.erl]
+preloaded_devices => [
+  #{<<"name">> => <<"ans104@1.0">>, <<"module">> => dev_codec_ans104},
+  #{<<"name">> => <<"compute@1.0">>, <<"module">> => dev_cu},
+  ...
+  #{<<"name">> => <<"foo@1.0">>, <<"module">> => dev_foo}
+],
+```
+
+Test the device with WAO.
+
+```js
+import assert from "assert"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { HyperBEAM } from "wao"
+
+const cwd = "../HyperBEAM" // HyperBEAM directory
+
+describe("Hyperbeam Custom Devices", function () {
+  let hbeam, hb
+  before(async () => {
+    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
+  })
+  beforeEach(async () => (hb = hbeam.hb))
+  after(async () => hbeam.kill())
+
+  it("should query a custom device", async () => {
+    const { version } = await hb.g("/~foo@1.0/info")
+	assert.equal("1.0", version)
+  })
 })
 ```
