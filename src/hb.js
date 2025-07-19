@@ -5,7 +5,7 @@ import { sign, signer } from "./signer.js"
 import { send as _send } from "./send.js"
 import hyper_aos from "./lua/hyper-aos.js"
 import aos_wamr from "./lua/aos_wamr.js"
-import { from } from "./httpsig.js"
+import { from } from "./httpsig2.js"
 
 const seed = num => {
   const array = new Array(num)
