@@ -3590,7 +3590,7 @@ strip-ansi@^6.0.0, strip-ansi@^6.0.1:
   dependencies:
     ansi-regex "^5.0.1"
 
-structured-headers@^1.0.1:
+structured-headers@1.0.1, structured-headers@^1.0.1:
   version "1.0.1"
   resolved "https://registry.npmjs.org/structured-headers/-/structured-headers-1.0.1.tgz"
   integrity sha512-QYBxdBtA4Tl5rFPuqmbmdrS9kbtren74RTJTcs0VSQNVV5iRhJD4QlYTLD0+81SBwUQctjEQzjTRI3WG4DzICA==

@@ -35,45 +35,43 @@ describe("Legacynet AOS", function () {
   after(async () => hbeam.kill())
 
   it("should spawn a legacynet AOS process", async () => {
-    const { process: pid } = await hb.p("/schedule", {
-      device: "process@1.0",
-      type: "Process",
-      "data-protocol": "ao",
-      variant: "ao.TN.1",
-      scheduler: hb.addr,
-      "scheduler-location": hb.addr,
-      authority: hb.addr,
-      "random-seed": seed(16),
-      module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
-      "scheduler-device": "scheduler@1.0",
-      "execution-device": "stack@1.0",
-      "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
-      "push-device": "push@1.0",
-      "patch-from": "/results/outbox",
-    })
+    const { process: pid } = await hb.p(
+      "/schedule",
+      {
+        device: "process@1.0",
+        type: "Process",
+        "data-protocol": "ao",
+        variant: "ao.TN.1",
+        scheduler: hb.addr,
+        "scheduler-location": hb.addr,
+        authority: hb.addr,
+        "random-seed": seed(16),
+        module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
+        "scheduler-device": "scheduler@1.0",
+        "execution-device": "stack@1.0",
+        "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
+        "push-device": "push@1.0",
+        "patch-from": "/results/outbox",
+      },
+      { path: false }
+    )
 
-    const tags = {
-      "patch-from": "/results/outbox",
-      "stack-keys": ["init", "compute", "snapshot", "normalize"],
-    }
+    await hb.p(
+      `/${pid}/schedule`,
+      { type: "Message", target: pid, action: "Eval", data },
+      { path: false }
+    )
 
-    await hb.p(`/${pid}/schedule`, {
-      type: "Message",
-      target: pid,
-      action: "Eval",
-      data,
-    })
-
-    await hb.p(`/${pid}/schedule`, {
-      type: "Message",
-      target: pid,
-      action: "Inc",
-    })
-    const { slot } = await hb.p(`/${pid}/schedule`, {
-      type: "Message",
-      target: pid,
-      action: "Inc",
-    })
+    await hb.p(
+      `/${pid}/schedule`,
+      { type: "Message", target: pid, action: "Inc" },
+      { path: false }
+    )
+    const { slot } = await hb.p(
+      `/${pid}/schedule`,
+      { type: "Message", target: pid, action: "Inc" },
+      { path: false }
+    )
     const { results } = await hb.g(`/${pid}/compute`, { slot })
     assert.equal("Count: 2", results.outbox["1"].data)
 

@@ -2597,7 +2597,7 @@ strip-ansi@^6.0.0, strip-ansi@^6.0.1:
   dependencies:
     ansi-regex "^5.0.1"
 
-structured-headers@^1.0.1:
+structured-headers@1.0.1, structured-headers@^1.0.1:
   version "1.0.1"
   resolved "https://registry.yarnpkg.com/structured-headers/-/structured-headers-1.0.1.tgz#1821e434e0fe45bdd78f07c779b16519ab520415"
   integrity sha512-QYBxdBtA4Tl5rFPuqmbmdrS9kbtren74RTJTcs0VSQNVV5iRhJD4QlYTLD0+81SBwUQctjEQzjTRI3WG4DzICA==
@@ -2726,10 +2726,10 @@ vlq@^2.0.4:
   resolved "https://registry.yarnpkg.com/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.31.2:
-  version "0.31.2"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.31.2.tgz#0afb10e19663f4dfec1905b3357973274e594482"
-  integrity sha512-R9eN2FyYLQ+B/D/BSYxBNVqfKnj//MQnoH5EZUxNssrF0vJ95i4iTXL5HTvXX6wtBQcgl8roUx075HfRa3XUTA==
+wao@^0.32.1:
+  version "0.32.1"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.32.1.tgz#d9ca2de644242479819bad0f45440366eb7aec27"
+  integrity sha512-UbijwL2hfpbyFN3lIFeS6Qi1BNWG67vwqCYSk+a/EIxfE0b8u3UlaLXY4gArNeCUeYc49xHChXjEDt1p/N3qCA==
   dependencies:
     "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"
@@ -2756,6 +2756,7 @@ wao@^0.31.2:
     md5 "^2.3.0"
     pm2 "^5.4.3"
     ramda "^0.30.1"
+    structured-headers "1.0.1"
     warp-arbundles "^1.0.4"
     wasm-brotli "^2.0.2"
     yargs "^17.7.2"

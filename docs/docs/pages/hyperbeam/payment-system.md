@@ -444,7 +444,7 @@ Now to topup the user account, we need to send `credit-notice` to the Lua script
 
 ### Create Commitments
 
-If you recall from the previous chapter, HyperBEAM internally signs and creates 2 commitments with sha256 hash of the signature and hmac-sha256 hash of the signed content. We can first construct this internal message to be passed to the Lua script. The WAO signer automatically excludes the `path` field for some compatibility reasons, but you can set `path=true` to the 2nd parameter of `hb.sign`.
+If you recall from the previous chapter, HyperBEAM internally signs and creates 2 commitments with sha256 hash of the signature and hmac-sha256 hash of the signed content. We can first construct this internal message to be passed to the Lua script.
 
 ```js [/test/payment-system.test.js]
 const obj = {
@@ -452,7 +452,7 @@ const obj = {
   quantity: 100,
   recipient: user.addr,
 }
-const lua_msg = await operator.hb.sign(obj, { path: true })
+const lua_msg = await operator.hb.sign(obj)
 ```
 
 Now we got a signed message with `path` included in `signature-input`.

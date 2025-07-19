@@ -36,7 +36,7 @@ square(Msg1, Msg2, Opts)->
   {ok, #{ <<"num">> => Num * Num }}.
 ```
 
-We can use the `resolve3` method from the previous chapter to create the base `num` with the `hashpath` cached. `/~mydev@1.0/resolve` returns `num=6` with `out.hashpath_7`.
+We can use the `resolve3` method from the previous chapter to create the base `num` with the `hashpath` cached. `/~mydev@1.0/resolve3` returns `num=6` with `out.hashpath_7`.
 
 ```js [/test/device-composition.test.js]
 const out = await hb.p("/~mydev@1.0/resolve3")
