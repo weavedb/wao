@@ -53,6 +53,7 @@ class HB {
     if (!this._info) {
       try {
         this._info = await this.g("/~meta@1.0/info")
+        this.operator = this._info.address
       } catch (e) {}
     }
   }
@@ -109,44 +110,15 @@ class HB {
     return JSON.parse(json.results.json.body)
   }
 
-  async spawn(tags = {}) {
-    const addr = await this.g("/~meta@1.0/info/address")
-    this.scheduler ??= addr
-    const res = await this.post({
-      path: "/~process@1.0/schedule",
-      body: mergeLeft(tags, {
-        device: "process@1.0",
-        "random-seed": seed(16),
-        type: "Process",
-        "execution-device": "test-device@1.0",
-      }),
-      scheduler: this.scheduler,
-    })
-    return { res, pid: res.out.process }
-  }
-  async spawn2(tags = {}) {
-    const addr = await this.g("/~meta@1.0/info/address")
-    this.scheduler ??= addr
-    const _tags = mergeLeft(tags, {
-      path: "/~process@1.0/schedule",
-      scheduler: this.scheduler,
-      "random-seed": seed(16),
-      type: "Process",
-      "execution-device": "test-device@1.0",
-    })
-    const res = await this.post(_tags, { path: false })
-    return { res, pid: res.headers.process }
-  }
-
   async cacheScript(data, type = "application/lua") {
     if (!this.cache) {
       const { pid } = await this.spawn({})
       this.cache = pid
     }
-    const { slot } = await this.schedule({
+    const { slot } = await this.scheduleFlat({
       data,
       pid: this.cache,
-      "content-type": type,
+      tags: { "content-type": type },
     })
     const msgs = await this.messages({ pid: this.cache, from: slot, limit: 1 })
     return msgs.edges[0].node.message.Id
@@ -154,7 +126,7 @@ class HB {
 
   async cacheBinary(data, type) {
     const res = await this.post({ path: "/~wao@1.0/cache_module", data, type })
-    return res.headers.id
+    return res.out.id
   }
 
   async message(args) {
@@ -163,70 +135,49 @@ class HB {
     const res = await this.compute({ pid, slot })
     return { slot, pid, res }
   }
-  async schedule2({ pid, tags = {}, data } = {}) {
-    let _tags = mergeLeft(tags, {
-      method: "POST",
-      path: `/${pid}/schedule`,
-      type: "Message",
-      target: pid,
-    })
+
+  async scheduleFlat({ pid, tags = {}, data } = {}) {
+    let _tags = mergeLeft(tags, { type: "Message", target: pid })
     if (data) _tags.data = data
-    let res = await this.post(_tags, { path: false })
-    return { slot: res.headers.slot, res, pid }
-  }
-  async scheduleLegacy2({
-    pid,
-    action = "Eval",
-    tags = {},
-    data,
-    scheduler,
-  } = {}) {
-    return await this.scheduleLua({ pid, action, tags, data, scheduler })
+    let res = await this.post({ path: "/~process@1.0/schedule", body: _tags })
+    return { slot: res.out.slot, res, pid }
   }
 
-  async scheduleLua({ pid, action = "Eval", tags = {}, data, scheduler }) {
-    if (action) tags.Action = action
-    let _tags = mergeLeft(tags, {
-      path: `/${pid}/schedule`,
-      type: "Message",
-      target: pid,
+  async scheduleNP({ pid, tags = {}, data } = {}) {
+    if (data) tags.data = data
+    let res = await this.post({
+      path: `/${pid}~node-process@1.0/schedule`,
+      body: await this.commit(tags),
     })
-    if (data) _tags.data = data
-    let res = await this.post(_tags, { path: false })
-    return { slot: res.headers.slot, res, pid }
+    return { slot: res.out.slot, res, pid }
   }
-
   async schedule({ pid, tags = {}, data } = {}) {
-    let body = mergeLeft(tags, { type: "Message", target: pid })
-    if (data) body.data = data
-    let res = await this.post({ path: "/~process@1.0/schedule", body })
-    return { slot: res.headers.slot, res, pid }
+    let _tags = mergeLeft(tags, { type: "Message", target: pid })
+    if (data) _tags.data = data
+    let res = await this.post({
+      path: `/${pid}/schedule`,
+      body: await this.commit(_tags, { path: false }),
+    })
+    return { slot: res.out.slot, res, pid }
+  }
+
+  async scheduleLua({ action = "Eval", tags = {}, ...rest }) {
+    if (action) tags.Action = action
+    return await this.schedule({ tags, ...rest })
   }
 
   async spawnLua(lua) {
-    const addr = await this.g("/~meta@1.0/info/address")
-    this.scheduler ??= addr
-    lua ??= this.lua ?? (await this.getLua())
-    const res = await this.post(
-      {
-        device: "process@1.0",
-        path: "/schedule",
-        scheduler: this.scheduler,
-        "data-protocol": "ao",
-        variant: "ao.N.1",
-        "scheduler-location": this.scheduler,
-        authority: this.scheduler,
-        "random-seed": seed(16),
-        type: "Process",
-        module: lua,
-        "execution-device": "lua@5.3a",
-        "push-device": "push@1.0",
-        "patch-from": "/results/outbox",
-      },
-      { path: false }
-    )
-    const pid = res.headers.process
-    return { pid, res }
+    await this.setInfo()
+    const tags = {
+      "data-protocol": "ao",
+      variant: "ao.N.1",
+      authority: this.operator,
+      module: this.lua ?? (await this.getLua()),
+      "execution-device": "lua@5.3a",
+      "push-device": "push@1.0",
+      "patch-from": "/results/outbox",
+    }
+    return this.spawn(tags)
   }
 
   async now({ pid, path = "" }) {
@@ -255,65 +206,42 @@ class HB {
     }
     return res
   }
+  async spawn(tags = {}) {
+    const res = await this.post({
+      path: "/~process@1.0/schedule",
+      body: await this.commit(
+        mergeLeft(tags, {
+          "random-seed": seed(16),
+          type: "Process",
+          "execution-device": "test-device@1.0",
+          device: "process@1.0",
+          scheduler: this.addr,
+        }),
+        { path: false }
+      ),
+      scheduler: this.operator,
+    })
+    return { res, pid: res.out.process }
+  }
   async spawnLegacy({ module, tags = {}, data } = {}) {
     await this.setInfo()
-    let t = {
-      type: "Process",
+    let t = mergeLeft(tags, {
       "data-protocol": "ao",
       variant: "ao.TN.1",
-      scheduler: this._info.address,
       authority: this._info.address,
-      "scheduler-location": this._info.address,
-      "random-seed": seed(16),
       module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
       device: "process@1.0",
-      "scheduler-device": "scheduler@1.0",
       "execution-device": "stack@1.0",
       "push-device": "push@1.0",
       "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
       "patch-from": "/results/outbox",
-      "stack-keys": ["init", "compute", "snapshot", "normalize"],
-    }
+    })
     if (data) t.data = data
-    tags = mergeLeft(tags, t)
-    return await this.spawn2(tags)
+    return await this.spawn(t)
   }
-  async scheduleLegacy({
-    pid,
-    action = "Eval",
-    tags = {},
-    data,
-    scheduler,
-  } = {}) {
+  async scheduleLegacy({ action = "Eval", tags = {}, ...rest } = {}) {
     if (action) tags.Action = action
-    return await this.schedule2({ pid, tags, data, scheduler })
-  }
-
-  async spawnLegacy2({ module, tags = {}, data } = {}) {
-    await this.setInfo()
-    let t = {
-      type: "Process",
-      "data-protocol": "ao",
-      variant: "ao.TN.1",
-      scheduler: this._info.address,
-      authority: this._info.address,
-      "scheduler-location": this._info.address,
-      "random-seed": seed(16),
-      module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
-      device: "process@1.0",
-      "scheduler-device": "scheduler@1.0",
-      "execution-device": "stack@1.0",
-      "push-device": "push@1.0",
-      "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
-      "patch-from": "/results/outbox",
-      "stack-keys": ["init", "compute", "snapshot", "normalize"],
-      path: "/~process@1.0/schedule",
-    }
-    if (data) t.data = data
-    tags = mergeLeft(tags, t)
-    const res = await this.post(t, { path: false })
-    const pid = res.headers.process
-    return { pid, res }
+    return await this.schedule({ tags, ...rest })
   }
 
   async results({ process, limit, sort = "DESC", from, to } = {}) {
@@ -426,84 +354,12 @@ class HB {
     return JSON.parse(res.body)
   }
   async spawnAOS(image) {
-    const addr = await this.g("/~meta@1.0/info/address")
-    this.scheduler ??= addr
+    await this.setInfo()
     image ??= this.image ?? (await this.getImage())
-    const res = await this.post(
-      {
-        device: "process@1.0",
-        path: "/schedule",
-        scheduler: this.scheduler,
-        "data-protocol": "ao",
-        variant: "ao.N.1",
-        "scheduler-location": this.scheduler,
-        authority: this.scheduler,
-        "random-seed": seed(16),
-        type: "Process",
-        image,
-        "execution-device": "stack@1.0",
-        "push-device": "push@1.0",
-        "device-stack": [
-          "wasi@1.0",
-          "json-iface@1.0",
-          "wasm-64@1.0",
-          "patch@1.0",
-          "multipass@1.0",
-        ],
-        "output-prefix": "wasm",
-        "patch-from": "/results/outbox",
-        "patch-mode": "patches",
-        "stack-keys": ["init", "compute", "snapshot", "normalize"],
-        passes: 2,
-      },
-      { path: false }
-    )
-    const pid = res.headers.process
-    return { pid, res }
-  }
-  async scheduleAOS({ pid, action = "Eval", tags = {}, data }) {
-    let _tags = mergeLeft(tags, {
-      device: "process@1.0",
-      method: "POST",
-      path: `/${pid}~process@1.0/schedule`,
-      scheduler: this.scheduler,
-      type: "Message",
-      Action: action,
-      target: pid,
-    })
-    if (data) _tags.data = data
-    let res = await this.post(_tags, { path: false })
-    const slot = res.headers.slot
-    return { slot, res, pid }
-  }
-  /*
-  async scheduleAOS2({ pid, action = "Eval", tags = {}, data }) {
-    let _tags = mergeLeft(tags, {
-      device: "process@1.0",
-      type: "Message",
-      Action: action,
-      target: pid,
-    })
-
-    if (data) _tags.data = data
-    const msg = { body: _tags, path: `/${pid}~process@1.0/schedule` }
-    let res = await this.post(msg, { path: false })
-    const slot = res.headers.slot
-    return { slot, res, pid }
-  }
-  async spawnAOS2(image) {
-    const addr = await this.g("/~meta@1.0/info/address")
-    this.scheduler ??= addr
-    image ??= this.image ?? (await this.getImage())
-    const _tags = {
-      device: "process@1.0",
-      scheduler: this.scheduler,
+    const tags = {
       "data-protocol": "ao",
       variant: "ao.N.1",
-      "scheduler-location": this.scheduler,
-      authority: this.scheduler,
-      "random-seed": seed(16),
-      type: "Process",
+      authority: this.operator,
       image,
       "execution-device": "stack@1.0",
       "push-device": "push@1.0",
@@ -517,21 +373,15 @@ class HB {
       "output-prefix": "wasm",
       "patch-from": "/results/outbox",
       "patch-mode": "patches",
-      "stack-keys": ["init", "compute", "snapshot", "normalize"],
       passes: 2,
     }
-    const msg = {
-      device: "process@1.0",
-      path: "schedule",
-      body: _tags,
-      scheduler: this.scheduler,
-    }
-
-    const res = await this.post(msg, { path: false })
-    const pid = res.headers.process
-    return { pid, res }
+    return await this.spawn(tags)
   }
-  */
+
+  async scheduleAOS({ action = "Eval", tags = {}, ...rest }) {
+    if (action) tags.Action = action
+    return await this.schedule({ tags, ...rest })
+  }
 }
 
 export default HB

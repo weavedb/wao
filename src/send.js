@@ -36,7 +36,7 @@ export async function send(signedMsg, fetchImpl = fetch) {
   return { ...from(http), ...http }
 }
 
-const httpSigName = address => {
+export const httpSigName = address => {
   const decoded = base64url.toBuffer(address)
   const hexString = [...decoded.subarray(1, 9)]
     .map(byte => byte.toString(16).padStart(2, "0"))
@@ -76,7 +76,13 @@ export const toHttpSigner = signer => {
         },
       })
 
-      const signatureBaseArray = createSignatureBase({ fields }, request)
+      // SORT THE FIELDS HERE to match Erlang's lists:sort(maps:keys(Enc))
+      const sortedFields = [...fields].sort()
+
+      const signatureBaseArray = createSignatureBase(
+        { fields: sortedFields },
+        request
+      )
       signatureInput = serializeList([
         [
           signatureBaseArray.map(([item]) => parseItem(item)),
@@ -89,7 +95,6 @@ export const toHttpSigner = signer => {
       return new TextEncoder().encode(signatureBase)
     }
     const result = await signer(create, "httpsig")
-
     if (!createCalled) {
       throw new Error(
         "create() must be invoked in order to construct the data to sign"
@@ -107,7 +112,6 @@ export const toHttpSigner = signer => {
       signatureInput,
       httpSigName(result.address)
     )
-
     const finalHeaders = {}
     for (const [key, value] of Object.entries(signedHeaders)) {
       if (key === "Signature" || key === "Signature-Input") {

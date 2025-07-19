@@ -52,7 +52,6 @@ async function _sign({
     return key !== "body-keys" && key !== "path" && !bodyKeys.includes(key)
   })
   if (_path !== false && isPath) signingFields.push("@path")
-
   const signedRequest = await toHttpSigner(signer)({
     request: { url: _url, method, headers: lowercaseHeaders },
     fields: signingFields,
