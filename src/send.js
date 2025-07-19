@@ -7,7 +7,7 @@ const {
   createSigningParameters,
   formatSignatureBase,
 } = httpbis
-import { from } from "./httpsig.js"
+import { from } from "./httpsig2.js"
 
 export async function send(signedMsg, fetchImpl = fetch) {
   const fetchOptions = {
