@@ -97,7 +97,7 @@ end)
     )
   })
 
-  it.only("should handle replies between multiple processes", async () => {
+  it("should handle replies between multiple processes", async () => {
     const src_data = `
 Handlers.add("Hello", "Hello", function (msg)
   local name = Send({ Target = msg.To, To = ao.id, Action = "Reply" }).receive().Data
