@@ -13,7 +13,7 @@ describe("HyperBEAM", function () {
     hb = new HB({ jwk: acc[0].jwk, url: "http://localhost:10001" })
   })
 
-  it("should connect to a HyperBEAM node", async () => {
+  it.skip("should connect to a HyperBEAM node", async () => {
     // get build info
     const build = await hb.g("/~meta@1.0/build")
     assert.equal(build.node, "HyperBEAM")

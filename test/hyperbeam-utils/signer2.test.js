@@ -1,6 +1,6 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
-import { getJWK, mod } from "../lib/test-utils.js"
+import { mod } from "../lib/test-utils.js"
 import HyperBEAM from "../../src/hyperbeam.js"
 import keys from "../lib/cases.js"
 import { generateTestCases } from "../lib/gen.js"

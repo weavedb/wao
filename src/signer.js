@@ -11,7 +11,7 @@ const joinUrl = ({ url, path }) => {
     : url + normalizedPath
 }
 
-export async function sign({ url, path, msg: encoded, jwk, signPath = false }) {
+export async function sign({ url, path, msg: encoded, jwk, signPath = true }) {
   const signer = createSigner(jwk, url)
   const { body = null, ...headers } = encoded
   let _enc = { headers }
@@ -25,11 +25,12 @@ async function _sign({
   path,
   url,
   method = "POST",
-  _path = false,
+  _path = true,
 }) {
   const headersObj = encoded ? encoded.headers : {}
   const body = encoded ? encoded.body : undefined
-  const _url = joinUrl({ url, path })
+  let url_path = typeof _path === "string" ? _path : path
+  const _url = joinUrl({ url, path: url_path })
   headersObj["path"] = path
   if (body && !headersObj["content-length"]) {
     const bodySize = body.size || body.byteLength || 0
@@ -45,18 +46,13 @@ async function _sign({
         .split(",")
         .map(k => k.trim())
     : []
+  let isPath = false
+  const signingFields = Object.keys(lowercaseHeaders).filter(key => {
+    if (key === "path") isPath = true
+    return key !== "body-keys" && key !== "path" && !bodyKeys.includes(key)
+  })
+  if (_path !== false && isPath) signingFields.push("@path")
 
-  const signingFields = Object.keys(lowercaseHeaders).filter(
-    key => key !== "body-keys" && key !== "path" && !bodyKeys.includes(key)
-  )
-
-  if (_path) signingFields.push("path")
-  /*
-  if (signingFields.length === 0 && !body) {
-    //lowercaseHeaders["content-length"] = "0"
-    //signingFields.push("content-length")
-  }
-  */
   const signedRequest = await toHttpSigner(signer)({
     request: { url: _url, method, headers: lowercaseHeaders },
     fields: signingFields,
@@ -85,7 +81,7 @@ export function signer(config) {
   if (!signer) throw new Error("Signer is required for mainnet mode")
   return async (
     fields,
-    { encoded: _encoded = false, path: _path = false } = {}
+    { encoded: _encoded = false, path: _path = true } = {}
   ) => {
     const { path = "/relay/process", method = "POST", ...aoFields } = fields
     const encoded = _encoded ? aoFields : await enc(aoFields)

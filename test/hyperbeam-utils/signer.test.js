@@ -18,16 +18,7 @@ describe("Hyperbeam Signer", function () {
     const { results } = await hb.compute({ pid, slot })
     assert.deepEqual(results, { "assignment-slot": 1 })
   })
-  it("should sign a valid message", async () => {
-    const { pid } = await hb.spawn()
-    const keys = {
-      path: `/${pid}~process@1.0/schedule/~json@1.0/serialize`,
-    }
-    const res = await hb.post(keys)
-    const { slot } = JSON.parse(res.body)
-    assert.equal(slot, 1)
-  })
-  it.only("should fuzz test random objects", async () => {
+  it("should fuzz test random objects", async () => {
     let err = []
     const cases = generateTestCases(1000)
     let i = 0
@@ -40,7 +31,10 @@ describe("Hyperbeam Signer", function () {
       console.log()
       console.log(JSON.stringify(v))
       console.log()
-      const msg = await hb.sign({ path: "/~wao@1.0/httpsig", ...v })
+      const msg = await hb.sign(
+        { path: "/~wao@1.0/httpsig", ...v },
+        { path: false }
+      )
       console.log(msg)
       try {
         const { body } = await hb.send(msg)

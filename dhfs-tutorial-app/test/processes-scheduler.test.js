@@ -19,28 +19,36 @@ describe("Processes and Scheduler", function () {
   after(async () => hbeam.kill())
 
   it("should spawn a process", async () => {
-    const { process: pid } = await hb.p("/schedule", {
-      device: "process@1.0",
-      type: "Process",
+    const { process: pid } = await hb.p("/~process@1.0/schedule", {
       scheduler: hb.addr,
-      "random-seed": seed(16),
-      "execution-device": "inc@1.0",
+      body: {
+        device: "process@1.0",
+        type: "Process",
+        scheduler: hb.addr,
+        "random-seed": seed(16),
+        "execution-device": "inc@1.0",
+      },
     })
     console.log(`Process ID: ${pid}`)
-
-    const { slot } = await hb.p(`/${pid}/schedule`, { type: "Message" })
+    const { slot } = await hb.p(`/${pid}/schedule`, {
+      body: { type: "Message" },
+    })
     console.log(`Allocated Slot: ${slot}`)
 
     const out = await hb.g(`/${pid}/compute`, { slot })
     assert.equal(out.num, 2)
 
-    const { slot: slot2 } = await hb.p(`/${pid}/schedule`, { type: "Message" })
+    const { slot: slot2 } = await hb.p(`/${pid}/schedule`, {
+      body: { type: "Message" },
+    })
     console.log(`Allocated Slot: ${slot2}`)
 
     const out2 = await hb.g(`/${pid}/compute`, { slot: slot2 })
     assert.equal(out2.num, 3)
 
-    const { slot: slot3 } = await hb.p(`/${pid}/schedule`, { type: "Message" })
+    const { slot: slot3 } = await hb.p(`/${pid}/schedule`, {
+      body: { type: "Message" },
+    })
     console.log(`Allocated Slot: ${slot3}`)
 
     const out3 = await hb.g(`/${pid}/now`)
