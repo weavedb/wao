@@ -31,11 +31,17 @@ describe("HyperBEAM", function () {
   })
 
   it("should execute AOS with WAMR", async () => {
-    const pid = await hb.spawnAOS()
-    await hb.messageAOS({ action: "Eval", tags: {}, data: src_data })
-    await hb.messageAOS({ action: "Add", tags: { Plus: "3" } })
-    assert.equal((await hb.messageAOS({ action: "Get" })).outbox["1"].data, "3")
-    await hb.messageAOS({ action: "Add", tags: { Plus: "3" } })
-    assert.equal((await hb.messageAOS({ action: "Get" })).outbox["1"].data, "6")
+    const { pid } = await hb.spawnAOS()
+    await hb.messageAOS({ pid, action: "Eval", tags: {}, data: src_data })
+    await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
+    assert.equal(
+      (await hb.messageAOS({ pid, action: "Get" })).outbox["1"].data,
+      "3"
+    )
+    await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
+    assert.equal(
+      (await hb.messageAOS({ pid, action: "Get" })).outbox["1"].data,
+      "6"
+    )
   })
 })

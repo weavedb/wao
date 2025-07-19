@@ -1,6 +1,6 @@
 import base64url from "base64url"
 import crypto from "crypto"
-import { httpbis } from "http-message-signatures"
+import { httpbis } from "./http-message-signatures/index.js"
 import { parseItem, serializeList } from "structured-headers"
 const {
   augmentHeaders,
