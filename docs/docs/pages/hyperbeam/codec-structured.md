@@ -1,6 +1,6 @@
 # Structured Codec
 
-`structured@1.0` turns complex objects into strings with extended `ao-types` according to the HTTP Structured Field Values ([RFC-9651](https://datatracker.ietf.org/doc/rfc9651/)) specification.
+`structured@1.0` turns complex objects into strings with extended `ao-types` according to the HTTP Structured Field Values ([RFC-9651](https://datatracker.ietf.org/doc/html/rfc9651)) specification.
 
 This object type is called `TABM (Type Annotated Binary Message)` in HyperBEAM.
 
@@ -154,7 +154,7 @@ yarn test test/codec-structured.test.js
 
 ##### Specs
 
-- [Structured Field Values for HTTP [RFC-9651]](https://datatracker.ietf.org/doc/rfc9651/)
+- [Structured Field Values for HTTP [RFC-9651]](https://datatracker.ietf.org/doc/html/rfc9651)
 
 ##### Device API
 

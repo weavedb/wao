@@ -1,0 +1,138 @@
+test at test/hyperbeam/hyperbeam-aos.test.js:23:3
+✖ should handle counter with Add and Get handlers (392.097043ms)
+  Error: 400: Message is not valid.
+      at send (file:///home/basque/dev/wao/src/send.js:28:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async HB.send (file:///home/basque/dev/wao/src/hb.js:67:12)
+      at async HB.post (file:///home/basque/dev/wao/src/hb.js:378:12)
+      at async HB.scheduleAOS (file:///home/basque/dev/wao/src/hb.js:96:15)
+      at async HB.messageAOS (file:///home/basque/dev/wao/src/hb.js:102:27)
+      at async TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/hyperbeam-aos.test.js:25:5)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1217:7)
+ 
+test at test/hyperbeam/hyperbeam-aos.test.js:33:3
+✖ should execute AOS with WAMR (290.164504ms)
+  Error: 400: Message is not valid.
+      at send (file:///home/basque/dev/wao/src/send.js:28:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async HB.send (file:///home/basque/dev/wao/src/hb.js:67:12)
+      at async HB.post (file:///home/basque/dev/wao/src/hb.js:378:12)
+      at async HB.scheduleAOS (file:///home/basque/dev/wao/src/hb.js:96:15)
+      at async HB.messageAOS (file:///home/basque/dev/wao/src/hb.js:102:27)
+      at async TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/hyperbeam-aos.test.js:35:5)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:565:7)
+ 
+test at test/hyperbeam/hyperbeam.test.js:112:3
+✖ should deploy a process (944.244913ms)
+  SyntaxError [Error]: Unexpected token 'O', "Oops! Some"... is not valid JSON
+      at JSON.parse (<anonymous>)
+      at HB.getJSON (file:///home/basque/dev/wao/src/hb.js:421:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async HB.compute (file:///home/basque/dev/wao/src/hb.js:121:12)
+      at async HB.computeLegacy (file:///home/basque/dev/wao/src/hb.js:125:18)
+      at async TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/hyperbeam.test.js:117:15)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:565:7)
+ 
+test at test/hyperbeam/hyperbeam.test.js:156:3
+✖ should upload module (1142.98423ms)
+  SyntaxError [Error]: No number after minus sign in JSON at position 1 (line 1 column 2)
+      at JSON.parse (<anonymous>)
+      at HB.getJSON (file:///home/basque/dev/wao/src/hb.js:421:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async HB.computeLua (file:///home/basque/dev/wao/src/hb.js:116:12)
+      at async TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/hyperbeam.test.js:161:24)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:565:7)
+ 
+test at test/hyperbeam/hyperbeam.test.js:180:3
+✖ should test WAMR (580.154568ms)
+  Error: 400: Message is not valid.
+      at send (file:///home/basque/dev/wao/src/send.js:28:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async HB.send (file:///home/basque/dev/wao/src/hb.js:67:12)
+      at async HB.post (file:///home/basque/dev/wao/src/hb.js:378:12)
+      at async HB.scheduleAOS (file:///home/basque/dev/wao/src/hb.js:96:15)
+      at async TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/hyperbeam.test.js:182:5)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:565:7
+       
+test at test/hyperbeam/patch.test.js:65:6
+✖ should patch with legacy aos (369.341522ms)
+  Error: 400: Message is not valid.
+      at send (file:///home/basque/dev/wao/src/send.js:28:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async HB.send (file:///home/basque/dev/wao/src/hb.js:67:12)
+      at async HB.post (file:///home/basque/dev/wao/src/hb.js:378:12)
+      at async HB.scheduleAOS (file:///home/basque/dev/wao/src/hb.js:96:15)
+      at async HB.messageAOS (file:///home/basque/dev/wao/src/hb.js:102:27)
+      at async TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/patch.test.js:67:5)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:565:7)
+ 
+test at test/hyperbeam/process.test.js:33:3
+✖ should upload module (52.305354ms)
+  Error: 400: Message is not valid.
+      at send (file:///home/basque/dev/wao/src/send.js:28:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async HB.send (file:///home/basque/dev/wao/src/hb.js:67:12)
+      at async HB.post (file:///home/basque/dev/wao/src/hb.js:378:12)
+      at async HB.p (file:///home/basque/dev/wao/src/hb.js:370:13)
+      at async TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/process.test.js:34:30)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1217:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:565:7)
+ 
+test at test/hyperbeam/scheduler.test.js:11:3
+✖ should test scheduler@1.0 (42.171808ms)
+  Error: 400: Message is not valid.
+      at send (file:///home/basque/dev/wao/src/send.js:28:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async HB.send (file:///home/basque/dev/wao/src/hb.js:67:12)
+      at async HB.post (file:///home/basque/dev/wao/src/hb.js:378:12)
+      at async HB.p (file:///home/basque/dev/wao/src/hb.js:370:13)
+      at async TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/scheduler.test.js:12:30)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1217:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:565:7)
+ 
+test at test/hyperbeam/wao-hb.test.js:43:3
+✖ should interact with hyperbeam using WAO SDK (2644.551768ms)
+  TypeError [Error]: Cannot read properties of undefined (reading 'msg')
+      at TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/wao-hb.test.js:45:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1217:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:565:7)
+ 
+test at test/hyperbeam/wao-hb.test.js:51:3
+✖ should spawn a message from a handler with receive (595.476746ms)
+  TypeError [Error]: Cannot read properties of undefined (reading 'm')
+      at TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/wao-hb.test.js:54:15)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:565
+       
+test at test/hyperbeam/wao-hb.test.js:58:3
+✖ should get with optional match (627.213693ms)
+  TypeError [Error]: Cannot read properties of undefined (reading 'd')
+      at TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/wao-hb.test.js:69:15)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:565:7)
+ 
+test at test/hyperbeam/wao-hb.test.js:100:6
+✖ should handle replies between multiple processes (1035.411316ms)
+  TypeError [Error]: Cannot read properties of undefined (reading 'm')
+      at TestContext.<anonymous> (file:///home/basque/dev/wao/test/hyperbeam/wao-hb.test.js:114:15)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:857:9)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:565:7)
+error Command failed with exit code 1.
+info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.

@@ -72,10 +72,11 @@ describe("Hyperbeam", function () {
     const hb4 = await new HB({ url: `http://localhost:${port}` }).init(
       acc[0].jwk
     )
-    const lua_msg = await hb3.commit(
-      { path: "credit-notice", quantity: 100, recipient: addr2 },
-      { path: true }
-    )
+    const lua_msg = await hb3.commit({
+      path: "credit-notice",
+      quantity: 100,
+      recipient: addr2,
+    })
     await hb3.p("/ledger~node-process@1.0/schedule", { body: lua_msg })
     const balance = await hb3.g(`/ledger~node-process@1.0/now/balance/${addr2}`)
     assert.equal(balance, "100")

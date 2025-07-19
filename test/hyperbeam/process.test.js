@@ -29,26 +29,26 @@ describe("Hyperbeam Device", function () {
   before(async () => (hbeam = await new HyperBEAM({ reset: true }).ready()))
   beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
-
-  it("should upload module", async () => {
+  it("should test process #0", async () => {
     const { process: pid } = await hb.p("/~process@1.0/schedule", {
-      device: "process@1.0",
+      body: {
+        device: "process@1.0",
+        type: "Process",
+        "execution-device": "wao@1.0",
+      },
       scheduler: hb.addr,
-      "execution-device": "wao@1.0",
     })
-
-    // todo: message invalid when signed body is empty
-    await hb.p(`/${pid}/schedule`, { target: pid })
-    await hb.p(`/${pid}/schedule`, { target: pid })
-    await hb.p(`/${pid}/schedule`, { target: pid })
+    await hb.p(`/${pid}/schedule`, { body: { target: pid } })
+    await hb.p(`/${pid}/schedule`, { body: { target: pid } })
+    await hb.p(`/${pid}/schedule`, { body: { target: pid } })
     const { count } = await hb.g(`/${pid}/compute`, { slot: 3 })
     assert.equal(count, 4)
-    await hb.p(`/${pid}/schedule`, { target: pid })
-    const now = await hb.getJSON({ path: `/${pid}/now` })
+    await hb.p(`/${pid}/schedule`, { body: { target: pid } })
+    const now = await hb.g(`/${pid}/now`)
     assert.equal(now.count, 5)
   })
 
-  it("should upload module", async () => {
+  it("should test process #2", async () => {
     const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
     await hb.schedule({ pid })
     await hb.schedule({ pid })

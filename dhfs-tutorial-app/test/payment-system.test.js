@@ -168,7 +168,7 @@ describe("Payment System p4@1.0", function () {
     const user = acc[0]
     user.hb = await new HB({ url: hbeam2.url }).init(user.jwk)
     const obj = { path: "credit-notice", quantity: 100, recipient: user.addr }
-    const lua_msg = await operator.hb.sign(obj, { path: true })
+    const lua_msg = await operator.hb.sign(obj)
     const hmacId = hmacid(lua_msg.headers)
     const rsaId = rsaid(lua_msg.headers)
     const committed_lua_msg = {
