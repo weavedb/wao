@@ -4,7 +4,91 @@
  */
 
 export function structured_from(input) {
-  return encodeToTabm(input)
+  const tabm = encodeToTabm(input)
+  // Apply post-processing to convert buffers to strings where appropriate
+  return postProcessTabm(tabm)
+}
+
+// Post-process TABM to convert buffers to strings for certain fields
+function postProcessTabm(obj) {
+  if (!obj || typeof obj !== "object" || Buffer.isBuffer(obj)) {
+    return obj
+  }
+
+  const result = {}
+
+  // Parse ao-types if present
+  const types = parseTypes(obj["ao-types"] || "")
+
+  for (const [key, value] of Object.entries(obj)) {
+    const normKey = normalize(key)
+    const type = types[normKey]
+
+    if (Buffer.isBuffer(value)) {
+      // Check if this buffer should be converted to a string
+      // This matches the behavior of bin_to_str in erl_str.js
+      if (shouldConvertToString(value)) {
+        result[key] = value.toString("utf8")
+      } else {
+        result[key] = value
+      }
+    } else if (
+      typeof value === "object" &&
+      value !== null &&
+      !Buffer.isBuffer(value)
+    ) {
+      // Check if this is a numbered map that should be converted to array
+      if (type === "list" && isNumberedMap(value)) {
+        result[key] = numberedMapToArray(postProcessTabm(value))
+      } else {
+        // Recursively process nested objects
+        result[key] = postProcessTabm(value)
+      }
+    } else {
+      result[key] = value
+    }
+  }
+
+  return result
+}
+
+// Check if an object is a numbered map (has keys like "0", "1", "2", etc.)
+function isNumberedMap(obj) {
+  const keys = Object.keys(obj)
+  return keys.some(k => /^\d+$/.test(k))
+}
+
+// Check if buffer should be converted to string (matching bin_to_str logic)
+function shouldConvertToString(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return false
+  }
+
+  try {
+    const str = buffer.toString("utf8")
+    // Check if it's valid UTF-8 by seeing if it round-trips correctly
+    if (!Buffer.from(str, "utf8").equals(buffer)) {
+      return false
+    }
+
+    // Check if all characters are printable or common whitespace
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i)
+      // Allow printable ASCII (32-126) and common whitespace (tab, newline, carriage return)
+      if (
+        !(code >= 32 && code <= 126) &&
+        code !== 9 &&
+        code !== 10 &&
+        code !== 13
+      ) {
+        return false
+      }
+    }
+
+    return true
+  } catch (e) {
+    return false
+  }
 }
 
 export function structured_to(input) {
@@ -13,12 +97,27 @@ export function structured_to(input) {
 
 // Main encoding function
 function encodeToTabm(obj) {
-  if (!obj || typeof obj !== "object" || Buffer.isBuffer(obj)) {
+  // Handle primitives directly
+  if (obj === null || obj === undefined) {
+    return obj
+  }
+
+  // Handle Buffers - they pass through unchanged
+  if (Buffer.isBuffer(obj)) {
+    return obj
+  }
+
+  // Handle non-objects (strings, numbers, etc)
+  if (typeof obj !== "object") {
     return obj
   }
 
   const result = {}
   const types = []
+
+  // Special handling for objects that already have ao-types
+  // This means they're already in TABM format, so we should preserve their structure
+  const hasAoTypes = obj["ao-types"] !== undefined
 
   // Sort keys by normalized form for consistent output with Erlang
   const keys = Object.keys(obj).sort((a, b) => {
@@ -32,6 +131,20 @@ function encodeToTabm(obj) {
   for (const key of keys) {
     const value = obj[key]
     const normKey = normalize(key)
+
+    // If this object already has ao-types, just pass through the values
+    if (hasAoTypes) {
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        !Buffer.isBuffer(value)
+      ) {
+        result[key] = encodeToTabm(value)
+      } else {
+        result[key] = value
+      }
+      continue
+    }
 
     // Handle empty values
     if (value === "" || (Buffer.isBuffer(value) && value.length === 0)) {
@@ -59,8 +172,11 @@ function encodeToTabm(obj) {
     }
     // Handle primitives
     else if (typeof value === "string") {
+      // IMPORTANT: Strings are kept as strings at the top level in TABM format
+      // They only become binaries when moved to a numbered map (inside arrays)
       result[normKey] = value
     } else if (Buffer.isBuffer(value)) {
+      // Buffers are kept as-is in the TABM format
       result[normKey] = value
     } else if (typeof value === "number") {
       if (Number.isInteger(value)) {
@@ -91,8 +207,8 @@ function encodeToTabm(obj) {
     }
   }
 
-  // Add ao-types if we have types
-  if (types.length > 0) {
+  // Add ao-types if we have types and don't already have ao-types
+  if (types.length > 0 && !hasAoTypes) {
     result["ao-types"] = types.map(([k, v]) => `${k}="${v}"`).join(", ")
   }
 
@@ -369,7 +485,10 @@ function parseTypes(typeStr) {
   const types = {}
   if (!typeStr) return types
 
-  const matches = typeStr.matchAll(/(\w+)="([^"]+)"/g)
+  // Convert Buffer to string if needed
+  const str = Buffer.isBuffer(typeStr) ? typeStr.toString("utf8") : typeStr
+
+  const matches = str.matchAll(/(\w+)="([^"]+)"/g)
   for (const match of matches) {
     types[match[1]] = match[2]
   }
@@ -463,12 +582,30 @@ function numberedMapToArray(map) {
     .map(k => parseInt(k, 10))
     .sort((a, b) => a - b)
 
-  const arr = []
-  const maxIdx = Math.max(...keys, 0)
+  if (keys.length === 0) {
+    return []
+  }
 
-  for (let i = 1; i <= maxIdx; i++) {
-    if (map[String(i)] !== undefined) {
-      arr[i - 1] = map[String(i)]
+  const arr = []
+
+  // Check if we have 0-based or 1-based indexing
+  const isZeroBased = keys[0] === 0
+
+  if (isZeroBased) {
+    // 0-based indexing
+    const maxIdx = Math.max(...keys)
+    for (let i = 0; i <= maxIdx; i++) {
+      if (map[String(i)] !== undefined) {
+        arr[i] = map[String(i)]
+      }
+    }
+  } else {
+    // 1-based indexing (default for structured fields)
+    const maxIdx = Math.max(...keys)
+    for (let i = 1; i <= maxIdx; i++) {
+      if (map[String(i)] !== undefined) {
+        arr[i - 1] = map[String(i)]
+      }
     }
   }
 

@@ -10,7 +10,7 @@ import { erl_str_from, erl_str_to } from "../../src/erl_str.js"
 const test = async (hb, cases, path, mod) => {
   let err = []
   let success = []
-  for (const v of cases.slice(0, 1)) {
+  for (const v of cases) {
     const json = erl_json_to(v)
     try {
       console.log(v, json, normalize(v))
@@ -43,7 +43,7 @@ describe("Hyperbeam Signer", function () {
   })
   after(async () => hbeam.kill())
   it("should test structured_from codec", async () => {
-    await test(hb, cases, "/~wao@1.0/structured_from", structured_from)
+    await test(hb, cases_from, "/~wao@1.0/structured_from", structured_from)
   })
 
   /*it("should test structured_from codec", async () => {
