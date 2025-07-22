@@ -22,20 +22,16 @@ export function erl_json_to(jsObj) {
 }
 
 /**
- * Normalize JS values to match what comes back from Erlang
- * - undefined → removed from objects, kept in arrays as undefined
- * - unique symbols → global symbols
- * - Symbol("null") → null, Symbol("true") → true, Symbol("false") → false
- * - strings → Buffers (when using erl_str_from)
+ * Normalize JS values to match what comes back from Erlang through erl_str_from
+ * This function is deterministic and matches the behavior of the Erlang round-trip
  * @param {*} obj - JS object to normalize
- * @param {boolean} convertStrings - Whether to convert strings to Buffers (for Erlang string codec)
  * @returns {*} - Normalized JS object
  */
-export function normalize(obj, convertStrings = true) {
+export function normalize(obj) {
   if (obj === null) return null
   if (obj === undefined) return undefined
 
-  // Handle symbols - convert to their special cases or global symbols
+  // Handle symbols - convert to their special cases or match erl_str_from behavior
   if (typeof obj === "symbol") {
     const key = Symbol.keyFor(obj)
     const name = key || obj.description || obj.toString().slice(7, -1)
@@ -45,21 +41,32 @@ export function normalize(obj, convertStrings = true) {
     if (name === "true") return true
     if (name === "false") return false
 
-    // Convert to global symbol
+    // Note: Symbol('undefined') stays as Symbol.for('undefined')
+    // It does NOT become JavaScript undefined
+    // This matches what erl_str_from actually returns
+
+    // For all symbols (including 'undefined'), convert to global symbol
+    // This is because non-global symbols can't round-trip through JSON
+    // Symbol('ok') -> '%ok%' -> Symbol.for('ok')
     return Symbol.for(name)
   }
 
-  // Strings - convert to Buffers if requested (for Erlang string codec)
-  if (typeof obj === "string" && convertStrings) {
+  // Strings
+  if (typeof obj === "string") {
+    // Special case: "::" becomes empty buffer through Erlang
+    if (obj === "::") {
+      return Buffer.alloc(0)
+    }
+    // Empty strings become empty binaries in Erlang
+    if (obj === "") {
+      return Buffer.alloc(0)
+    }
+    // Non-empty strings convert to Buffers
     return Buffer.from(obj, "utf8")
   }
 
   // Other primitives pass through
-  if (
-    typeof obj === "string" ||
-    typeof obj === "number" ||
-    typeof obj === "boolean"
-  ) {
+  if (typeof obj === "number" || typeof obj === "boolean") {
     return obj
   }
 
@@ -68,16 +75,22 @@ export function normalize(obj, convertStrings = true) {
     return Buffer.from(obj)
   }
 
-  // Arrays - normalize each element (undefined stays)
+  // Arrays - normalize each element
   if (Array.isArray(obj)) {
-    return obj.map(item => normalize(item, convertStrings))
+    return obj.map(item => {
+      // undefined in arrays becomes null (JSON behavior)
+      if (item === undefined) {
+        return null
+      }
+      return normalize(item)
+    })
   }
 
   // Objects - normalize each value and remove undefined values
   if (typeof obj === "object" && obj !== null) {
     const result = {}
     for (const [k, v] of Object.entries(obj)) {
-      const normalized = normalize(v, convertStrings)
+      const normalized = normalize(v)
       // Skip undefined values in objects
       if (normalized !== undefined) {
         result[k] = normalized
