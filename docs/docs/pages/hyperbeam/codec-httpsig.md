@@ -24,7 +24,7 @@ httpsig_from(Msg1, Msg2, Opts) ->
 
 Let's convert one complex object.
 
-- `{ a: { b: [1, 2, 3]} }, c: { d: [3.14, true, "str"] } }`
+- `{ a: { b: [1, 2, 3]}, c: { d: [3.14, true, "str"] } }`
 
 The structured encoded representation is the following.
 

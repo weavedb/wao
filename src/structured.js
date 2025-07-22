@@ -1,120 +1,338 @@
 /**
- * A codec implementing the structured format for HyperBEAM's internal,
- * richly typed message format.
- *
- * This format mirrors HTTP Structured Fields (RFC-9651).
+ * HyperBEAM Structured Format Codec
+ * Implements encoding/decoding for TABM (Type-Annotated Binary Message) format
  */
 
-/**
- * Convert to structured format (TABM).
- * This mimics the server's structured_from endpoint behavior.
- * Despite the name, this converts TO structured format, not FROM it.
- * @param {Object} input - The native JS object
- * @returns {Object} - TABM format
- */
 export function structured_from(input) {
-  // The server's structured_from uses dev_codec_structured:from
-  // which converts TO structured format (TABM)
-  return nativeToTabm(input)
+  return encodeToTabm(input)
 }
 
-/**
- * Convert from structured format (TABM) to native.
- * This mimics the server's structured_to endpoint behavior.
- * Despite the name, this converts FROM structured format, not TO it.
- * @param {Object} input - The TABM format
- * @returns {Object} - Native JS object
- */
 export function structured_to(input) {
-  // The server's structured_to uses dev_codec_structured:to
-  // which converts FROM structured format to native
-  return tabmToNative(input)
+  return decodeFromTabm(input)
 }
 
-/**
- * Internal function to convert TABM to native JS object
- */
-function tabmToNative(tabm) {
-  if (typeof tabm === "string" || tabm instanceof Buffer) {
-    return tabm
+// Main encoding function
+function encodeToTabm(obj) {
+  if (!obj || typeof obj !== "object" || Buffer.isBuffer(obj)) {
+    return obj
   }
 
-  if (typeof tabm !== "object" || tabm === null) {
-    return tabm
-  }
-
-  // Parse ao-types field
-  const types = parseAoTypes(tabm["ao-types"] || "")
-
-  // First, handle empty values based on types
   const result = {}
-  for (const [key, type] of Object.entries(types)) {
-    if (type === "empty-binary") {
-      result[key] = ""
-    } else if (type === "empty-list") {
-      result[key] = []
-    } else if (type === "empty-message") {
-      result[key] = {}
+  const types = []
+
+  // Sort keys by normalized form for consistent output with Erlang
+  const keys = Object.keys(obj).sort((a, b) => {
+    const normA = normalize(a)
+    const normB = normalize(b)
+    if (normA < normB) return -1
+    if (normA > normB) return 1
+    return 0
+  })
+
+  for (const key of keys) {
+    const value = obj[key]
+    const normKey = normalize(key)
+
+    // Handle empty values
+    if (value === "" || (Buffer.isBuffer(value) && value.length === 0)) {
+      types.push([normKey, "empty-binary"])
+    } else if (Array.isArray(value) && value.length === 0) {
+      types.push([normKey, "empty-list"])
+    } else if (isEmptyObject(value)) {
+      types.push([normKey, "empty-message"])
+    }
+    // Handle $empty objects
+    else if (value && typeof value === "object" && value["$empty"]) {
+      if (value["$empty"] === "binary") {
+        types.push([normKey, "empty-binary"])
+      } else if (value["$empty"] === "list") {
+        types.push([normKey, "empty-list"])
+      } else if (value["$empty"] === "map" || value["$empty"] === "message") {
+        types.push([normKey, "empty-message"])
+      }
+    }
+    // Handle arrays
+    else if (Array.isArray(value)) {
+      const arrayResult = processArray(value)
+      types.push([normKey, arrayResult.type])
+      result[normKey] = arrayResult.value
+    }
+    // Handle primitives
+    else if (typeof value === "string") {
+      result[normKey] = value
+    } else if (Buffer.isBuffer(value)) {
+      result[normKey] = value
+    } else if (typeof value === "number") {
+      if (Number.isInteger(value)) {
+        types.push([normKey, "integer"])
+        result[normKey] = String(value)
+      } else {
+        types.push([normKey, "float"])
+        // Floats are stored as buffers at top level
+        result[normKey] = Buffer.from(formatFloat(value))
+      }
+    } else if (typeof value === "boolean") {
+      types.push([normKey, "atom"])
+      result[normKey] = `"${value}"`
+    } else if (value === null) {
+      types.push([normKey, "atom"])
+      result[normKey] = '"null"'
+    } else if (typeof value === "symbol") {
+      types.push([normKey, "atom"])
+      const name =
+        Symbol.keyFor(value) ||
+        value.description ||
+        value.toString().slice(7, -1)
+      result[normKey] = `"${name}"`
+    }
+    // Handle nested objects
+    else if (typeof value === "object") {
+      result[normKey] = encodeToTabm(value)
     }
   }
 
-  // Then process all other fields
-  for (const [key, value] of Object.entries(tabm)) {
+  // Add ao-types if we have types
+  if (types.length > 0) {
+    result["ao-types"] = types.map(([k, v]) => `${k}="${v}"`).join(", ")
+  }
+
+  return result
+}
+
+// Process arrays - convert to numbered map if needed
+function processArray(arr) {
+  // Pre-process $empty objects
+  const processed = arr.map(item => {
+    if (item && typeof item === "object" && item["$empty"]) {
+      if (item["$empty"] === "binary") return Buffer.alloc(0)
+      if (item["$empty"] === "list") return []
+      if (item["$empty"] === "map" || item["$empty"] === "message") return {}
+    }
+    return item
+  })
+
+  // Check if we need numbered map (first element is array/map OR any element is a map)
+  const needsNumbered = shouldUseNumberedMap(processed)
+
+  if (!needsNumbered) {
+    // Encode as structured field list
+    return { type: "list", value: encodeList(processed) }
+  }
+
+  // Convert to numbered map
+  const numbered = {}
+  const types = []
+
+  processed.forEach((item, idx) => {
+    const key = String(idx + 1)
+
+    // Empty values - only add type
+    if (item === "" || (Buffer.isBuffer(item) && item.length === 0)) {
+      types.push([key, "empty-binary"])
+    } else if (Array.isArray(item) && item.length === 0) {
+      types.push([key, "empty-list"])
+    } else if (isEmptyObject(item)) {
+      types.push([key, "empty-message"])
+    }
+    // Strings become buffers in numbered maps
+    else if (typeof item === "string") {
+      numbered[key] = Buffer.from(item)
+    }
+    // Buffers stay as buffers
+    else if (Buffer.isBuffer(item)) {
+      numbered[key] = item
+    }
+    // Arrays - recursive processing
+    else if (Array.isArray(item)) {
+      const subResult = processArray(item)
+      types.push([key, subResult.type])
+      numbered[key] = subResult.value
+    }
+    // Numbers
+    else if (typeof item === "number") {
+      if (Number.isInteger(item)) {
+        types.push([key, "integer"])
+        numbered[key] = Buffer.from(String(item))
+      } else {
+        types.push([key, "float"])
+        numbered[key] = Buffer.from(formatFloat(item))
+      }
+    }
+    // Booleans
+    else if (typeof item === "boolean") {
+      types.push([key, "atom"])
+      numbered[key] = Buffer.from(`"${item}"`)
+    }
+    // Null
+    else if (item === null) {
+      types.push([key, "atom"])
+      numbered[key] = Buffer.from('"null"')
+    }
+    // Objects
+    else if (typeof item === "object") {
+      numbered[key] = encodeToTabm(item)
+    }
+  })
+
+  // Add ao-types
+  if (types.length > 0) {
+    numbered["ao-types"] = types.map(([k, v]) => `${k}="${v}"`).join(", ")
+  }
+
+  return { type: "list", value: numbered }
+}
+
+// Check if array needs to be converted to numbered map
+function shouldUseNumberedMap(arr) {
+  if (arr.length === 0) return false
+
+  // If first element is array or map -> numbered map
+  const first = arr[0]
+  if (Array.isArray(first)) return true
+  if (first && typeof first === "object" && !Buffer.isBuffer(first)) return true
+
+  // Check if any element is a map
+  return arr.some(
+    item =>
+      item &&
+      typeof item === "object" &&
+      !Buffer.isBuffer(item) &&
+      !Array.isArray(item)
+  )
+}
+
+// Encode array as structured field list
+function encodeList(arr) {
+  const items = arr.map(item => {
+    // Empty values
+    if (item === "" || (Buffer.isBuffer(item) && item.length === 0)) {
+      return '""'
+    }
+    // Strings
+    if (typeof item === "string") {
+      return `"${escapeString(item)}"`
+    }
+    // Buffers
+    if (Buffer.isBuffer(item)) {
+      return `"${escapeString(item.toString())}"`
+    }
+    // Arrays
+    if (Array.isArray(item)) {
+      if (item.length === 0) return "[]"
+      // Check if nested array can be encoded
+      if (shouldUseNumberedMap(item)) {
+        throw new Error(
+          "Cannot encode nested array with maps as structured field"
+        )
+      }
+      return encodeNestedList(item, 1)
+    }
+    // Numbers
+    if (typeof item === "number") {
+      if (Number.isInteger(item)) {
+        return `"(ao-type-integer) ${item}"`
+      } else {
+        return `"(ao-type-float) ${formatFloat(item)}"`
+      }
+    }
+    // Booleans
+    if (typeof item === "boolean") {
+      return `"(ao-type-atom) \\"${item}\\""`
+    }
+    // Null
+    if (item === null) {
+      return '"(ao-type-atom) \\"null\\""'
+    }
+    // Symbols
+    if (typeof item === "symbol") {
+      const name =
+        Symbol.keyFor(item) || item.description || item.toString().slice(7, -1)
+      return `"(ao-type-atom) \\"${escapeString(name)}\\""`
+    }
+
+    throw new Error(`Cannot encode item of type ${typeof item} in list`)
+  })
+
+  return items.join(", ")
+}
+
+// Encode nested lists with proper escaping
+function encodeNestedList(arr, level) {
+  const bs = "\\".repeat(Math.pow(2, level) - 1)
+
+  const items = arr.map(item => {
+    if (typeof item === "string") {
+      return `${bs}"${escapeString(item)}${bs}"`
+    }
+    if (typeof item === "number") {
+      if (Number.isInteger(item)) {
+        return `${bs}"(ao-type-integer) ${item}${bs}"`
+      } else {
+        return `${bs}"(ao-type-float) ${formatFloat(item)}${bs}"`
+      }
+    }
+    if (Array.isArray(item)) {
+      return encodeNestedList(item, level + 1)
+    }
+    if (typeof item === "boolean") {
+      const innerBs = "\\".repeat(Math.pow(2, level + 1) - 1)
+      return `${bs}"(ao-type-atom) ${innerBs}"${item}${innerBs}"${bs}"`
+    }
+    if (item === null) {
+      const innerBs = "\\".repeat(Math.pow(2, level + 1) - 1)
+      return `${bs}"(ao-type-atom) ${innerBs}"null${innerBs}"${bs}"`
+    }
+    return `${bs}"${String(item)}${bs}"`
+  })
+
+  const content = items.join(", ")
+
+  if (level === 1) {
+    return `"(ao-type-list) ${content}"`
+  } else {
+    const outerBs = "\\".repeat(Math.pow(2, level - 1) - 1)
+    return `${outerBs}"(ao-type-list) ${content}${outerBs}"`
+  }
+}
+
+// Decode from TABM format
+function decodeFromTabm(obj) {
+  if (!obj || typeof obj !== "object" || Buffer.isBuffer(obj)) {
+    return obj
+  }
+
+  const result = {}
+  const types = parseTypes(obj["ao-types"] || "")
+
+  for (const [key, value] of Object.entries(obj)) {
     if (key === "ao-types") continue
 
-    const normalizedKey = normalizeKey(key)
-    const type = types[normalizedKey]
+    const normKey = normalize(key)
+    const type = types[normKey]
 
-    if (typeof value === "string") {
-      if (!type) {
-        // No type annotation, it's just a string
-        result[key] = value
-      } else {
-        // Decode according to type
-        result[key] = decodeValue(type, value)
+    // Handle empty types
+    if (!result[key] && type) {
+      if (type === "empty-binary") {
+        result[key] = ""
+      } else if (type === "empty-list") {
+        result[key] = []
+      } else if (type === "empty-message") {
+        result[key] = {}
       }
-    } else if (
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value)
-    ) {
-      // Recursively decode child TABM
-      const childDecoded = tabmToNative(value)
+    }
+
+    // Decode values
+    if (typeof value === "string" && type) {
+      result[key] = decodeValue(type, value)
+    } else if (typeof value === "object" && !Buffer.isBuffer(value)) {
+      const decoded = decodeFromTabm(value)
+      // Convert numbered maps back to arrays
       if (type === "list") {
-        // Convert numbered map back to array
-        // First get all numeric keys
-        const numericKeys = Object.keys(childDecoded)
-          .filter(k => /^\d+$/.test(k))
-          .sort((a, b) => parseInt(a) - parseInt(b))
-
-        // Build array with proper indices
-        const maxIndex =
-          numericKeys.length > 0
-            ? Math.max(...numericKeys.map(k => parseInt(k)))
-            : -1
-        const arr = new Array(maxIndex + 1)
-
-        // Fill in the values
-        for (let i = 0; i <= maxIndex; i++) {
-          if (childDecoded.hasOwnProperty(String(i))) {
-            arr[i] = childDecoded[String(i)]
-          } else {
-            // Check if it's an empty value from ao-types
-            const childTypes = parseAoTypes(value["ao-types"] || "")
-            if (childTypes[String(i)] === "empty-binary") {
-              arr[i] = ""
-            } else {
-              arr[i] = undefined
-            }
-          }
-        }
-
-        result[key] = arr.filter(v => v !== undefined)
+        result[key] = numberedMapToArray(decoded)
       } else {
-        result[key] = childDecoded
+        result[key] = decoded
       }
     } else {
-      // Already decoded value
       result[key] = value
     }
   }
@@ -122,156 +340,53 @@ function tabmToNative(tabm) {
   return result
 }
 
-/**
- * Internal function to convert native JS to TABM
- */
-function nativeToTabm(msg) {
-  if (typeof msg === "string" || msg instanceof Buffer) {
-    return msg
-  }
-
-  if (typeof msg !== "object" || msg === null) {
-    return msg
-  }
-
-  const types = []
-  const values = {}
-
-  // Sort keys to ensure consistent order
-  const sortedKeys = Object.keys(msg).sort()
-
-  for (const key of sortedKeys) {
-    const value = msg[key]
-    const binKey = normalizeKey(key)
-
-    // Handle empty values
-    if (value === "") {
-      types.push([binKey, "empty-binary"])
-      continue
-    } else if (Array.isArray(value) && value.length === 0) {
-      types.push([binKey, "empty-list"])
-      continue
-    } else if (isEmptyMessage(value)) {
-      types.push([binKey, "empty-message"])
-      continue
-    }
-
-    // Handle different value types
-    if (typeof value === "string") {
-      values[key] = value
-    } else if (Array.isArray(value)) {
-      // Check if it's a list of objects/arrays or primitives
-      const hasObjects = value.some(
-        item =>
-          typeof item === "object" && item !== null && !Array.isArray(item)
-      )
-
-      if (hasObjects) {
-        // List of maps - convert to numbered map
-        types.push([binKey, "list"])
-        const numberedMap = {}
-        value.forEach((item, index) => {
-          numberedMap[String(index)] = item
-        })
-        values[key] = nativeToTabm(numberedMap)
-      } else {
-        // List of primitives or mixed with nested arrays
-        // Always encode as a list with type annotations
-        const [type, encoded] = encodeValue(value)
-        types.push([binKey, type])
-        values[key] = encoded
-      }
-    } else if (typeof value === "object" && value !== null) {
-      values[key] = nativeToTabm(value)
-    } else if (
-      typeof value === "number" ||
-      typeof value === "boolean" ||
-      value === null
-    ) {
-      // Encode primitive values
-      const [type, encoded] = encodeValue(value)
-      types.push([binKey, type])
-      values[key] = encoded
-    }
-  }
-
-  // Add ao-types field if there are any types
-  if (types.length > 0) {
-    values["ao-types"] = encodeDictionary(types)
-  }
-
-  return values
+// Helper functions
+function normalize(key) {
+  return String(key).toLowerCase()
 }
 
-/**
- * Encode a value to its structured field representation
- * @param {*} value - The value to encode
- * @returns {[string, string]} - [type, encoded_value]
- */
-function encodeValue(value) {
-  if (Number.isInteger(value)) {
-    return ["integer", String(value)]
-  } else if (typeof value === "number") {
-    // Float - simplified version, actual implementation would need proper decimal handling
-    return ["float", String(value)]
-  } else if (typeof value === "boolean") {
-    // Booleans are encoded as atoms with the string representation
-    return ["atom", `"${value}"`]
-  } else if (value === null) {
-    return ["atom", '"null"']
-  } else if (Array.isArray(value)) {
-    // Encode list of primitives
-    const encoded = value
-      .map(item => {
-        if (typeof item === "string") {
-          return `"${escapeString(item)}"`
-        } else if (Array.isArray(item)) {
-          // Nested list - encode the inner list and escape it
-          const [_, innerEncoded] = encodeValue(item)
-          // Double escape the quotes for nested lists
-          const escapedInner = innerEncoded.replace(/"/g, '\\"')
-          return `"(ao-type-list) ${escapedInner}"`
-        } else if (typeof item === "number") {
-          const [type, enc] = encodeValue(item)
-          return `"(ao-type-${type}) ${enc}"`
-        } else if (typeof item === "boolean") {
-          const [type, enc] = encodeValue(item)
-          // For booleans in lists, we need to escape the quotes in the atom value
-          const escapedEnc = enc.replace(/"/g, '\\"')
-          return `"(ao-type-${type}) ${escapedEnc}"`
-        } else if (item === null) {
-          return `"(ao-type-atom) \\"null\\""`
-        } else {
-          throw new Error(`Cannot encode list item of type ${typeof item}`)
-        }
-      })
-      .join(", ")
-    return ["list", encoded]
-  } else {
-    throw new Error(`Cannot encode value of type ${typeof value}`)
-  }
+function isEmptyObject(obj) {
+  return (
+    obj &&
+    typeof obj === "object" &&
+    !Array.isArray(obj) &&
+    !Buffer.isBuffer(obj) &&
+    Object.keys(obj).length === 0
+  )
 }
 
-/**
- * Decode a value from its structured field representation
- * @param {string} type - The type annotation
- * @param {string} value - The encoded value
- * @returns {*} - Decoded value
- */
+function formatFloat(num) {
+  let str = num.toExponential(20)
+  // Ensure 2-digit exponent
+  return str.replace(/e([+-])(\d)$/, "e$10$2")
+}
+
+function escapeString(str) {
+  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+function parseTypes(typeStr) {
+  const types = {}
+  if (!typeStr) return types
+
+  const matches = typeStr.matchAll(/(\w+)="([^"]+)"/g)
+  for (const match of matches) {
+    types[match[1]] = match[2]
+  }
+  return types
+}
+
 function decodeValue(type, value) {
-  switch (type.toLowerCase()) {
+  switch (type) {
     case "integer":
       return parseInt(value, 10)
     case "float":
       return parseFloat(value)
-    case "boolean":
-      return value === "?1"
     case "atom":
-      // Atoms are quoted strings, remove the quotes
-      if (value === '"null"') return null
       if (value === '"true"') return true
       if (value === '"false"') return false
-      return value.slice(1, -1) // Remove quotes
+      if (value === '"null"') return null
+      return value.slice(1, -1)
     case "list":
       return parseList(value)
     default:
@@ -279,48 +394,30 @@ function decodeValue(type, value) {
   }
 }
 
-/**
- * Parse HTTP Structured Fields list format
- * @param {string} value - The list string to parse
- * @returns {Array} - Parsed list
- */
 function parseList(value) {
-  if (!value || value.trim() === "") return []
+  if (!value) return []
 
   const items = []
   let current = ""
-  let inQuotes = false
-  let escapeNext = false
+  let depth = 0
+  let inString = false
 
   for (let i = 0; i < value.length; i++) {
     const char = value[i]
-    const nextChar = i < value.length - 1 ? value[i + 1] : null
 
-    if (escapeNext) {
-      current += char
-      escapeNext = false
-      continue
+    if (char === '"' && value[i - 1] !== "\\") {
+      inString = !inString
     }
 
-    if (char === "\\" && inQuotes) {
-      // Check if this is an escape sequence
-      if (nextChar === '"' || nextChar === "\\") {
-        escapeNext = true
-        current += char
+    if (!inString) {
+      if (char === "," && depth === 0) {
+        items.push(parseListItem(current.trim()))
+        current = ""
         continue
       }
     }
 
-    if (char === '"' && !escapeNext) {
-      inQuotes = !inQuotes
-    }
-
-    if (char === "," && !inQuotes) {
-      items.push(parseListItem(current.trim()))
-      current = ""
-    } else {
-      current += char
-    }
+    current += char
   }
 
   if (current.trim()) {
@@ -330,153 +427,50 @@ function parseList(value) {
   return items
 }
 
-/**
- * Parse a single list item
- * @param {string} item - The item to parse
- * @returns {*} - Parsed value
- */
 function parseListItem(item) {
-  if (item.startsWith('"') && item.endsWith('"')) {
-    const content = item.slice(1, -1)
-    if (content.startsWith("(ao-type-")) {
-      const match = content.match(/^\(ao-type-([^)]+)\) (.+)$/)
-      if (match) {
-        const type = match[1]
-        const value = match[2]
-
-        if (type === "list") {
-          // For nested lists, we need to unescape the quotes first
-          const unescapedValue = value.replace(/\\"/g, '"')
-          return parseList(unescapedValue)
-        } else if (type === "atom") {
-          // For atoms, the value is already quoted and may be escaped
-          const unescapedValue = value.replace(/\\"/g, '"')
-          return decodeValue(type, unescapedValue)
-        } else {
-          return decodeValue(type, value)
-        }
-      }
-    }
-    return unescapeString(content)
+  if (!item.startsWith('"') || !item.endsWith('"')) {
+    return item
   }
-  return item
-}
 
-/**
- * Parse the ao-types dictionary
- * @param {string} aoTypes - The ao-types string
- * @returns {Object} - Parsed types map
- */
-function parseAoTypes(aoTypes) {
-  if (!aoTypes) return {}
+  const content = item.slice(1, -1)
 
-  const types = {}
-  const entries = aoTypes
-    .split(",")
-    .map(e => e.trim())
-    .filter(e => e)
+  // Handle typed values
+  const typeMatch = content.match(/^\(ao-type-(\w+)\) (.+)$/)
+  if (typeMatch) {
+    const [, type, val] = typeMatch
 
-  for (const entry of entries) {
-    const match = entry.match(/^([^=]+)=(.+)$/)
-    if (match) {
-      const key = decodeKey(match[1].trim())
-      const value = match[2].trim().replace(/^"|"$/g, "")
-      types[key] = value
+    if (type === "integer") return parseInt(val, 10)
+    if (type === "float") return parseFloat(val)
+    if (type === "atom") {
+      const atomVal = val.replace(/\\"/g, '"')
+      if (atomVal === '"true"') return true
+      if (atomVal === '"false"') return false
+      if (atomVal === '"null"') return null
+      return atomVal.slice(1, -1)
+    }
+    if (type === "list") {
+      return parseList(val)
     }
   }
 
-  return types
+  // Unescape string
+  return content.replace(/\\"/g, '"').replace(/\\\\/g, "\\")
 }
 
-/**
- * Encode a dictionary to HTTP Structured Fields format
- * @param {Array} entries - Array of [key, value] pairs
- * @returns {string} - Encoded dictionary
- */
-function encodeDictionary(entries) {
-  return entries
-    .map(([key, value]) => {
-      const encodedKey = encodeKey(key)
-      return `${encodedKey}="${value}"`
-    })
-    .join(", ")
-}
+function numberedMapToArray(map) {
+  const keys = Object.keys(map)
+    .filter(k => /^\d+$/.test(k))
+    .map(k => parseInt(k, 10))
+    .sort((a, b) => a - b)
 
-/**
- * Normalize a key (similar to hb_ao:normalize_key)
- * @param {string} key - The key to normalize
- * @returns {string} - Normalized key
- */
-function normalizeKey(key) {
-  if (typeof key !== "string") return String(key)
-  return key.toLowerCase()
-}
+  const arr = []
+  const maxIdx = Math.max(...keys, 0)
 
-/**
- * Encode a key for structured fields (similar to hb_escape:encode)
- * @param {string} key - The key to encode
- * @returns {string} - Encoded key
- */
-function encodeKey(key) {
-  // Simplified version - actual implementation would need full escaping
-  return key.replace(/[^a-zA-Z0-9_-]/g, match => {
-    return "%" + match.charCodeAt(0).toString(16).padStart(2, "0")
-  })
-}
+  for (let i = 1; i <= maxIdx; i++) {
+    if (map[String(i)] !== undefined) {
+      arr[i - 1] = map[String(i)]
+    }
+  }
 
-/**
- * Decode an encoded key
- * @param {string} key - The encoded key
- * @returns {string} - Decoded key
- */
-function decodeKey(key) {
-  return key.replace(/%([0-9a-fA-F]{2})/g, (match, hex) => {
-    return String.fromCharCode(parseInt(hex, 16))
-  })
-}
-
-/**
- * Check if a value is an empty message/object
- * @param {*} value - The value to check
- * @returns {boolean} - True if empty message
- */
-function isEmptyMessage(value) {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.keys(value).length === 0
-  )
-}
-
-/**
- * Convert a numbered map to an ordered list
- * @param {Object} map - The numbered map
- * @returns {Array} - Ordered list
- */
-function messageToOrderedList(map) {
-  const keys = Object.keys(map).filter(k => /^\d+$/.test(k))
-  keys.sort((a, b) => parseInt(a) - parseInt(b))
-  return keys.map(k => map[k])
-}
-
-/**
- * Escape a string for structured fields
- * @param {string} str - The string to escape
- * @returns {string} - Escaped string
- */
-function escapeString(str) {
-  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-}
-
-/**
- * Unescape a string from structured fields
- * @param {string} str - The string to unescape
- * @returns {string} - Unescaped string
- */
-function unescapeString(str) {
-  // The test expects:
-  // \\\" to become \"  (escaped quote becomes literal quote)
-  // \\\\ to become \\  (escaped backslash becomes literal backslash)
-  return str.replace(/\\\\/g, "\\").replace(/\\"/g, '"')
+  return arr
 }
