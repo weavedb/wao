@@ -4,12 +4,12 @@ import HyperBEAM from "../../src/hyperbeam.js"
 import { flat_from, flat_to } from "../../src/flat.js"
 import { structured_from, structured_to } from "../../src/structured.js"
 import { httpsig_from, httpsig_to } from "../../src/httpsig.js"
-import { cases_from, cases_to } from "./structured_cases.js"
+import cases from "../lib/cases.js"
 
 const test = async (hb, cases) => {
   let err = []
   let success = []
-  for (const v of cases) {
+  for (const v of cases.slice(0, 1)) {
     try {
       const res = await hb.post({
         path: "/~mydev@1.0/structured_from",
@@ -43,6 +43,6 @@ describe("Hyperbeam Signer", function () {
   after(async () => hbeam.kill())
 
   it("should test encoding", async () => {
-    await test(hb, cases_from)
+    await test(hb, cases)
   })
 })

@@ -40,6 +40,7 @@ async function _sign({
   for (const [key, value] of Object.entries(headersObj)) {
     lowercaseHeaders[key.toLowerCase()] = value
   }
+
   const bodyKeys = headersObj["body-keys"]
     ? headersObj["body-keys"]
         .replace(/"/g, "")

@@ -1,27 +1,42 @@
 import assert from "assert"
 import { describe, it, before, after } from "node:test"
 import HyperBEAM from "../../src/hyperbeam.js"
+import { structured_from, structured_to } from "../../src/structured.js"
+import { cases_from, cases_to } from "./structured_cases.js"
+import cases, { httpsig_errors } from "../lib/cases.js"
+import { erl_json_from, erl_json_to, normalize } from "../../src/erl_json.js"
+import { erl_str_from, erl_str_to } from "../../src/erl_str.js"
 import { httpsig_from, httpsig_to } from "../../src/httpsig.js"
-import { cases_from, cases_to } from "./httpsig_cases.js"
 
-const test = async (hb, cases, path, mod) => {
+const test = async (hb, cases, path) => {
   let err = []
   let success = []
   for (const v of cases) {
-    const msg = await hb.sign({ path, body: JSON.stringify(v) })
     try {
-      const { body } = await hb.send(msg)
-      const json = JSON.parse(body)
-      assert.deepEqual(mod(v), json)
+      const structured = structured_from(normalize(v))
+      const json = erl_json_to(structured)
+      console.log(structured, json)
+      const { out } = await hb.post({ path, body: JSON.stringify(json) })
+      console.log(out)
+      console.log("response", out)
+      console.log(
+        "httpsig_to(normalize(structured))",
+        httpsig_to(normalize(structured))
+      )
+      console.log("erl_str_from(out)", erl_str_from(out))
+      assert.deepEqual(httpsig_to(structured), erl_str_from(out))
       success.push(v)
     } catch (e) {
       console.log(e)
       err.push(v)
+      break
     }
   }
-  console.log(`${err.length} / ${cases.length} failed!`)
+  //console.log(`${err.length} / ${cases.length} failed!`)
+  console.log(`${success.length} success`)
   if (err) {
-    for (let v of err) console.log(v)
+    console.log(`error with the case`)
+    for (let v of err) console.log(JSON.stringify(v))
   }
 }
 
@@ -32,12 +47,7 @@ describe("Hyperbeam Signer", function () {
     hb = hbeam.hb
   })
   after(async () => hbeam.kill())
-
-  it("should test httpsig_from codec", async () => {
-    await test(hb, cases_from, "/~mydev@1.0/httpsig_from", httpsig_from)
-  })
-
-  it("should test httpsig_to codec", async () => {
-    await test(hb, cases_to, "/~mydev@1.0/httpsig_to", httpsig_to)
+  it("should test structured_from codec", async () => {
+    await test(hb, cases, "/~wao@1.0/httpsig_to")
   })
 })

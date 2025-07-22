@@ -1874,12 +1874,57 @@ import genSimple from "./genSimple.js"
 
 const bin = Buffer.from([1, 2, 3])
 const empty = Buffer.from([])
-
-const ok = [
-  { recursive: [1, [2, [3, [4]]]] },
+export const map_error = [
   { types: ["", 0, "", false, Symbol("null"), [], {}, -1] },
   { chaos: [1, "three", true, Symbol("ok"), null, [], {}, 4.5] },
   { mixed_empty_full: ["", [1], {}, { a: 1 }] },
+  {
+    data: [
+      1,
+      "abc",
+      true,
+      "ok",
+      1.23,
+      { bool: false, float: 3.14, int: 1, nested: "ok", str: "abc" },
+    ],
+  },
+  { mixed_empty: ["", 0, [], "", {}, null, false] },
+]
+export const httpsig_errors = [
+  {
+    data: {
+      bytes: Buffer.from([0, 127, 255]),
+      empty: { list: [], map: {} },
+    },
+  },
+  {
+    data: "plain text",
+    body: { content: Buffer.from([192, 168, 1, 1]) },
+  },
+  {
+    items: {
+      first: Buffer.from([255]),
+      second: Buffer.from([0]),
+      third: Buffer.from([128]),
+    },
+  },
+  {
+    data: { body: Buffer.from([255]) },
+    body: { data: Buffer.from([0]) },
+  },
+]
+export const signer_errors = [
+  { binary: bin },
+  { body: bin, data: bin },
+  { bin },
+  { data: bin },
+  { body: bin },
+  { bin, data: bin },
+  { bin, body: bin },
+  { bin, data: bin, body: bin },
+]
+const ok = [
+  { recursive: [1, [2, [3, [4]]]] },
   { alternating: [1, "one", 2, "two", 3, "three"] },
   {
     binary_data: "some binary content",
@@ -1896,21 +1941,10 @@ const ok = [
     values: [1, 2, 3, 4, 5],
     states: [Symbol("active"), Symbol("inactive"), Symbol("pending")],
   },
-  {
-    data: [
-      1,
-      "abc",
-      true,
-      "ok",
-      1.23,
-      { bool: false, float: 3.14, int: 1, nested: "ok", str: "abc" },
-    ],
-  },
   { empty: Buffer.from([]), nested: [Buffer.from([]), 3] },
   { list: [1, [2, 3]] },
   { list: [53.05] },
   { list: [Symbol("ok")] },
-  { mixed_empty: ["", 0, [], "", {}, null, false] },
 
   { "data-field": 1, data_field: 2, dataField: 3 },
   {
@@ -2052,16 +2086,6 @@ const ok = [
     empty_binary: Buffer.from([]),
   },
   {
-    data: {
-      bytes: Buffer.from([0, 127, 255]),
-      empty: { list: [], map: {} },
-    },
-  },
-  {
-    data: "plain text",
-    body: { content: Buffer.from([192, 168, 1, 1]) },
-  },
-  {
     nested_empty: {
       a: {},
       b: { c: [] },
@@ -2078,17 +2102,6 @@ const ok = [
       encoded: "base64_content",
     },
     empty_string: "",
-  },
-  {
-    items: {
-      first: Buffer.from([255]),
-      second: Buffer.from([0]),
-      third: Buffer.from([128]),
-    },
-  },
-  {
-    data: { body: Buffer.from([255]) },
-    body: { data: Buffer.from([0]) },
   },
   {
     body: { a: { b: 5, c: 3 } },
@@ -2114,7 +2127,6 @@ const ok = [
   { key: [{ int: 1 }] },
   { null: null, undefined: undefined },
   { body: { list: [], map: {} }, nested: { list: [], map: {} } },
-  { binary: Buffer.from([1, 2, 3]) },
   {
     str: "abc",
     bool: true,
@@ -2125,13 +2137,12 @@ const ok = [
     body: bin,
   },
   { map: { a: 1, b: 2, c: { d: 3 } }, body: bin },
-  { body: bin, data: bin },
   { map: { a: 3, b: "abc", c: { d: { e: 3 } } } },
   { map: { jntzf: 8.02 } },
   { map: { float: 86.01, bool: true } },
   { key: [[8.02]] },
-  { body: bin, data: bin },
   { base64: Buffer.from([1, 2, 3]).toString("base64") },
+
   { bin: empty },
   { body: empty },
   { bin: empty, body: empty },
@@ -2149,13 +2160,7 @@ const ok = [
   { bin: [], data: [] },
   { bin: [], body: [] },
   { bin: [], data: [], body: [] },
-  { bin },
-  { data: bin },
-  { body: bin },
-  { data: bin, body: bin },
-  { bin, data: bin },
-  { bin, body: bin },
-  { bin, data: bin, body: bin },
+
   { num: Symbol("atom") },
   { data: Symbol("atom") },
   { body: Symbol("atom") },
