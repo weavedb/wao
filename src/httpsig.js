@@ -1,6 +1,7 @@
 // httpsig.js - JavaScript implementation of HTTP Signature codec
 
 import crypto from "crypto"
+import { flat_from, flat_to } from "./flat.js"
 
 const CRLF = "\r\n"
 const DOUBLE_CRLF = CRLF + CRLF
@@ -128,7 +129,14 @@ function ungroupIds(msg) {
 
 // Group maps for body encoding - following Erlang logic exactly
 function groupMaps(map, parent = "", top = {}) {
-  if (typeof map !== "object" || map === null) return top
+  if (
+    typeof map !== "object" ||
+    map === null ||
+    Array.isArray(map) ||
+    Buffer.isBuffer(map)
+  ) {
+    return top
+  }
 
   const flattened = {}
   let newTop = { ...top }
@@ -141,11 +149,19 @@ function groupMaps(map, parent = "", top = {}) {
     const normKey = normalizeKey(key)
     const flatK = parent ? `${parent}/${normKey}` : normKey
 
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      !Buffer.isBuffer(value)
+    ) {
       // Recursively process nested objects
       newTop = groupMaps(value, flatK, newTop)
     } else if (typeof value === "string" && value.length > MAX_HEADER_LENGTH) {
       // Value too large for header, lift to top level
+      newTop[flatK] = value
+    } else if (Buffer.isBuffer(value) && value.length > MAX_HEADER_LENGTH) {
+      // Large buffers also get lifted to top level
       newTop[flatK] = value
     } else {
       // Keep in current flattened map
@@ -168,58 +184,108 @@ function groupMaps(map, parent = "", top = {}) {
 function encodeBodyPart(partName, bodyPart, inlineKey) {
   const disposition =
     partName === inlineKey ? "inline" : `form-data;name="${partName}"`
+  const isInline = partName === inlineKey
 
-  if (typeof bodyPart === "object" && bodyPart !== null) {
-    // For objects, we need to match Erlang's behavior exactly
-    // Erlang sorts ALL entries including content-disposition
-    const allEntries = Object.entries(bodyPart)
-      .filter(([key]) => key !== "body")
-      .map(([key, value]) => [key, `${key}: ${value}`])
+  if (
+    typeof bodyPart === "object" &&
+    bodyPart !== null &&
+    !Array.isArray(bodyPart) &&
+    !Buffer.isBuffer(bodyPart)
+  ) {
+    // Check if this part has ao-types
+    const hasAoTypes = "ao-types" in bodyPart
 
-    // Add content-disposition to the entries
-    allEntries.push([
-      "content-disposition",
-      `content-disposition: ${disposition}`,
-    ])
+    if (hasAoTypes) {
+      // For parts WITH ao-types: sort all entries alphabetically
+      const allEntries = []
 
-    // Sort ALL entries alphabetically by key
-    allEntries.sort(([a], [b]) => a.localeCompare(b))
+      // Collect all entries except body
+      for (const [key, value] of Object.entries(bodyPart)) {
+        if (key === "body") continue
 
-    const headers = allEntries.map(([_, header]) => header)
-    const headerStr = headers.join(CRLF)
-    const body = bodyPart.body || ""
+        if (key === "ao-types") {
+          allEntries.push({ key: "ao-types", line: `ao-types: ${value}` })
+        } else {
+          // Handle Buffer values properly
+          let valueStr = value
+          if (Buffer.isBuffer(value)) {
+            // Use binary/latin1 encoding to preserve all byte values 0-255
+            valueStr = value.toString("binary")
+          }
+          allEntries.push({ key: key, line: `${key}: ${valueStr}` })
+        }
+      }
 
-    return body ? `${headerStr}${DOUBLE_CRLF}${body}` : headerStr
-  } else if (typeof bodyPart === "string") {
+      // Add content-disposition
+      allEntries.push({
+        key: "content-disposition",
+        line: `content-disposition: ${disposition}`,
+      })
+
+      // Sort alphabetically by key
+      allEntries.sort((a, b) => a.key.localeCompare(b.key))
+
+      // Build the lines
+      const lines = allEntries.map(entry => entry.line)
+
+      // Body handling
+      const body = bodyPart.body || ""
+      if (body) {
+        lines.push("") // Empty line before body
+        lines.push(body)
+      }
+
+      return lines.join(CRLF)
+    } else {
+      // For parts WITHOUT ao-types
+      const allEntries = []
+
+      for (const [key, value] of Object.entries(bodyPart)) {
+        if (key === "body") continue
+        // Handle Buffer values properly
+        let valueStr = value
+        if (Buffer.isBuffer(value)) {
+          // Use binary/latin1 encoding to preserve all byte values 0-255
+          valueStr = value.toString("binary")
+        }
+        allEntries.push({ key: key, line: `${key}: ${valueStr}` })
+      }
+
+      const lines = []
+
+      if (isInline) {
+        // Inline parts without ao-types: sort ALL fields alphabetically including content-disposition
+        allEntries.push({
+          key: "content-disposition",
+          line: `content-disposition: ${disposition}`,
+        })
+
+        // Sort by key
+        allEntries.sort((a, b) => a.key.localeCompare(b.key))
+
+        // Extract the lines
+        lines.push(...allEntries.map(entry => entry.line))
+      } else {
+        // Regular parts: content-disposition first, then fields
+        lines.push(`content-disposition: ${disposition}`)
+        lines.push(...allEntries.map(entry => entry.line))
+      }
+
+      // Body handling
+      const body = bodyPart.body || ""
+      if (body) {
+        if (allEntries.length === 0 && !isInline) {
+          lines.push("") // Empty line before body only if no fields
+        }
+        lines.push(body)
+      }
+
+      return lines.join(CRLF)
+    }
+  } else if (typeof bodyPart === "string" || Buffer.isBuffer(bodyPart)) {
     return `content-disposition: ${disposition}${DOUBLE_CRLF}${bodyPart}`
   }
   return ""
-}
-
-// Encode HTTP message to binary
-function encodeHttpMsg(httpsig) {
-  const headers = []
-  const body = httpsig.body || ""
-
-  // Ensure content-disposition comes first if present
-  if (httpsig["content-disposition"]) {
-    headers.push(`content-disposition: ${httpsig["content-disposition"]}`)
-  }
-
-  // Then add all other headers in sorted order
-  const otherEntries = Object.entries(httpsig)
-    .filter(([name]) => name !== "body" && name !== "content-disposition")
-    .sort(([a], [b]) => a.localeCompare(b))
-
-  for (const [name, value] of otherEntries) {
-    headers.push(`${name}: ${value}`)
-  }
-
-  const encodedHeaders = headers.join(CRLF)
-  if (!body) {
-    return encodedHeaders
-  }
-  return `${encodedHeaders}${DOUBLE_CRLF}${body}`
 }
 
 // Parse multipart body
@@ -301,34 +367,20 @@ function parseMultipart(contentType, body) {
   return result
 }
 
-// Convert from flat to nested structure
-function flatToNested(flat) {
-  const result = {}
-
-  for (const [path, value] of Object.entries(flat)) {
-    const parts = path.split("/")
-    let current = result
-
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i]
-      if (!current[part]) {
-        current[part] = {}
-      }
-      current = current[part]
-    }
-
-    current[parts[parts.length - 1]] = value
-  }
-
-  return result
-}
-
 // Add content-digest header
 function addContentDigest(msg) {
   if (!msg.body) return msg
 
   const hash = crypto.createHash("sha256")
-  hash.update(msg.body, "utf8")
+
+  // Handle both string and Buffer bodies
+  if (Buffer.isBuffer(msg.body)) {
+    hash.update(msg.body)
+  } else {
+    // For strings, use binary encoding to match how the multipart body is encoded
+    hash.update(msg.body, "binary")
+  }
+
   const digest = hash.digest("base64")
 
   return {
@@ -376,7 +428,7 @@ export function httpsig_from(http) {
 
     withBodyKeys = { ...headers, ...parsed }
 
-    // Convert flat structure to nested
+    // Convert flat structure to nested using flat.js
     const flat = {}
     for (const [key, value] of Object.entries(withBodyKeys)) {
       if (key.includes("/")) {
@@ -385,7 +437,8 @@ export function httpsig_from(http) {
     }
 
     if (Object.keys(flat).length > 0) {
-      const nested = flatToNested(flat)
+      // Use flat_from to convert flat structure to nested
+      const nested = flat_from(flat)
       for (const [key, value] of Object.entries(nested)) {
         withBodyKeys[key] = value
       }
@@ -435,23 +488,113 @@ export function httpsig_to(tabm) {
 
   const [inlineFieldHdrs, inlineKeyVal] = inlineKey(tabm)
 
-  // Group maps and prepare body
+  // Check if this is a flat structure that should stay as headers
+  // A flat structure has no nested objects (maps)
+  const hasNestedMaps = Object.values(stripped).some(
+    value =>
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      !Buffer.isBuffer(value)
+  )
+
+  // If it's just a flat map with strings/primitives, keep as headers
+  // This matches Erlang's behavior where flat maps don't become multipart
+  if (!hasNestedMaps) {
+    // For flat structures, just return with normalized keys
+    // This matches Erlang which returns the map unchanged
+    const result = { ...inlineFieldHdrs }
+
+    for (const [key, value] of Object.entries(stripped)) {
+      // Convert Buffers to strings if they're UTF-8 text
+      if (Buffer.isBuffer(value)) {
+        try {
+          const str = value.toString("utf8")
+          // Check if it's valid UTF-8 that can be safely converted
+          if (Buffer.from(str, "utf8").equals(value)) {
+            // Check if all characters are printable
+            let isPrintable = true
+            for (let i = 0; i < str.length; i++) {
+              const code = str.charCodeAt(i)
+              if (
+                !(code >= 32 && code <= 126) &&
+                code !== 9 &&
+                code !== 10 &&
+                code !== 13
+              ) {
+                isPrintable = false
+                break
+              }
+            }
+            if (isPrintable) {
+              result[key] = str
+            } else {
+              result[key] = value
+            }
+          } else {
+            result[key] = value
+          }
+        } catch (e) {
+          result[key] = value
+        }
+      } else {
+        result[key] = value
+      }
+    }
+
+    // Handle inline body key - move data from inline key to body
+    if (inlineKeyVal && inlineKeyVal !== "body" && result[inlineKeyVal]) {
+      result.body = result[inlineKeyVal]
+      delete result[inlineKeyVal]
+    }
+
+    // If there's a body, add content-digest
+    if (result.body) {
+      return addContentDigest(result)
+    }
+
+    return result
+  }
+
+  // Original multipart logic for nested structures
   const bodyMap = {}
   const headers = { ...inlineFieldHdrs }
 
+  // Process each field - ao-types at top level should go to headers
   for (const [key, value] of Object.entries(stripped)) {
-    if (key === "body" || key === inlineKeyVal) {
+    if (key === "ao-types") {
+      // Top-level ao-types goes to headers only
+      // Convert Buffer to string if needed
+      if (Buffer.isBuffer(value)) {
+        headers[key] = value.toString("utf8")
+      } else {
+        headers[key] = value
+      }
+    } else if (key === "body" || key === inlineKeyVal) {
       bodyMap[key === inlineKeyVal ? inlineKeyVal : "body"] = value
     } else if (
       typeof value === "object" &&
       value !== null &&
-      !Array.isArray(value)
+      !Array.isArray(value) &&
+      !Buffer.isBuffer(value)
     ) {
       bodyMap[key] = value
-    } else if (typeof value === "string" && value.length <= MAX_HEADER_LENGTH) {
-      // Normalize headers: lowercase but preserve underscores
-      headers[key.toLowerCase()] = value
-    } else {
+    } else if (
+      typeof value === "string" &&
+      value.length <= MAX_HEADER_LENGTH &&
+      key !== "ao-types"
+    ) {
+      headers[normalizeKey(key)] = value
+    } else if (
+      Buffer.isBuffer(value) &&
+      value.length <= MAX_HEADER_LENGTH &&
+      key !== "ao-types"
+    ) {
+      // Convert Buffers to strings for headers
+      const str = value.toString("utf8")
+      headers[normalizeKey(key)] = str
+    } else if (key !== "ao-types") {
+      // Only add to bodyMap if it's not ao-types
       bodyMap[key] = value
     }
   }
@@ -460,14 +603,12 @@ export function httpsig_to(tabm) {
   const groupedBodyMap = groupMaps(bodyMap)
 
   if (Object.keys(groupedBodyMap).length === 0) {
-    // Empty body
     return headers
   } else if (
     Object.keys(groupedBodyMap).length === 1 &&
     groupedBodyMap[inlineKeyVal] &&
     typeof groupedBodyMap[inlineKeyVal] === "string"
   ) {
-    // Single body value
     const result = { ...headers, body: groupedBodyMap[inlineKeyVal] }
     return addContentDigest(result)
   } else {
@@ -475,20 +616,17 @@ export function httpsig_to(tabm) {
     const parts = []
     const bodyKeysList = []
 
-    // Sort entries for consistent ordering to match Erlang
     const sortedEntries = Object.entries(groupedBodyMap).sort(([a], [b]) =>
       a.localeCompare(b)
     )
 
     for (const [key, value] of sortedEntries) {
-      // Special handling for single-key objects with only "body"
       if (
         typeof value === "object" &&
         value !== null &&
         Object.keys(value).length === 1 &&
         "body" in value
       ) {
-        // Encode with /body suffix to preserve hierarchy
         const encoded = encodeBodyPart(`${key}/body`, value, "body")
         parts.push({
           name: `${key}/body`,
