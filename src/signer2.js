@@ -4,10 +4,36 @@ import { erl_json_from, erl_json_to, normalize } from "./erl_json.js"
 import { enc } from "./encode.js"
 import { isBytes } from "./encode-utils.js"
 
+// Helper to check if an array contains binary data
+const arrayHasBinaryData = arr => {
+  if (!Array.isArray(arr)) return false
+
+  return arr.some(item => {
+    if (isBytes(item)) return true
+    if (Array.isArray(item)) return arrayHasBinaryData(item)
+    return false
+  })
+}
+
+// Helper to check if a string contains non-printable characters
+const hasNonPrintableChars = str => {
+  if (typeof str !== "string") return false
+
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i)
+    // Allow only printable ASCII (32-126)
+    // Note: tabs (9), newlines (10), and carriage returns (13) are not allowed in HTTP headers
+    if (code < 32 || code > 126) {
+      return true
+    }
+  }
+  return false
+}
+
 const isValid = encoded => {
   if (!encoded || typeof encoded !== "object") return false
 
-  // Check if all header values are strings or numbers
+  // Check if all header values are valid for HTTP headers
   for (const [key, value] of Object.entries(encoded)) {
     if (key === "body") {
       // Body can be string, Buffer, or undefined
@@ -27,18 +53,25 @@ const isValid = encoded => {
         }
         return false
       }
+
+      // Check if string contains non-printable characters
+      if (typeof value === "string" && hasNonPrintableChars(value)) {
+        return false
+      }
     }
   }
 
   return true
 }
 
-// Check if object contains any binary data
+// Check if object contains any binary data or arrays with binary data
 const hasBinaryData = obj => {
   for (const [key, value] of Object.entries(obj)) {
     if (key === "path") continue
 
     if (isBytes(value)) {
+      return true
+    } else if (Array.isArray(value) && arrayHasBinaryData(value)) {
       return true
     } else if (
       typeof value === "object" &&
@@ -48,6 +81,8 @@ const hasBinaryData = obj => {
       // Check nested objects
       for (const [k, v] of Object.entries(value)) {
         if (isBytes(v)) {
+          return true
+        } else if (Array.isArray(v) && arrayHasBinaryData(v)) {
           return true
         }
       }
@@ -93,9 +128,10 @@ export const sign = async obj => {
 
   // Otherwise use the standard pipeline
   const encoded = httpsig_to(
-    structured_from(normalize({ ...obj, path: "/~wao@1.0/httpsig" }))
+    normalize(structured_from(normalize({ ...obj, path: "/~wao@1.0/httpsig" })))
   )
 
+  // Check if the encoded result is valid for HTTP headers
   if (!isValid(encoded)) {
     return await smartSign(obj)
   }
