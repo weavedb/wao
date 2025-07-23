@@ -25,9 +25,10 @@ export function erl_json_to(jsObj) {
  * Normalize JS values to match what comes back from Erlang through erl_str_from
  * This function is deterministic and matches the behavior of the Erlang round-trip
  * @param {*} obj - JS object to normalize
+ * @param {boolean} binaryMode - true for binary mode, false for string mode (default)
  * @returns {*} - Normalized JS object
  */
-export function normalize(obj) {
+export function normalize(obj, binaryMode = false) {
   if (obj === null) return null
   if (obj === undefined) return undefined
 
@@ -57,12 +58,14 @@ export function normalize(obj) {
     if (obj === "::") {
       return Buffer.alloc(0)
     }
-    // Empty strings become empty binaries in Erlang
-    if (obj === "") {
-      return Buffer.alloc(0)
+
+    if (binaryMode) {
+      // In binary mode, convert strings to buffers
+      return Buffer.from(obj, "utf8")
+    } else {
+      // In string mode, strings stay as strings
+      return obj
     }
-    // Non-empty strings convert to Buffers
-    return Buffer.from(obj, "utf8")
   }
 
   // Other primitives pass through
@@ -82,7 +85,7 @@ export function normalize(obj) {
       if (item === undefined) {
         return null
       }
-      return normalize(item)
+      return normalize(item, binaryMode)
     })
   }
 
@@ -90,7 +93,7 @@ export function normalize(obj) {
   if (typeof obj === "object" && obj !== null) {
     const result = {}
     for (const [k, v] of Object.entries(obj)) {
-      const normalized = normalize(v)
+      const normalized = normalize(v, binaryMode)
       // Skip undefined values in objects
       if (normalized !== undefined) {
         result[k] = normalized
