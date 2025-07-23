@@ -231,7 +231,7 @@ function encodeBodyPart(partName, bodyPart, inlineKey) {
       // Body handling
       const body = bodyPart.body || ""
       if (body) {
-        lines.push("") // Empty line before body
+        lines.push("") // Always add empty line before body
         lines.push(body)
       }
 
@@ -274,9 +274,7 @@ function encodeBodyPart(partName, bodyPart, inlineKey) {
       // Body handling
       const body = bodyPart.body || ""
       if (body) {
-        if (allEntries.length === 0 && !isInline) {
-          lines.push("") // Empty line before body only if no fields
-        }
+        lines.push("") // Always add empty line before body
         lines.push(body)
       }
 
