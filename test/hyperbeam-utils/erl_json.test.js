@@ -14,14 +14,29 @@ const test = async (hb, cases, path) => {
   for (const v of cases) {
     console.log(`[${++i}]...........................................`, v)
     const json = erl_json_to(v)
-    const msg = await hb.sign({ path, body: JSON.stringify(json) })
     try {
-      console.log(v, json, normalize(v))
-      const { body } = await hb.send(msg)
-      console.log("response", body)
-      console.log("erl_str_from(body)", erl_str_from(body))
-      console.log("normalize(v)", normalize(v))
-      assert.deepEqual(normalize(v), erl_str_from(body))
+      const { out } = await hb.post({ path, body: JSON.stringify(json) })
+
+      console.log("Raw out:", out)
+      console.log("Out substring:", out.substring(0, 150))
+
+      if (out.startsWith("#erl_response{")) {
+        const match = out.match(/#erl_response\{raw=(.*?),formatted=/s)
+        if (match) {
+          console.log("Extracted raw:", match[1])
+          console.log("Raw substring:", match[1].substring(0, 100))
+        }
+      }
+
+      const input = normalize(v)
+      const output = erl_str_from(out)
+      const input_b = normalize(v, true)
+      const output_b = erl_str_from(out, true)
+      console.log(output, output_b)
+      console.log("normalize(v)", input)
+      console.log("erl_str_from(out)", output)
+      assert.deepEqual(input_b, output_b)
+
       success.push(v)
     } catch (e) {
       console.log(e)
@@ -32,12 +47,9 @@ const test = async (hb, cases, path) => {
   console.log(
     `success: ${success.length}, error: ${err.length}, total: ${cases.length}`
   )
-  if (err) {
-    for (let v of err) console.log(v)
-  }
+  if (err) for (let v of err) console.log(v)
   assert.equal(err.length, 0)
 }
-
 describe("Hyperbeam Signer", function () {
   let hb, hbeam
   before(async () => {
