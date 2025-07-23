@@ -5,26 +5,24 @@ import { structured_from, structured_to } from "../../src/structured.js"
 import { cases_from, cases_to } from "./structured_cases.js"
 import cases, { httpsig_errors } from "../lib/cases.js"
 import { erl_json_from, erl_json_to, normalize } from "../../src/erl_json.js"
-import { erl_str_from, erl_str_to } from "../../src/erl_str.js"
+import { erl_str_from, erl_str_to, parse_body } from "../../src/erl_str.js"
 import { httpsig_from, httpsig_to } from "../../src/httpsig.js"
 
 const test = async (hb, cases, path) => {
   let err = []
   let success = []
+  let i = 0
   for (const v of cases) {
+    console.log(`[${++i}]...........................................`, v)
     try {
       const structured = structured_from(normalize(v))
       const json = erl_json_to(structured)
-      console.log(structured, json)
       const { out } = await hb.post({ path, body: JSON.stringify(json) })
-      console.log(out)
-      console.log("response", out)
-      console.log(
-        "httpsig_to(normalize(structured))",
-        httpsig_to(normalize(structured))
-      )
-      console.log("erl_str_from(out)", erl_str_from(out))
-      assert.deepEqual(httpsig_to(structured), erl_str_from(out))
+      const expected = httpsig_to(normalize(structured))
+      const output = parse_body(erl_str_from(out))
+      console.log("erl_str_from(out)", output)
+      console.log("httpsig_to(normalize(structured))", expected)
+      assert.deepEqual(expected, output)
       success.push(v)
     } catch (e) {
       console.log(e)
@@ -32,12 +30,14 @@ const test = async (hb, cases, path) => {
       break
     }
   }
-  //console.log(`${err.length} / ${cases.length} failed!`)
-  console.log(`${success.length} success`)
+  console.log(
+    `success: ${success.length}, error: ${err.length}, total: ${cases.length}`
+  )
   if (err) {
     console.log(`error with the case`)
     for (let v of err) console.log(JSON.stringify(v))
   }
+  assert.equal(err.length, 0)
 }
 
 describe("Hyperbeam Signer", function () {
@@ -48,6 +48,9 @@ describe("Hyperbeam Signer", function () {
   })
   after(async () => hbeam.kill())
   it("should test structured_from codec", async () => {
-    await test(hb, cases, "/~wao@1.0/httpsig_to")
+    await test(hb, cases_from, "/~encode@1.0/httpsig_to")
+  })
+  it("should test structured_from codec", async () => {
+    await test(hb, cases, "/~encode@1.0/httpsig_to")
   })
 })
