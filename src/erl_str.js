@@ -1,101 +1,786 @@
 /**
- * Clean Erlang term parser for JavaScript
- * Parses Erlang terms into JavaScript values
+ * Erlang term string parser and formatter
+ * Converts between Erlang term strings and JavaScript values
  */
 
-export function parseErlangString(str) {
-  let position = 0
+/**
+ * Parse an Erlang term string into JavaScript values
+ * @param {string} str - Erlang term string
+ * @param {boolean} binaryMode - If true, keep binaries as Buffers; if false, convert to strings
+ * @returns {*} JavaScript value
+ */
+export function erl_str_from(str, binaryMode = false) {
+  // Handle the new response format
+  if (str.startsWith("#erl_response{")) {
+    const rawMatch = str.match(/#erl_response\{raw=(.*?),formatted=(.*?)\}$/s)
+    if (rawMatch && rawMatch[1] && rawMatch[2]) {
+      const rawStr = rawMatch[1]
+      const formattedStr = rawMatch[2]
 
-  function peek(offset = 0) {
-    return str[position + offset] || ""
-  }
-
-  function advance(count = 1) {
-    position += count
-  }
-
-  function skipWhitespace() {
-    while (position < str.length && /\s/.test(peek())) {
-      advance()
-    }
-  }
-
-  function parseString() {
-    // Parse quoted string/atom
-    if (peek() !== "'") return null
-
-    advance() // skip opening quote
-    let result = ""
-
-    while (position < str.length && peek() !== "'") {
-      if (peek() === "\\" && peek(1) === "'") {
-        result += "'"
-        advance(2)
-      } else if (peek() === "\\" && peek(1) === "\\") {
-        result += "\\"
-        advance(2)
-      } else if (peek() === "\\" && peek(1) === "n") {
-        result += "\n"
-        advance(2)
-      } else if (peek() === "\\" && peek(1) === "r") {
-        result += "\r"
-        advance(2)
-      } else if (peek() === "\\" && peek(1) === "t") {
-        result += "\t"
-        advance(2)
+      if (binaryMode) {
+        // In binary mode, just parse formatted
+        const parser = new ErlangParser(formattedStr, true)
+        return parser.parse()
       } else {
-        result += peek()
-        advance()
+        // Build a type map from raw, then parse formatted with type info
+        const typeMap = buildTypeMap(rawStr)
+        const parser = new TypeAwareParser(formattedStr, typeMap)
+        return parser.parse()
       }
     }
-
-    if (peek() === "'") advance() // skip closing quote
-
-    // Convert special atoms
-    if (result === "null") return null
-    if (result === "true") return true
-    if (result === "false") return false
-
-    return Symbol.for(result)
   }
 
-  function parseBinary() {
-    // Parse <<...>>
-    if (peek() !== "<" || peek(1) !== "<") return null
+  // Fallback for non-response format
+  const parser = new ErlangParser(str, binaryMode)
+  return parser.parse()
+}
 
-    advance(2) // skip <<
+/**
+ * Parse body field specially - convert to string only for multipart bodies
+ * @param {*} parsed - Parsed Erlang term object
+ * @returns {*} Object with body field potentially converted to string
+ */
+export function parse_body(parsed) {
+  if (!parsed || typeof parsed !== "object") {
+    return parsed
+  }
 
-    // String binary <<"...">>
-    if (peek() === '"') {
-      advance() // skip "
-      let content = ""
+  // If there's a body field
+  if ("body" in parsed) {
+    if (Buffer.isBuffer(parsed.body)) {
+      // Check if this looks like a multipart body
+      // Multipart bodies start with "--" boundary
+      const bodyStart = parsed.body.toString(
+        "binary",
+        0,
+        Math.min(100, parsed.body.length)
+      )
+      if (
+        bodyStart.startsWith("--") &&
+        parsed["content-type"] &&
+        parsed["content-type"].includes("multipart")
+      ) {
+        // It's a multipart body, convert to string
+        return {
+          ...parsed,
+          body: parsed.body.toString("binary"),
+        }
+      }
+      // Not multipart, keep as Buffer
+      return parsed
+    }
+    // Already a string, return as-is
+    return parsed
+  }
+
+  return parsed
+}
+
+// Build a map of paths to types by analyzing the raw string
+function buildTypeMap(rawStr) {
+  const typeMap = new Map()
+
+  function detectBinaryType(str, startPos) {
+    // Check what follows <<
+    let pos = startPos + 2
+    while (pos < str.length && /\s/.test(str[pos])) pos++
+
+    if (pos < str.length && str[pos] === '"') {
+      // It looks like a string, but check if it has escape sequences
+      // If it has \NNN octal escapes, it's actually a binary that Erlang formatted as string
+      let scanPos = pos + 1
+      let hasOctalEscapes = false
 
       while (
-        position < str.length &&
-        !(peek() === '"' && peek(1) === ">" && peek(2) === ">")
+        scanPos < str.length &&
+        !(
+          str[scanPos] === '"' &&
+          str[scanPos + 1] === ">" &&
+          str[scanPos + 2] === ">"
+        )
       ) {
-        if (peek() === "\\" && peek(1) === '"') {
-          content += '"'
-          advance(2)
-        } else if (peek() === "\\" && peek(1) === "\\") {
-          content += "\\"
-          advance(2)
-        } else if (peek() === "\\" && peek(1) === "n") {
-          content += "\n"
-          advance(2)
-        } else if (peek() === "\\" && peek(1) === "r") {
-          content += "\r"
-          advance(2)
-        } else if (peek() === "\\" && peek(1) === "t") {
-          content += "\t"
-          advance(2)
+        if (str[scanPos] === "\\" && scanPos + 1 < str.length) {
+          const nextChar = str[scanPos + 1]
+          // Check for octal escape \NNN
+          if (/[0-7]/.test(nextChar)) {
+            hasOctalEscapes = true
+            break
+          }
+          scanPos += 2
         } else {
-          content += peek()
-          advance()
+          scanPos++
         }
       }
 
-      advance(3) // skip ">>
+      // If it has octal escapes, treat as binary
+      if (hasOctalEscapes) {
+        return "binary"
+      }
+
+      return "string"
+    }
+    return "binary"
+  }
+
+  function scanValue(str, pos, path) {
+    while (pos < str.length && /\s/.test(str[pos])) pos++
+
+    if (pos >= str.length) return pos
+
+    if (str[pos] === "#" && str[pos + 1] === "{") {
+      // Map
+      pos += 2
+      let mapIndex = 0
+
+      while (pos < str.length) {
+        while (pos < str.length && /\s/.test(str[pos])) pos++
+        if (str[pos] === "}") return pos + 1
+
+        // Parse key
+        const keyStart = pos
+        if (str[pos] === "<" && str[pos + 1] === "<") {
+          // Binary key
+          const keyType = detectBinaryType(str, pos)
+          let keyEnd = pos + 2
+
+          if (keyType === "string") {
+            keyEnd++ // skip "
+            while (
+              keyEnd < str.length &&
+              !(
+                str[keyEnd] === '"' &&
+                str[keyEnd + 1] === ">" &&
+                str[keyEnd + 2] === ">"
+              )
+            ) {
+              if (str[keyEnd] === "\\") keyEnd++
+              keyEnd++
+            }
+            keyEnd += 3
+          } else {
+            let depth = 1
+            while (depth > 0 && keyEnd < str.length) {
+              if (str[keyEnd] === "<" && str[keyEnd + 1] === "<") {
+                depth++
+                keyEnd += 2
+              } else if (str[keyEnd] === ">" && str[keyEnd + 1] === ">") {
+                depth--
+                keyEnd += 2
+              } else {
+                keyEnd++
+              }
+            }
+          }
+
+          pos = keyEnd
+        } else {
+          // Regular key
+          while (pos < str.length && !/[\s=,}]/.test(str[pos])) pos++
+        }
+
+        // Skip =>
+        while (pos < str.length && /\s/.test(str[pos])) pos++
+        if (str[pos] === "=" && str[pos + 1] === ">") pos += 2
+        while (pos < str.length && /\s/.test(str[pos])) pos++
+
+        // Parse value and record type if binary
+        if (str[pos] === "<" && str[pos + 1] === "<") {
+          const type = detectBinaryType(str, pos)
+          const pathKey = [...path, mapIndex].join(".")
+          typeMap.set(pathKey, type)
+        }
+
+        pos = scanValue(str, pos, [...path, mapIndex])
+        mapIndex++
+
+        // Skip comma
+        while (pos < str.length && /\s/.test(str[pos])) pos++
+        if (str[pos] === ",") pos++
+      }
+    } else if (str[pos] === "<" && str[pos + 1] === "<") {
+      // Binary
+      const type = detectBinaryType(str, pos)
+      const pathKey = path.join(".")
+      typeMap.set(pathKey, type)
+
+      pos += 2
+      if (type === "string" || str[pos] === '"') {
+        // Skip past string literal
+        if (str[pos] === '"') pos++ // skip opening quote
+        while (
+          pos < str.length &&
+          !(str[pos] === '"' && str[pos + 1] === ">" && str[pos + 2] === ">")
+        ) {
+          if (str[pos] === "\\") pos++
+          pos++
+        }
+        return pos + 3
+      } else {
+        let depth = 1
+        while (depth > 0 && pos < str.length) {
+          if (str[pos] === "<" && str[pos + 1] === "<") {
+            depth++
+            pos += 2
+          } else if (str[pos] === ">" && str[pos + 1] === ">") {
+            depth--
+            pos += 2
+          } else {
+            pos++
+          }
+        }
+        return pos
+      }
+    } else if (str[pos] === "[") {
+      // List
+      pos++
+      let listIndex = 0
+
+      while (pos < str.length) {
+        while (pos < str.length && /\s/.test(str[pos])) pos++
+        if (str[pos] === "]") return pos + 1
+
+        pos = scanValue(str, pos, [...path, listIndex])
+        listIndex++
+
+        while (pos < str.length && /\s/.test(str[pos])) pos++
+        if (str[pos] === ",") pos++
+      }
+    } else {
+      // Skip other values
+      while (pos < str.length && !/[\s,\]}=>]/.test(str[pos])) {
+        pos++
+      }
+      return pos
+    }
+
+    return pos
+  }
+
+  scanValue(rawStr, 0, [])
+  return typeMap
+}
+
+// Parser that uses type information
+class TypeAwareParser {
+  constructor(str, typeMap) {
+    this.str = str
+    this.typeMap = typeMap
+    this.pos = 0
+    this.path = []
+  }
+
+  parse() {
+    const result = this.parseValue()
+    this.skipWhitespace()
+    if (this.pos < this.str.length) {
+      throw new Error(`Unexpected content at position ${this.pos}`)
+    }
+    return result
+  }
+
+  peek(offset = 0) {
+    return this.str[this.pos + offset] || ""
+  }
+
+  advance(count = 1) {
+    this.pos += count
+  }
+
+  skipWhitespace() {
+    while (this.pos < this.str.length && /\s/.test(this.peek())) {
+      this.advance()
+    }
+  }
+
+  parseValue() {
+    this.skipWhitespace()
+
+    const ch = this.peek()
+    const ch2 = this.peek(1)
+
+    if (ch === "#" && ch2 === "{") {
+      return this.parseMap()
+    }
+
+    if (ch === "<" && ch2 === "<") {
+      return this.parseBinary()
+    }
+
+    if (ch === "[") {
+      return this.parseList()
+    }
+
+    if (ch === "'") {
+      return this.parseQuotedAtom()
+    }
+
+    if (ch === '"') {
+      return this.parseQuotedString()
+    }
+
+    return this.parseAtomOrNumber()
+  }
+
+  parseMap() {
+    this.advance(2) // skip #{
+    const map = {}
+    let mapIndex = 0
+
+    while (true) {
+      this.skipWhitespace()
+
+      if (this.peek() === "}") {
+        this.advance()
+        break
+      }
+
+      this.path.push(mapIndex)
+      const key = this.parseValue()
+      this.path.pop()
+
+      this.skipWhitespace()
+
+      if (this.peek() !== "=" || this.peek(1) !== ">") {
+        throw new Error("Expected =>")
+      }
+      this.advance(2)
+
+      this.skipWhitespace()
+
+      this.path.push(mapIndex)
+      const value = this.parseValue()
+      this.path.pop()
+
+      const jsKey =
+        key instanceof Buffer
+          ? key.toString("utf8")
+          : typeof key === "symbol"
+            ? Symbol.keyFor(key) || String(key)
+            : String(key)
+
+      map[jsKey] = value
+      mapIndex++
+
+      this.skipWhitespace()
+      if (this.peek() === ",") {
+        this.advance()
+      }
+    }
+
+    return map
+  }
+
+  parseBinary() {
+    const currentPath = this.path.join(".")
+    const type = this.typeMap.get(currentPath) || "binary"
+
+    // Parse the formatted version (always byte format)
+    this.advance(2) // skip <<
+
+    if (this.peek() === ">" && this.peek(1) === ">") {
+      this.advance(2)
+      return Buffer.alloc(0)
+    }
+
+    const bytes = []
+    while (!(this.peek() === ">" && this.peek(1) === ">")) {
+      this.skipWhitespace()
+
+      let num = ""
+      while (/\d/.test(this.peek())) {
+        num += this.peek()
+        this.advance()
+      }
+
+      if (num) bytes.push(parseInt(num, 10))
+
+      this.skipWhitespace()
+      if (this.peek() === ",") this.advance()
+    }
+
+    this.advance(2) // skip >>
+
+    const buffer = Buffer.from(bytes)
+
+    // If it was a string literal in raw, convert to string
+    if (type === "string") {
+      return buffer.toString("utf8")
+    }
+
+    // For binaries that are not explicitly marked as strings, check if they're valid UTF-8
+    // that contains reasonable string content (no control characters except \t, \n, \r)
+    try {
+      const str = buffer.toString("utf8")
+      // Check if the string round-trips correctly
+      if (Buffer.from(str, "utf8").equals(buffer)) {
+        // It's valid UTF-8, but also check if it contains reasonable characters
+        let hasReasonableChars = true
+        for (let i = 0; i < str.length; i++) {
+          const code = str.charCodeAt(i)
+          // Allow printable chars, space, tab, newline, carriage return, and Unicode
+          if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) {
+            hasReasonableChars = false
+            break
+          }
+        }
+
+        if (hasReasonableChars) {
+          return str
+        }
+      }
+    } catch (e) {
+      // Not valid UTF-8, keep as buffer
+    }
+
+    return buffer
+  }
+
+  parseQuotedString() {
+    this.advance() // skip opening "
+    let str = ""
+
+    while (this.peek() !== '"') {
+      if (this.peek() === "\\") {
+        this.advance()
+        const escaped = this.peek()
+        switch (escaped) {
+          case '"':
+            str += '"'
+            break
+          case "\\":
+            str += "\\"
+            break
+          case "n":
+            str += "\n"
+            break
+          case "r":
+            str += "\r"
+            break
+          case "t":
+            str += "\t"
+            break
+          default:
+            str += escaped
+        }
+        this.advance()
+      } else {
+        str += this.peek()
+        this.advance()
+      }
+    }
+
+    this.advance() // skip closing "
+    return str
+  }
+
+  parseList() {
+    this.advance() // skip [
+    const list = []
+    let listIndex = 0
+
+    while (true) {
+      this.skipWhitespace()
+
+      if (this.peek() === "]") {
+        this.advance()
+        break
+      }
+
+      this.path.push(listIndex)
+      list.push(this.parseValue())
+      this.path.pop()
+
+      listIndex++
+
+      this.skipWhitespace()
+      if (this.peek() === ",") {
+        this.advance()
+      }
+    }
+
+    return list
+  }
+
+  parseQuotedAtom() {
+    this.advance() // skip '
+
+    let atom = ""
+    while (this.peek() !== "'") {
+      if (this.peek() === "\\") {
+        this.advance()
+        const escaped = this.peek()
+        switch (escaped) {
+          case "'":
+            atom += "'"
+            break
+          case "\\":
+            atom += "\\"
+            break
+          case "n":
+            atom += "\n"
+            break
+          case "r":
+            atom += "\r"
+            break
+          case "t":
+            atom += "\t"
+            break
+          default:
+            atom += escaped
+        }
+        this.advance()
+      } else {
+        atom += this.peek()
+        this.advance()
+      }
+    }
+
+    this.advance() // skip closing '
+
+    if (atom === "null") return null
+    if (atom === "true") return true
+    if (atom === "false") return false
+
+    return Symbol.for(atom)
+  }
+
+  parseAtomOrNumber() {
+    let token = ""
+
+    // Parse unquoted atom/number
+    while (this.pos < this.str.length) {
+      const ch = this.peek()
+
+      if (
+        ch === "," ||
+        ch === "]" ||
+        ch === "}" ||
+        ch === ")" ||
+        (ch === "=" && this.peek(1) === ">")
+      ) {
+        break
+      }
+
+      if (/\s/.test(ch)) {
+        let i = this.pos
+        while (i < this.str.length && /\s/.test(this.str[i])) i++
+
+        if (i >= this.str.length) break
+
+        const nextCh = this.str[i]
+        if (
+          nextCh === "," ||
+          nextCh === "]" ||
+          nextCh === "}" ||
+          nextCh === ")" ||
+          (nextCh === "=" && i + 1 < this.str.length && this.str[i + 1] === ">")
+        ) {
+          break
+        }
+      }
+
+      token += ch
+      this.advance()
+    }
+
+    token = token.trim()
+
+    if (token === "null") return null
+    if (token === "true") return true
+    if (token === "false") return false
+
+    if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(token)) {
+      return parseFloat(token)
+    }
+
+    return Symbol.for(token)
+  }
+}
+
+// Parser implementation
+class ErlangParser {
+  constructor(str, binaryMode = false) {
+    this.str = str
+    this.pos = 0
+    this.binaryMode = binaryMode
+  }
+
+  parse() {
+    const result = this.parseValue()
+    this.skipWhitespace()
+    if (this.pos < this.str.length) {
+      throw new Error(
+        `Unexpected content at position ${this.pos}: ${this.str.slice(this.pos, this.pos + 50)}`
+      )
+    }
+    return result
+  }
+
+  peek(offset = 0) {
+    return this.str[this.pos + offset] || ""
+  }
+
+  advance(count = 1) {
+    this.pos += count
+  }
+
+  skipWhitespace() {
+    while (this.pos < this.str.length && /\s/.test(this.peek())) {
+      this.advance()
+    }
+  }
+
+  parseValue() {
+    this.skipWhitespace()
+
+    const ch = this.peek()
+    const ch2 = this.peek(1)
+
+    // Map: #{...}
+    if (ch === "#" && ch2 === "{") {
+      return this.parseMap()
+    }
+
+    // Binary: <<...>>
+    if (ch === "<" && ch2 === "<") {
+      return this.parseBinary()
+    }
+
+    // List: [...]
+    if (ch === "[") {
+      return this.parseList()
+    }
+
+    // Quoted atom: 'atom'
+    if (ch === "'") {
+      return this.parseQuotedAtom()
+    }
+
+    // Quoted string: "..."
+    if (ch === '"') {
+      return this.parseQuotedString()
+    }
+
+    // Number or unquoted atom
+    return this.parseAtomOrNumber()
+  }
+
+  parseMap() {
+    this.advance(2) // skip #{
+    const map = {}
+
+    while (true) {
+      this.skipWhitespace()
+
+      if (this.peek() === "}") {
+        this.advance()
+        break
+      }
+
+      // Parse key
+      const key = this.parseValue()
+      this.skipWhitespace()
+
+      // Expect =>
+      if (this.peek() !== "=" || this.peek(1) !== ">") {
+        throw new Error(`Expected => at position ${this.pos}`)
+      }
+      this.advance(2)
+
+      this.skipWhitespace()
+
+      // Parse value
+      const value = this.parseValue()
+
+      // Convert key to string
+      let jsKey
+      if (key instanceof Buffer) {
+        jsKey = key.toString("utf8")
+      } else if (typeof key === "symbol") {
+        jsKey = Symbol.keyFor(key) || key.description || String(key)
+      } else {
+        jsKey = String(key)
+      }
+
+      map[jsKey] = value
+
+      this.skipWhitespace()
+      if (this.peek() === ",") {
+        this.advance()
+      }
+    }
+
+    return map
+  }
+
+  parseBinary() {
+    this.advance(2) // skip <<
+
+    // String binary: <<"...">>
+    if (this.peek() === '"') {
+      this.advance() // skip "
+      let content = ""
+
+      while (
+        !(this.peek() === '"' && this.peek(1) === ">" && this.peek(2) === ">")
+      ) {
+        if (this.pos >= this.str.length) {
+          throw new Error("Unterminated string binary")
+        }
+
+        if (this.peek() === "\\") {
+          this.advance()
+          const escaped = this.peek()
+
+          // Check for octal escape sequences \NNN
+          if (/[0-7]/.test(escaped)) {
+            let octal = escaped
+            this.advance()
+
+            // Get up to 2 more octal digits
+            if (/[0-7]/.test(this.peek())) {
+              octal += this.peek()
+              this.advance()
+
+              if (/[0-7]/.test(this.peek())) {
+                octal += this.peek()
+                this.advance()
+              }
+            }
+
+            // Convert octal to character
+            const charCode = parseInt(octal, 8)
+            content += String.fromCharCode(charCode)
+          } else {
+            // Regular escape sequences
+            switch (escaped) {
+              case '"':
+                content += '"'
+                break
+              case "\\":
+                content += "\\"
+                break
+              case "n":
+                content += "\n"
+                break
+              case "r":
+                content += "\r"
+                break
+              case "t":
+                content += "\t"
+                break
+              default:
+                content += escaped
+            }
+            this.advance()
+          }
+        } else {
+          content += this.peek()
+          this.advance()
+        }
+      }
+
+      this.advance(3) // skip ">>
 
       // Check for structured field format
       if (
@@ -110,364 +795,345 @@ export function parseErlangString(str) {
           const base64 = content.slice(1, -1)
           return Buffer.from(base64, "base64")
         } catch (e) {
-          // Not valid base64, return as buffer
-          return Buffer.from(content)
+          // Not valid base64, treat as regular string
         }
       }
 
-      return Buffer.from(content)
+      // In binary mode, return as Buffer; otherwise check if it's printable
+      if (this.binaryMode) {
+        return Buffer.from(content, "utf8")
+      } else {
+        // Check if the content is printable
+        const bytes = Buffer.from(content, "utf8")
+        const isPrintable = Array.from(bytes).every(b => b >= 32 && b <= 126)
+
+        // If it contains non-printable characters, return as Buffer
+        if (!isPrintable) {
+          return bytes
+        }
+
+        // Otherwise return as string
+        return content
+      }
     }
 
-    // Empty binary <<>>
-    if (peek() === ">" && peek(1) === ">") {
-      advance(2)
+    // Empty binary: <<>>
+    if (this.peek() === ">" && this.peek(1) === ">") {
+      this.advance(2)
       return Buffer.alloc(0)
     }
 
-    // Byte binary <<1,2,3>>
+    // Byte binary: <<1,2,3>>
     const bytes = []
-    while (position < str.length && !(peek() === ">" && peek(1) === ">")) {
-      skipWhitespace()
-
-      let num = ""
-      while (position < str.length && /\d/.test(peek())) {
-        num += peek()
-        advance()
+    while (!(this.peek() === ">" && this.peek(1) === ">")) {
+      if (this.pos >= this.str.length) {
+        throw new Error("Unterminated byte binary")
       }
 
-      if (num) bytes.push(parseInt(num))
+      this.skipWhitespace()
 
-      skipWhitespace()
-      if (peek() === ",") advance()
+      let num = ""
+      while (/\d/.test(this.peek())) {
+        num += this.peek()
+        this.advance()
+      }
+
+      if (num) {
+        bytes.push(parseInt(num, 10))
+      }
+
+      this.skipWhitespace()
+      if (this.peek() === ",") {
+        this.advance()
+      }
     }
 
-    advance(2) // skip >>
+    this.advance(2) // skip >>
     return Buffer.from(bytes)
   }
 
-  function parseList() {
-    // Parse [...]
-    if (peek() !== "[") return null
+  parseQuotedString() {
+    this.advance() // skip "
+    let str = ""
 
-    advance() // skip [
+    while (this.peek() !== '"') {
+      if (this.peek() === "\\") {
+        this.advance()
+        const escaped = this.peek()
+        switch (escaped) {
+          case '"':
+            str += '"'
+            break
+          case "\\":
+            str += "\\"
+            break
+          case "n":
+            str += "\n"
+            break
+          case "r":
+            str += "\r"
+            break
+          case "t":
+            str += "\t"
+            break
+          default:
+            str += escaped
+        }
+        this.advance()
+      } else {
+        str += this.peek()
+        this.advance()
+      }
+    }
+
+    this.advance() // skip closing "
+    return str
+  }
+
+  parseList() {
+    this.advance() // skip [
     const list = []
 
-    while (position < str.length) {
-      skipWhitespace()
+    while (true) {
+      this.skipWhitespace()
 
-      if (peek() === "]") {
-        advance()
+      if (this.peek() === "]") {
+        this.advance()
         break
       }
 
-      const value = parseValue()
-      list.push(value)
+      list.push(this.parseValue())
 
-      skipWhitespace()
-      if (peek() === ",") advance()
+      this.skipWhitespace()
+      if (this.peek() === ",") {
+        this.advance()
+      }
     }
 
     return list
   }
 
-  function parseMap() {
-    // Parse #{...}
-    if (peek() !== "#" || peek(1) !== "{") return null
+  parseQuotedAtom() {
+    this.advance() // skip '
+    let atom = ""
 
-    advance(2) // skip #{
-    const map = {}
-
-    while (position < str.length) {
-      skipWhitespace()
-
-      if (peek() === "}") {
-        advance()
-        break
+    while (this.peek() !== "'") {
+      if (this.pos >= this.str.length) {
+        throw new Error("Unterminated quoted atom")
       }
 
-      // Parse key
-      const key = parseValue()
-      skipWhitespace()
-
-      // Skip =>
-      if (peek() === "=" && peek(1) === ">") {
-        advance(2)
+      if (this.peek() === "\\") {
+        this.advance()
+        const escaped = this.peek()
+        switch (escaped) {
+          case "'":
+            atom += "'"
+            break
+          case "\\":
+            atom += "\\"
+            break
+          case "n":
+            atom += "\n"
+            break // Literal newline
+          case "r":
+            atom += "\r"
+            break
+          case "t":
+            atom += "\t"
+            break
+          default:
+            atom += escaped
+        }
+        this.advance()
       } else {
-        throw new Error(`Expected => at position ${position}`)
+        atom += this.peek()
+        this.advance()
       }
-
-      skipWhitespace()
-
-      // Parse value
-      const value = parseValue()
-
-      // Convert key to string for JavaScript object
-      const jsKey = key instanceof Buffer ? key.toString() : String(key)
-      map[jsKey] = value
-
-      skipWhitespace()
-      if (peek() === ",") advance()
     }
 
-    // Don't convert maps to arrays - keep them as objects
-    // JavaScript will use string keys for numeric indices anyway
+    this.advance() // skip closing '
 
-    return map
+    // Special atoms that become JS primitives
+    if (atom === "null") return null
+    if (atom === "true") return true
+    if (atom === "false") return false
+
+    return Symbol.for(atom)
   }
 
-  function parseAtomOrNumber() {
-    // Parse unquoted atoms and numbers
+  parseAtomOrNumber() {
+    const startPos = this.pos
     let token = ""
-    const startPos = position
 
-    // Collect characters until we hit a delimiter
-    while (position < str.length) {
-      const ch = peek()
+    // Simple approach: collect until we hit a known delimiter
+    while (this.pos < this.str.length) {
+      const ch = this.peek()
+      const ch2 = this.peek(1)
 
-      // Check for delimiters
-      if (
-        ch === "," ||
-        ch === "]" ||
-        ch === "}" ||
-        ch === "\t" ||
-        ch === "\r" ||
-        ch === ">" ||
-        (ch === "=" && peek(1) === ">") ||
-        (ch === "<" && peek(1) === "<") ||
-        (ch === "#" && peek(1) === "{") ||
-        ch === "[" ||
-        ch === "{"
-      ) {
-        break
+      // Stop at these delimiters
+      if (ch === ",") break
+      if (ch === "]") break
+      if (ch === "}") break
+      if (ch === ")") break
+      if (ch === "=" && ch2 === ">") break
+
+      // Handle backslash specially
+      if (ch === "\\") {
+        // In unquoted atoms, backslash is just a regular character
+        token += ch
+        this.advance()
+
+        // Don't try to interpret the next character as an escape
+        if (this.pos < this.str.length) {
+          token += this.peek()
+          this.advance()
+        }
+        continue
       }
 
-      // Special handling for spaces
-      // In some cases, Erlang sends atoms with spaces without quotes
-      // We need to detect patterns like "with spaces", "also global", etc.
-      if (ch === " ") {
-        // If we have "with" and the next word is "spaces", combine them
-        if (token === "with" || token === "also") {
-          let lookahead = 1
-          let nextWord = ""
-
-          // Skip spaces
-          while (
-            position + lookahead < str.length &&
-            str[position + lookahead] === " "
-          ) {
-            lookahead++
-          }
-
-          // Collect the next word
-          while (
-            position + lookahead < str.length &&
-            /[a-zA-Z0-9_-]/.test(str[position + lookahead])
-          ) {
-            nextWord += str[position + lookahead]
-            lookahead++
-          }
-
-          // Check if this forms a known pattern
-          if (
-            (token === "with" && nextWord === "spaces") ||
-            (token === "also" && nextWord === "global")
-          ) {
-            // Include the space and continue parsing
-            token += ch
-            advance()
-            continue
-          }
+      // For whitespace, check if it's trailing
+      if (/\s/.test(ch)) {
+        // Scan ahead to find next non-whitespace
+        let i = this.pos
+        while (i < this.str.length && /\s/.test(this.str[i])) {
+          i++
         }
 
-        // Otherwise, space is a delimiter
-        break
-      }
-
-      // Special handling for newlines in atoms
-      if (ch === "\n") {
-        // Check if this is part of an atom like with\nnewline
-        if (position + 1 < str.length && /[a-zA-Z0-9_-]/.test(peek(1))) {
-          token += ch
-          advance()
-          continue
+        // Check what comes after whitespace
+        if (i >= this.str.length) {
+          // Hit end of string
+          break
         }
-        // Otherwise newline is a delimiter
-        break
+
+        const nextCh = this.str[i]
+        if (
+          nextCh === "," ||
+          nextCh === "]" ||
+          nextCh === "}" ||
+          nextCh === ")"
+        ) {
+          // This whitespace is trailing, not part of atom
+          break
+        }
+        if (
+          nextCh === "=" &&
+          i + 1 < this.str.length &&
+          this.str[i + 1] === ">"
+        ) {
+          // Whitespace before =>
+          break
+        }
       }
 
+      // Include this character in the atom
       token += ch
-      advance()
+      this.advance()
+
+      // Safety check to prevent infinite loops
+      if (this.pos - startPos > 1000) {
+        throw new Error(`Atom too long at position ${startPos}`)
+      }
     }
 
-    // If we didn't collect any characters, return undefined (not null!)
-    // This indicates we didn't find an atom/number at this position
-    if (token === "") return undefined
+    // Trim only trailing whitespace
+    token = token.trimEnd()
 
-    // Check special atoms
+    if (!token) {
+      throw new Error(`Empty atom at position ${this.pos}`)
+    }
+
+    // Handle special atoms
     if (token === "null") return null
     if (token === "true") return true
     if (token === "false") return false
-    // Don't convert 'undefined' to JavaScript undefined!
-    // Keep it as a symbol like any other atom
 
-    // Check if it's a number
+    // Try to parse as number
     if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(token)) {
-      return token.includes(".") || token.includes("e") || token.includes("E")
-        ? parseFloat(token)
-        : parseInt(token)
+      return parseFloat(token)
     }
 
-    // Otherwise it's an atom
+    // Return as atom
     return Symbol.for(token)
   }
-
-  function parseValue() {
-    skipWhitespace()
-
-    // Try parsing different value types
-    let result
-
-    // Map
-    if (peek() === "#" && peek(1) === "{") {
-      return parseMap()
-    }
-
-    // Binary
-    if (peek() === "<" && peek(1) === "<") {
-      return parseBinary()
-    }
-
-    // List
-    if (peek() === "[") {
-      return parseList()
-    }
-
-    // Quoted atom
-    if (peek() === "'") {
-      return parseString()
-    }
-
-    // Unquoted atom or number
-    result = parseAtomOrNumber()
-    if (result !== undefined) {
-      return result
-    }
-
-    // If nothing matched, throw error
-    throw new Error(
-      `Unexpected character at position ${position}: '${peek()}' (char code: ${peek().charCodeAt(0)})\n` +
-        `Context: "${str.slice(Math.max(0, position - 10), position)}[${peek()}]${str.slice(position + 1, position + 10)}"`
-    )
-  }
-
-  // Parse the string
-  const result = parseValue()
-
-  // Make sure we consumed everything
-  skipWhitespace()
-  if (position < str.length) {
-    throw new Error(
-      `Unexpected content at position ${position}: ${str.slice(position)}`
-    )
-  }
-
-  return result
 }
 
-// Export the parser function
-export function erl_str_from(str) {
-  return parseErlangString(str)
-}
-
-// Formatter function - converts JavaScript values to Erlang string representation
+/**
+ * Format JavaScript values as Erlang term strings
+ * @param {*} value - JavaScript value
+ * @returns {string} Erlang term string
+ */
 export function erl_str_to(value) {
-  function escapeString(str) {
-    return str
-      .replace(/\\/g, "\\\\")
-      .replace(/'/g, "\\'")
-      .replace(/\n/g, "\\n")
-      .replace(/\r/g, "\\r")
-      .replace(/\t/g, "\\t")
-  }
-
-  function formatValue(val) {
-    // null
-    if (val === null) return "null"
-
-    // undefined
-    if (val === undefined) return "undefined"
-
-    // boolean
-    if (typeof val === "boolean") return val.toString()
-
-    // number
-    if (typeof val === "number") {
-      if (Number.isInteger(val)) return val.toString()
-      // Format float with enough precision
-      return val.toString()
-    }
-
-    // string
-    if (typeof val === "string") {
-      return `'${escapeString(val)}'`
-    }
-
-    // symbol
-    if (typeof val === "symbol") {
-      const key = Symbol.keyFor(val)
-      const desc = val.description || key || ""
-
-      // Check if it's a special symbol that becomes a literal
-      if (desc === "null") return "null"
-      if (desc === "true") return "true"
-      if (desc === "false") return "false"
-      if (desc === "undefined") return "undefined"
-
-      // Regular atom - check if it needs quoting
-      if (/^[a-z][a-zA-Z0-9_]*$/.test(desc)) {
-        // Simple atom, no quotes needed
-        return desc
-      } else {
-        // Complex atom, needs quotes
-        return `'${escapeString(desc)}'`
-      }
-    }
-
-    // Buffer
-    if (val instanceof Buffer || val instanceof Uint8Array) {
-      const bytes = Array.from(val)
-
-      // Check if it's printable ASCII
-      const isPrintable = bytes.every(b => b >= 32 && b <= 126)
-
-      if (isPrintable) {
-        // Use string binary format
-        const str = Buffer.from(val).toString()
-        return `<<"${escapeString(str)}">>`
-      } else {
-        // Use byte list format
-        return `<<${bytes.join(",")}>>`
-      }
-    }
-
-    // Array
-    if (Array.isArray(val)) {
-      const items = val.map(formatValue)
-      return `[${items.join(",")}]`
-    }
-
-    // Object/Map
-    if (typeof val === "object" && val !== null) {
-      const entries = Object.entries(val).map(([k, v]) => {
-        const key = /^\d+$/.test(k) ? k : `<<"${escapeString(k)}">>`
-        return `${key} => ${formatValue(v)}`
-      })
-      return `#{${entries.join(",")}}`
-    }
-
-    // Fallback
-    return String(val)
-  }
-
   return formatValue(value)
+}
+
+// Formatter implementation
+function formatValue(value) {
+  if (value === null) return "null"
+  if (value === undefined) return "undefined"
+  if (typeof value === "boolean") return value.toString()
+
+  if (typeof value === "number") {
+    return value.toString()
+  }
+
+  if (typeof value === "string") {
+    // Format as string binary
+    return `<<"${escapeString(value)}">>`
+  }
+
+  if (typeof value === "symbol") {
+    const key = Symbol.keyFor(value)
+    const name = key || value.description || ""
+
+    // Special symbols
+    if (name === "null") return "null"
+    if (name === "true") return "true"
+    if (name === "false") return "false"
+    if (name === "undefined") return "undefined"
+
+    // Check if needs quoting
+    if (/^[a-z][a-zA-Z0-9_]*$/.test(name)) {
+      return name
+    } else {
+      return `'${escapeString(name)}'`
+    }
+  }
+
+  if (value instanceof Buffer || value instanceof Uint8Array) {
+    const bytes = Array.from(value)
+
+    // Check if it's printable
+    const isPrintable = bytes.every(b => b >= 32 && b <= 126)
+
+    if (isPrintable) {
+      const str = Buffer.from(value).toString()
+      return `<<"${escapeString(str)}">>`
+    } else {
+      return `<<${bytes.join(",")}>>`
+    }
+  }
+
+  if (Array.isArray(value)) {
+    const items = value.map(formatValue)
+    return `[${items.join(",")}]`
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value).map(([k, v]) => {
+      const key = `<<"${escapeString(k)}">>`
+      return `${key} => ${formatValue(v)}`
+    })
+    return `#{${entries.join(",")}}`
+  }
+
+  return String(value)
+}
+
+function escapeString(str) {
+  return str
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t")
 }
