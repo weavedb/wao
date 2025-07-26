@@ -1573,6 +1573,17 @@ hasown@^2.0.2:
   dependencies:
     function-bind "^1.1.2"
 
+hbsig@^0.0.6:
+  version "0.0.6"
+  resolved "https://registry.yarnpkg.com/hbsig/-/hbsig-0.0.6.tgz#4d6e66a3963af5dd6ca7de3cee6b487e67c13706"
+  integrity sha512-j3JydIFkRgRa8oXv0yMFqWqq6Yy30jDankwsL2259yzrjp1A9nt4NWU9vujZNZ6uGYmJ0NYwpdCI+Oi3Ar4kBA==
+  dependencies:
+    "@permaweb/aoconnect" "^0.0.85"
+    base64url "^3.0.1"
+    fast-sha256 "^1.3.0"
+    ramda "^0.31.3"
+    structured-headers "1.0.1"
+
 hi-base32@^0.5.1:
   version "0.5.1"
   resolved "https://registry.yarnpkg.com/hi-base32/-/hi-base32-0.5.1.tgz#1279f2ddae2673219ea5870c2121d2a33132857e"
@@ -2298,6 +2309,11 @@ ramda@^0.30.0, ramda@^0.30.1:
   resolved "https://registry.yarnpkg.com/ramda/-/ramda-0.30.1.tgz#7108ac95673062b060025052cd5143ae8fc605bf"
   integrity sha512-tEF5I22zJnuclswcZMc8bDIrwRHRzf+NqVEmqg50ShAZMP7MWeR/RGDthfM/p+BlqvF2fXAzpn8i+SJcYD3alw==
 
+ramda@^0.31.3:
+  version "0.31.3"
+  resolved "https://registry.yarnpkg.com/ramda/-/ramda-0.31.3.tgz#0f54199ec99a7bd6702277d28d6bf7f93b916bb9"
+  integrity sha512-xKADKRNnqmDdX59PPKLm3gGmk1ZgNnj3k7DryqWwkamp4TJ6B36DdpyKEQ0EoEYmH2R62bV4Q+S0ym2z8N2f3Q==
+
 range-parser@^1.2.1:
   version "1.2.1"
   resolved "https://registry.yarnpkg.com/range-parser/-/range-parser-1.2.1.tgz#3cf37023d199e1c24d1a55b84800c2f3e6468031"
@@ -2726,12 +2742,11 @@ vlq@^2.0.4:
   resolved "https://registry.yarnpkg.com/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.32.2:
-  version "0.32.2"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.32.2.tgz#262b667a092059992cc497a5a331fb862a2755ee"
-  integrity sha512-kfrPJL6yTj6GZINJnJ9Zj2a6zny8232QewcO8VNNnafkxxGc4MTQTPS5Q0ex8KT/doz3QYBhlwaN1bK2BpFXYA==
+wao@^0.33.2:
+  version "0.33.2"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.33.2.tgz#e28d717ead3655a77ea863103a843c8df74df2e9"
+  integrity sha512-nMPw1crjwN40Vc4mc0vPTPuxUgT3q2a0lcevSwevL2yDhXhXdqhbFAMjcMMEqkN5RDyWI0hZqWdmP2ejLksTBg==
   dependencies:
-    "@babel/plugin-transform-modules-commonjs" "^7.24.8"
     "@bokuweb/zstd-wasm" "^0.0.22"
     "@dha-team/arbundles" "^1.0.1"
     "@permaweb/ao-loader" "^0.0.44"
@@ -2749,6 +2764,7 @@ wao@^0.32.2:
     express "^5.1.0"
     fast-sha256 "^1.3.0"
     graphql "^16.10.0"
+    hbsig "^0.0.6"
     http-message-signatures "^1.0.4"
     lmdb "^3.2.2"
     localforage "^1.10.0"

@@ -1,8 +1,8 @@
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
 import { HyperBEAM, acc } from "wao/test"
-import HB from "../../src/hb.js"
-import { rsaid, hmacid } from "wao/utils"
+import { HB } from "wao"
+import { rsaid, hmacid } from "hbsig"
 
 const cwd = "../HyperBEAM"
 

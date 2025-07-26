@@ -18,7 +18,7 @@ export default class HyperBEAM {
     gateway,
     wallet = ".wallet.json",
     reset,
-    cwd = "./HyperBEAM",
+    cwd = process.env.CWD ?? "./HyperBEAM",
     c,
     cmake,
     faff,

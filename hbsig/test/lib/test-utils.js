@@ -1,33 +1,11 @@
-import { connect, createSigner } from "@permaweb/aoconnect"
-import { send as _send, signer } from "hbsig"
-import { wait, toAddr } from "../../src/utils.js"
-import { acc } from "../../src/test.js"
-import { run } from "../../src/hyperbeam-server.js"
-import { resolve } from "path"
-import { readFileSync } from "fs"
+import { send } from "../../src/send.js"
+import { erl_json_from, erl_json_to, normalize } from "../../src/erl_json.js"
+import { erl_str_from, erl_str_to } from "../../src/erl_str.js"
+import assert from "assert"
+import { describe, it, before, after } from "node:test"
+import { HyperBEAM } from "wao/test"
+import { createSigner } from "../../src/signer.js"
 
-const prepare = async (port = 10001, port2 = 4000, jwk) => {
-  await wait(5000)
-  const server = run(port2)
-  jwk ??= acc[0].jwk
-  const _signer = createSigner(jwk, `http://localhost:${port}`)
-  const request = signer({ signer: _signer })
-  const send = async args => {
-    const msg = await request(args)
-    return await _send(msg)
-  }
-  return { server, request, send, addr: toAddr(jwk.n) }
-}
-
-const getJWK = file => {
-  return JSON.parse(readFileSync(resolve(import.meta.dirname, file), "utf8"))
-}
-const seed = num => {
-  const array = new Uint8Array(num)
-  return crypto.getRandomValues(array)
-}
-
-// Recursively transform values to match expected format
 function mod(obj) {
   // Handle undefined - convert to string "undefined"
   if (obj === undefined) return "undefined"
@@ -135,4 +113,102 @@ function mod2(obj) {
   return obj
 }
 
-export { prepare, getJWK, seed, mod, mod2 }
+const test = async (sign, cases, path, mod = v => v, pmod = v => v) => {
+  let err = []
+  let success = []
+  let i = 0
+  for (const v of cases) {
+    console.log(`[${++i}]...........................................`, v)
+    try {
+      const _pmod = pmod(v)
+      const json = erl_json_to(_pmod)
+      const signed = await sign({ path, body: JSON.stringify(json) })
+      const { out } = await send(signed)
+      const input = normalize(_pmod)
+      const output = erl_str_from(out)
+      const expected = normalize(mod(_pmod), true)
+      const output_b = erl_str_from(out, true)
+      assert.deepEqual(expected, output_b)
+      success.push(v)
+    } catch (e) {
+      console.log(e)
+      err.push(v)
+    }
+  }
+  console.log(`${err.length} / ${cases.length} failed!`)
+  if (err) {
+    for (let v of err) console.log(v)
+  }
+}
+
+const genTest = ({ desc = "HyperBEAM", its = [] }) => {
+  describe(desc, function () {
+    let hbeam, sign
+    before(async () => {
+      hbeam = await new HyperBEAM({ reset: true }).ready()
+      sign = createSigner(hbeam.jwk, hbeam.url)
+    })
+    after(async () => hbeam.kill())
+    for (const v of its) {
+      it(
+        v.it ?? "should run",
+        async () =>
+          await test(
+            sign,
+            v.cases,
+            v.path ?? "/~hbsig@1.0/json_to_erl",
+            v.mod,
+            v.pmod
+          )
+      )
+    }
+  })
+}
+
+const modOut = out => {
+  let output = erl_str_from(out)
+  delete output.commitments
+  delete output.path
+  delete output.method
+  delete output["content-length"]
+  delete output["content-type"]
+  delete output["inline-body-key"]
+  return output
+}
+const modIn = inp => {
+  let inp2 = normalize(inp)
+
+  // Recursive function to lowercase all object keys and convert empty strings to Buffer
+  const lowercaseKeys = obj => {
+    // Handle null/undefined
+    if (obj === null || obj === undefined) {
+      return obj
+    }
+
+    // Handle empty strings - convert to empty Buffer
+    if (obj === "") {
+      return Buffer.from([])
+    }
+
+    // Handle arrays - recurse on each element
+    if (Array.isArray(obj)) {
+      return obj.map(item => lowercaseKeys(item))
+    }
+
+    // Handle objects - lowercase keys and recurse on values
+    if (typeof obj === "object" && obj.constructor === Object) {
+      const result = {}
+      for (const [key, value] of Object.entries(obj)) {
+        // Lowercase the key and recurse on the value
+        result[key.toLowerCase()] = lowercaseKeys(value)
+      }
+      return result
+    }
+
+    // Return other primitive values as-is
+    return obj
+  }
+
+  return lowercaseKeys(inp2)
+}
+export { mod, mod2, test, genTest, modOut, modIn }
