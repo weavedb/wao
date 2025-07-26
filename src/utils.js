@@ -1,6 +1,5 @@
 import { graphql, parse, validate, buildSchema } from "graphql"
 import sha256 from "fast-sha256"
-export { id, base, hashpath, rsaid, hmacid } from "./id.js"
 import {
   clone,
   is,
@@ -732,7 +731,14 @@ function toAddr(n) {
   return base64urlEncode(hash)
 }
 
+const seed = num => {
+  const array = new Array(num)
+  for (let i = 0; i < num; i++) array[i] = Math.floor(Math.random() * 256)
+  return Buffer.from(array).toString("base64")
+}
+
 export {
+  seed,
   toANS104Request,
   parseSignatureInput,
   allChecked,

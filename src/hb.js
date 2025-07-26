@@ -1,17 +1,10 @@
-import { connect, createSigner } from "@permaweb/aoconnect"
+import { createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft, clone } from "ramda"
-import { rsaid, hmacid, toAddr, buildTags } from "./utils.js"
-import { sign, signer } from "./signer.js"
-import { send as _send } from "./send.js"
+import { toAddr, buildTags, seed } from "./utils.js"
+import { rsaid, hmacid, sign, signer, send as _send, commit } from "hbsig"
 import hyper_aos from "./lua/hyper-aos.js"
 import aos_wamr from "./lua/aos_wamr.js"
-import { from } from "./httpsig2.js"
-
-const seed = num => {
-  const array = new Array(num)
-  for (let i = 0; i < num; i++) array[i] = Math.floor(Math.random() * 256)
-  return Buffer.from(array).toString("base64")
-}
+import { from } from "./httpsig-utils.js"
 
 class HB {
   constructor({
@@ -38,15 +31,6 @@ class HB {
     this.signer = createSigner(jwk, this.url)
     this.addr = toAddr(jwk.n)
     this.sign = signer({ signer: this.signer, url: this.url })
-
-    const { request } = connect({
-      MODE: "mainnet",
-      URL: this.url,
-      device: "",
-      signer: this.signer,
-    })
-
-    this._request = request
   }
 
   async setInfo() {
@@ -278,23 +262,7 @@ class HB {
   }
 
   async commit(obj, opts) {
-    const msg = await this.sign(obj, opts)
-    const hmacId = hmacid(msg.headers)
-    const rsaId = rsaid(msg.headers)
-    const committer = this.addr
-    const meta = { alg: "rsa-pss-sha512", "commitment-device": "httpsig@1.0" }
-    const meta2 = { alg: "hmac-sha256", "commitment-device": "httpsig@1.0" }
-    const sigs = {
-      signature: msg.headers.signature,
-      "signature-input": msg.headers["signature-input"],
-    }
-    return {
-      commitments: {
-        [rsaId]: { ...meta, committer, ...sigs },
-        [hmacId]: { ...meta2, ...sigs },
-      },
-      ...obj,
-    }
+    return await commit(obj, { ...opts, signer: this.sign })
   }
 
   async p(path, ...args) {

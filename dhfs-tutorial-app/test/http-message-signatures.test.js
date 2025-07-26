@@ -1,9 +1,7 @@
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
 import { HyperBEAM } from "wao/test"
-
-import { verify } from "wao/signer"
-import { rsaid, hmacid } from "wao/utils"
+import { verify, rsaid, hmacid } from "hbsig"
 
 const cwd = "../HyperBEAM"
 const mydev = { name: "mydev@1.0", module: "dev_mydev" }
