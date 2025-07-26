@@ -1,11 +1,11 @@
-// Import the functions from the library
-// Adjust the path based on where you saved the hyperbeam-id-generators.js file
+import assert from "assert"
+import { after, describe, it, before, beforeEach } from "node:test"
 import {
   generateCommitmentId,
   rsaid,
   hmacid,
   verifyCommitmentId,
-} from "../../src/id.js"
+} from "../src/id.js"
 
 // Test data from the Erlang implementation
 const testMessage = {
@@ -48,76 +48,67 @@ const hmacMessage = {
     ],
 }
 
-console.log("=== HyperBEAM ID Generator Test Suite ===\n")
+describe("ID", function () {
+  it("should validate", () => {
+    console.log("=== HyperBEAM ID Generator Test Suite ===\n")
 
-// Test 1: RSA Commitment ID
-console.log("Test 1: RSA-PSS Commitment ID Generation")
-const rsaCommitment =
-  testMessage.commitments["PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE"]
-const rsaId = rsaid(rsaCommitment)
-console.log("Expected ID: PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE")
-console.log("Generated ID:", rsaId)
-console.log(
-  "Test passed:",
-  rsaId === "PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE"
-)
+    // Test 1: RSA Commitment ID
+    console.log("Test 1: RSA-PSS Commitment ID Generation")
+    const rsaCommitment =
+      testMessage.commitments["PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE"]
+    const rsaId = rsaid(rsaCommitment)
+    console.log("Expected ID: PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE")
+    console.log("Generated ID:", rsaId)
+    assert.equal(rsaId, "PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE")
 
-// Test 2: HMAC Commitment ID
-console.log("\nTest 2: HMAC Commitment ID Generation")
-const hmacId = hmacid(hmacMessage)
-console.log("Expected ID: iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw")
-console.log("Generated ID:", hmacId)
-console.log(
-  "Test passed:",
-  hmacId === "iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw"
-)
+    // Test 2: HMAC Commitment ID
+    console.log("\nTest 2: HMAC Commitment ID Generation")
+    const hmacId = hmacid(hmacMessage)
+    console.log("Expected ID: iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw")
+    console.log("Generated ID:", hmacId)
+    assert.equal(hmacId, "iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw")
 
-// Test 3: Generic commitment ID function
-console.log("\nTest 3: Generic Commitment ID Function")
-const genericRsaId = generateCommitmentId(rsaCommitment)
-console.log("RSA via generic function:", genericRsaId)
-console.log(
-  "RSA test passed:",
-  genericRsaId === "PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE"
-)
+    // Test 3: Generic commitment ID function
+    console.log("\nTest 3: Generic Commitment ID Function")
+    const genericRsaId = generateCommitmentId(rsaCommitment)
+    console.log("RSA via generic function:", genericRsaId)
+    assert.equal(genericRsaId, "PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE")
 
-const hmacCommitment = { alg: "hmac-sha256" }
-const genericHmacId = generateCommitmentId(hmacCommitment, hmacMessage)
-console.log("HMAC via generic function:", genericHmacId)
-console.log(
-  "HMAC test passed:",
-  genericHmacId === "iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw"
-)
+    const hmacCommitment = { alg: "hmac-sha256" }
+    const genericHmacId = generateCommitmentId(hmacCommitment, hmacMessage)
+    console.log("HMAC via generic function:", genericHmacId)
+    assert.equal(genericHmacId, "iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw")
 
-// Test 4: Verify commitment IDs
-console.log("\nTest 4: Verify Commitment IDs")
-const rsaVerified = verifyCommitmentId(
-  rsaCommitment,
-  "PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE"
-)
-console.log("RSA verification:", rsaVerified)
+    // Test 4: Verify commitment IDs
+    console.log("\nTest 4: Verify Commitment IDs")
+    const rsaVerified = verifyCommitmentId(
+      rsaCommitment,
+      "PDw08yIW-ImV2N3ItIlWQ1wBt2t_H1CGMUOxJjx47HE",
+    )
+    assert(rsaVerified)
 
-const hmacVerified = verifyCommitmentId(
-  hmacCommitment,
-  "iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw",
-  hmacMessage
-)
-console.log("HMAC verification:", hmacVerified)
+    const hmacVerified = verifyCommitmentId(
+      hmacCommitment,
+      "iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw",
+      hmacMessage,
+    )
+    assert(hmacVerified)
 
-// Test 5: Demonstrate HMAC independence from signature
-console.log("\nTest 5: HMAC Independence from RSA Signature")
-const modifiedMessage = {
-  ...hmacMessage,
-  signature:
-    "http-sig-bba7e22451416f77=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:",
-}
-const hmacIdModified = hmacid(modifiedMessage)
-console.log("HMAC with different RSA signature:", hmacIdModified)
-console.log(
-  "Still the same ID:",
-  hmacIdModified === "iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw"
-)
+    // Test 5: Demonstrate HMAC independence from signature
+    console.log("\nTest 5: HMAC Independence from RSA Signature")
+    const modifiedMessage = {
+      ...hmacMessage,
+      signature:
+        "http-sig-bba7e22451416f77=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:",
+    }
+    const hmacIdModified = hmacid(modifiedMessage)
+    console.log("HMAC with different RSA signature:", hmacIdModified)
+    assert.equal(hmacIdModified, "iK__u54zqDWrJpVVbf3uYvgvG1hxWZM6Tq1zusfGYIw")
 
-console.log("\n=== All Tests Completed ===")
-console.log("The HMAC ID is deterministic and depends only on message content,")
-console.log("not on the RSA signature value.")
+    console.log("\n=== All Tests Completed ===")
+    console.log(
+      "The HMAC ID is deterministic and depends only on message content,",
+    )
+    console.log("not on the RSA signature value.")
+  })
+})
