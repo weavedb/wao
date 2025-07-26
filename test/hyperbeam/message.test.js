@@ -1,7 +1,7 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
 import HyperBEAM from "../../src/hyperbeam.js"
-import { extractPublicKeyFromHeaders } from "../../src/signer-utils.js"
+import { extractPubKey } from "hbsig"
 import { toAddr } from "../../src/test.js"
 
 describe("Hyperbeam Device", function () {
@@ -29,9 +29,7 @@ describe("Hyperbeam Device", function () {
       path: `/~message@1.0/commit`,
       hello: "world",
     })
-    const signerAddr = toAddr(
-      extractPublicKeyFromHeaders(headers).toString("base64")
-    )
+    const signerAddr = toAddr(extractPubKey(headers).toString("base64"))
     assert.equal(hb.addr, signerAddr)
   })
 })

@@ -190,7 +190,7 @@ export async function verify(signedMessage, publicKey) {
     } else {
       // Extract public key from keyid
       const signatureName = extractSignatureName(headers)
-      const extractedKey = extractPublicKeyFromHeaders(headers, signatureName)
+      const extractedKey = extractPubKey(headers, signatureName)
       if (!extractedKey) {
         return {
           valid: false,
@@ -245,10 +245,7 @@ export async function verify(signedMessage, publicKey) {
 
     // Extract additional info from headers
     const signatureName = extractSignatureName(headers)
-    const extractedPublicKey = extractPublicKeyFromHeaders(
-      headers,
-      signatureName
-    )
+    const extractedPublicKey = extractPubKey(headers, signatureName)
 
     // Extract algorithm from signature-input
     const signatureInputHeader =
@@ -302,7 +299,7 @@ export async function verify(signedMessage, publicKey) {
  * @param {string} [signatureName] - Optional signature name to look for
  * @returns {Buffer|null} Public key buffer or null
  */
-export function extractPublicKeyFromHeaders(headers, signatureName) {
+export function extractPubKey(headers, signatureName) {
   const signatureInput =
     headers["signature-input"] || headers["Signature-Input"]
   if (!signatureInput) return null
@@ -335,7 +332,7 @@ export function extractPublicKeyFromHeaders(headers, signatureName) {
  */
 function extractPublicKeyFromMessage(signedMessage) {
   const signatureName = extractSignatureName(signedMessage.headers)
-  return extractPublicKeyFromHeaders(signedMessage.headers, signatureName)
+  return extractPubKey(signedMessage.headers, signatureName)
 }
 
 export async function send(signedMsg, fetchImpl = fetch) {
