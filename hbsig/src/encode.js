@@ -476,6 +476,8 @@ function processArrayItems(
     const index = idx + 1
 
     if (indicesWithOwnParts.has(index)) {
+      // This item has its own part - skip it here
+      // Don't add type annotation for items that have their own parts
       return
     }
     if (
@@ -943,6 +945,7 @@ function handleBinaryValue(bodyKey, value, headers) {
   }
 
   const buffer = toBuffer(value)
+  // Always keep binary data as raw binary, regardless of whether it's in an array
   const headerText = lines.join("\r\n") + "\r\n\r\n"
   return new Blob([headerText, buffer])
 }

@@ -1,5 +1,5 @@
 const bin = Buffer.from([1, 2, 3])
-const empty = Buffer.from([])
+const empty_bin = Buffer.from([])
 
 export const map_errors = [
   { types: ["", 0, "", false, Symbol("null"), [], {}, -1] },
@@ -17,7 +17,6 @@ export const map_errors = [
   },
   { mixed_empty: ["", 0, [], "", {}, null, false] },
 ]
-
 export const httpsig_errors = [
   {
     data: {
@@ -41,19 +40,17 @@ export const httpsig_errors = [
     body: { data: Buffer.from([0]) },
   },
 ]
-
 export const signer_errors = [
   { binary: bin },
   { body: bin, data: bin },
   { bin },
+  { data: bin },
+  { body: bin },
   { bin, data: bin },
   { bin, body: bin },
   { bin, data: bin, body: bin },
 ]
-
-const ok = [
-  { data: bin },
-  { body: bin },
+export const ok = [
   { recursive: [1, [2, [3, [4]]]] },
   { alternating: [1, "one", 2, "two", 3, "three"] },
   {
@@ -273,9 +270,9 @@ const ok = [
   { key: [[8.02]] },
   { base64: Buffer.from([1, 2, 3]).toString("base64") },
 
-  { bin: empty },
-  { body: empty },
-  { bin: empty, body: empty },
+  { bin: empty_bin },
+  { body: empty_bin },
+  { bin: empty_bin, body: empty_bin },
   { bin: {} },
   { data: {} },
   { body: {} },
@@ -328,34 +325,7 @@ const ok = [
   { num: 1, data: 1, body: 1 },
 ]
 
-export const ok2 = [
-  { data: 1, Data: 2, DATA: 3 },
-  { body: "a", Body: "b", BODY: "c" },
-  { a1: 1, A1: 2, "1a": 3, "1A": 4 },
-  { 123: "numeric", abc: "alpha", ABC: "ALPHA" },
-  {
-    field: 1,
-    Field: [2],
-    FIELD: { data: 3 },
-    FiElD: [{ val: 4 }],
-  },
-  { list: [Symbol("ok")] },
-]
-
 export const errors = [
-  { max_int64: 9223372036854775807 },
-  { min_int64: -9223372036854775808 },
-  { large_positive: 1000000000000000 },
-  { large_negative: -1000000000000000 },
-  { int_array: [9223372036854775807, -9223372036854775808, 0] },
-  { boundary_ints: { max: 9223372036854775807, min: -9223372036854775808 } },
-  {
-    types: [
-      { type: "integer", value: 9223372036854775807 },
-      { type: "empty", value: "" },
-      { type: "list", value: [1, 2] },
-    ],
-  },
   {
     nested: {
       nums: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
@@ -366,10 +336,21 @@ export const errors = [
   { binary: Buffer.from([1, 2, 3]), binary2: Buffer.from([1, 2, 3]) },
   { bin: [bin, bin] },
   { list: [Symbol("ok"), [bin]] },
-  { data: empty },
-  { data: empty, body: empty },
-  { bin: empty, data: empty },
-  { bin: empty, data: empty, body: empty },
+  { data: empty_bin },
+  { data: empty_bin, body: empty_bin },
+  { bin: empty_bin, data: empty_bin },
+  { bin: empty_bin, data: empty_bin, body: empty_bin },
+  { max_int64: 9223372036854775807 },
+  { min_int64: -9223372036854775808 },
+  { large_positive: 1000000000000000 },
+  { large_negative: -1000000000000000 },
+  { int_array: [9223372036854775807, -9223372036854775808, 0] },
+  { boundary_ints: { max: 9223372036854775807, min: -9223372036854775808 } },
+  { data: 1, Data: 2, DATA: 3 },
+  { body: "a", Body: "b", BODY: "c" },
+  { test: 1, Test: 2, TEST: 3, TeSt: 4 },
+  { a1: 1, A1: 2, "1a": 3, "1A": 4 },
+  { 123: "numeric", abc: "alpha", ABC: "ALPHA" },
   { "field!": 1, "field?": 2, "field#": 3 },
   { "": "empty_key", " ": "space_key", "  ": "two_spaces" },
   {
@@ -377,12 +358,24 @@ export const errors = [
     Data: [3, -9223372036854775808, [], {}],
     DATA: ["", null, Symbol("undefined"), Symbol("ok")],
   },
-  { test: 1, Test: 2, TEST: 3, TeSt: 4 },
   {
     users: [
       { id: 9223372036854775807, name: "user1", tags: ["a", "b"] },
       { id: -9223372036854775808, name: "user2", tags: [] },
     ],
+  },
+  {
+    types: [
+      { type: "integer", value: 9223372036854775807 },
+      { type: "empty", value: "" },
+      { type: "list", value: [1, 2] },
+    ],
+  },
+  {
+    field: 1,
+    Field: [2],
+    FIELD: { data: 3 },
+    FiElD: [{ val: 4 }],
   },
   {
     all: [
@@ -412,17 +405,4 @@ export const errors = [
   },
 ]
 
-export const simple = [
-  //{ bin: [Buffer.from([1]), Buffer.from([2])] },
-  //{ "": "value" },
-  { "field?": "value" },
-  //{ num: 9223372036854776000 },
-]
-
-export default [
-  ...ok,
-  ...ok2,
-  ...map_errors,
-  ...httpsig_errors,
-  ...signer_errors,
-]
+export default [...ok, ...map_errors, ...httpsig_errors, ...signer_errors]
