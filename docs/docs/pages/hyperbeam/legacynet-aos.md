@@ -4,14 +4,14 @@ Legacynet compatible AOS uses `genesis-wasm@1.0` to delegate compute to an exter
 
 Let's use the production AOS2.0.6 module stored at `ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s` for now.
 
-Currently, nesting messages don't work with legacynet compatible AOS. HyperBEAM automatically replaces `path` with `schedule` for process-based messages, which invalidates signatures. To circumvent this, we need to exclude `path` from the signature base with `{ path: false }`.
+:::warning
+Nesting the schduling message is the cleaner way to schedule messages, but we will learn it in the next chapter and keep it unnested here. When not nesting messages, HyperBEAM automatically replaces `path` with `schedule` for process-based messages, which invalidates signatures. To circumvent this, we need to exclude `path` from the signature base with `{ path: false }`.
+:::
 
 ```js [/test/legacynet-aos.test.js]
 import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
+import { describe, it, before, after } from "node:test"
 import { HyperBEAM } from "wao/test"
-
-const cwd = "../HyperBEAM"
 
 const seed = num => {
   const array = new Array(num)
@@ -33,13 +33,12 @@ end)`
 describe("Processes and Scheduler", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({
-      cwd,
-      reset: true,
-      as: ["genesis_wasm"],
-    }).ready()
+    hbeam = await new HyperBEAM({ 
+	  reset: true, 
+	  as: ["genesis_wasm"]
+	}).ready()
+	hb = hbeam.hb
   })
-  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
   it("should spawn a legacynet AOS process", async () => {

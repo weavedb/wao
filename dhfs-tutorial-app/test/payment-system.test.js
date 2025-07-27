@@ -1,10 +1,8 @@
 import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
+import { describe, it, before, after } from "node:test"
 import { HyperBEAM, acc } from "wao/test"
 import { HB } from "wao"
 import { rsaid, hmacid } from "hbsig"
-
-const cwd = "../HyperBEAM"
 
 describe("Payment System faff@1.0", function () {
   let hbeam, hb, operator
@@ -13,12 +11,9 @@ describe("Payment System faff@1.0", function () {
 
   before(async () => {
     hbeam = await new HyperBEAM({
-      cwd,
       reset: true,
       faff: [HyperBEAM.OPERATOR, allowed_user.addr],
     }).ready()
-  })
-  beforeEach(async () => {
     operator = hbeam
     allowed_user.hb = new HB({ jwk: allowed_user.jwk })
     disallowed_user.hb = new HB({ jwk: disallowed_user.jwk })
@@ -56,17 +51,15 @@ describe("Payment System simple-pay@1.0", function () {
   let user = acc[0]
   before(async () => {
     hbeam = await new HyperBEAM({
-      cwd,
       reset: true,
       operator: HyperBEAM.OPERATOR,
       simple_pay: true,
       simple_pay_price: 2,
     }).ready()
-  })
-  beforeEach(async () => {
     operator = hbeam
     user.hb = await new HB({}).init(user.jwk)
   })
+
   after(async () => hbeam.kill())
 
   it("should test simple-pay@1.0", async () => {
@@ -106,12 +99,11 @@ describe("Payment System p4@1.0", function () {
   let hb, hbeam
   before(async () => {
     hbeam = await new HyperBEAM({
-      cwd,
       reset: true,
       operator: HyperBEAM.OPERATOR,
     }).ready()
+    hb = hbeam.hb
   })
-  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
   it("should handle payment with lua", async () => {
@@ -158,7 +150,6 @@ describe("Payment System p4@1.0", function () {
     const cid = await hb.cacheScript(client)
 
     const hbeam2 = await new HyperBEAM({
-      cwd,
       port: 10002,
       operator: hb.addr,
       p4_lua: { processor: pid, client: cid },
