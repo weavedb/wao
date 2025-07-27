@@ -16,10 +16,10 @@ You can use `hb_message:id` on HyperBEAM.
 ID = hb_message:id(Msg)
 ```
 
-Or you can use `id` from `wao/utils`.
+Or you can use `id` from `hbsig`.
 
 ```js
-import { id } from "wao/utils"
+import { id } from "hbisg"
 const msg_id = id(msg)
 ```
 
@@ -255,7 +255,7 @@ Any signed request to a HyperBEAM node returns a hashpath as `tag` in `signature
 `hb.post` automatically extracts it from the response for you.
 
 ```js [/test/hashpaths.test.js]
-import { id } from "wao/utils"
+import { id } from "hbsig"
 
 const { out, hashpath } = await hb.post({ path: "/~mydev@1.0/forward" })
 const { msg1, msg2 } = JSON.parse(out)
@@ -286,3 +286,4 @@ yarn test test/hashpaths.test.js
 
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)
+- [HBSig API](/api/hbsig)
