@@ -16,7 +16,7 @@ describe("HyperBEAM", function () {
 	hbeam = await new HyperBEAM({ 
       port: 10001,
 	  wallet: ".wallet.json",
-      cwd: "../HyperBEAM", 
+      cwd: "./HyperBEAM", 
       reset: true,
 	  bundler: 4001,
 	  gateway: 4000,
@@ -64,7 +64,10 @@ hbeam.kill()
 
 If your installation requires environment variables to run `rebar3`, define then in `.env.hyperbeam`.
 
+`cwd` can also be set in `.env.hyperbeam` to apply globally across all test files.
+
 ```dotenv [.env.hyperbeam]
+CWD=./HyperBEAM
 CC=gcc-12
 CXX=g++-12
 CMAKE_POLICY_VERSION_MINIMUM=3.5
