@@ -80,10 +80,10 @@ This is the signed message:
 
 The signing added `signature` and `signature-input` to `headers`. Let's break down `signature-input`.
 
-You can also verify the signature, which gives you the decomposition of the message if you ever need it.
+You can also verify the signature with `hbsig`, which gives you the decomposition of the message if you ever need it.
 
 ```js [/test/http-message-signatures.test.js]
-import { verify } from "wao/signer"
+import { verify } from "hbsig"
 const { 
   valid, // should be true
   verified,
@@ -235,3 +235,4 @@ yarn test test/http-message-signatures.test.js
 
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)
+- [HBSig API](/api/hbsig)

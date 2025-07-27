@@ -167,6 +167,10 @@ export default defineConfig({
 	{
           text: 'HyperBEAM',
           link: '/api/hyperbeam',
+        },
+	{
+          text: 'HBSig',
+          link: '/api/hbsig',
         }
       ],
     },

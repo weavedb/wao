@@ -1,0 +1,231 @@
+# HBSig
+
+HyperBEAM / AO-Core requires complex encoding and signing involving multiple codecs and HTTP Message Signatures. However, it is not 100% compatible with [the standard http-message-signatures libraries](https://github.com/dhensby/node-http-message-signatures), and [aoconnect](https://github.com/permaweb/ao/blob/main/connect/src/client/hb-encode.js) only provides basic encoding for AOS messages.
+
+`hbsig` handles encoding of arbitrarily complex objects, which works on HyperBEAM. It is built by emulating the HyperBEAM codec devices as well as creating workaround encoding strategies using a custom device for extensive tests with LLMs. 
+
+## Installation
+
+`hbsig` is a standalone package providing utility methods for HyperBEAM codecs, signatures, encoding and hash algorithms.
+
+```bash
+yarn add hbsig
+```
+
+## Sign Message
+
+### createSigner
+
+```js
+import { createSigner } from "hbsig"
+
+const hyperbeam_url = "http://localhost:10001"
+const sign = createSigner(jwk, hyperbeam_url)
+```
+
+### Sign and Send Message
+
+`hbsig` can encode and sign almost any complex objects combining layers of HyperBEAM codecs and `http-message-signatures`. While there are a few edge cases where HyperBEAM's decoder has limitations, `hbsig` intelligently provides workarounds for many of these scenarios. The encoding strategies were refined through extensive battle-testing with LLMs.
+
+```js
+import { send } from "hbsig"
+
+const msg = { str: "abc", num: 123, bin: Buffer.from([1,2,3] )}
+const signed = await sign({ path: "/~hbsig@1.0/msg2", ...msg })
+const { out } = await send(signed)
+```
+
+### Exclude @path
+
+`@path` is automatically included in the signed components. To exclude `@path`, set `path=false` in the 2nd argument. There are some cases you want to exclude `@path` due to HyperBEAM's non-standard handing of the `path` field. HyperBEAM strips off the leading `/` from `path`, and also removes `@` from the field name in the signed body, which might not be compatible with the [Http Message Signatures](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-message-signatures) standard, and invalidates signatures in some scenarios.
+
+```js
+const msg = await sign(
+  { path: "/~hbsig@1.0/msg2", key: "value" }, 
+  { path: false }
+)
+```
+
+## Verify Message
+
+You can verify signed messages while decoding `signature-input`.
+
+```js
+import { verify } from "hbsig"
+
+const { 
+  valid, // should be true
+  verified,
+  signatureName, 
+  keyId, 
+  algorithm, 
+  decodedSignatureInput : { components, params: { alg, keyid, tag }, raw }
+} = await verify(signed)
+```
+
+## Commitments
+
+You can signa a message including commitments.
+
+```js
+import { commit } from "hbsig"
+const committed = await commit({path, ...msg}, { signer: sign })
+```
+
+### Commit IDs
+
+A commitment needs to include two IDs, which are
+
+- sha256 hash of signature
+- hmac-sha256 hash of the signed components
+
+You can explicitly get these IDs from a signed message.
+
+```js
+import { rsaid, hmacid } from "hbsig"
+
+const hmac_id = hmacid(signed.headers)
+const rsa_id = rsaid(signed.headers)
+```
+
+## Message ID
+
+You can calculate the id from committed message.
+
+```js
+import { id } from "hbsig"
+
+const msg_id = id(committed)
+```
+
+
+## Hashpath
+
+You can calculate the next hashpath from the current hashpath and a new message.
+
+```js
+import { hashpath } from "hbsig"
+
+const next_hashpath = hashpath(current_hashpath, committed)
+```
+
+### base
+
+A hashpath consists of the hash of the current hashpath and the new message ID joined by `/`. You can independently calculate the base hash with `base`.
+
+```js
+import { base, id } from "hbsig"
+const next_hashpath = `${base(current_hashpath)}/${id(committed)}`
+```
+
+## Utilities
+
+### toAddr
+
+Synchronously calculate Arweave address from a public key. `arweave.js` provides only asynchronous method for this. You can extract a public key from `jwk.n` as well as `verify(signed)`, which gives you `keyId` from `signature-input`.
+
+```js
+import { toAddr } from "hbsig"
+const address = toAddr(jwk.n) // toAddr(jwk) works too
+```
+
+
+## Codecs
+
+`hbsig` internally handles many different representations of the same object using multiple codecs from HyperBEAM (`flat` `structured` `httpsig`) and 2 added codecs to achieve seamless data exchange between JS and Erlang (`erljson` `erlstr`).
+
+### hbsig@1.0 Device
+
+`hbsig` comes with an accompanying device ([hbsig@1.0](https://github.com/weavedb/HyperBEAM/blob/d1201e9a3b32627a84dcbb64f3647d57aa54d33f/src/dev_hbsig.erl)) on HyperBEAM to validate various encoding strategies.
+
+```bash
+git clone https://github.com/weavedb/wao.git && cd wao
+git submodule update --init --recursive
+```
+
+- `json_to_erl/3` : convert stringified JSON to an Erlang object
+- `to_erl/1` : convert stringified JSON in `body` to an Erlang object 
+- `to_str/1` : convert an Erlang object to ErlStr
+- `structured_from/3` : expose `structured@1.0:from`
+- `structured_to/3` : expose `structured@1.0:to`
+- `httpsig_from/3` : expose `httpsig@1.0:from`
+- `httpsig_to/3` : expose `httpsig@1.0:to`
+- `flat_from/3`: expose `flat@1.0:from`
+- `flat_to/3`: expose `flat@1.0:to`
+- `msg2/3` : return `Msg2` as ErlStr so we can check the decoded message
+
+### ErlJSON
+
+JSON and erlang objects have different types such as `null`, `boolean`, and `atom`. ErlJSON normalized JSON objects to Erlang compatible structures.
+
+```js
+import { normalize, erl_json_from, erl_json_to } from "hbsig"
+```
+
+### ErlStr
+
+Erlang doesn't differentiate between strings and buffers, and the built-in format method loses precision when converting binary data containing non-standard characters. To address this, ErlStr maintains both binary and stringified formats  for accurate Erlang-to-JSON conversion.
+
+```js
+import { erl_str_from, erl_str_to } from "hbsig"
+```
+
+`ErlJSON` and `ErlStr` enable seamless conversions between JSON and Erlang objects, allowing precise encoding tests across both environments.
+
+### flat
+
+```js
+import { flat_from, flat_to } from "hbsig"
+```
+
+### structured
+
+```js
+import { structured_from, structured_to } from "hbsig"
+```
+
+### httpsig
+
+```js
+import { httpsig_from, httpsig_to } from "hbsig"
+```
+
+### Example Test
+
+You can find comprehensive encoding tests [here](https://github.com/weavedb/wao/tree/master/hbsig/test).
+
+```js
+import { structured_from, structured_to } from "../src/structured.js"
+import { normalize, erl_json_to } from "../src/erl_json.js"
+import { httpsig_from, httpsig_to } from "../src/httpsig.js"
+
+describe(desc, function () {
+  let hbeam, sign
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    sign = createSigner(hbeam.jwk, hbeam.url)
+  })
+  after(async () => hbeam.kill())
+  it("should validate", async ()=>{
+    const msg = { str: "abc", num: 123, bin: Buffer.from([1, 2, 3]) }
+	const structured = structured_from(normalize(msg))
+    const json = erl_json_to(structured)
+    const signed = await sign({
+	  path: "/~hbsig@1.0/httpsig_to", 
+	  body: JSON.stringify(json)
+	})
+    const { out } = await send(signed)
+    const input = httpsig_to(normalize(structured))
+    const output = erl_str_from(out)
+    const expected = normalize(input, true)
+    const output_b = erl_str_from(out, true) // true for binary format
+    assert.deepEqual(expected, output_b) // compare in binary format
+  })
+})
+```
+
+To run all tests, you need to clone [wao](https://github.com/weavedb/HyperBEAM/tree/wao) branch of HyperBEAM, [compile it](https://hyperbeam.ar.io/run/running-a-hyperbeam-node.html), add `.wallet.json`, and set [CWD](/api/hyperbeam#environment-variables) in `.env.hyperbeam`.
+
+```bash
+yarn test-all
+```
