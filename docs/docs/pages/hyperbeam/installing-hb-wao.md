@@ -12,10 +12,10 @@ Create a WAO project that comes with the `wao` SDK and testing framework:
 npx wao create myapp && cd myapp
 ```
 
-You can also create an empty directory and install `wao`:
+You can also create an empty directory and install `wao` and `hbsig`:
 
 ```bash [Terminal]
-mkdir myapp && cd myapp && yarn init && yarn add wao
+mkdir myapp && cd myapp && yarn init && yarn add wao hbsig
 mkdir test && touch test/hyperbeam.js
 ```
 
@@ -32,7 +32,8 @@ Edit `package.json` to enable ESM and test commands with the `--experimental-was
     "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js"
   },
   "dependencies": {
-    "wao": "^0.29.2"
+	"hbsig": "^0.0.7",
+    "wao": "^0.33.3"
   }
 }
 ```
@@ -43,6 +44,12 @@ Import the `HyperBEAM` and `HB` classes from `wao` to interact with your HyperBE
 
 Make sure you have an Arweave wallet JWK at `HyperBEAM/.wallet.json` for the node operator account.
 
+Also, set `CWD` in `.env.hyperbeam`, which should be the HyperBEAM node directory path relative to the root directory of your app.
+
+```dotenv [/.env.hyperbeam]
+CWD=../HyperBEAM
+```
+
 Here's the minimum viable test code. The `HyperBEAM` class starts up a HyperBEAM node and kills it once your tests complete, creating a sandbox environment for each test suite.
 
 
@@ -51,22 +58,14 @@ import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
 import { HyperBEAM } from "wao/test"
 
-/*
-  The link to your HyperBEAM node directory.
-  It's relative to your app root folder, not the test folder.
-*/
-const cwd = "../HyperBEAM"
-
 describe("HyperBEAM", function () {
   let hbeam, hb
 
   // start a hyperbeam node and wait till it's ready, reset node storage
   before(async () => {
-    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
-  }) 
-
-  // HB class from hbeam has the node operator signer
-  beforeEach(async () => (hb = hbeam.hb))
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    hb = hbeam.hb
+  })
 
   // kill the node after testing
   after(async () => hbeam.kill())
@@ -90,17 +89,15 @@ If you can't run HyperBEAM on your local machine, skip the `HyperBEAM` class and
 
 ```js [/test/hb.test.js]
 import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
+import { describe, it, before, after } from "node:test"
 import { acc } from "wao/test"
 import { HB } from "wao"
-
-const cwd = "../HyperBEAM"
 
 describe("HyperBEAM", function () {
   let hb
 
   // using one of the pre-generated non-operator accounts for test
-  beforeEach(async () => {
+  before(async () => {
     hb = new HB({ jwk: acc[0].jwk, url: "http://localhost:10001" })
   })
 

@@ -8,12 +8,10 @@ The node operator can update `faff_allow_list` via `/~meta@1.0/info` to manage t
 
 ```js [/test/payment-system.test.js]
 import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
+import { describe, it, before, after } from "node:test"
 import { HyperBEAM, acc } from "wao/test"
-import HB from "../../src/hb.js"
-import { rsaid, hmacid } from "wao/utils"
-
-const cwd = "../HyperBEAM"
+import HB from "wao"
+import { rsaid, hmacid } from "hbsig"
 
 describe("Payment System faff@1.0", function () {
   let hbeam, hb, operator
@@ -22,12 +20,9 @@ describe("Payment System faff@1.0", function () {
 
   before(async () => {
     hbeam = await new HyperBEAM({
-      cwd,
       reset: true,
       faff: [HyperBEAM.OPERATOR, allowed_user.addr],
     }).ready()
-  })
-  beforeEach(async () => {
     operator = hbeam
     allowed_user.hb = new HB({ jwk: allowed_user.jwk })
     disallowed_user.hb = new HB({ jwk: disallowed_user.jwk })
@@ -87,14 +82,11 @@ describe("Payment System simple-pay@1.0", function () {
   let user = acc[0]
   before(async () => {
     hbeam = await new HyperBEAM({
-      cwd,
       reset: true,
       operator: HyperBEAM.OPERATOR,
       simple_pay: true,
       simple_pay_price: 2,
     }).ready()
-  })
-  beforeEach(async () => {
     operator = hbeam
     user.hb = await new HB({}).init(user.jwk)
   })
@@ -423,7 +415,6 @@ For `p4@1.0` to work, we need to pass the payment `operator` address and `p4_lua
 // comment out reset to use the same store where we cached Lua scripts
 const hbeam2 = await new HyperBEAM({
   //reset: true,	
-  cwd,
   port: 10002,
   operator: addr,
   p4_lua: { processor: pid, client: cid },
@@ -576,3 +567,4 @@ yarn test test/payment-system.test.js
 
 - [HyperBEAM Class API](/api/hyperbeam)
 - [HB Class API](/api/hb)
+- [HBSig API](/api/hbsig)

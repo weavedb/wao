@@ -1,18 +1,17 @@
 import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
+import { describe, it, before, after } from "node:test"
 import { HyperBEAM } from "wao/test"
 import { verify, rsaid, hmacid } from "hbsig"
 
-const cwd = "../HyperBEAM"
 const mydev = { name: "mydev@1.0", module: "dev_mydev" }
 const devices = ["json", "structured", "httpsig", "flat", "meta", mydev]
 
 describe("Custom Devices and Codecs", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ cwd, devices, reset: true }).ready()
+    hbeam = await new HyperBEAM({ devices, reset: true }).ready()
+    hb = hbeam.hb
   })
-  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
   it("should sign a message", async () => {
