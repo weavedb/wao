@@ -1,5 +1,5 @@
 import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
+import { describe, it, before, after } from "node:test"
 import { HyperBEAM } from "wao/test"
 
 const cwd = "../HyperBEAM"
@@ -9,9 +9,9 @@ const devices = ["json", "structured", "httpsig", "flat", "meta", mydev]
 describe("Httpsig Codec", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ cwd, devices, reset: true }).ready()
+    hbeam = await new HyperBEAM({ devices, reset: true }).ready()
+    hb = hbeam.hb
   })
-  beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
   it("should encode with httpsig device", async () => {
