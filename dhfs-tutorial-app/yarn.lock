@@ -1573,21 +1573,10 @@ hasown@^2.0.2:
   dependencies:
     function-bind "^1.1.2"
 
-hbsig@^0.0.7:
-  version "0.0.7"
-  resolved "https://registry.yarnpkg.com/hbsig/-/hbsig-0.0.7.tgz#386892e335dc1d658be3ef9c02dd28797d4057cb"
-  integrity sha512-nza59thFt6Ecg05s8pNKOr+eMYjmnhJgruxXi35vTm8I6wtOol1KVwdNCOWGknWiKVz/jELkJxXBiidXlPlDQQ==
-  dependencies:
-    "@permaweb/aoconnect" "^0.0.85"
-    base64url "^3.0.1"
-    fast-sha256 "^1.3.0"
-    ramda "^0.31.3"
-    structured-headers "1.0.1"
-
-hbsig@^0.1.0:
-  version "0.1.0"
-  resolved "https://registry.yarnpkg.com/hbsig/-/hbsig-0.1.0.tgz#2cbf6053667c249d472f6959319841372443ec6f"
-  integrity sha512-me703c/ZNrnn7ruH5oTsf4TXpnvbWdFTVnyetk22GvmntV2UwAz1S5aewLHy9CwBxyS6j7iYcAgV+99t1tliPg==
+hbsig@^0.1.1:
+  version "0.1.1"
+  resolved "https://registry.yarnpkg.com/hbsig/-/hbsig-0.1.1.tgz#3456680b401bb4d3b303ccc7cdbc61f83152a1c5"
+  integrity sha512-cud244YgZ2WsZ7OTEbaJUEvxShelljTpfTnj92tm2QO1CL5ejkLuOIdDBIfdlCr1fe9kTfYw6UD5PRD9ORyFBQ==
   dependencies:
     "@permaweb/aoconnect" "^0.0.85"
     base64url "^3.0.1"
@@ -2753,10 +2742,10 @@ vlq@^2.0.4:
   resolved "https://registry.yarnpkg.com/vlq/-/vlq-2.0.4.tgz#6057b85729245b9829e3cc7755f95b228d4fe041"
   integrity sha512-aodjPa2wPQFkra1G8CzJBTHXhgk3EVSwxSWXNPr1fgdFLUb8kvLV1iEb6rFgasIsjP82HWI6dsb5Io26DDnasA==
 
-wao@^0.34.1:
-  version "0.34.1"
-  resolved "https://registry.yarnpkg.com/wao/-/wao-0.34.1.tgz#309638bc553764153d2922e5ded4e5f2be7a1fa5"
-  integrity sha512-JAa8mauKVb4kIUFBWLORdMgOusqS5jcHBBufmoxP71/h6k9VllrnfQMkvA8uHpSPAwXbiSWQgIBq4H7GfzQa/Q==
+wao@^0.34.2:
+  version "0.34.2"
+  resolved "https://registry.yarnpkg.com/wao/-/wao-0.34.2.tgz#a076c4326ba443baf844b1e56414d371b1586deb"
+  integrity sha512-f7cQqXHKe1lMulo0OmEquv6Ernny/bGBgE61LM42+PmB1UjKpxhGTi0cAPnNiv1FM4M5rF5xzyVR3TnUrOP7sA==
   dependencies:
     "@bokuweb/zstd-wasm" "^0.0.22"
     "@dha-team/arbundles" "^1.0.1"
@@ -2775,7 +2764,7 @@ wao@^0.34.1:
     express "^5.1.0"
     fast-sha256 "^1.3.0"
     graphql "^16.10.0"
-    hbsig "^0.1.0"
+    hbsig "^0.1.1"
     http-message-signatures "^1.0.4"
     lmdb "^3.2.2"
     localforage "^1.10.0"

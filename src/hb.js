@@ -138,10 +138,9 @@ class HB {
   async schedule({ pid, tags = {}, data } = {}) {
     let _tags = mergeLeft(tags, { type: "Message", target: pid })
     if (data) _tags.data = data
-    let res = await this.post({
-      path: `/${pid}/schedule`,
-      body: await this.commit(_tags, { path: false }),
-    })
+    let body = await this.commit(_tags, { path: false })
+    let signed = await this.sign({ path: `/${pid}/schedule`, body })
+    let res = await this.send(signed)
     return { slot: res.out.slot, res, pid }
   }
 
@@ -263,6 +262,7 @@ class HB {
   }
 
   async commit(obj, opts) {
+    console.log("comitting................................")
     return await commit(obj, { ...opts, signer: this.sign })
   }
 
