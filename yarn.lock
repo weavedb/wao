@@ -2432,10 +2432,10 @@ hasown@^2.0.2:
   dependencies:
     function-bind "^1.1.2"
 
-hbsig@^0.1.0:
-  version "0.1.0"
-  resolved "https://registry.yarnpkg.com/hbsig/-/hbsig-0.1.0.tgz#2cbf6053667c249d472f6959319841372443ec6f"
-  integrity sha512-me703c/ZNrnn7ruH5oTsf4TXpnvbWdFTVnyetk22GvmntV2UwAz1S5aewLHy9CwBxyS6j7iYcAgV+99t1tliPg==
+hbsig@^0.1.1:
+  version "0.1.1"
+  resolved "https://registry.yarnpkg.com/hbsig/-/hbsig-0.1.1.tgz#3456680b401bb4d3b303ccc7cdbc61f83152a1c5"
+  integrity sha512-cud244YgZ2WsZ7OTEbaJUEvxShelljTpfTnj92tm2QO1CL5ejkLuOIdDBIfdlCr1fe9kTfYw6UD5PRD9ORyFBQ==
   dependencies:
     "@permaweb/aoconnect" "^0.0.85"
     base64url "^3.0.1"
