@@ -183,7 +183,9 @@ const smartSign = async (obj, path) => {
 
     if (canUseSimpleEncoding) {
       // Build a simple message that won't trigger multipart
-      const message = { path: path || filtered.path || "/~wao@1.0/httpsig" }
+      const message = {}
+      if (path) message.path = path
+
       const types = []
 
       for (const [key, value] of Object.entries(filtered)) {
@@ -204,7 +206,7 @@ const smartSign = async (obj, path) => {
           message[key] = encodeAsStructuredFieldList(value)
         } else if (typeof value === "number") {
           types.push(
-            `${key}="${Number.isInteger(value) ? "integer" : "float"}"`,
+            `${key}="${Number.isInteger(value) ? "integer" : "float"}"`
           )
           message[key] = String(value)
         } else if (typeof value === "boolean") {
@@ -228,7 +230,7 @@ const smartSign = async (obj, path) => {
     // For complex structures that need multipart, use enc()
     const normalized = normalize({
       ...filtered,
-      path: path || "/~wao@1.0/httpsig",
+      ...(path && { path }),
     })
     const result = await enc(normalized)
 
@@ -237,7 +239,7 @@ const smartSign = async (obj, path) => {
     const flattened = {
       ...result.headers,
       body: result.body,
-      path: normalized.path || path || "/~wao@1.0/httpsig",
+      ...(path && { path }),
     }
 
     // httpsig_to expects the structured format
@@ -248,7 +250,8 @@ const smartSign = async (obj, path) => {
     console.error("Encoding failed:", error)
 
     // Fallback: create a simple structure
-    const result = { path: path || "/~wao@1.0/httpsig" }
+    const result = {}
+    if (path) result.path = path
 
     for (const [key, value] of Object.entries(obj)) {
       if (key === "path") continue
@@ -262,31 +265,35 @@ const smartSign = async (obj, path) => {
   }
 }
 
-// Internal sign function that matches the original signature
-const _sign = async (obj, path) => {
+// Internal encode function that uses the original impl as much as possible
+const encode = async (obj, path) => {
   // Filter out undefined values before processing
   const filtered = filterUndefined(obj)
 
   // If object contains binary data, use enc() directly
   if (hasBinaryData(filtered)) {
-    return await smartSign(filtered, path)
+    // For binary data, use enc() which handles multipart
+    return await enc(filtered)
   }
 
   // Otherwise use the standard pipeline
-  const encoded = httpsig_to(
-    normalize(
-      structured_from(
-        normalize({ ...filtered, path: path || "/~wao@1.0/httpsig" }),
-      ),
-    ),
-  )
+  let fields = { ...filtered }
+  // Only add path if explicitly provided
+  if (path) fields.path = path
+
+  // Try the standard encoding pipeline
+  const encoded = httpsig_to(normalize(structured_from(normalize(fields))))
 
   // Check if the encoded result is valid for HTTP headers
   if (!isValid(encoded)) {
-    return await smartSign(filtered, path)
+    // If invalid, fall back to enc()
+    return await enc(filtered)
   }
 
-  return encoded
+  // For non-binary data, return in the same format as enc()
+  // httpsig_to returns a flattened object, so we need to separate headers and body
+  const { body, ...headers } = encoded
+  return { headers, body }
 }
 
 // Helper to join URL and path
@@ -304,59 +311,7 @@ export async function sign({ url, path, msg: encoded, jwk, signPath = true }) {
   const { body = null, ...headers } = encoded
   let _enc = { headers }
   if (body) _enc.body = new Blob([body])
-
-  const headersObj = _enc.headers || {}
-  const bodyData = _enc.body || undefined
-  let url_path = typeof signPath === "string" ? signPath : path
-  const _url = joinUrl({ url, path: url_path })
-
-  headersObj["path"] = path
-  if (bodyData && !headersObj["content-length"]) {
-    const bodySize = bodyData.size || bodyData.byteLength || 0
-    if (bodySize > 0) headersObj["content-length"] = String(bodySize)
-  }
-
-  const lowercaseHeaders = {}
-  for (const [key, value] of Object.entries(headersObj)) {
-    lowercaseHeaders[key.toLowerCase()] = value
-  }
-
-  const bodyKeys = headersObj["body-keys"]
-    ? headersObj["body-keys"]
-        .replace(/"/g, "")
-        .split(",")
-        .map(k => k.trim())
-    : []
-
-  let isPath = false
-  const signingFields = Object.keys(lowercaseHeaders).filter(key => {
-    if (key === "path") isPath = true
-    return key !== "body-keys" && key !== "path" && !bodyKeys.includes(key)
-  })
-
-  if (signPath !== false && isPath) signingFields.push("@path")
-
-  const signedRequest = await toHttpSigner(signer)({
-    request: { url: _url, method: "POST", headers: lowercaseHeaders },
-    fields: signingFields,
-  })
-
-  const finalHeaders = {}
-  for (const [key, value] of Object.entries(headersObj)) {
-    finalHeaders[key] = value
-  }
-
-  finalHeaders["signature"] = signedRequest.headers["signature"]
-  finalHeaders["signature-input"] = signedRequest.headers["signature-input"]
-
-  if (headersObj["body-keys"]) {
-    finalHeaders["body-keys"] = headersObj["body-keys"]
-  }
-
-  const result = { url: _url, method: "POST", headers: finalHeaders }
-  if (bodyData) result.body = bodyData
-
-  return result
+  return await _sign({ path, signPath, encoded, signer, url })
 }
 
 // Helper function to recursively filter out undefined values
@@ -378,73 +333,90 @@ const filterUndefined = obj => {
   return obj
 }
 
-// Signer factory function that matches signer.js API
+async function _sign({
+  path,
+  signPath = true,
+  method = "POST",
+  encoded,
+  signer,
+  url,
+}) {
+  console.log(
+    ".........................................................................hre"
+  )
+  const headersObj = encoded ? encoded.headers : {}
+  const body = encoded ? encoded.body : undefined
+  let url_path = typeof signPath === "string" ? signPath : path
+  const _url = joinUrl({ url, path: url_path })
+
+  // Only add path header if path is provided
+  if (path) headersObj["path"] = path
+
+  if (body && !headersObj["content-length"]) {
+    const bodySize = body.size || body.byteLength || 0
+    if (bodySize > 0) headersObj["content-length"] = String(bodySize)
+  }
+
+  const lowercaseHeaders = {}
+  for (const [key, value] of Object.entries(headersObj)) {
+    lowercaseHeaders[key.toLowerCase()] = value
+  }
+
+  const bodyKeys = headersObj["body-keys"]
+    ? headersObj["body-keys"]
+        .replace(/"/g, "")
+        .split(",")
+        .map(k => k.trim())
+    : []
+
+  let isPath = false
+  const signingFields = Object.keys(lowercaseHeaders).filter(key => {
+    if (key === "path") isPath = true
+    return key !== "body-keys" && key !== "path" && !bodyKeys.includes(key)
+  })
+
+  // Only add @path if signPath is enabled AND path header exists
+  if (signPath !== false && isPath) signingFields.push("@path")
+
+  console.log("signingFields", signingFields)
+  const signedRequest = await toHttpSigner(signer)({
+    request: { url: _url, method, headers: lowercaseHeaders },
+    fields: signingFields,
+  })
+
+  const finalHeaders = {}
+  for (const [key, value] of Object.entries(headersObj)) {
+    finalHeaders[key] = value
+  }
+
+  finalHeaders["signature"] = signedRequest.headers["signature"]
+  finalHeaders["signature-input"] = signedRequest.headers["signature-input"]
+
+  if (headersObj["body-keys"]) {
+    finalHeaders["body-keys"] = headersObj["body-keys"]
+  }
+
+  const result = { url: _url, method, headers: finalHeaders }
+  if (body) result.body = body
+
+  return result
+}
+
 export function signer(config) {
   const { signer, url = "http://localhost:10001" } = config
   if (!signer) throw new Error("Signer is required for mainnet mode")
-
   return async (
     fields,
-    { encoded: _encoded = false, path: _path = true } = {},
+    { encoded: _encoded = false, path: signPath = true } = {}
   ) => {
+    console.log("fields", fields)
     const { path = "/relay/process", method = "POST", ...aoFields } = fields
-
-    // Filter out undefined values before encoding
     const filteredFields = filterUndefined(aoFields)
-    const encoded = _encoded ? filteredFields : await enc(filteredFields)
-
-    const headersObj = encoded ? encoded.headers : {}
-    const body = encoded ? encoded.body : undefined
-    let url_path = typeof _path === "string" ? _path : path
-    const _url = joinUrl({ url, path: url_path })
-
-    headersObj["path"] = path
-    if (body && !headersObj["content-length"]) {
-      const bodySize = body.size || body.byteLength || 0
-      if (bodySize > 0) headersObj["content-length"] = String(bodySize)
-    }
-
-    const lowercaseHeaders = {}
-    for (const [key, value] of Object.entries(headersObj)) {
-      lowercaseHeaders[key.toLowerCase()] = value
-    }
-
-    const bodyKeys = headersObj["body-keys"]
-      ? headersObj["body-keys"]
-          .replace(/"/g, "")
-          .split(",")
-          .map(k => k.trim())
-      : []
-
-    let isPath = false
-    const signingFields = Object.keys(lowercaseHeaders).filter(key => {
-      if (key === "path") isPath = true
-      return key !== "body-keys" && key !== "path" && !bodyKeys.includes(key)
-    })
-
-    if (_path !== false && isPath) signingFields.push("@path")
-
-    const signedRequest = await toHttpSigner(signer)({
-      request: { url: _url, method, headers: lowercaseHeaders },
-      fields: signingFields,
-    })
-
-    const finalHeaders = {}
-    for (const [key, value] of Object.entries(headersObj)) {
-      finalHeaders[key] = value
-    }
-
-    finalHeaders["signature"] = signedRequest.headers["signature"]
-    finalHeaders["signature-input"] = signedRequest.headers["signature-input"]
-
-    if (headersObj["body-keys"]) {
-      finalHeaders["body-keys"] = headersObj["body-keys"]
-    }
-
-    const result = { url: _url, method, headers: finalHeaders }
-    if (body) result.body = body
-
-    return result
+    const encoded = _encoded
+      ? filteredFields
+      : await encode(filteredFields, path)
+    console.log("encoded", encoded)
+    return await _sign({ path, signPath, method, encoded, signer, url })
   }
 }
 
@@ -452,5 +424,3 @@ export const createSigner = (jwk, url) => {
   const _signer = _createSigner(jwk, url)
   return signer({ signer: _signer, url })
 }
-
-export { _sign as signInternal }
