@@ -191,6 +191,7 @@ class HB {
     return res
   }
   async spawn(tags = {}) {
+    await this.setInfo()
     const res = await this.post({
       path: "/~process@1.0/schedule",
       body: await this.commit(

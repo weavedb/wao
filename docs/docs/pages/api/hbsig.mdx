@@ -30,7 +30,7 @@ const sign = createSigner(jwk, hyperbeam_url)
 ```js
 import { send } from "hbsig"
 
-const msg = { str: "abc", num: 123, bin: Buffer.from([1,2,3] )}
+const msg = { str: "abc", num: 123, bin: Buffer.from([1,2,3]) }
 const signed = await sign({ path: "/~hbsig@1.0/msg2", ...msg })
 const { out } = await send(signed)
 ```
@@ -65,7 +65,7 @@ const {
 
 ## Commitments
 
-You can signa a message including commitments.
+You can sign a message and create commitments with the signature.
 
 ```js
 import { commit } from "hbsig"
@@ -76,7 +76,7 @@ const committed = await commit({path, ...msg}, { signer: sign })
 
 A commitment needs to include two IDs, which are
 
-- sha256 hash of signature
+- sha256 hash of the signature
 - hmac-sha256 hash of the signed components
 
 You can explicitly get these IDs from a signed message.
@@ -90,7 +90,7 @@ const rsa_id = rsaid(signed.headers)
 
 ## Message ID
 
-You can calculate the id from committed message.
+You can calculate the ID from committed message.
 
 ```js
 import { id } from "hbsig"
