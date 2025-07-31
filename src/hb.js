@@ -25,11 +25,13 @@ class HB {
       url: this.url,
     })
   }
-
+  isArConnect() {
+    return this.jwk?.id || this.jwk?.walletName === "ArConnect"
+  }
   _init(jwk) {
     this.jwk = jwk
     this.signer = createSigner(jwk, this.url)
-    this.addr = toAddr(jwk.n)
+    if (!this.isArConnect()) this.addr = toAddr(jwk.n)
     this.sign = signer({ signer: this.signer, url: this.url })
   }
 
@@ -199,7 +201,7 @@ class HB {
           type: "Process",
           "execution-device": "test-device@1.0",
           device: "process@1.0",
-          scheduler: this.addr,
+          scheduler: this.operator,
         }),
         { path: false }
       ),
@@ -248,8 +250,9 @@ class HB {
   }
 
   async dryrun({ tags = {}, pid, action, data } = {}) {
+    await this.setInfo()
     if (typeof action === "string") tags.Action = action
-    let json = { Tags: buildTags({ ...tags }), Owner: this.addr }
+    let json = { Tags: buildTags({ ...tags }), Owner: this.operator }
     if (data) json.Data = data
     const res = await this.post({
       path: "/~relay@1.0/call",
@@ -262,7 +265,6 @@ class HB {
   }
 
   async commit(obj, opts) {
-    console.log("comitting................................")
     return await commit(obj, { ...opts, signer: this.sign })
   }
 

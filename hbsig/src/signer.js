@@ -341,9 +341,6 @@ async function _sign({
   signer,
   url,
 }) {
-  console.log(
-    ".........................................................................hre"
-  )
   const headersObj = encoded ? encoded.headers : {}
   const body = encoded ? encoded.body : undefined
   let url_path = typeof signPath === "string" ? signPath : path
@@ -378,7 +375,6 @@ async function _sign({
   // Only add @path if signPath is enabled AND path header exists
   if (signPath !== false && isPath) signingFields.push("@path")
 
-  console.log("signingFields", signingFields)
   const signedRequest = await toHttpSigner(signer)({
     request: { url: _url, method, headers: lowercaseHeaders },
     fields: signingFields,
@@ -409,13 +405,11 @@ export function signer(config) {
     fields,
     { encoded: _encoded = false, path: signPath = true } = {}
   ) => {
-    console.log("fields", fields)
     const { path = "/relay/process", method = "POST", ...aoFields } = fields
     const filteredFields = filterUndefined(aoFields)
     const encoded = _encoded
       ? filteredFields
       : await encode(filteredFields, path)
-    console.log("encoded", encoded)
     return await _sign({ path, signPath, method, encoded, signer, url })
   }
 }
