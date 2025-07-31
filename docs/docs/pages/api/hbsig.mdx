@@ -1,5 +1,7 @@
 # HBSig
 
+![](/images/hbsig.jpeg)
+
 HyperBEAM / AO-Core requires complex encoding and signing involving multiple codecs and HTTP Message Signatures. However, it is not 100% compatible with [the standard http-message-signatures libraries](https://github.com/dhensby/node-http-message-signatures), and [aoconnect](https://github.com/permaweb/ao/blob/main/connect/src/client/hb-encode.js) only provides basic encoding for AOS messages.
 
 `hbsig` handles encoding of arbitrarily complex objects, which works on HyperBEAM. It is built by emulating the HyperBEAM codec devices as well as creating workaround encoding strategies using a custom device for extensive tests with LLMs. 
