@@ -62,7 +62,7 @@ class AR {
     })
   }
 
-  isArConnect(jwk) {
+  isArConnect() {
     return this.jwk?.id || this.jwk?.walletName === "ArConnect"
   }
 
