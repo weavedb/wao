@@ -2,8 +2,8 @@ import { createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft, clone } from "ramda"
 import { toAddr, buildTags, seed } from "./utils.js"
 import { rsaid, hmacid, sign, signer, send as _send, commit } from "hbsig"
-import hyper_aos from "./hyper-aos.js"
-import aos_wamr from "./aos_wamr.js"
+import hyper_aos from "./lua/hyper-aos.js"
+import aos_wamr from "./lua/aos_wamr.js"
 import { from } from "./httpsig-utils.js"
 
 class HB {
@@ -25,22 +25,21 @@ class HB {
       url: this.url,
     })
   }
-  isArConnect() {
-    return this.jwk?.id || this.jwk?.walletName === "ArConnect"
-  }
+
   _init(jwk) {
     this.jwk = jwk
     this.signer = createSigner(jwk, this.url)
-    if (!this.isArConnect()) this.addr = toAddr(jwk.n)
+    this.addr = toAddr(jwk.n)
     this.sign = signer({ signer: this.signer, url: this.url })
   }
 
   async setInfo() {
-    if (!this._info) {
+    if (!this.operator) {
       try {
-        this._info = await this.g("/~meta@1.0/info")
-        this.operator = this._info.address
-      } catch (e) {}
+        this.operator = await this.g("/~meta@1.0/info/address")
+      } catch (e) {
+        console.log(e)
+      }
     }
   }
 
@@ -214,7 +213,7 @@ class HB {
     let t = mergeLeft(tags, {
       "data-protocol": "ao",
       variant: "ao.TN.1",
-      authority: this._info.address,
+      authority: this.operator,
       module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
       device: "process@1.0",
       "execution-device": "stack@1.0",
@@ -250,9 +249,8 @@ class HB {
   }
 
   async dryrun({ tags = {}, pid, action, data } = {}) {
-    await this.setInfo()
     if (typeof action === "string") tags.Action = action
-    let json = { Tags: buildTags({ ...tags }), Owner: this.operator }
+    let json = { Tags: buildTags({ ...tags }), Owner: this.addr }
     if (data) json.Data = data
     const res = await this.post({
       path: "/~relay@1.0/call",
@@ -301,7 +299,9 @@ class HB {
         i++
       }
     }
+    console.log(`${this.url}${path}${_json}${_params}`)
     const response = await fetch(`${this.url}${path}${_json}${_params}`)
+    console.log(response)
     let headers = {}
     response.headers.forEach((v, k) => (headers[k] = v))
     const http = {
