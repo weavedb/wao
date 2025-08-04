@@ -2,8 +2,8 @@ import { createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft, clone } from "ramda"
 import { toAddr, buildTags, seed } from "./utils.js"
 import { rsaid, hmacid, sign, signer, send as _send, commit } from "hbsig"
-import hyper_aos from "./lua/hyper-aos.js"
-import aos_wamr from "./lua/aos_wamr.js"
+import hyper_aos from "./hyper-aos.js"
+import aos_wamr from "./aos_wamr.js"
 import { from } from "./httpsig-utils.js"
 
 class HB {

@@ -4,6 +4,7 @@ import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, AO, toAddr } from "../../src/test.js"
 import { getJWK } from "../lib/test-utils.js"
 import HB from "../../src/hb.js"
+import AOHB from "../../src/ao.js"
 import { isNotNil, filter, isNil } from "ramda"
 import { randomBytes } from "node:crypto"
 import { wait } from "../../src/utils.js"
@@ -189,6 +190,7 @@ describe("Hyperbeam Legacynet", function () {
     const r3 = await hb.dryrun({ pid, action: "Get" })
     assert.equal(r3.Messages[0].Data, "Count: 2")
   })
+
   it("should handle counter with Add and Get handlers", async () => {
     const { pid } = await hb.spawnAOS()
     await hb.messageAOS({ pid, action: "Eval", tags: {}, data: src_data })
@@ -224,5 +226,34 @@ describe("Hyperbeam Legacynet", function () {
     console.log("compute: 3", await hb.computeAOS({ pid, slot: 3 }))
     console.log("compute: 3", await hb.computeAOS({ pid, slot: 3 }))
     console.log("compute: 2", await hb.computeAOS({ pid, slot: 2 }))
+  })
+
+  it.only("should receive msg from another process", async () => {
+    const src_data = `
+local count = 0
+Handlers.add("Add", "Add", function (msg)
+  count = count + tonumber(msg.Plus)
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+
+Handlers.add("Query", "Query", function (msg)
+  local data = Send({ Target = msg.To, Action = "Get" }).receive().Data
+  msg.reply({ Data = tostring(data) })
+end)
+`
+    console.log(hbeam.url)
+    const ao = await new AOHB({ module_type: "mainnet", hb: hbeam.url }).init(
+      hbeam.jwk
+    )
+    const ao2 = await new AOHB({ module_type: "mainnet", hb: hbeam.url }).init(
+      hbeam.jwk
+    )
+    const { pid, p } = await ao.deploy({ src_data })
+    const { pid: pid2, p: p2 } = await ao2.deploy({ src_data })
+    await p.m("Add", { Plus: "3" })
+    assert.equal(await p2.m("Query", { To: pid }), "3")
   })
 })
