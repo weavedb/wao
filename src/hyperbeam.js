@@ -81,7 +81,7 @@ export default class HyperBEAM {
     if (shell) this.shell()
   }
   shell() {
-    const _as = this.as.length === 0 ? [] : ["as", this.as.join(", ")]
+    const _as = this.as.length === 0 ? [] : ["as", this.as.join(",")]
     this._shell = spawn(
       "rebar3",
       [
@@ -121,7 +121,7 @@ export default class HyperBEAM {
           }
         }
       }
-      const _as = this.as.length === 0 ? [] : ["as", this.as.join(", ")]
+      const _as = this.as.length === 0 ? [] : ["as", this.as.join(",")]
       const _test = Array.isArray(test) ? test.join("+") : test
       let _module = ""
 
