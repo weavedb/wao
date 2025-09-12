@@ -6,73 +6,262 @@
 import { erl_str_from } from "./erl_str.js"
 
 /**
- * Convert from structured format
- * @param {string|object} input - Erlang term string or JavaScript object
- * @returns {object} - Processed object
+ * Convert from structured format (rich message to TABM)
+ * Mirrors Erlang's from/1 function
+ * @param {*} obj - Rich message object
+ * @returns {*} - TABM object
  */
-export function structured_from(input) {
+export function structured_from(obj) {
+  // Handle binary input
+  if (
+    typeof obj === "string" ||
+    obj instanceof Buffer ||
+    obj instanceof Uint8Array
+  ) {
+    return obj
+  }
+
+  // Handle non-object input
+  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
+    return obj
+  }
+
+  // Convert rich message to TABM
+  return from(obj)
+}
+
+/**
+ * Convert to structured format (TABM to rich message)
+ * Mirrors Erlang's to/1 function
+ * @param {string|object} input - Erlang term string or TABM object
+ * @returns {object} - Rich message object
+ */
+export function structured_to(input) {
   // If input is a string (Erlang response), parse it
   if (typeof input === "string") {
     return erl_str_from(input, false)
   }
 
-  // Otherwise process the object like Erlang's from/1
-  return from(input)
+  // Otherwise convert TABM to rich message
+  return to(input)
 }
 
 /**
- * Convert to structured format
- * @param {*} obj - JavaScript object
- * @returns {*} - Structured format object
+ * Convert a TABM into a rich message (mirrors Erlang's to/1)
+ * @param {*} tabm - Type-Annotated-Binary-Message
+ * @returns {*} - Rich message
  */
-export function structured_to(obj) {
-  // TODO: Implement the inverse of structured_from
-  return obj
-}
+function to(tabm) {
+  // Handle binary input
+  if (
+    typeof tabm === "string" ||
+    tabm instanceof Buffer ||
+    tabm instanceof Uint8Array
+  ) {
+    return tabm
+  }
 
-/**
- * Check if an array should be converted to numbered map
- * Rules based on Erlang behavior:
- * 1. Contains any objects/maps → convert
- * 2. Contains empty arrays (but NOT empty buffers) → convert
- * 3. All items are arrays (array of arrays) → convert
- * 4. Otherwise → encode as string
- */
-function shouldConvertToNumberedMap(arr) {
-  let allArrays = true
-  let hasObjects = false
-  let hasEmptyArrays = false
+  // Handle non-object input
+  if (typeof tabm !== "object" || tabm === null || Array.isArray(tabm)) {
+    return tabm
+  }
 
-  for (const item of arr) {
-    // Check for objects (not arrays or buffers)
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      !Array.isArray(item) &&
-      !Buffer.isBuffer(item)
-    ) {
-      hasObjects = true
-    }
-    // Check for empty arrays only (NOT empty buffers)
-    else if (Array.isArray(item) && item.length === 0) {
-      hasEmptyArrays = true
-    }
-    // Track if all items are arrays
-    else if (!Array.isArray(item)) {
-      allArrays = false
+  // Parse ao-types if present
+  const aoTypesStr = tabm["ao-types"] || ""
+  const types = parseAoTypes(aoTypesStr)
+
+  // Build result with empty values first
+  const result = {}
+
+  // Add empty values based on their types
+  for (const [key, type] of Object.entries(types)) {
+    if (type === "empty-binary") {
+      result[key] = ""
+    } else if (type === "empty-list") {
+      result[key] = []
+    } else if (type === "empty-message") {
+      result[key] = {}
     }
   }
 
-  // Convert if: has objects, has empty arrays, or all items are non-empty arrays
-  return (
-    hasObjects ||
-    hasEmptyArrays ||
-    (allArrays && arr.length > 0 && arr.every(item => Array.isArray(item)))
-  )
+  // Process all other key-value pairs
+  for (const [rawKey, value] of Object.entries(tabm)) {
+    // Skip ao-types field
+    if (rawKey === "ao-types") {
+      continue
+    }
+
+    const normalizedKey = rawKey.toLowerCase()
+
+    if (
+      typeof value === "string" ||
+      value instanceof Buffer ||
+      value instanceof Uint8Array
+    ) {
+      const type = types[normalizedKey]
+      if (type) {
+        // Decode according to type
+        result[rawKey] = decodeValue(type, value)
+      } else {
+        // No type info, keep as binary/string
+        result[rawKey] = value
+      }
+    } else if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
+      // Recursively decode child TABM
+      const childDecoded = to(value)
+      const type = types[normalizedKey]
+
+      if (type === "list") {
+        // Convert numbered map back to ordered list
+        result[rawKey] = messageToOrderedList(childDecoded)
+      } else {
+        result[rawKey] = childDecoded
+      }
+    } else {
+      // Value already has converted type
+      result[rawKey] = value
+    }
+  }
+
+  return filterDefaultKeys(result)
 }
 
 /**
- * Implementation of Erlang's dev_codec_structured:from/1
+ * Parse ao-types field and return map of keys to types
+ * @param {string} aoTypesStr - ao-types field content
+ * @returns {object} - Map of normalized keys to types
+ */
+function parseAoTypes(aoTypesStr) {
+  if (!aoTypesStr) {
+    return {}
+  }
+
+  const types = {}
+
+  // Simple parser for "key1=\"type1\", key2=\"type2\"" format
+  const pairs = aoTypesStr.split(", ")
+
+  for (const pair of pairs) {
+    const match = pair.match(/^(.+?)="(.+?)"$/)
+    if (match) {
+      const [, key, type] = match
+      // Decode escaped key and normalize
+      const decodedKey = decodeEscapedKey(key)
+      types[decodedKey.toLowerCase()] = type
+    }
+  }
+
+  return types
+}
+
+/**
+ * Decode escaped key (simplified version)
+ * @param {string} key - Escaped key
+ * @returns {string} - Decoded key
+ */
+function decodeEscapedKey(key) {
+  // This is a simplified decoder - in practice you'd want more robust escaping
+  return key.replace(/\\"/g, '"').replace(/\\\\/g, "\\")
+}
+
+/**
+ * Convert numbered map back to ordered list
+ * @param {object} numberedMap - Map with numeric string keys
+ * @returns {Array} - Ordered array
+ */
+function messageToOrderedList(numberedMap) {
+  const keys = Object.keys(numberedMap)
+    .filter(key => /^\d+$/.test(key))
+    .map(key => parseInt(key, 10))
+    .sort((a, b) => a - b)
+
+  return keys.map(key => numberedMap[key.toString()])
+}
+
+/**
+ * Filter default keys (simplified - removes common defaults)
+ * @param {object} message - Message object
+ * @returns {object} - Filtered message
+ */
+function filterDefaultKeys(message) {
+  // This is a placeholder - implement based on your needs
+  return message
+}
+
+/**
+ * Decode a value based on its type
+ * @param {string} type - Type identifier
+ * @param {*} value - Encoded value
+ * @returns {*} - Decoded value
+ */
+function decodeValue(type, value) {
+  switch (type.toLowerCase()) {
+    case "integer":
+      return parseInt(parseStructuredItem(value), 10)
+
+    case "float":
+      return parseFloat(value)
+
+    case "atom":
+      const atomItem = parseStructuredItem(value)
+      return atomItem.replace(/^"|"$/g, "") // Remove quotes
+
+    case "list":
+      return parseStructuredList(value).map(item => {
+        if (typeof item === "string" && item.startsWith("(ao-type-")) {
+          const match = item.match(/^\(ao-type-(.+?)\) (.+)$/)
+          if (match) {
+            const [, itemType, itemValue] = match
+            return decodeValue(itemType, itemValue)
+          }
+        }
+        return item
+      })
+
+    case "binary":
+      return value
+
+    default:
+      return value
+  }
+}
+
+/**
+ * Parse structured field item (simplified)
+ * @param {string} value - Structured field value
+ * @returns {*} - Parsed value
+ */
+function parseStructuredItem(value) {
+  // This is a simplified parser - you'd want to use a proper structured fields parser
+  if (value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1) // Remove quotes
+  }
+  return value
+}
+
+/**
+ * Parse structured field list (simplified)
+ * @param {string} value - Structured field list
+ * @returns {Array} - Parsed list
+ */
+function parseStructuredList(value) {
+  // This is a simplified parser - you'd want to use a proper structured fields parser
+  return value.split(", ").map(item => {
+    if (item.startsWith('"') && item.endsWith('"')) {
+      return item.slice(1, -1) // Remove quotes
+    }
+    return item
+  })
+}
+
+/**
+ * Convert rich message to TABM (mirrors Erlang's from/1)
+ * @param {object} msg - Rich message
+ * @returns {object} - TABM
  */
 function from(msg) {
   // Handle non-map values
@@ -126,13 +315,11 @@ function from(msg) {
 
     // Handle binary/string values
     if (value instanceof Buffer || value instanceof Uint8Array) {
-      // Keep buffers as buffers
       values.push([normKey, value])
       continue
     }
 
     if (typeof value === "string") {
-      // Keep strings as strings
       values.push([normKey, value])
       continue
     }
@@ -191,6 +378,47 @@ function from(msg) {
   }
 
   return result
+}
+
+/**
+ * Check if an array should be converted to numbered map
+ * Rules based on Erlang behavior:
+ * 1. Contains any objects/maps → convert
+ * 2. Contains empty arrays (but NOT empty buffers) → convert
+ * 3. All items are arrays (array of arrays) → convert
+ * 4. Otherwise → encode as string
+ */
+function shouldConvertToNumberedMap(arr) {
+  let allArrays = true
+  let hasObjects = false
+  let hasEmptyArrays = false
+
+  for (const item of arr) {
+    // Check for objects (not arrays or buffers)
+    if (
+      typeof item === "object" &&
+      item !== null &&
+      !Array.isArray(item) &&
+      !Buffer.isBuffer(item)
+    ) {
+      hasObjects = true
+    }
+    // Check for empty arrays only (NOT empty buffers)
+    else if (Array.isArray(item) && item.length === 0) {
+      hasEmptyArrays = true
+    }
+    // Track if all items are arrays
+    else if (!Array.isArray(item)) {
+      allArrays = false
+    }
+  }
+
+  // Convert if: has objects, has empty arrays, or all items are non-empty arrays
+  return (
+    hasObjects ||
+    hasEmptyArrays ||
+    (allArrays && arr.length > 0 && arr.every(item => Array.isArray(item)))
+  )
 }
 
 /**
