@@ -1,6 +1,7 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { modIn, modOut } from "./lib/test-utils.js"
+import { verify } from "../src/signer-utils.js"
 import { HyperBEAM } from "wao/test"
 import cases, { errors } from "./lib/cases.js"
 import { normalize } from "../src/erl_json.js"
@@ -19,10 +20,14 @@ describe("Hyperbeam Signer", function () {
     let err = []
     let success = []
     let i = 0
-    for (const v of cases) {
+    let _cases = cases
+    for (const v of _cases) {
       console.log(`[${++i}]...........................................`, v)
       try {
-        const signed = await sign({ path: "/~hbsig@1.0/msg2", ...v })
+        const signed = await sign(
+          { path: "/~hbsig@1.0/msg2", ...v },
+          { path: false }
+        )
         const { out } = await send(signed)
         const output = modOut(out)
         const exp = modIn(normalize(v))
@@ -33,7 +38,7 @@ describe("Hyperbeam Signer", function () {
         err.push(v)
       }
     }
-    console.log(`${err.length} / ${cases.length} failed!`)
+    console.log(`${err.length} / ${_cases.length} failed!`)
     if (err) for (let v of err) console.log(v)
   })
 })

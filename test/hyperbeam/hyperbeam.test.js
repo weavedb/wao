@@ -2,7 +2,6 @@ import assert from "assert"
 import base64url from "base64url"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { acc, mu, AO, toAddr } from "../../src/test.js"
-import { getJWK } from "../lib/test-utils.js"
 import HB from "../../src/hb.js"
 import AOHB from "../../src/ao.js"
 import { isNotNil, filter, isNil } from "ramda"
@@ -12,6 +11,8 @@ import Server from "../../src/server.js"
 import HyperBEAM from "../../src/hyperbeam.js"
 import { readFileSync } from "fs"
 import { resolve } from "path"
+
+import AO2 from "../../src/ao.js"
 
 const src_data = `
 local count = 0
@@ -228,7 +229,7 @@ describe("Hyperbeam Legacynet", function () {
     console.log("compute: 2", await hb.computeAOS({ pid, slot: 2 }))
   })
 
-  it.only("should receive msg from another process", async () => {
+  it("should receive msg from another process", async () => {
     const src_data = `
 local count = 0
 Handlers.add("Add", "Add", function (msg)
@@ -255,5 +256,59 @@ end)
     const { pid: pid2, p: p2 } = await ao2.deploy({ src_data })
     await p.m("Add", { Plus: "3" })
     assert.equal(await p2.m("Query", { To: pid }), "3")
+  })
+
+  it("should test oracle", async () => {
+    const ao = await new AO2({ module_type: "mainnet", hb: hbeam.url }).init(
+      hbeam.jwk
+    )
+    const ao2 = await new AO2({ module_type: "mainnet", hb: hbeam.url }).init(
+      hbeam.jwk
+    )
+    const src_data = `
+local count = 0
+Handlers.add("Add", "Add", function (msg)
+  local data = Send({ Target = msg.To, Action = "Plus" }).receive().Data
+  count = count + tonumber(data)
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+`
+    const src_data2 = `
+Handlers.add("Plus", "Plus", function (msg)
+  msg.reply({ Data = tostring(3) })
+end)
+`
+    const { p, pid } = await ao.deploy({ src_data })
+    const { p: p2, pid: pid2 } = await ao2.deploy({ src_data: src_data2 })
+    await p.m("Add", { To: pid2 })
+    console.log(await p.m("Get"))
+  })
+
+  it.only("should test oracle", async () => {
+    const src_data = `
+local count = 0
+json = require("json")
+Handlers.add("Add", "Add", function (msg)
+  local data = Send({ Target = msg.To, Url = msg.Url }).receive().Data
+  count = count + tonumber(json.decode(data).version)
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)
+`
+    const { pid } = await hb.spawn({ "execution-device": "oracle@1.0" })
+    console.log(await hb.message({ pid }))
+    console.log(pid)
+
+    const ao = await new AO2({ module_type: "mainnet", hb: hbeam.url }).init(
+      hbeam.jwk
+    )
+    const { p } = await ao.deploy({ src_data })
+    await p.m("Add", { To: pid, Url: "https://arweave.net/" })
+    console.log(await p.m("Get"))
   })
 })
