@@ -183,8 +183,18 @@ describe("SDK", function () {
     const { p, err, res } = await ao.deploy({ src_data, module: modid })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
-
   it.only("should spawn a process and send messages", async () => {
+    const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)
+`
+    const { p } = await ao.deploy({ boot: true, src_data })
+    console.log(await p.msg("Hello", {}, { check: { data: true } }))
+
+    console.log(await p.msg("Hello", {}, { check: { data2: true } })) // err
+  })
+  it("should spawn a process and send messages", async () => {
     const { p } = await ao.deploy({ src_data })
     assert.equal(await p.d("Hello"), "Hello, World!")
   })
@@ -430,7 +440,7 @@ describe("AOS1", function () {
 })
 
 describe("Aoconnect", () => {
-  it.only("should get a variable state", async () => {
+  it("should get a variable state", async () => {
     const ao = await new AO({}).init(acc[0])
     const { p, pid } = await ao.deploy({
       src_data: `Table = { String = "Hello", Array = { "str", 3, true } }`,
@@ -451,7 +461,7 @@ describe("Aoconnect", () => {
 })
 
 describe("get", function () {
-  it.only("should get with optional match", async () => {
+  it("should get with optional match", async () => {
     const src_data = `
 local json = require("json")
 Handlers.add("Hello", "Hello", function (msg)
