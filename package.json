@@ -1,6 +1,6 @@
 {
   "name": "wao",
-  "version": "0.35.7",
+  "version": "0.36.0",
   "bin": "./src/cli.js",
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -37,8 +37,9 @@
     }
   },
   "dependencies": {
+    "@ar.io/sdk": "^3.20.0",
     "@bokuweb/zstd-wasm": "^0.0.22",
-    "@dha-team/arbundles": "^1.0.1",
+    "@dha-team/arbundles": "^1.0.4",
     "@permaweb/ao-loader": "^0.0.44",
     "@permaweb/aoconnect": "^0.0.85",
     "@permaweb/aoconnect-69": "npm:@permaweb/aoconnect@0.0.69",
