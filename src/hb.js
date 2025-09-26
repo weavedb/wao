@@ -1,10 +1,23 @@
 import { createSigner } from "@permaweb/aoconnect"
+import { httpsig_from, structured_to } from "hbsig"
 import { isEmpty, last, isNotNil, mergeLeft, clone } from "ramda"
 import { toAddr, buildTags, seed } from "./utils.js"
 import { rsaid, hmacid, sign, signer, send as _send, commit } from "hbsig"
 import hyper_aos from "./hyper-aos.js"
 import aos_wamr from "./aos_wamr.js"
 import { from } from "./httpsig-utils.js"
+
+import { ArweaveSigner } from "@ar.io/sdk"
+import { createData } from "@dha-team/arbundles"
+
+const toMsg = async req => {
+  let msg = {}
+  req?.headers?.forEach((v, k) => {
+    msg[k] = v
+  })
+  if (req.body) msg.body = await req.text?.()
+  return msg
+}
 
 class HB {
   constructor({
@@ -140,12 +153,41 @@ class HB {
     })
     return { slot: res.out.slot, res, pid }
   }
+  async post104({ path = "/~process@1.0/schedule", tags = {}, data = "1984" }) {
+    const _tags = buildTags(mergeLeft(tags, { signingFormat: "ANS-104" }))
+    const signer = new ArweaveSigner(this.jwk)
+    console.log(_tags)
+    const di = createData(data, signer, { tags: _tags })
+    await di.sign(signer)
+    let res = await fetch(`${this.url}${path}`, {
+      method: "POST",
+      headers: {
+        "codec-device": "ans104@1.0",
+        "Content-Type": "application/ans104",
+      },
+      body: di.binary,
+    })
+    let _headers = structured_to(httpsig_from(await toMsg(res)))
+    res.out = _headers
+    return res
+  }
+
   async schedule({ pid, tags = {}, data } = {}) {
-    let _tags = mergeLeft(tags, { type: "Message", target: pid })
-    if (data) _tags.data = data
-    let body = await this.commit(_tags, { path: false })
-    let signed = await this.sign({ path: `/${pid}/schedule`, body })
-    let res = await this.send(signed)
+    let res = null
+    if (this.format === "ans104") {
+      let _tags = mergeLeft(tags, { type: "Message" })
+      res = await this.post104({
+        path: `/${pid}/schedule`,
+        tags: _tags,
+        data: data ?? "1984",
+      })
+    } else {
+      let _tags = mergeLeft(tags, { type: "Message", target: pid })
+      if (data) _tags.data = data
+      let body = await this.commit(_tags, { path: false })
+      let signed = await this.sign({ path: `/${pid}/schedule`, body })
+      res = await this.send(signed)
+    }
     return { slot: res.out.slot, res, pid }
   }
 
@@ -196,22 +238,37 @@ class HB {
   }
   async spawn(tags = {}) {
     await this.setInfo()
-    const res = await this.post({
-      path: "/~process@1.0/schedule",
-      body: await this.commit(
-        mergeLeft(tags, {
+    let res = null
+    if (this.format === "ans104") {
+      res = await this.post104({
+        tags: mergeLeft(tags, {
+          "codec-device": "ans104@1.0",
           "random-seed": seed(16),
           type: "Process",
           "execution-device": "test-device@1.0",
           device: "process@1.0",
           scheduler: this.operator,
         }),
-        { path: false }
-      ),
-      scheduler: this.operator,
-    })
+      })
+    } else {
+      res = await this.post({
+        path: "/~process@1.0/schedule",
+        body: await this.commit(
+          mergeLeft(tags, {
+            "random-seed": seed(16),
+            type: "Process",
+            "execution-device": "test-device@1.0",
+            device: "process@1.0",
+            scheduler: this.operator,
+          }),
+          { path: false }
+        ),
+        scheduler: this.operator,
+      })
+    }
     return { res, pid: res.out.process }
   }
+
   async spawnLegacy({ module, tags = {}, data } = {}) {
     await this.setInfo()
     let t = mergeLeft(tags, {
