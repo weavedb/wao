@@ -24,7 +24,9 @@ class HB {
     url = "http://localhost:10001",
     cu = "http://localhost:6363",
     jwk,
+    format = "httpsig",
   } = {}) {
+    this.format = format
     this.cu = cu
     this.url = url
     if (jwk) this._init(jwk)
@@ -104,7 +106,12 @@ class HB {
 
   async compute({ pid, slot, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
-    return await this.getJSON({ path: `/${pid}/compute${path}`, slot })
+    if (this.format === "ans104") {
+      const res = await this.get({ path: `/${pid}/compute${path}`, slot })
+      return res.out
+    } else {
+      return await this.getJSON({ path: `/${pid}/compute${path}`, slot })
+    }
   }
 
   async computeLegacy({ pid, slot }) {
@@ -212,7 +219,12 @@ class HB {
 
   async now({ pid, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
-    return await this.getJSON({ path: `/${pid}/now${path}` })
+    if (this.format === "ans104") {
+      const res = await this.get({ path: `/${pid}/now${path}` })
+      return res.out
+    } else {
+      return await this.getJSON({ path: `/${pid}/now${path}` })
+    }
   }
 
   async slot({ pid, path = "" }) {
