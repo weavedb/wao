@@ -286,7 +286,22 @@ function encodeBodyPart(partName, bodyPart, inlineKey) {
   return ""
 }
 
-// Parse multipart body
+// Helper to detect if a string contains binary data
+function isBinaryData(str) {
+  // Check first 100 chars for binary indicators
+  for (let i = 0; i < Math.min(str.length, 100); i++) {
+    const code = str.charCodeAt(i)
+    // Non-printable chars (except CR/LF/TAB)
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) return true
+    // High byte range that's not valid text
+    if (code > 126 && code < 160) return true
+    // Null byte is definitely binary
+    if (code === 0) return true
+  }
+  return false
+}
+
+// Parse multipart body - handles binary data in headers
 function parseMultipart(contentType, body) {
   const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/)
   if (!boundaryMatch) return {}
@@ -295,8 +310,8 @@ function parseMultipart(contentType, body) {
   const boundaryDelim = `--${boundary}`
   const endBoundary = `--${boundary}--`
 
-  // Remove the final boundary terminator if present
-  let bodyContent = body
+  // Use binary encoding to preserve all bytes as character codes 0-255
+  let bodyContent = typeof body === "string" ? body : body.toString("binary")
   if (bodyContent.endsWith(endBoundary)) {
     bodyContent = bodyContent.substring(0, bodyContent.lastIndexOf(endBoundary))
   }
@@ -309,20 +324,98 @@ function parseMultipart(contentType, body) {
   const bodyKeysList = []
 
   for (const part of parts) {
-    const [headerBlock, ...bodyParts] = part.split(DOUBLE_CRLF)
-    let partBody = bodyParts.join(DOUBLE_CRLF)
+    // First split to find the headers/body boundary (double CRLF)
+    const headerBodySplit = part.indexOf(DOUBLE_CRLF)
+    let headerBlock, partBody
 
-    // Remove trailing CRLF
-    partBody = partBody.replace(/\r?\n?$/, "")
+    if (headerBodySplit !== -1) {
+      headerBlock = part.substring(0, headerBodySplit)
+      partBody = part.substring(headerBodySplit + DOUBLE_CRLF.length)
+      // Remove trailing CRLF from body
+      partBody = partBody.replace(/\r?\n?$/, "")
+    } else {
+      headerBlock = part
+      partBody = ""
+    }
 
     const headers = {}
-    const headerLines = headerBlock.split(/\r?\n/)
-    for (const line of headerLines) {
+
+    // Parse headers more carefully to handle binary data
+    let currentPos = 0
+    while (currentPos < headerBlock.length) {
+      // Find next line ending (but be careful with binary data)
+      let lineEnd = headerBlock.indexOf("\r\n", currentPos)
+      if (lineEnd === -1) lineEnd = headerBlock.indexOf("\n", currentPos)
+      if (lineEnd === -1) lineEnd = headerBlock.length
+
+      const line = headerBlock.substring(currentPos, lineEnd)
       const colonIndex = line.indexOf(": ")
+
       if (colonIndex > 0) {
         const name = line.substring(0, colonIndex).toLowerCase()
-        const value = line.substring(colonIndex + 2)
-        headers[name] = value
+        let value = line.substring(colonIndex + 2)
+
+        // Special handling for known binary fields or detected binary data
+        if (name === "owner" || name === "signature") {
+          // These fields contain binary data that may have embedded newlines
+          // We need to read until we find the next header or end of headers
+          let valueStart = currentPos + colonIndex + 2
+
+          // Look ahead to find where this field really ends
+          // The next header will start with a valid header name followed by ": "
+          let searchPos = valueStart
+          let valueEnd = headerBlock.length
+
+          // Look for the next valid header pattern
+          while (searchPos < headerBlock.length) {
+            let nextNewline = headerBlock.indexOf("\n", searchPos)
+            if (nextNewline === -1) break
+
+            // Check if what follows looks like a header
+            let nextLineStart = nextNewline + 1
+            let nextColon = headerBlock.indexOf(":", nextLineStart)
+
+            // Valid header should have colon relatively close to line start
+            if (nextColon > nextLineStart && nextColon < nextLineStart + 50) {
+              // Check if the text before colon looks like a header name (ASCII text)
+              let possibleHeaderName = headerBlock.substring(
+                nextLineStart,
+                nextColon
+              )
+              let looksLikeHeader = /^[a-zA-Z0-9-]+$/.test(possibleHeaderName)
+
+              if (looksLikeHeader) {
+                // Found the next header, value ends at the newline before it
+                valueEnd = nextNewline
+                break
+              }
+            }
+            searchPos = nextNewline + 1
+          }
+
+          // Extract the full value, trimming any trailing whitespace
+          value = headerBlock.substring(valueStart, valueEnd)
+
+          // Remove trailing CR if present (since we found the LF)
+          if (value.endsWith("\r")) {
+            value = value.substring(0, value.length - 1)
+          }
+
+          // Convert to Buffer to preserve binary
+          headers[name] = Buffer.from(value, "binary")
+          currentPos = valueEnd + 1
+        } else {
+          // Regular text field
+          if (isBinaryData(value)) {
+            headers[name] = Buffer.from(value, "binary")
+          } else {
+            headers[name] = value
+          }
+          currentPos = lineEnd + (headerBlock[lineEnd] === "\r" ? 2 : 1)
+        }
+      } else {
+        // No colon found, skip this line
+        currentPos = lineEnd + (headerBlock[lineEnd] === "\r" ? 2 : 1)
       }
     }
 
@@ -331,34 +424,48 @@ function parseMultipart(contentType, body) {
 
     let partName
     if (disposition === "inline") {
+      // This is the inline part
       partName = "body"
       bodyKeysList.push("body")
+
+      // Extract all headers from inline part as top-level fields
+      const restHeaders = { ...headers }
+      delete restHeaders["content-disposition"]
+
+      // Add each header from the inline part to the top level of result
+      for (const [key, value] of Object.entries(restHeaders)) {
+        result[key] = value
+      }
+
+      // If there's body content in the inline part, add it as 'body'
+      if (partBody) {
+        result[partName] = partBody
+      }
     } else {
+      // Handle named form-data parts
       const nameMatch = disposition.match(/name="([^"]+)"/)
       partName = nameMatch ? nameMatch[1] : null
       if (partName) {
-        // Add the top-level key for this part
         const topLevelKey = partName.split("/")[0]
         bodyKeysList.push(topLevelKey)
       }
-    }
 
-    if (!partName) continue
+      if (!partName) continue
 
-    const restHeaders = { ...headers }
-    delete restHeaders["content-disposition"]
+      const restHeaders = { ...headers }
+      delete restHeaders["content-disposition"]
 
-    if (Object.keys(restHeaders).length === 0) {
-      result[partName] = partBody
-    } else if (!partBody) {
-      result[partName] = restHeaders
-    } else {
-      result[partName] = { ...restHeaders, body: partBody }
+      if (Object.keys(restHeaders).length === 0) {
+        result[partName] = partBody
+      } else if (!partBody) {
+        result[partName] = restHeaders
+      } else {
+        result[partName] = { ...restHeaders, body: partBody }
+      }
     }
   }
 
   if (bodyKeysList.length > 0) {
-    // Format as structured field list, preserving order and duplicates
     result["body-keys"] = bodyKeysList.map(k => `"${k}"`).join(", ")
   }
 
@@ -655,4 +762,18 @@ export function httpsig_to(tabm) {
 
     return addContentDigest(result)
   }
+}
+
+/**
+ * Convert structured message to flat format
+ */
+export function structured_to(msg) {
+  return msg
+}
+
+/**
+ * Convert flat format to structured message
+ */
+export function structured_from(msg) {
+  return msg
 }

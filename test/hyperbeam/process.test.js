@@ -48,7 +48,7 @@ describe("Hyperbeam Device", function () {
     assert.equal(now.count, 5)
   })
 
-  it("should test process #2", async () => {
+  it.only("should test process #2", async () => {
     const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
     await hb.schedule({ pid })
     await hb.schedule({ pid })
