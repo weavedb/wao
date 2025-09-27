@@ -31,7 +31,7 @@ describe("Hyperbeam Device", function () {
     const _hbeam = new HyperBEAM({
       reset: true,
       bundler_ans104: false,
-      //bundler_httpsig: "http://localhost:4001",
+      bundler_httpsig: "http://localhost:4001",
     })
     gw = gateway({ jwk: _hbeam.jwk })
     hbeam = await _hbeam.ready()
