@@ -24,6 +24,8 @@ export default class HyperBEAM {
     faff,
     simple_pay = false,
     simple_pay_price,
+    bundler_ans104,
+    bundler_httpsig,
     p4_non_chargable_routes,
     p4_lua,
     store_prefix,
@@ -66,7 +68,9 @@ export default class HyperBEAM {
     this.cmake = cmake
     this.port = port
     this.url = `http://localhost:${this.port}`
-    this.bundler = bundler
+    if (bundler) this.bundler = `http://localhost::${bundler}`
+    this.bundler_ans104 = bundler_ans104
+    if (bundler_httpsig) this.bundler = bundler_httpsig
     this.as = as
     this.gateway = gateway
     if (Array.isArray(this.faff)) {
@@ -221,9 +225,15 @@ export default class HyperBEAM {
     const _store = this.store_prefix
       ? `, store => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }, #{ <<"store-module">> => hb_store_gateway, <<"subindex">> => [#{ <<"name">> => <<"Data-Protocol">>, <<"value">> => <<"ao">> }], <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }] }, #{ <<"store-module">> => hb_store_gateway, <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"prefix">> => <<"${this.store_prefix}">> }] }]`
       : ""
-    const _bundler = this.bundler
-      ? `, bundler_httpsig => <<"http://localhost:${this.bundler}">>`
+    let _bundler = this.bundler
+      ? `, bundler_httpsig => <<"${this.bundler}">>`
       : ""
+    let _bundler_ans104 =
+      this.bundler_ans104 === false
+        ? ", bundler_ans104 => false"
+        : this.bundler_ans104
+          ? `, bundler_ans104 => <<"http://localhost:${this.bundler_ans104}">>`
+          : ""
     /*
     const _routes = `, routes => [#{ <<"template">> => <<"/result/.*">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${this.cu}">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:${this.cu}\">> } }, #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [#{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => httpc, protocol => http2 } }, #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }] }, #{ <<"template">> => <<"/raw">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } } }]`
     */
@@ -260,7 +270,7 @@ export default class HyperBEAM {
         : !isNil(this.faff)
           ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
           : ""
-    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_on}${_p4_non_chargable}${_operator}${_spp}${_devices}${_node_processes}}).`
+    const start = `hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_bundler_ans104}${_on}${_p4_non_chargable}${_operator}${_spp}${_devices}${_node_processes}}).`
     return start
   }
 

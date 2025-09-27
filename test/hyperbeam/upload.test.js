@@ -5,29 +5,10 @@ import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
 import HyperBEAM from "../../src/hyperbeam.js"
 import { wait } from "../../src/utils.js"
+import { acc } from "../../src/test.js"
+import gateway from "../../src/bundler.js"
 import HB from "../../src/hb.js"
 
-/*
-  fields: {
-  Type: 'Process',
-  device: 'process@1.0',
-  'scheduler-device': 'scheduler@1.0',
-  'push-device': 'push@1.0',
-  'execution-device': 'genesis-wasm@1.0',
-  'data-protocol': 'ao',
-  variant: 'ao.N.1',
-  'App-Name': 'hyper-aos',
-  Name: 'myp2',
-  Authority: 'tFEE7DkO2zQ0fh1P8N6_KhRbfCfzF0Wv3KZ5MVyGx5U',
-  'aos-version': '2.0.7',
-  'accept-bundle': 'true',
-  'codec-device': 'ans104@1.0',
-  signingFormat: 'ANS-104',
-  scheduler: 'tFEE7DkO2zQ0fh1P8N6_KhRbfCfzF0Wv3KZ5MVyGx5U',
-  'scheduler-location': 'tFEE7DkO2zQ0fh1P8N6_KhRbfCfzF0Wv3KZ5MVyGx5U',
-  Module: 'ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s'
-}
-*/
 const toMsg = async req => {
   let msg = {}
   req?.headers?.forEach((v, k) => {
@@ -45,10 +26,21 @@ const toTags = fields => {
 }
 
 describe("Hyperbeam Device", function () {
-  let hb, hbeam
-  before(async () => (hbeam = await new HyperBEAM({ reset: true }).ready()))
+  let hb, hbeam, gw
+  before(async () => {
+    const _hbeam = new HyperBEAM({
+      reset: true,
+      bundler_ans104: false,
+      //bundler_httpsig: "http://localhost:4001",
+    })
+    gw = gateway({ jwk: _hbeam.jwk })
+    hbeam = await _hbeam.ready()
+  })
   beforeEach(async () => (hb = hbeam.hb))
-  after(async () => hbeam.kill())
+  after(async () => {
+    gw.close()
+    hbeam.kill()
+  })
 
   it("should test process #0", async () => {
     const signer = new ArweaveSigner(hbeam.jwk)
@@ -56,8 +48,8 @@ describe("Hyperbeam Device", function () {
       Type: "Process",
       device: "process@1.0",
       "execution-device": "wao@1.0",
-      "data-protocol": "ao",
-      variant: "ao.N.1",
+      "Data-Protocol": "ao",
+      Variant: "ao.N.1",
       "codec-device": "ans104@1.0",
       signingFormat: "ANS-104",
       "Scheduler-Location": hb.addr,
@@ -81,8 +73,8 @@ describe("Hyperbeam Device", function () {
 
     const fields2 = {
       Type: "Message",
-      "data-protocol": "ao",
-      variant: "ao.N.1",
+      "Data-Protocol": "ao",
+      Variant: "ao.N.1",
       signingFormat: "ANS-104",
     }
     const di2 = createData("1984", signer, { tags: toTags(fields2) })
@@ -108,15 +100,34 @@ describe("Hyperbeam Device", function () {
     await wait(5000)
   })
 
-  it.only("should sign with ans104", async () => {
+  it.only("should test process #2", async () => {
     const hb2 = new HB({ jwk: hb.jwk, format: "ans104" })
-    const { pid } = await hb2.spawn({ "execution-device": "wao@1.0" })
-    await hb2.schedule({ pid })
-    await hb2.schedule({ pid })
-    await hb2.schedule({ pid })
+    const { pid } = await hb2.spawn({
+      Name: "turbo-test",
+      "execution-device": "wao@1.0",
+      "Data-Protocol": "ao",
+      Variant: "ao.WDB.1",
+    })
+    await hb2.schedule({
+      pid,
+      tags: { "Data-Protocol": "ao", Variant: "ao.WDB.1" },
+    })
+    await hb2.schedule({
+      pid,
+      tags: { "Data-Protocol": "ao", Variant: "ao.WDB.1" },
+    })
+    await hb2.schedule({
+      pid,
+      tags: { "Data-Protocol": "ao", Variant: "ao.WDB.1" },
+    })
     const { count } = await hb2.compute({ pid, slot: 2 })
     assert.equal(count, 3)
     await hb2.schedule({ pid })
-    assert.equal((await hb2.now({ pid })).count, 5)
+    assert.equal((await hb2.compute({ pid, slot: 4 })).count, 5)
+    const edges = (await hb2.messages({ pid })).edges
+    for (const v of edges) {
+      console.log(v.node.assignment)
+      console.log(v.node.message)
+    }
   })
 })

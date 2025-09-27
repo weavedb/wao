@@ -24,7 +24,9 @@ class HB {
     url = "http://localhost:10001",
     cu = "http://localhost:6363",
     jwk,
+    format = "httpsig",
   } = {}) {
+    this.format = format
     this.cu = cu
     this.url = url
     if (jwk) this._init(jwk)
@@ -104,7 +106,12 @@ class HB {
 
   async compute({ pid, slot, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
-    return await this.getJSON({ path: `/${pid}/compute${path}`, slot })
+    if (this.format === "ans104") {
+      const res = await this.get({ path: `/${pid}/compute${path}`, slot })
+      return res.out
+    } else {
+      return await this.getJSON({ path: `/${pid}/compute${path}`, slot })
+    }
   }
 
   async computeLegacy({ pid, slot }) {
@@ -120,7 +127,7 @@ class HB {
     const { slot } = await this.scheduleFlat({
       data,
       pid: this.cache,
-      tags: { "content-type": type },
+      tags: { "Content-Type": type },
     })
     const msgs = await this.messages({ pid: this.cache, from: slot, limit: 1 })
     return msgs.edges[0].node.message.Id
@@ -139,7 +146,7 @@ class HB {
   }
 
   async scheduleFlat({ pid, tags = {}, data } = {}) {
-    let _tags = mergeLeft(tags, { type: "Message", target: pid })
+    let _tags = mergeLeft(tags, { Type: "Message", target: pid })
     if (data) _tags.data = data
     let res = await this.post({ path: "/~process@1.0/schedule", body: _tags })
     return { slot: res.out.slot, res, pid }
@@ -153,11 +160,15 @@ class HB {
     })
     return { slot: res.out.slot, res, pid }
   }
-  async post104({ path = "/~process@1.0/schedule", tags = {}, data = "1984" }) {
+  async post104({
+    path = "/~process@1.0/schedule",
+    tags = {},
+    data = "1984",
+    target,
+  }) {
     const _tags = buildTags(mergeLeft(tags, { signingFormat: "ANS-104" }))
     const signer = new ArweaveSigner(this.jwk)
-    console.log(_tags)
-    const di = createData(data, signer, { tags: _tags })
+    const di = createData(data, signer, { tags: _tags, target })
     await di.sign(signer)
     let res = await fetch(`${this.url}${path}`, {
       method: "POST",
@@ -167,22 +178,22 @@ class HB {
       },
       body: di.binary,
     })
-    let _headers = structured_to(httpsig_from(await toMsg(res)))
-    res.out = _headers
+    res.out = structured_to(httpsig_from(await toMsg(res)))
     return res
   }
 
   async schedule({ pid, tags = {}, data } = {}) {
     let res = null
     if (this.format === "ans104") {
-      let _tags = mergeLeft(tags, { type: "Message" })
+      let _tags = mergeLeft(tags, { Type: "Message" })
       res = await this.post104({
+        target: pid,
         path: `/${pid}/schedule`,
         tags: _tags,
         data: data ?? "1984",
       })
     } else {
-      let _tags = mergeLeft(tags, { type: "Message", target: pid })
+      let _tags = mergeLeft(tags, { Type: "Message", target: pid })
       if (data) _tags.data = data
       let body = await this.commit(_tags, { path: false })
       let signed = await this.sign({ path: `/${pid}/schedule`, body })
@@ -199,9 +210,9 @@ class HB {
   async spawnLua(lua) {
     await this.setInfo()
     const tags = {
-      "data-protocol": "ao",
-      variant: "ao.N.1",
-      authority: this.operator,
+      "Data-Protocol": "ao",
+      Variant: "ao.N.1",
+      Authority: this.operator,
       module: this.lua ?? (await this.getLua()),
       "execution-device": "lua@5.3a",
       "push-device": "push@1.0",
@@ -212,12 +223,22 @@ class HB {
 
   async now({ pid, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
-    return await this.getJSON({ path: `/${pid}/now${path}` })
+    if (this.format === "ans104") {
+      const res = await this.get({ path: `/${pid}/now${path}` })
+      return res.out
+    } else {
+      return await this.getJSON({ path: `/${pid}/now${path}` })
+    }
   }
 
   async slot({ pid, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
-    return await this.getJSON({ path: `/${pid}/slot${path}` })
+    if (this.format === "ans104") {
+      const res = await this.get({ path: `/${pid}/slot${path}` })
+      return res.out
+    } else {
+      return await this.getJSON({ path: `/${pid}/slot${path}` })
+    }
   }
 
   async messages({ pid, from, to } = {}) {
@@ -244,10 +265,10 @@ class HB {
         tags: mergeLeft(tags, {
           "codec-device": "ans104@1.0",
           "random-seed": seed(16),
-          type: "Process",
+          Type: "Process",
           "execution-device": "test-device@1.0",
           device: "process@1.0",
-          scheduler: this.operator,
+          Scheduler: this.operator,
         }),
       })
     } else {
@@ -256,14 +277,14 @@ class HB {
         body: await this.commit(
           mergeLeft(tags, {
             "random-seed": seed(16),
-            type: "Process",
+            Type: "Process",
             "execution-device": "test-device@1.0",
             device: "process@1.0",
-            scheduler: this.operator,
+            Scheduler: this.operator,
           }),
           { path: false }
         ),
-        scheduler: this.operator,
+        Scheduler: this.operator,
       })
     }
     return { res, pid: res.out.process }
@@ -272,9 +293,9 @@ class HB {
   async spawnLegacy({ module, tags = {}, data } = {}) {
     await this.setInfo()
     let t = mergeLeft(tags, {
-      "data-protocol": "ao",
-      variant: "ao.TN.1",
-      authority: this.operator,
+      "Data-Protocol": "ao",
+      Variant: "ao.TN.1",
+      Authority: this.operator,
       module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
       device: "process@1.0",
       "execution-device": "stack@1.0",
@@ -304,7 +325,7 @@ class HB {
       path: "/~relay@1.0/call",
       method: "GET",
       "relay-path": `${this.cu}/results/${process}${params}`,
-      "content-type": "application/json",
+      "Content-Type": "application/json",
     })
     return JSON.parse(res.body)
   }
@@ -317,7 +338,7 @@ class HB {
       path: "/~relay@1.0/call",
       method: "POST",
       "relay-path": `${this.cu}/dry-run?process-id=${pid}`,
-      "content-type": "application/json",
+      "Content-Type": "application/json",
       "relay-body": JSON.stringify(json),
     })
     return JSON.parse(res.body)
@@ -387,9 +408,9 @@ class HB {
     await this.setInfo()
     image ??= this.image ?? (await this.getImage())
     const tags = {
-      "data-protocol": "ao",
-      variant: "ao.N.1",
-      authority: this.operator,
+      "Data-Protocol": "ao",
+      Variant: "ao.N.1",
+      Authority: this.operator,
       image,
       "execution-device": "stack@1.0",
       "push-device": "push@1.0",
