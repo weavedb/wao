@@ -6,7 +6,7 @@ const pkg = WarpArBundles.default ?? WarpArBundles
 const { DataItem } = pkg
 import crypto from "crypto"
 import base64url from "base64url"
-import { wait } from "./utils.js"
+import { toAddr, wait } from "./utils.js"
 import AO from "./ao.js"
 import { connect, createSigner } from "@permaweb/aoconnect"
 
@@ -334,7 +334,10 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
           }
         }
         // check: is owner=mu.addr right?
-        const msg = await genMsg(opt.message, p, data, _tags, from, mu.addr)
+        const _owner = opt.message_item?.owner
+          ? toAddr(opt.message_item.owner)
+          : mu.addr
+        const msg = await genMsg(opt.message, p, data, _tags, from, _owner)
         const _env = await genEnv({
           pid: p.id,
           owner: p.owner,
@@ -428,6 +431,32 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
                   from: v.Target,
                   target: opt.process,
                 })*/
+              }
+            } else if (t.__SU__) {
+              const sch = t.__SU__
+              const tar = v.Target
+              /*const procs =
+                (await fetch(sch).then(r => r.json()))?.Processes ?? []*/
+              const ao = await new AO({ port: sch.split(":").pop() - 2 }).init(
+                mu.jwk
+              )
+              try {
+                let _tags = {
+                  ...t,
+                  "From-Process": opt.process,
+                  "Pushed-For": id,
+                }
+                const pr = (await mem.getTx(opt.process))?.tags ?? []
+                const module = tags(pr).Module
+                if (module) _tags["From-Module"] = module
+                const { mid } = await ao.msg({
+                  act: _tags["Action"] ?? null,
+                  pid: tar,
+                  tags: _tags,
+                  data: v.Data ?? "",
+                })
+              } catch (e) {
+                console.log(e)
               }
             } else if (t.__Scheduler__) {
               const sch = t.__Scheduler__
@@ -526,7 +555,6 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         owner = opt.owner ?? ""
         item = opt.item
       }
-
       const p = await mem.get("env", opt.process)
       if (!p) return null
       if (!opt.item && opt.signer) {
