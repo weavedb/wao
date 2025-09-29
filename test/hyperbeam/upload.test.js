@@ -6,7 +6,7 @@ import { after, describe, it, before, beforeEach } from "node:test"
 import HyperBEAM from "../../src/hyperbeam.js"
 import { wait } from "../../src/utils.js"
 import { acc } from "../../src/test.js"
-import gateway from "../../src/bundler.js"
+import bundler from "../../src/bundler.js"
 import HB from "../../src/hb.js"
 
 const toMsg = async req => {
@@ -26,19 +26,19 @@ const toTags = fields => {
 }
 
 describe("Hyperbeam Device", function () {
-  let hb, hbeam, gw
+  let hb, hbeam, bd
   before(async () => {
     const _hbeam = new HyperBEAM({
       reset: true,
       bundler_ans104: false,
       bundler_httpsig: "http://localhost:4001",
     })
-    gw = gateway({ jwk: _hbeam.jwk })
+    bd = bundler({ jwk: _hbeam.jwk })
     hbeam = await _hbeam.ready()
   })
   beforeEach(async () => (hb = hbeam.hb))
   after(async () => {
-    gw.close()
+    bd.close()
     hbeam.kill()
   })
 

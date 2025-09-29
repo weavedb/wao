@@ -7,9 +7,6 @@ import {
   toGraphObj,
 } from "./utils.js"
 import { keys, map, isNil, reverse, omit } from "ramda"
-//import { httpbis, createVerifier } from "http-message-signatures"
-//import { createPublicKey } from "node:crypto"
-//const { verifyMessage } = httpbis
 
 class Adaptor {
   constructor({
@@ -406,6 +403,7 @@ class Adaptor {
     let type = null
     let item = null
     if (valid || true) item = new DataItem(body)
+    await item.setSignature(item.rawSignature)
     const _tags = tags(item.tags)
     let err = null
     if (_tags.Type === "Process") {
