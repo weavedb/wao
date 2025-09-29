@@ -1,8 +1,16 @@
 import { createSigner } from "@permaweb/aoconnect"
-import { httpsig_from, structured_to } from "hbsig"
 import { isEmpty, last, isNotNil, mergeLeft, clone } from "ramda"
 import { toAddr, buildTags, seed } from "./utils.js"
-import { rsaid, hmacid, sign, signer, send as _send, commit } from "hbsig"
+import {
+  httpsig_from,
+  structured_to,
+  rsaid,
+  hmacid,
+  sign,
+  signer,
+  send as _send,
+  commit,
+} from "hbsig"
 import hyper_aos from "./hyper-aos.js"
 import aos_wamr from "./aos_wamr.js"
 import { from } from "./httpsig-utils.js"
@@ -160,6 +168,18 @@ class HB {
     })
     return { slot: res.out.slot, res, pid }
   }
+  async send104({ path = "/~process@1.0/schedule", item }) {
+    let res = await fetch(`${this.url}${path}`, {
+      method: "POST",
+      headers: {
+        "codec-device": "ans104@1.0",
+        "Content-Type": "application/ans104",
+      },
+      body: item.binary,
+    })
+    res.out = structured_to(httpsig_from(await toMsg(res)))
+    return res
+  }
   async post104({
     path = "/~process@1.0/schedule",
     tags = {},
@@ -168,18 +188,9 @@ class HB {
   }) {
     const _tags = buildTags(mergeLeft(tags, { signingFormat: "ANS-104" }))
     const signer = new ArweaveSigner(this.jwk)
-    const di = createData(data, signer, { tags: _tags, target })
-    await di.sign(signer)
-    let res = await fetch(`${this.url}${path}`, {
-      method: "POST",
-      headers: {
-        "codec-device": "ans104@1.0",
-        "Content-Type": "application/ans104",
-      },
-      body: di.binary,
-    })
-    res.out = structured_to(httpsig_from(await toMsg(res)))
-    return res
+    const item = createData(data, signer, { tags: _tags, target })
+    await item.sign(signer)
+    return await this.send104({ path, item })
   }
 
   async schedule({ pid, tags = {}, data } = {}) {
