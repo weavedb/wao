@@ -58,8 +58,10 @@ class AR extends MAR {
   async dataitem({ target = "", data = "1984", tags = {}, signer, item }) {
     let di = item
     if (!di) {
-      const _item = await signer({ data, tags: buildTags(tags), target })
-      di = new DataItem(_item.raw)
+      if (!item?.signature) {
+        const _item = await signer({ data, tags: buildTags(tags), target })
+        di = new DataItem(_item.raw)
+      }
     } else tags = t(di.tags)
     const owner = await this.owner(di)
     return { id: await di.id, owner, item: di, tags }
