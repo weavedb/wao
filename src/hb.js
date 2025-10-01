@@ -10,11 +10,10 @@ import {
   signer,
   send as _send,
   commit,
+  result,
 } from "hbsig"
 import hyper_aos from "./hyper-aos.js"
 import aos_wamr from "./aos_wamr.js"
-import { from } from "./httpsig-utils.js"
-
 import { ArweaveSigner } from "@ar.io/sdk"
 import { createData } from "@dha-team/arbundles"
 
@@ -23,7 +22,14 @@ const toMsg = async req => {
   req?.headers?.forEach((v, k) => {
     msg[k] = v
   })
-  if (req.body) msg.body = await req.text?.()
+  //if (req.body) msg.body = await req.text?.()
+  if (req.body) {
+    const arrayBuffer = await req.arrayBuffer()
+    msg.body =
+      typeof Buffer !== "undefined"
+        ? Buffer.from(arrayBuffer) // Node.js
+        : new Uint8Array(arrayBuffer) // Browser
+  }
   return msg
 }
 
@@ -177,8 +183,7 @@ class HB {
       },
       body: item.binary,
     })
-    res.out = structured_to(httpsig_from(await toMsg(res)))
-    return res
+    return await result(res)
   }
   async post104({
     path = "/~process@1.0/schedule",
@@ -393,17 +398,7 @@ class HB {
       }
     }
     const response = await fetch(`${this.url}${path}${_json}${_params}`)
-    let headers = {}
-    response.headers.forEach((v, k) => (headers[k] = v))
-    const http = {
-      headers,
-      body: await response.text(),
-      status: response.status,
-    }
-    return {
-      ...from(http),
-      ...http,
-    }
+    return await result(response)
   }
 
   async postJSON(args, opt = {}) {

@@ -1,7 +1,10 @@
 import { trim } from "ramda"
-import { decodeSigInput } from "./signer-utils.js"
-import base64url from "base64url"
 import { toAddr } from "./utils.js"
+import { decodeSigInput } from "./signer-utils.js"
+import { httpsig_from } from "./httpsig.js"
+import { structured_to } from "./structured.js"
+import base64url from "base64url"
+
 /**
  * Get multipart boundary from content-type header
  */
@@ -856,12 +859,43 @@ const stringToBuffer = str => {
   return buffer
 }
 
+const toMsg = async req => {
+  let msg = {}
+  req?.headers?.forEach((v, k) => {
+    msg[k] = v
+  })
+  if (req.body) {
+    const arrayBuffer = await req.arrayBuffer()
+    msg.body =
+      typeof Buffer !== "undefined"
+        ? Buffer.from(arrayBuffer)
+        : new Uint8Array(arrayBuffer)
+  }
+  return msg
+}
+
+export const result = async response => {
+  let headers = {}
+  response.headers.forEach((v, k) => (headers[k] = v))
+  const msg = await toMsg(response)
+  const out = structured_to(httpsig_from(msg))
+  const body = Buffer.from(msg.body).toString()
+  const http = { headers, body }
+  const _from = from(http)
+  return {
+    signer: _from?.signer ?? null,
+    hashpath: _from?.hashpath ?? null,
+    headers,
+    status: response.status,
+    body,
+    out: out["ao-result"] ? _from?.out : out,
+  }
+}
+
 export const from = http => {
   const input =
     http.headers["signature-input"] || http.headers["Signature-Input"]
-  if (!input) {
-    return null
-  }
+  if (!input) return null
 
   // Decode signature inputs
   const inputs = decodeSigInput(input)

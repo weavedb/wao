@@ -1,13 +1,32 @@
 import base64url from "base64url"
 import { httpbis } from "./http-message-signatures/index.js"
 import { parseItem, serializeList } from "structured-headers"
+import { httpsig_from } from "./httpsig.js"
+import { structured_to } from "./structured.js"
+import { result } from "./send-utils.js"
+
 const {
   augmentHeaders,
   createSignatureBase,
   createSigningParameters,
   formatSignatureBase,
 } = httpbis
-import { from } from "./httpsig2.js"
+
+const toMsg = async req => {
+  let msg = {}
+  req?.headers?.forEach((v, k) => {
+    msg[k] = v
+  })
+  if (req.body) {
+    const arrayBuffer = await req.arrayBuffer()
+    msg.body =
+      typeof Buffer !== "undefined"
+        ? Buffer.from(arrayBuffer) // Node.js
+        : new Uint8Array(arrayBuffer) // Browser
+  }
+
+  return msg
+}
 
 export async function send(signedMsg, fetchImpl = fetch) {
   const fetchOptions = {
@@ -27,13 +46,7 @@ export async function send(signedMsg, fetchImpl = fetch) {
   if (response.status >= 400) {
     throw new Error(`${response.status}: ${await response.text()}`)
   }
-
-  let headers = {}
-  if (response.headers && typeof response.headers.forEach === "function") {
-    response.headers.forEach((v, k) => (headers[k] = v))
-  } else headers = response.headers
-  const http = { headers, body: await response.text(), status: response.status }
-  return { ...from(http), ...http }
+  return await result(response)
 }
 
 export const httpSigName = address => {
