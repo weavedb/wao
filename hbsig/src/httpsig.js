@@ -204,7 +204,12 @@ function encodeBodyPart(partName, bodyPart, inlineKey) {
         if (key === "body") continue
 
         if (key === "ao-types") {
-          allEntries.push({ key: "ao-types", line: `ao-types: ${value}` })
+          // Keep ao-types as-is (Buffer or string)
+          let valueStr = value
+          if (Buffer.isBuffer(value)) {
+            valueStr = value.toString("binary")
+          }
+          allEntries.push({ key: "ao-types", line: `ao-types: ${valueStr}` })
         } else {
           // Handle Buffer values properly
           let valueStr = value
@@ -286,17 +291,17 @@ function encodeBodyPart(partName, bodyPart, inlineKey) {
   return ""
 }
 
-// Helper to detect if a string contains binary data
-function isBinaryData(str) {
-  // Check first 100 chars for binary indicators
-  for (let i = 0; i < Math.min(str.length, 100); i++) {
-    const code = str.charCodeAt(i)
+// Helper to detect if a Buffer contains binary data
+function isBinaryData(buf) {
+  // Check first 100 bytes for binary indicators
+  for (let i = 0; i < Math.min(buf.length, 100); i++) {
+    const byte = buf[i]
     // Non-printable chars (except CR/LF/TAB)
-    if (code < 32 && code !== 9 && code !== 10 && code !== 13) return true
+    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) return true
     // High byte range that's not valid text
-    if (code > 126 && code < 160) return true
+    if (byte > 126 && byte < 160) return true
     // Null byte is definitely binary
-    if (code === 0) return true
+    if (byte === 0) return true
   }
   return false
 }
@@ -355,14 +360,13 @@ function parseMultipart(contentType, body) {
         const name = line.substring(0, colonIndex).toLowerCase()
         let value = line.substring(colonIndex + 2)
 
-        // Special handling for known binary fields or detected binary data
-        if (name === "owner" || name === "signature") {
-          // These fields contain binary data that may have embedded newlines
-          // We need to read until we find the next header or end of headers
-          let valueStart = currentPos + colonIndex + 2
+        // Check if this might be binary data by looking at the first part
+        const valueBuf = Buffer.from(value, "binary")
+        const mightBeBinary = isBinaryData(valueBuf)
 
-          // Look ahead to find where this field really ends
-          // The next header will start with a valid header name followed by ": "
+        if (mightBeBinary) {
+          // Binary data may contain embedded newlines, so read until next header
+          let valueStart = currentPos + colonIndex + 2
           let searchPos = valueStart
           let valueEnd = headerBlock.length
 
@@ -371,13 +375,10 @@ function parseMultipart(contentType, body) {
             let nextNewline = headerBlock.indexOf("\n", searchPos)
             if (nextNewline === -1) break
 
-            // Check if what follows looks like a header
             let nextLineStart = nextNewline + 1
             let nextColon = headerBlock.indexOf(":", nextLineStart)
 
-            // Valid header should have colon relatively close to line start
             if (nextColon > nextLineStart && nextColon < nextLineStart + 50) {
-              // Check if the text before colon looks like a header name (ASCII text)
               let possibleHeaderName = headerBlock.substring(
                 nextLineStart,
                 nextColon
@@ -385,7 +386,6 @@ function parseMultipart(contentType, body) {
               let looksLikeHeader = /^[a-zA-Z0-9-]+$/.test(possibleHeaderName)
 
               if (looksLikeHeader) {
-                // Found the next header, value ends at the newline before it
                 valueEnd = nextNewline
                 break
               }
@@ -393,24 +393,16 @@ function parseMultipart(contentType, body) {
             searchPos = nextNewline + 1
           }
 
-          // Extract the full value, trimming any trailing whitespace
           value = headerBlock.substring(valueStart, valueEnd)
-
-          // Remove trailing CR if present (since we found the LF)
           if (value.endsWith("\r")) {
             value = value.substring(0, value.length - 1)
           }
 
-          // Convert to Buffer to preserve binary
           headers[name] = Buffer.from(value, "binary")
           currentPos = valueEnd + 1
         } else {
           // Regular text field
-          if (isBinaryData(value)) {
-            headers[name] = Buffer.from(value, "binary")
-          } else {
-            headers[name] = value
-          }
+          headers[name] = value
           currentPos = lineEnd + (headerBlock[lineEnd] === "\r" ? 2 : 1)
         }
       } else {
@@ -439,7 +431,8 @@ function parseMultipart(contentType, body) {
 
       // If there's body content in the inline part, add it as 'body'
       if (partBody) {
-        result[partName] = partBody
+        // Convert back to Buffer to preserve binary data
+        result[partName] = Buffer.from(partBody, "binary")
       }
     } else {
       // Handle named form-data parts
@@ -456,11 +449,16 @@ function parseMultipart(contentType, body) {
       delete restHeaders["content-disposition"]
 
       if (Object.keys(restHeaders).length === 0) {
-        result[partName] = partBody
+        // Convert body back to Buffer
+        result[partName] = Buffer.from(partBody, "binary")
       } else if (!partBody) {
         result[partName] = restHeaders
       } else {
-        result[partName] = { ...restHeaders, body: partBody }
+        // Convert body back to Buffer
+        result[partName] = {
+          ...restHeaders,
+          body: Buffer.from(partBody, "binary"),
+        }
       }
     }
   }
@@ -611,40 +609,8 @@ export function httpsig_to(tabm) {
     const result = { ...inlineFieldHdrs }
 
     for (const [key, value] of Object.entries(stripped)) {
-      // Convert Buffers to strings if they're UTF-8 text
-      if (Buffer.isBuffer(value)) {
-        try {
-          const str = value.toString("utf8")
-          // Check if it's valid UTF-8 that can be safely converted
-          if (Buffer.from(str, "utf8").equals(value)) {
-            // Check if all characters are printable
-            let isPrintable = true
-            for (let i = 0; i < str.length; i++) {
-              const code = str.charCodeAt(i)
-              if (
-                !(code >= 32 && code <= 126) &&
-                code !== 9 &&
-                code !== 10 &&
-                code !== 13
-              ) {
-                isPrintable = false
-                break
-              }
-            }
-            if (isPrintable) {
-              result[key] = str
-            } else {
-              result[key] = value
-            }
-          } else {
-            result[key] = value
-          }
-        } catch (e) {
-          result[key] = value
-        }
-      } else {
-        result[key] = value
-      }
+      // Keep Buffers as Buffers - don't convert to strings
+      result[key] = value
     }
 
     // Handle inline body key - move data from inline key to body
@@ -669,12 +635,8 @@ export function httpsig_to(tabm) {
   for (const [key, value] of Object.entries(stripped)) {
     if (key === "ao-types") {
       // Top-level ao-types goes to headers only
-      // Convert Buffer to string if needed
-      if (Buffer.isBuffer(value)) {
-        headers[key] = value.toString("utf8")
-      } else {
-        headers[key] = value
-      }
+      // Keep as Buffer if it's a Buffer, otherwise use as-is
+      headers[key] = value
     } else if (key === "body" || key === inlineKeyVal) {
       bodyMap[key === inlineKeyVal ? inlineKeyVal : "body"] = value
     } else if (
@@ -695,9 +657,8 @@ export function httpsig_to(tabm) {
       value.length <= MAX_HEADER_LENGTH &&
       key !== "ao-types"
     ) {
-      // Convert Buffers to strings for headers
-      const str = value.toString("utf8")
-      headers[normalizeKey(key)] = str
+      // Keep buffers as buffers for headers
+      headers[normalizeKey(key)] = value
     } else if (key !== "ao-types") {
       // Only add to bodyMap if it's not ao-types
       bodyMap[key] = value
