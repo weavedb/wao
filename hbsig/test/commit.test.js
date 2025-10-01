@@ -1,7 +1,7 @@
 import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { mod } from "./lib/test-utils.js"
-import { HyperBEAM } from "wao/test"
+import { HyperBEAM } from "../../src/test.js"
 import cases, { errors } from "./lib/cases.js"
 import { normalize } from "../src/erl_json.js"
 import { createSigner } from "../src/signer.js"
