@@ -734,7 +734,7 @@ function toAddr(n) {
 const seed = num => {
   const array = new Array(num)
   for (let i = 0; i < num; i++) array[i] = Math.floor(Math.random() * 256)
-  return Buffer.from(array).toString("base64")
+  return Buffer.from(array).toString("base64url")
 }
 
 export {
