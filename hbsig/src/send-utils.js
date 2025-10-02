@@ -878,7 +878,8 @@ export const result = async response => {
   let headers = {}
   response.headers.forEach((v, k) => (headers[k] = v))
   const msg = await toMsg(response)
-  const out = structured_to(httpsig_from(msg))
+  const tabm = httpsig_from(msg)
+  const out = structured_to(tabm)
   const body = Buffer.from(msg.body).toString()
   const http = { headers, body }
   const _from = from(http)

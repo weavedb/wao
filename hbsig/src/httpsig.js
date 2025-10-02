@@ -291,18 +291,51 @@ function encodeBodyPart(partName, bodyPart, inlineKey) {
   return ""
 }
 
-// Helper to detect if a Buffer contains binary data
-function isBinaryData(buf) {
-  // Check first 100 bytes for binary indicators
-  for (let i = 0; i < Math.min(buf.length, 100); i++) {
-    const byte = buf[i]
-    // Non-printable chars (except CR/LF/TAB)
-    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) return true
-    // High byte range that's not valid text
-    if (byte > 126 && byte < 160) return true
-    // Null byte is definitely binary
-    if (byte === 0) return true
+// Improved helper to detect if data is likely binary
+function isBinaryData(data) {
+  let buf
+
+  if (typeof data === "string") {
+    // Convert string to buffer using binary encoding to check byte values
+    buf = Buffer.from(data, "binary")
+  } else if (Buffer.isBuffer(data)) {
+    buf = data
+  } else {
+    return false
   }
+
+  // Check a larger sample for better detection
+  const sampleSize = Math.min(buf.length, 512)
+  let nullCount = 0
+  let controlCount = 0
+  let highByteCount = 0
+
+  for (let i = 0; i < sampleSize; i++) {
+    const byte = buf[i]
+
+    // Null bytes are a strong indicator of binary
+    if (byte === 0) {
+      nullCount++
+      if (nullCount > 0) return true // Even one null byte indicates binary
+    }
+
+    // Control characters (except common text ones: TAB, LF, CR)
+    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) {
+      controlCount++
+    }
+
+    // High byte values that aren't valid UTF-8 continuation bytes
+    if (byte > 127) {
+      highByteCount++
+    }
+  }
+
+  // If more than 10% of bytes are control chars, likely binary
+  if (controlCount / sampleSize > 0.1) return true
+
+  // If more than 30% are high bytes without valid UTF-8 sequences, likely binary
+  if (highByteCount / sampleSize > 0.3) return true
+
   return false
 }
 
@@ -348,66 +381,93 @@ function parseMultipart(contentType, body) {
     // Parse headers more carefully to handle binary data
     let currentPos = 0
     while (currentPos < headerBlock.length) {
-      // Find next line ending (but be careful with binary data)
-      let lineEnd = headerBlock.indexOf("\r\n", currentPos)
-      if (lineEnd === -1) lineEnd = headerBlock.indexOf("\n", currentPos)
-      if (lineEnd === -1) lineEnd = headerBlock.length
+      // Find the next colon to identify a potential header
+      let colonPos = headerBlock.indexOf(": ", currentPos)
 
-      const line = headerBlock.substring(currentPos, lineEnd)
-      const colonIndex = line.indexOf(": ")
+      if (colonPos === -1) {
+        // No more headers
+        break
+      }
 
-      if (colonIndex > 0) {
-        const name = line.substring(0, colonIndex).toLowerCase()
-        let value = line.substring(colonIndex + 2)
-
-        // Check if this might be binary data by looking at the first part
-        const valueBuf = Buffer.from(value, "binary")
-        const mightBeBinary = isBinaryData(valueBuf)
-
-        if (mightBeBinary) {
-          // Binary data may contain embedded newlines, so read until next header
-          let valueStart = currentPos + colonIndex + 2
-          let searchPos = valueStart
-          let valueEnd = headerBlock.length
-
-          // Look for the next valid header pattern
-          while (searchPos < headerBlock.length) {
-            let nextNewline = headerBlock.indexOf("\n", searchPos)
-            if (nextNewline === -1) break
-
-            let nextLineStart = nextNewline + 1
-            let nextColon = headerBlock.indexOf(":", nextLineStart)
-
-            if (nextColon > nextLineStart && nextColon < nextLineStart + 50) {
-              let possibleHeaderName = headerBlock.substring(
-                nextLineStart,
-                nextColon
-              )
-              let looksLikeHeader = /^[a-zA-Z0-9-]+$/.test(possibleHeaderName)
-
-              if (looksLikeHeader) {
-                valueEnd = nextNewline
-                break
-              }
-            }
-            searchPos = nextNewline + 1
-          }
-
-          value = headerBlock.substring(valueStart, valueEnd)
-          if (value.endsWith("\r")) {
-            value = value.substring(0, value.length - 1)
-          }
-
-          headers[name] = Buffer.from(value, "binary")
-          currentPos = valueEnd + 1
-        } else {
-          // Regular text field
-          headers[name] = value
-          currentPos = lineEnd + (headerBlock[lineEnd] === "\r" ? 2 : 1)
+      // Look backwards from colon to find the start of this line
+      let lineStart = currentPos
+      let searchBack = colonPos - 1
+      while (searchBack >= currentPos) {
+        if (headerBlock[searchBack] === "\n") {
+          lineStart = searchBack + 1
+          break
         }
+        searchBack--
+      }
+
+      // Extract the header name
+      const name = headerBlock
+        .substring(lineStart, colonPos)
+        .trim()
+        .toLowerCase()
+
+      // Check if this looks like a valid header name
+      if (!/^[a-zA-Z0-9-]+$/.test(name) || name.length > 50) {
+        // Not a valid header, skip past this colon
+        currentPos = colonPos + 2
+        continue
+      }
+
+      // Start of value is after ": "
+      let valueStart = colonPos + 2
+
+      // Find the end of this header's value by looking for the next valid header
+      let valueEnd = headerBlock.length
+      let searchPos = valueStart
+
+      while (searchPos < headerBlock.length) {
+        let nextNewline = headerBlock.indexOf("\n", searchPos)
+        if (nextNewline === -1) break
+
+        let nextLineStart = nextNewline + 1
+        if (nextLineStart >= headerBlock.length) break
+
+        // Check if next line starts with a header pattern
+        let nextColon = headerBlock.indexOf(": ", nextLineStart)
+
+        if (nextColon > nextLineStart && nextColon < nextLineStart + 50) {
+          let possibleHeaderName = headerBlock
+            .substring(nextLineStart, nextColon)
+            .trim()
+
+          // Must be valid header name format
+          if (/^[a-zA-Z0-9-]+$/.test(possibleHeaderName)) {
+            valueEnd = nextNewline
+            break
+          }
+        }
+
+        searchPos = nextNewline + 1
+      }
+
+      // Extract the value
+      let value = headerBlock.substring(valueStart, valueEnd)
+
+      // Trim trailing CRLF or LF
+      if (value.endsWith("\r\n")) {
+        value = value.substring(0, value.length - 2)
+      } else if (value.endsWith("\n")) {
+        value = value.substring(0, value.length - 1)
+      } else if (value.endsWith("\r")) {
+        value = value.substring(0, value.length - 1)
+      }
+
+      // Determine if this is binary data
+      if (value.length > 0 && isBinaryData(value)) {
+        headers[name] = Buffer.from(value, "binary")
       } else {
-        // No colon found, skip this line
-        currentPos = lineEnd + (headerBlock[lineEnd] === "\r" ? 2 : 1)
+        headers[name] = value
+      }
+
+      // Move to the end of this header's value
+      currentPos = valueEnd + 1
+      if (headerBlock[valueEnd] === "\r") {
+        currentPos++
       }
     }
 
@@ -431,8 +491,10 @@ function parseMultipart(contentType, body) {
 
       // If there's body content in the inline part, add it as 'body'
       if (partBody) {
-        // Convert back to Buffer to preserve binary data
-        result[partName] = Buffer.from(partBody, "binary")
+        // Keep as Buffer if it's binary data
+        result[partName] = isBinaryData(partBody)
+          ? Buffer.from(partBody, "binary")
+          : partBody
       }
     } else {
       // Handle named form-data parts
@@ -449,15 +511,20 @@ function parseMultipart(contentType, body) {
       delete restHeaders["content-disposition"]
 
       if (Object.keys(restHeaders).length === 0) {
-        // Convert body back to Buffer
-        result[partName] = Buffer.from(partBody, "binary")
+        // Keep as Buffer if it's binary data
+        result[partName] = isBinaryData(partBody)
+          ? Buffer.from(partBody, "binary")
+          : partBody
       } else if (!partBody) {
+        // ao-types should stay with this part, not be extracted
         result[partName] = restHeaders
       } else {
-        // Convert body back to Buffer
+        // Keep as Buffer if it's binary data
         result[partName] = {
           ...restHeaders,
-          body: Buffer.from(partBody, "binary"),
+          body: isBinaryData(partBody)
+            ? Buffer.from(partBody, "binary")
+            : partBody,
         }
       }
     }
@@ -533,21 +600,25 @@ export function httpsig_from(http) {
 
     // Convert flat structure to nested using flat.js
     const flat = {}
+    const nonFlat = {}
     for (const [key, value] of Object.entries(withBodyKeys)) {
       if (key.includes("/")) {
         flat[key] = value
+      } else {
+        nonFlat[key] = value
       }
     }
 
     if (Object.keys(flat).length > 0) {
+      // Merge non-flat keys into flat for processing
+      // This ensures flat_from can see existing objects like results: { "ao-types": "..." }
+      const combined = { ...nonFlat, ...flat }
+
       // Use flat_from to convert flat structure to nested
-      const nested = flat_from(flat)
-      for (const [key, value] of Object.entries(nested)) {
-        withBodyKeys[key] = value
-      }
-      for (const key of Object.keys(flat)) {
-        delete withBodyKeys[key]
-      }
+      const nested = flat_from(combined)
+
+      // The nested result already has everything merged
+      withBodyKeys = nested
     }
   } else if (body) {
     withBodyKeys[inlinedKey] = body
