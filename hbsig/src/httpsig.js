@@ -291,50 +291,37 @@ function encodeBodyPart(partName, bodyPart, inlineKey) {
   return ""
 }
 
-// Improved helper to detect if data is likely binary
-function isBinaryData(data) {
-  let buf
+// Helper to detect if a Buffer contains binary data
+function isBinaryData(buf) {
+  // Check first 512 bytes for binary indicators
+  const checkLength = Math.min(buf.length, 512)
 
-  if (typeof data === "string") {
-    // Convert string to buffer using binary encoding to check byte values
-    buf = Buffer.from(data, "binary")
-  } else if (Buffer.isBuffer(data)) {
-    buf = data
-  } else {
-    return false
+  // Any null byte means binary
+  for (let i = 0; i < checkLength; i++) {
+    if (buf[i] === 0) return true
   }
 
-  // Check a larger sample for better detection
-  const sampleSize = Math.min(buf.length, 512)
-  let nullCount = 0
+  // Count non-text bytes
   let controlCount = 0
   let highByteCount = 0
 
-  for (let i = 0; i < sampleSize; i++) {
+  for (let i = 0; i < checkLength; i++) {
     const byte = buf[i]
-
-    // Null bytes are a strong indicator of binary
-    if (byte === 0) {
-      nullCount++
-      if (nullCount > 0) return true // Even one null byte indicates binary
-    }
-
-    // Control characters (except common text ones: TAB, LF, CR)
+    // Non-printable chars (except CR/LF/TAB)
     if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) {
       controlCount++
     }
-
-    // High byte values that aren't valid UTF-8 continuation bytes
+    // High byte range
     if (byte > 127) {
       highByteCount++
     }
   }
 
-  // If more than 10% of bytes are control chars, likely binary
-  if (controlCount / sampleSize > 0.1) return true
+  // If more than 5% are control chars, likely binary
+  if (controlCount / checkLength > 0.05) return true
 
-  // If more than 30% are high bytes without valid UTF-8 sequences, likely binary
-  if (highByteCount / sampleSize > 0.3) return true
+  // If more than 20% are high bytes, likely binary
+  if (highByteCount / checkLength > 0.2) return true
 
   return false
 }
@@ -445,28 +432,36 @@ function parseMultipart(contentType, body) {
         searchPos = nextNewline + 1
       }
 
-      // Extract the value
+      // Extract the value - valueEnd points to \n which is NOT part of the value
       let value = headerBlock.substring(valueStart, valueEnd)
 
-      // Trim trailing CRLF or LF
-      if (value.endsWith("\r\n")) {
-        value = value.substring(0, value.length - 2)
-      } else if (value.endsWith("\n")) {
-        value = value.substring(0, value.length - 1)
-      } else if (value.endsWith("\r")) {
-        value = value.substring(0, value.length - 1)
-      }
+      // Determine if this is binary data FIRST (before trimming)
+      const isBinary =
+        value.length > 0 && isBinaryData(Buffer.from(value, "binary"))
 
-      // Determine if this is binary data
-      if (value.length > 0 && isBinaryData(value)) {
+      if (isBinary) {
+        // Binary data: only remove trailing \r if it's part of CRLF separator
+        // (when valueEnd points to \n and value ends with \r)
+        if (
+          valueEnd < headerBlock.length &&
+          headerBlock[valueEnd] === "\n" &&
+          value.endsWith("\r")
+        ) {
+          value = value.substring(0, value.length - 1)
+        }
         headers[name] = Buffer.from(value, "binary")
       } else {
+        // Text data: remove all trailing CRLF/LF (these are line separators, not data)
+        value = value.replace(/[\r\n]+$/, "")
         headers[name] = value
       }
 
       // Move to the end of this header's value
-      currentPos = valueEnd + 1
-      if (headerBlock[valueEnd] === "\r") {
+      currentPos = valueEnd
+      if (currentPos < headerBlock.length && headerBlock[currentPos] === "\n") {
+        currentPos++
+      }
+      if (currentPos < headerBlock.length && headerBlock[currentPos] === "\r") {
         currentPos++
       }
     }
@@ -491,8 +486,8 @@ function parseMultipart(contentType, body) {
 
       // If there's body content in the inline part, add it as 'body'
       if (partBody) {
-        // Keep as Buffer if it's binary data
-        result[partName] = isBinaryData(partBody)
+        // Keep as string unless it's binary data
+        result[partName] = isBinaryData(Buffer.from(partBody, "binary"))
           ? Buffer.from(partBody, "binary")
           : partBody
       }
@@ -511,18 +506,18 @@ function parseMultipart(contentType, body) {
       delete restHeaders["content-disposition"]
 
       if (Object.keys(restHeaders).length === 0) {
-        // Keep as Buffer if it's binary data
-        result[partName] = isBinaryData(partBody)
+        // Keep as string unless it's binary data
+        result[partName] = isBinaryData(Buffer.from(partBody, "binary"))
           ? Buffer.from(partBody, "binary")
           : partBody
       } else if (!partBody) {
         // ao-types should stay with this part, not be extracted
         result[partName] = restHeaders
       } else {
-        // Keep as Buffer if it's binary data
+        // Keep as string unless it's binary data
         result[partName] = {
           ...restHeaders,
-          body: isBinaryData(partBody)
+          body: isBinaryData(Buffer.from(partBody, "binary"))
             ? Buffer.from(partBody, "binary")
             : partBody,
         }
