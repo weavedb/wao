@@ -9,7 +9,7 @@
     "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
-    "hbsig": "^0.2.3",
-    "wao": "^0.37.4"
+    "hbsig": "^0.2.5",
+    "wao": "^0.37.7"
   }
 }
