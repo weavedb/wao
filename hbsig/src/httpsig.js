@@ -1,11 +1,67 @@
 // httpsig.js - JavaScript implementation of HTTP Signature codec
 
-import crypto from "crypto"
+import { hash } from "fast-sha256"
 import { flat_from, flat_to } from "./flat.js"
 
 const CRLF = "\r\n"
 const DOUBLE_CRLF = CRLF + CRLF
 const MAX_HEADER_LENGTH = 4096
+
+// Helper to convert string to Uint8Array
+function stringToBytes(str, encoding = "utf8") {
+  if (encoding === "binary") {
+    const bytes = new Uint8Array(str.length)
+    for (let i = 0; i < str.length; i++) {
+      bytes[i] = str.charCodeAt(i) & 0xff
+    }
+    return bytes
+  }
+  return new TextEncoder().encode(str)
+}
+
+// Helper to convert bytes to base64url
+function bytesToBase64url(bytes) {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+  let result = ""
+
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i]
+    const b = i + 1 < bytes.length ? bytes[i + 1] : 0
+    const c = i + 2 < bytes.length ? bytes[i + 2] : 0
+
+    const combined = (a << 16) | (b << 8) | c
+
+    result += chars[(combined >> 18) & 0x3f]
+    result += chars[(combined >> 12) & 0x3f]
+    if (i + 1 < bytes.length) result += chars[(combined >> 6) & 0x3f]
+    if (i + 2 < bytes.length) result += chars[combined & 0x3f]
+  }
+
+  return result
+}
+
+// Helper to convert bytes to base64
+function bytesToBase64(bytes) {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  let result = ""
+
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i]
+    const b = i + 1 < bytes.length ? bytes[i + 1] : 0
+    const c = i + 2 < bytes.length ? bytes[i + 2] : 0
+
+    const combined = (a << 16) | (b << 8) | c
+
+    result += chars[(combined >> 18) & 0x3f]
+    result += chars[(combined >> 12) & 0x3f]
+    result += i + 1 < bytes.length ? chars[(combined >> 6) & 0x3f] : "="
+    result += i + 2 < bytes.length ? chars[combined & 0x3f] : "="
+  }
+
+  return result
+}
 
 // Helper to normalize keys (lowercase only, no underscore conversion)
 function normalizeKey(key) {
@@ -57,12 +113,11 @@ function parseSfDict(str) {
   return dict
 }
 
-// Helper to generate boundary from parts
+// Helper to generate boundary from parts using fast-sha256
 function boundaryFromParts(parts) {
   const bodyBin = parts.map(p => p.body).join(CRLF)
-  const hash = crypto.createHash("sha256")
-  hash.update(bodyBin)
-  return hash.digest("base64url")
+  const hashBytes = hash(stringToBytes(bodyBin, "binary"))
+  return bytesToBase64url(hashBytes)
 }
 
 // Helper to determine inline key
@@ -532,21 +587,21 @@ function parseMultipart(contentType, body) {
   return result
 }
 
-// Add content-digest header
+// Add content-digest header using fast-sha256
 function addContentDigest(msg) {
   if (!msg.body) return msg
 
-  const hash = crypto.createHash("sha256")
-
+  let bodyBytes
   // Handle both string and Buffer bodies
   if (Buffer.isBuffer(msg.body)) {
-    hash.update(msg.body)
+    bodyBytes = new Uint8Array(msg.body)
   } else {
     // For strings, use binary encoding to match how the multipart body is encoded
-    hash.update(msg.body, "binary")
+    bodyBytes = stringToBytes(msg.body, "binary")
   }
 
-  const digest = hash.digest("base64")
+  const hashBytes = hash(bodyBytes)
+  const digest = bytesToBase64(hashBytes)
 
   return {
     ...msg,
