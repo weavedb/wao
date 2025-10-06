@@ -1,6 +1,6 @@
 {
   "name": "hbsig",
-  "version": "0.2.6",
+  "version": "0.2.8",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -11,6 +11,16 @@
     "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js"
   },
   "license": "MIT",
+  "exports": {
+    ".": {
+      "require": "./cjs/index.js",
+      "import": "./esm/index.js"
+    },
+    "./nocrypto": {
+      "require": "./cjs/nocrypto.js",
+      "import": "./esm/nocrypto.js"
+    }
+  },
   "devDependencies": {
     "@babel/cli": "^7.24.8",
     "@babel/core": "^7.25.2",
