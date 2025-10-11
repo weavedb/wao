@@ -249,12 +249,7 @@ class HB {
 
   async slot({ pid, path = "" }) {
     if (path && !/^\//.test(path)) path = "/" + path
-    if (this.format === "ans104") {
-      const res = await this.get({ path: `/${pid}/slot${path}` })
-      return res.out
-    } else {
-      return await this.getJSON({ path: `/${pid}/slot${path}` })
-    }
+    return await this.getJSON({ path: `/${pid}/slot${path}` })
   }
 
   async messages({ pid, from, to } = {}) {
