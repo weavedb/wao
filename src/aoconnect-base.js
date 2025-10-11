@@ -449,8 +449,10 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
                 const pr = (await mem.getTx(opt.process))?.tags ?? []
                 const module = tags(pr).Module
                 if (module) _tags["From-Module"] = module
+                const act = _tags["Action"] ?? null
+                delete _tags["Action"]
                 const { mid } = await ao.msg({
-                  act: _tags["Action"] ?? null,
+                  act,
                   pid: tar,
                   tags: _tags,
                   data: v.Data ?? "",
