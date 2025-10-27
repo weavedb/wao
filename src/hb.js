@@ -303,20 +303,34 @@ class HB {
 
   async spawnLegacy({ module, tags = {}, data } = {}) {
     await this.setInfo()
-    let t = mergeLeft(tags, {
-      "Data-Protocol": "ao",
-      Variant: "ao.TN.1",
-      Authority: this.operator,
-      module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
-      device: "process@1.0",
-      "execution-device": "stack@1.0",
-      "push-device": "push@1.0",
-      "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
-      "patch-from": "/results/outbox",
-    })
+    let t = {}
+    if (this.format === "ans104") {
+      t = mergeLeft(tags, {
+        "Data-Protocol": "ao",
+        Variant: "ao.TN.1",
+        Authority: this.operator,
+        Scheduler: this.operator,
+        Module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
+        device: "process@1.0",
+        "execution-device": "genesis-wasm@1.0",
+      })
+    } else {
+      t = mergeLeft(tags, {
+        "Data-Protocol": "ao",
+        Variant: "ao.TN.1",
+        Authority: this.operator,
+        Module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
+        device: "process@1.0",
+        "execution-device": "stack@1.0",
+        "push-device": "push@1.0",
+        "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
+        "patch-from": "/results/outbox",
+      })
+    }
     if (data) t.data = data
     return await this.spawn(t)
   }
+
   async scheduleLegacy({ action = "Eval", tags = {}, ...rest } = {}) {
     if (action) tags.Action = action
     return await this.schedule({ tags, ...rest })
