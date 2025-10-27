@@ -100,7 +100,7 @@ describe("Hyperbeam Device", function () {
     await wait(5000)
   })
 
-  it.only("should test process #2", async () => {
+  it("should test process #2", async () => {
     const hb2 = new HB({ jwk: hb.jwk, format: "ans104" })
     const { pid } = await hb2.spawn({
       Name: "turbo-test",
@@ -129,5 +129,55 @@ describe("Hyperbeam Device", function () {
       console.log(v.node.assignment)
       console.log(v.node.message)
     }
+  })
+
+  const data = `
+local count = 0
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)`
+
+  it.only("should test process #2", async () => {
+    const hb2 = new HB({ jwk: hb.jwk, format: "ans104" })
+    const { out } = await hb2.get({ path: "~meta@1.0/info" })
+    console.log(out.address)
+    const { pid } = await hb2.spawn({
+      "execution-device": "genesis-wasm@1.0",
+      "Data-Protocol": "ao",
+      Variant: "ao.TN.1",
+      Module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
+      Scheduler: out.address,
+    })
+    const { slot } = await hb2.scheduleLegacy({ pid, data })
+    console.log(slot)
+    const { slot: slot2 } = await hb2.scheduleLegacy({ pid, action: "Inc" })
+    console.log(slot2)
+    const res = await hb2.computeLegacy({ pid, slot: 2 })
+    console.log("count..........", res)
+    return
+    /*
+    await hb2.schedule({
+      pid,
+      tags: { "Data-Protocol": "ao", Variant: "ao.WDB.1" },
+    })
+    await hb2.schedule({
+      pid,
+      tags: { "Data-Protocol": "ao", Variant: "ao.WDB.1" },
+    })
+    const { count } = await hb2.compute({ pid, slot: 2 })
+    assert.equal(count, 3)
+    await hb2.schedule({ pid })
+    assert.equal((await hb2.compute({ pid, slot: 4 })).count, 5)
+    const edges = (await hb2.messages({ pid })).edges
+    
+    for (const v of edges) {
+      console.log(v.node.assignment)
+      console.log(v.node.message)
+    }*/
   })
 })
