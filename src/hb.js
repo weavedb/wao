@@ -174,6 +174,7 @@ class HB {
     })
     return { slot: res.out.slot, res, pid }
   }
+
   async send104({ path = "/~process@1.0/schedule", item }) {
     let res = await fetch(`${this.url}${path}`, {
       method: "POST",
@@ -185,6 +186,7 @@ class HB {
     })
     return await result(res)
   }
+
   async post104({
     path = "/~process@1.0/schedule",
     tags = {},
@@ -319,12 +321,10 @@ class HB {
         "Data-Protocol": "ao",
         Variant: "ao.TN.1",
         Authority: this.operator,
+        Scheduler: this.operator,
         Module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
         device: "process@1.0",
-        "execution-device": "stack@1.0",
-        "push-device": "push@1.0",
-        "device-stack": ["genesis-wasm@1.0", "patch@1.0"],
-        "patch-from": "/results/outbox",
+        "execution-device": "genesis-wasm@1.0",
       })
     }
     if (data) t.data = data
