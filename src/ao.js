@@ -95,7 +95,10 @@ class AO {
       in_memory = false,
       port,
     } = opt
-    if (_hb) this.hb = new HB()
+    if (_hb) {
+      this.format = _hb === "ans104" ? _hb : "httpsig"
+      this.hb = new HB({ format: this.format })
+    }
     if (!_port && port) _port = port
     if (!aoconnect && _port) aoconnect = optAO(_port)
     if (!ar && _port) ar = { port: _port }
