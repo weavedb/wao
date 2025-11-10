@@ -55,7 +55,6 @@ describe("Hyperbeam Legacynet", function () {
   after(async () => hbeam.kill())
 
   it.only("should deploy a process", async () => {
-    const { out: address } = await hb.get({ path: "/~meta@1.0/info/address" })
     const ao = await new AO2({ hb: "ans104" }).init(hbeam.jwk)
     const { p, pid } = await ao.deploy({ src_data })
     console.log((await p.msg("Inc", { To: pid })).res.Messages[0])
