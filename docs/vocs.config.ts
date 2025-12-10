@@ -51,7 +51,7 @@ export default defineConfig({
       collapsed: true,
       items: [
         {
-          text: "Decoding from Scratch",
+          text: "Overview",
           link: "/hyperbeam/decoding-from-scratch",
         },
         {
