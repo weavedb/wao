@@ -1,0 +1,49 @@
+# HyperBEAM on Mobile
+
+![](/images/mobile.png)
+
+Run a HyperBEAM node on your smartphone.
+
+:::warning[Experimental]
+Mobile support is highly experimental and intended for educational purposes. Not recommended for production use.
+:::
+
+## Supported Versions
+
+We currently target two pre-release versions:
+
+- `v0.9-milestone-3-beta-1` (default)
+- `v0.9-milestone-3-beta-3`
+
+These guides will be updated when the final version is released.
+
+## How It Works
+
+HyperBEAM is built on Erlang/OTP and includes native components (WASM runtime, LMDB database). Running it on mobile requires:
+
+1. **Linux environment** - HyperBEAM needs Linux syscalls
+2. **ARM64 compilation** - Mobile processors use ARM64, not x86_64
+3. **Native library recompilation** - NIFs must link against the device's libc
+
+On **Android**, we use [Termux](https://termux.dev) which provides a native Linux environment with direct hardware access. HyperBEAM runs at near-native speed.
+
+On **iOS**, Apple doesn't allow direct Linux execution. We use [UTM SE](https://getutm.app) to emulate an entire ARM64 Linux VM, which is significantly slower.
+
+## Platforms
+
+| Platform | Method | Performance | Recommended |
+|----------|--------|-------------|-------------|
+| [Android](/android) | Termux (native) | ⚡ Fast | ✅ Yes |
+| [iOS](/ios) | UTM SE (emulated) | 🐢 Slow | ❌ No |
+
+## Android
+
+Android runs HyperBEAM natively through Termux. The build process compiles in Alpine Linux (via proot) then deploys to Termux with recompiled native libraries.
+
+[Get started with Android →](/mobile/android)
+
+## iOS
+
+iOS requires a full Linux VM running in UTM SE. We build on Android first, then transfer the compiled binary to iOS. Performance is limited by software emulation.
+
+[Get started with iOS →](/mobile/ios)

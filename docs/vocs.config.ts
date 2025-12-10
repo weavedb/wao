@@ -1,177 +1,197 @@
-import { defineConfig } from 'vocs'
+import { defineConfig } from "vocs"
 
 export default defineConfig({
-  iconUrl: '/favicon.ico',
-  title: 'WAO',
-  ogImageUrl: 'https://vocs.dev/api/og?logo=%logo&title=%title&description=%description',
-  topNav: [ 
-    { text: 'Get Started', link: '/getting-started' },
-    { text: 'HyperBEAM', link: '/hyperbeam/decoding-from-scratch' }, 
-    { text: 'API', link: '/api/ao' }, 
-  ],   
+  iconUrl: "/favicon.ico",
+  title: "WAO",
+  ogImageUrl:
+    "https://vocs.dev/api/og?logo=%logo&title=%title&description=%description",
+  topNav: [
+    { text: "Get Started", link: "/getting-started" },
+    { text: "HyperBEAM", link: "/hyperbeam/decoding-from-scratch" },
+    { text: "Mobile", link: "/mobile/overview" },
+    { text: "API", link: "/api/ao" },
+  ],
   socials: [
     {
-      icon: 'discord',
-      link: 'https://discord.gg/vCkuVhkugY',
+      icon: "discord",
+      link: "https://discord.gg/vCkuVhkugY",
     },
     {
-      icon: 'github',
-      link: 'https://github.com/weavedb/wao',
+      icon: "github",
+      link: "https://github.com/arweaveoasis/wao",
     },
     {
-      icon: 'x',
-      link: 'https://twitter.com/WaoEco',
+      icon: "x",
+      link: "https://twitter.com/WaoEco",
     },
   ],
   sidebar: [
     {
-      text: 'Getting Started',
-      link: '/getting-started',
+      text: "Getting Started",
+      link: "/getting-started",
     },
     {
-      text: 'HyperBEAM',
-      link: '/hyperbeam',
+      text: "HyperBEAM",
+      link: "/hyperbeam",
     },
     {
-      text: 'Legacynet AOS',
-      link: '/legacynet',
+      text: "Legacynet AOS",
+      link: "/legacynet",
     },
     {
-      text: 'AO The Web',
-      link: '/web',
+      text: "AO The Web",
+      link: "/web",
     },
     {
-      text: 'WAO Hub',
-      link: '/hub',
+      text: "WAO Hub",
+      link: "/hub",
     },
     {
-      text: 'HyperBEAM',
-      collapsed: false,
-      items: [
-	{
-          text: 'Decoding from Scratch',
-          link: '/hyperbeam/decoding-from-scratch',
-        },
-	{
-          text: 'Installing HB and WAO',
-          link: '/hyperbeam/installing-hb-wao',
-        },
-	{
-          text: 'Devices and Pathing',
-          link: '/hyperbeam/devices-pathing'
-        },
-	{
-          text: 'Custom Devices and Codecs',
-          link: '/hyperbeam/custom-devices-codecs'
-        },
-	{
-          text: 'Flat Codec',
-          link: '/hyperbeam/codec-flat'
-        },
-	{
-          text: 'Structured Codec',
-          link: '/hyperbeam/codec-structured'
-        },
-	{
-          text: 'Httpsig Codec',
-          link: '/hyperbeam/codec-httpsig'
-        },
-	{
-          text: 'Http Message Signatures',
-          link: '/hyperbeam/http-message-signatures'
-        },
-	{
-          text: 'Hashpaths',
-          link: '/hyperbeam/hashpaths'
-        },
-	{
-          text: 'Device Composition',
-          link: '/hyperbeam/device-composition'
-        },
-	{
-          text: 'Processes and Scheduler',
-          link: '/hyperbeam/processes-scheduler'
-        },
-	{
-          text: 'Legacynet Compatible AOS',
-          link: '/hyperbeam/legacynet-aos'
-        },
-	{
-          text: 'Payment System',
-          link: '/hyperbeam/payment-system'
-        },
-      ],
-    },
-    {
-      text: 'Tutorials',
-      collapsed: false,
-      items: [
-	{
-          text: 'Legacynet AOS on HyperBEAM',
-          link: '/tutorials/legacynet-aos',
-        },
-	{
-          text: 'Mainnet AOS',
-          link: '/tutorials/mainnet-aos',
-        },
-	{
-          text: 'Creating Custom Devices',
-          link: '/tutorials/creating-devices',
-        },
-	{
-          text: 'Custom Devices in Rust',
-          link: '/tutorials/devices-rust',
-        },
-	{
-          text: 'Custom Devices in C++',
-          link: '/tutorials/devices-cpp',
-        },
-	{
-          text: 'Running LLMs on AOS',
-          link: '/tutorials/running-llms',
-        },
-      ],
-    },
-    {
-      text: 'API',
-      collapsed: false,
+      text: "Decoding HyperBEAM",
+      collapsed: true,
       items: [
         {
-          text: 'AO',
-          link: '/api/ao',
+          text: "Decoding from Scratch",
+          link: "/hyperbeam/decoding-from-scratch",
         },
-	{
-          text: 'Process',
-          link: '/api/process',
+        {
+          text: "Installing HB and WAO",
+          link: "/hyperbeam/installing-hb-wao",
         },
-	{
-          text: 'Function Piping',
-          link: '/api/function-piping',
+        {
+          text: "Devices and Pathing",
+          link: "/hyperbeam/devices-pathing",
         },
-	{
-          text: 'AR',
-          link: '/api/ar',
+        {
+          text: "Custom Devices and Codecs",
+          link: "/hyperbeam/custom-devices-codecs",
         },
-	{
-          text: 'GQL',
-          link: '/api/gql',
+        {
+          text: "Flat Codec",
+          link: "/hyperbeam/codec-flat",
         },
-	{
-          text: 'ArMem',
-          link: '/api/armem',
+        {
+          text: "Structured Codec",
+          link: "/hyperbeam/codec-structured",
         },
-	{
-          text: 'HB',
-          link: '/api/hb',
+        {
+          text: "Httpsig Codec",
+          link: "/hyperbeam/codec-httpsig",
         },
-	{
-          text: 'HyperBEAM',
-          link: '/api/hyperbeam',
+        {
+          text: "Http Message Signatures",
+          link: "/hyperbeam/http-message-signatures",
         },
-	{
-          text: 'HBSig',
-          link: '/api/hbsig',
-        }
+        {
+          text: "Hashpaths",
+          link: "/hyperbeam/hashpaths",
+        },
+        {
+          text: "Device Composition",
+          link: "/hyperbeam/device-composition",
+        },
+        {
+          text: "Processes and Scheduler",
+          link: "/hyperbeam/processes-scheduler",
+        },
+        {
+          text: "Legacynet Compatible AOS",
+          link: "/hyperbeam/legacynet-aos",
+        },
+        {
+          text: "Payment System",
+          link: "/hyperbeam/payment-system",
+        },
+      ],
+    },
+    {
+      text: "HyperBEAM on Mobile",
+      collapsed: true,
+      items: [
+        {
+          text: "Overview",
+          link: "/mobile/overview",
+        },
+        {
+          text: "Android",
+          link: "/mobile/android",
+        },
+        {
+          text: "iOS",
+          link: "/mobile/ios",
+        },
+      ],
+    },
+    {
+      text: "Tutorials",
+      collapsed: true,
+      items: [
+        {
+          text: "Legacynet AOS on HyperBEAM",
+          link: "/tutorials/legacynet-aos",
+        },
+        {
+          text: "Mainnet AOS",
+          link: "/tutorials/mainnet-aos",
+        },
+        {
+          text: "Creating Custom Devices",
+          link: "/tutorials/creating-devices",
+        },
+        {
+          text: "Custom Devices in Rust",
+          link: "/tutorials/devices-rust",
+        },
+        {
+          text: "Custom Devices in C++",
+          link: "/tutorials/devices-cpp",
+        },
+        {
+          text: "Running LLMs on AOS",
+          link: "/tutorials/running-llms",
+        },
+      ],
+    },
+    {
+      text: "API",
+      collapsed: true,
+      items: [
+        {
+          text: "AO",
+          link: "/api/ao",
+        },
+        {
+          text: "Process",
+          link: "/api/process",
+        },
+        {
+          text: "Function Piping",
+          link: "/api/function-piping",
+        },
+        {
+          text: "AR",
+          link: "/api/ar",
+        },
+        {
+          text: "GQL",
+          link: "/api/gql",
+        },
+        {
+          text: "ArMem",
+          link: "/api/armem",
+        },
+        {
+          text: "HB",
+          link: "/api/hb",
+        },
+        {
+          text: "HyperBEAM",
+          link: "/api/hyperbeam",
+        },
+        {
+          text: "HBSig",
+          link: "/api/hbsig",
+        },
       ],
     },
   ],

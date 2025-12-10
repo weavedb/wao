@@ -1,0 +1,478 @@
+# HyperBEAM on Android
+
+Run a full HyperBEAM decentralized computing node on your Android device.
+
+## Prerequisites
+
+:::warning[Device Compatibility]
+**Required**: Android phone with ARM64 processor (2015 or newer)
+- ✅ Most modern Android phones qualify
+- ✅ Examples: Samsung Galaxy S6+, Google Pixel (any), OnePlus 3+, Xiaomi devices
+- ❌ NOT supported: 32-bit ARM, x86 Android phones
+- 📱 For iOS devices, see [iOS guide](/ios)
+:::
+
+- **Storage**: Minimum 2GB free space
+- **RAM**: 2GB+ recommended (HyperBEAM uses 200-400MB when running)
+- **Internet**: Stable WiFi or mobile data (initial download: ~500MB)
+
+### Check Your Device Compatibility
+
+Open Termux and run:
+
+```bash
+uname -m        # Should show: aarch64
+df -h $HOME     # Should show 2GB+ free
+```
+
+### Required Software
+
+**Termux**: Linux environment for Android
+
+:::info[Compatibility Note]
+If the Google Play Store version of Termux doesn't work on your older Android device, download from F-Droid instead. The F-Droid version is often more compatible and is the officially recommended source.
+:::
+
+**Download Options:**
+- **Recommended**: [F-Droid Termux](https://f-droid.org/en/packages/com.termux/) (better compatibility, official builds)
+- **Alternative**: [Google Play Termux](https://play.google.com/store/apps/details?id=com.termux)
+
+---
+
+## Installation Options
+
+:::tip[Recommended for Most Users]
+**Option 1: Automated Installation** is the easiest and fastest way to get started. Just copy and paste one command!
+:::
+
+| Option | Difficulty | Best For |
+|--------|------------|----------|
+| **Option 1: Automated** | ⭐ Easy | Users who want simplicity |
+| **Option 2: Quick Manual** | ⭐⭐ Medium | Users who want some control |
+| **Option 3: Detailed** | ⭐⭐⭐ Advanced | Users who want to learn |
+
+---
+
+## Option 1: Automated Installation
+
+**Perfect for**: Users who want a one-command installation
+
+::::steps
+
+### Install Termux
+
+1. Install Termux from [F-Droid](https://f-droid.org/en/packages/com.termux/) or [Google Play](https://play.google.com/store/apps/details?id=com.termux)
+2. Open Termux and allow all permissions
+
+### Run Installation Script
+
+```bash
+curl https://hb-mobile.vercel.app | bash
+```
+
+### Wait for Completion
+
+The script will:
+1. ✓ Verify your device is compatible (ARM64)
+2. ✓ Install all Termux dependencies
+3. ✓ Set up Alpine Linux environment
+4. ✓ Compile HyperBEAM in Alpine
+5. ✓ Deploy to Termux and compile NIFs
+6. ✓ Start HyperBEAM automatically
+
+::::
+
+### Progress Indicators
+
+You'll see these phases:
+
+```
+Step 1/3: Installing Termux dependencies
+Step 2/3: Compiling in Alpine Linux
+Step 3/3: Deploying to Termux and finalizing
+✓✓✓ INSTALLATION COMPLETE ✓✓✓
+```
+
+:::success[Installation Complete!]
+When successful, you'll see the HyperBEAM banner with:
+```
+== Node activate at:               http://localhost:8734 ==
+```
+Your HyperBEAM node is now running! 🎉
+:::
+
+:::tip[Don't Worry About These Errors]
+These messages are harmless and can be ignored:
+- `os_mon` application errors
+- `memsup: Permission denied`
+- `disksup` errors
+
+These are OS monitoring tools that don't work in Termux due to Android restrictions. **HyperBEAM still runs perfectly!**
+:::
+
+---
+
+## Option 2: Quick Manual Installation
+
+**Perfect for**: Users who want to see what's happening
+
+::::steps
+
+### Termux Setup
+
+Install Termux from [F-Droid](https://f-droid.org/en/packages/com.termux/) or [Google Play](https://play.google.com/store/apps/details?id=com.termux), then run:
+
+```bash
+pkg update && pkg upgrade -y && \
+pkg install proot-distro git wget -y && \
+proot-distro install alpine && \
+proot-distro login alpine
+```
+
+:::warning[Environment Change]
+You'll now be in Alpine Linux - notice the prompt changes from `$` to `localhost:~#`. This is expected!
+:::
+
+### Alpine Compilation
+
+Copy and paste this entire block:
+
+```bash
+apk update && \
+apk add build-base cmake git pkgconfig ncurses openssl openssl-dev curl ca-certificates erlang27 erlang27-dev rust cargo linux-headers lmdb lmdb-dev && \
+cd /tmp && wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3 && mv rebar3 /usr/local/bin/ && \
+cd ~ && git clone https://github.com/permaweb/HyperBEAM.git && cd HyperBEAM && \
+git checkout d58f16b806f3e54e528624a3f6c0c81e34160ba6 && \
+sed -i 's/WAMR_BUILD_TARGET = X86_64/WAMR_BUILD_TARGET = AARCH64/g' Makefile && \
+sed -i '172s/long ptr, size;/long ptr;\n        int size;/' native/hb_beamr/hb_beamr.c && \
+sed -i '178s/long size_l = (long)size;/size_t size_l = (size_t)size;/' native/hb_beamr/hb_beamr.c && \
+sed -i '179s/char\* wasm_binary/const char* wasm_binary/' native/hb_beamr/hb_beamr.c && \
+sed -i '472s/uint64_t argc/uint32_t argc/' native/hb_beamr/hb_wasm.c && \
+sed -i '473s/uint64_t\* argv = malloc(sizeof(uint64_t)/uint32_t* argv = malloc(sizeof(uint32_t)/' native/hb_beamr/hb_wasm.c && \
+sed -i '476s/for (uint64_t i/for (uint32_t i/' native/hb_beamr/hb_wasm.c && \
+sed -i '477s/argv\[i\] = prepared_args.data\[i\].of.i64;/argv[i] = (uint32_t)prepared_args.data[i].of.i64;/' native/hb_beamr/hb_wasm.c && \
+sed -i 's/wasm_runtime_get_exception(proc->exec_env)/wasm_runtime_get_exception(wasm_runtime_get_module_inst(proc->exec_env))/g' native/hb_beamr/hb_wasm.c && \
+git clone https://github.com/bytecodealliance/wasm-micro-runtime.git _build/wamr -b WAMR-2.2.0 --single-branch && \
+sed -i 's/find_package(Threads REQUIRED)/set(CMAKE_THREAD_LIBS_INIT "-lpthread")\nset(CMAKE_HAVE_THREADS_LIBRARY 1)\nset(CMAKE_USE_PTHREADS_INIT 1)\nset(Threads_FOUND TRUE)/' _build/wamr/CMakeLists.txt && \
+rebar3 compile && \
+cd ~ && tar czf /tmp/hyperbeam-compiled.tar.gz -h -C HyperBEAM _build priv 2>&1 | grep -v "No such file" || true && \
+ls -lh /tmp/hyperbeam-compiled.tar.gz && echo "✓✓✓ ALPINE COMPILATION COMPLETE ✓✓✓" && exit
+```
+
+**Wait for "✓✓✓ ALPINE COMPILATION COMPLETE ✓✓✓"** - you'll automatically return to Termux.
+
+### Termux Deployment
+
+Copy and paste this entire block:
+
+```bash
+cd ~ && \
+cp /data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/alpine/tmp/hyperbeam-compiled.tar.gz . && \
+mkdir -p HyperBEAM && cd HyperBEAM && \
+tar xzf ../hyperbeam-compiled.tar.gz 2>&1 | grep -v "Cannot hard link" | grep -v "Permission denied" || true && \
+pkg install -y erlang rust clang liblmdb liblmdb-static git && \
+sed -i '1s|#!/system/bin/sh|#!/data/data/com.termux/files/usr/bin/sh|' /data/data/com.termux/files/usr/bin/erl && \
+cd _build/default/lib/b64fast && rm -rf priv ebin && mkdir -p priv ebin && \
+erlc -o ebin src/*.erl && \
+clang -fPIC -shared -o priv/b64fast.so c_src/b64fast.c -I$PREFIX/lib/erlang/usr/include && \
+echo "✓ b64fast compiled" && \
+cd ~/HyperBEAM/_build/default/lib/elmdb/native/elmdb_nif && \
+echo "Compiling elmdb (this takes 15 seconds)..." && \
+cargo build --release 2>&1 | tail -1 && \
+sleep 2 && \
+cp target/release/libelmdb_nif.so ../../priv/elmdb_nif.so && \
+echo "✓ elmdb compiled" && \
+cd ~/HyperBEAM && \
+cat > start.sh << 'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+cd ~/HyperBEAM
+export HB_STORE_PATH=/data/data/com.termux/files/home/data
+mkdir -p $HB_STORE_PATH
+
+WLAN_IP=$(ifconfig 2>/dev/null | grep -A 1 wlan0 | grep inet | awk '{print $2}')
+echo ""
+echo "================================"
+echo "HyperBEAM Starting"
+echo "WiFi IP: $WLAN_IP"
+echo "Local:   http://localhost:8734"
+echo "Network: http://$WLAN_IP:8734"
+echo "================================"
+echo ""
+
+erl -pa _build/default/lib/*/ebin -eval "application:ensure_all_started(hb)."
+EOF
+chmod +x start.sh && \
+echo "✓✓✓ SETUP COMPLETE ✓✓✓" && \
+cd ~/HyperBEAM && \
+exec ./start.sh < /dev/tty
+```
+
+::::
+
+---
+
+## Option 3: Detailed Step-by-Step
+
+**Perfect for**: Users who want to understand every step and learn the architecture
+
+:::info[Understanding the Architecture]
+We use **two separate Linux environments**:
+
+1. **Alpine Linux** (compilation) - Clean build environment, Erlang/OTP 27
+2. **Termux** (runtime) - Android-native, Erlang/OTP 28
+
+**Why?** Direct compilation in Termux fails due to Android's security model. We compile in Alpine, then copy binaries to Termux and recompile only the NIFs that need Android-specific libraries.
+:::
+
+### Data Flow
+
+```
+[Alpine Linux] → Compile Everything → [Archive (.tar.gz)]
+                                            ↓
+                                     Copy to Termux
+                                            ↓
+[Termux] → Extract → Recompile NIFs → [Running HyperBEAM]
+```
+
+::::steps
+
+### Phase 1: Setting Up Termux
+
+Install and open Termux, then update packages:
+
+```bash
+pkg update
+pkg upgrade -y
+pkg install proot-distro git wget -y
+```
+
+### Phase 2: Install Alpine Linux
+
+```bash
+proot-distro install alpine
+proot-distro login alpine
+```
+
+Notice the prompt changes from `$` to `localhost:~#`.
+
+### Phase 3: Install Build Dependencies in Alpine
+
+```bash
+apk update
+apk add build-base cmake git pkgconfig ncurses openssl openssl-dev curl ca-certificates erlang27 erlang27-dev rust cargo linux-headers lmdb lmdb-dev
+```
+
+Install rebar3:
+
+```bash
+cd /tmp
+wget https://s3.amazonaws.com/rebar3/rebar3
+chmod +x rebar3
+mv rebar3 /usr/local/bin/
+```
+
+### Phase 4: Clone and Patch HyperBEAM
+
+```bash
+cd ~
+git clone https://github.com/permaweb/HyperBEAM.git
+cd HyperBEAM
+git checkout d58f16b806f3e54e528624a3f6c0c81e34160ba6
+```
+
+Apply ARM64 patches:
+
+```bash
+# Target architecture
+sed -i 's/WAMR_BUILD_TARGET = X86_64/WAMR_BUILD_TARGET = AARCH64/g' Makefile
+
+# Type compatibility fixes
+sed -i '172s/long ptr, size;/long ptr;\n        int size;/' native/hb_beamr/hb_beamr.c
+sed -i '178s/long size_l = (long)size;/size_t size_l = (size_t)size;/' native/hb_beamr/hb_beamr.c
+sed -i '179s/char\* wasm_binary/const char* wasm_binary/' native/hb_beamr/hb_beamr.c
+
+# WASM API updates
+sed -i '472s/uint64_t argc/uint32_t argc/' native/hb_beamr/hb_wasm.c
+sed -i '473s/uint64_t\* argv = malloc(sizeof(uint64_t)/uint32_t* argv = malloc(sizeof(uint32_t)/' native/hb_beamr/hb_wasm.c
+sed -i '476s/for (uint64_t i/for (uint32_t i/' native/hb_beamr/hb_wasm.c
+sed -i '477s/argv\[i\] = prepared_args.data\[i\].of.i64;/argv[i] = (uint32_t)prepared_args.data[i].of.i64;/' native/hb_beamr/hb_wasm.c
+
+# Exception handling
+sed -i 's/wasm_runtime_get_exception(proc->exec_env)/wasm_runtime_get_exception(wasm_runtime_get_module_inst(proc->exec_env))/g' native/hb_beamr/hb_wasm.c
+```
+
+### Phase 5: Clone and Patch WAMR
+
+```bash
+git clone https://github.com/bytecodealliance/wasm-micro-runtime.git _build/wamr -b WAMR-2.2.0 --single-branch
+
+sed -i 's/find_package(Threads REQUIRED)/set(CMAKE_THREAD_LIBS_INIT "-lpthread")\nset(CMAKE_HAVE_THREADS_LIBRARY 1)\nset(CMAKE_USE_PTHREADS_INIT 1)\nset(Threads_FOUND TRUE)/' _build/wamr/CMakeLists.txt
+```
+
+### Phase 6: Compile HyperBEAM
+
+```bash
+rebar3 compile
+```
+
+### Phase 7: Package and Exit Alpine
+
+```bash
+cd ~
+tar czf /tmp/hyperbeam-compiled.tar.gz -h -C HyperBEAM _build priv 2>&1 | grep -v "No such file" || true
+exit
+```
+
+### Phase 8: Deploy to Termux
+
+```bash
+cd ~
+cp /data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/alpine/tmp/hyperbeam-compiled.tar.gz .
+mkdir -p HyperBEAM && cd HyperBEAM
+tar xzf ../hyperbeam-compiled.tar.gz 2>&1 | grep -v "Cannot hard link" | grep -v "Permission denied" || true
+```
+
+Install runtime dependencies:
+
+```bash
+pkg install -y erlang rust clang liblmdb liblmdb-static git
+```
+
+Fix Erlang shebang:
+
+```bash
+sed -i '1s|#!/system/bin/sh|#!/data/data/com.termux/files/usr/bin/sh|' /data/data/com.termux/files/usr/bin/erl
+```
+
+### Phase 9: Recompile NIFs
+
+**b64fast:**
+
+```bash
+cd _build/default/lib/b64fast
+rm -rf priv ebin && mkdir -p priv ebin
+erlc -o ebin src/*.erl
+clang -fPIC -shared -o priv/b64fast.so c_src/b64fast.c -I$PREFIX/lib/erlang/usr/include
+```
+
+**elmdb:**
+
+```bash
+cd ~/HyperBEAM/_build/default/lib/elmdb/native/elmdb_nif
+cargo build --release
+cp target/release/libelmdb_nif.so ../../priv/elmdb_nif.so
+```
+
+### Phase 10: Create Startup Script
+
+```bash
+cd ~/HyperBEAM
+cat > start.sh << 'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+cd ~/HyperBEAM
+export HB_STORE_PATH=/data/data/com.termux/files/home/data
+mkdir -p $HB_STORE_PATH
+
+WLAN_IP=$(ifconfig 2>/dev/null | grep -A 1 wlan0 | grep inet | awk '{print $2}')
+echo ""
+echo "================================"
+echo "HyperBEAM Starting"
+echo "WiFi IP: $WLAN_IP"
+echo "Local:   http://localhost:8734"
+echo "Network: http://$WLAN_IP:8734"
+echo "================================"
+echo ""
+
+erl -pa _build/default/lib/*/ebin -eval "application:ensure_all_started(hb)."
+EOF
+chmod +x start.sh
+```
+
+### Phase 11: Launch HyperBEAM
+
+```bash
+./start.sh
+```
+
+::::
+
+---
+
+## Accessing the Dashboard
+
+Once HyperBEAM is running:
+
+**Local Access (on your phone):**
+```
+http://localhost:8734
+```
+
+**From Another Device (same network):**
+
+:::tip[Finding Your Local IP]
+Your WiFi IP is displayed when HyperBEAM starts. Or run:
+```bash
+ifconfig 2>/dev/null | grep -A 1 wlan0 | grep inet | awk '{print $2}'
+```
+:::
+
+Then navigate to:
+```
+http://YOUR_PHONE_IP:8734
+```
+
+**From the Internet (external access):**
+
+To expose your node to the internet, use Cloudflare Tunnel:
+
+```bash
+pkg install cloudflared
+cloudflared tunnel -url http://localhost:8734
+```
+
+This gives you a public URL (e.g., `https://xxx.trycloudflare.com`) that forwards to your local HyperBEAM node. Works on both WiFi and mobile data.
+
+:::tip
+Run the tunnel in a separate Termux session (swipe from left edge → New session) so HyperBEAM keeps running.
+:::
+
+---
+
+## Testing with WAO
+
+You can test your HyperBEAM node programmatically using [WAO](https://github.com/ao-computer/wao):
+
+```js [test.js]
+import assert from "assert"
+import { describe, it } from "node:test"
+import { HB } from "wao"
+
+describe("HyperBEAM Mobile", function () {
+  it("should get the HyperBEAM node info", async () => {
+    const hb = new HB({ url: "http://192.168.x.x:8734" }) // Your phone's IP
+    const { out } = await hb.get({ path: "/~meta@1.0/info" })
+    assert.equal(out.node, "HyperBEAM")
+  })
+})
+```
+
+Run with:
+
+```bash
+npm install wao
+node --test test.js
+```
+
+:::tip
+Replace `192.168.x.x` with your phone's actual WiFi IP address.
+:::
+
+---
+
+## Restarting HyperBEAM
+
+After initial setup, restart anytime with:
+
+```bash
+cd ~/HyperBEAM && ./start.sh
+```
