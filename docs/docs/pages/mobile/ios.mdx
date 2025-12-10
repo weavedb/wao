@@ -1,0 +1,286 @@
+# HyperBEAM on iOS
+
+Run a HyperBEAM node on your iPhone or iPad using UTM SE virtualization.
+
+:::warning
+Running HyperBEAM on iOS is **not practical for daily use**. UTM SE uses software emulation which makes it very slow compared to Android. This guide is mainly for testing and educational purposes.
+:::
+
+:::info[Why No Precompiled Build?]
+We could provide a precompiled HyperBEAM VM image for iOS, but we don't because:
+- UTM SE's emulation is too slow for practical use
+- The VM would still need ~2GB of storage
+- Android runs HyperBEAM natively and is the recommended mobile platform
+
+If you want to run a mobile HyperBEAM node, use [Android](/android) instead.
+:::
+
+## Requirements
+
+- iPhone/iPad with iOS 14+
+- At least 15GB free storage
+- Android device with [Termux](https://f-droid.org/en/packages/com.termux/) (for building)
+- Both devices on the same WiFi network
+
+## Overview
+
+iOS doesn't allow direct Linux execution, so we use UTM SE to run Alpine Linux in a virtual machine. Building HyperBEAM inside UTM is very slow, so we build on Android and transfer the compiled binary.
+
+```
+┌─────────────────┐          ┌─────────────────┐
+│  Android/Termux │          │   iOS/UTM SE    │
+│                 │          │                 │
+│  1. Build       │   WiFi   │  3. Download    │
+│  2. Serve ──────┼──────────┼► 4. Run         │
+│     :8080       │          │     :8734       │
+└─────────────────┘          └─────────────────┘
+```
+
+## Installation
+
+::::steps
+
+### Install UTM SE on iOS
+
+1. Install [UTM SE](https://apps.apple.com/us/app/utm-se-retro-pc-emulator/id1564628856) from the App Store
+2. Open UTM SE
+
+:::info
+**Why UTM SE?** It doesn't require jailbreak or sideloading. It uses Apple's Hypervisor framework for JIT-free emulation.
+:::
+
+### Download Alpine Linux
+
+1. Open Safari and go to: https://alpinelinux.org/downloads/
+2. Download **Standard → aarch64** ISO (~200MB)
+3. Direct link: `alpine-standard-3.23.0-aarch64.iso`
+
+### Create Virtual Machine
+
+1. Open **UTM SE** and tap **+** (plus button)
+2. Tap **"New Machine"**
+3. Select **"Linux"**
+4. On **Hardware** screen:
+   - Select **"ARM64 virtual machine (2014, ARM64)"**
+   - Set Memory to **1024 MiB** (or higher)
+   - CPU Cores: **Default**
+   - Tap **Continue**
+5. On **Linux** screen:
+   - Select **"Boot from ISO image"**
+   - Tap **Browse...** and select the Alpine ISO
+   - Tap **Continue**
+6. On **Storage** screen:
+   - Set size to **10 GiB**
+   - Tap **Continue**
+7. On **Shared Directory** screen:
+   - Skip (just tap **Continue**)
+8. On **Summary** screen:
+   - Change name to **"HyperBEAM"** (optional)
+   - Tap **Save**
+
+### Install Alpine Linux
+
+1. Start the VM (tap play button)
+2. Login as `root` (no password)
+3. Run the installer:
+
+```sh
+setup-alpine
+```
+
+4. Follow the prompts:
+   - Keyboard: `us`
+   - Hostname: `hyperbeam`
+   - Network: `eth0`, `dhcp`, `done`
+   - Root password: set one
+   - Timezone: your timezone
+   - Mirror: `1` (or fastest)
+   - SSH: `openssh`
+   - Disk: `vda`, `sys` mode
+   - Confirm erase: `y`
+
+5. After install completes, exit the VM:
+
+```sh
+exit
+```
+
+6. Long-press the VM and tap **Edit**
+7. In **DRIVES** section:
+   - Drag **VirtIO Drive** above **USB Drive** (reorder so VirtIO is first)
+8. In **Network** section:
+   - Tap **New** under PORT FORWARD
+   - Set:
+     - Protocol: `TCP`
+     - Guest Address: `10.0.2.15`
+     - Guest Port: `8734`
+     - Host Address: `0.0.0.0`
+     - Host Port: `8734`
+   - Tap **Save**
+9. Tap **Save** to save VM settings
+10. Start the VM again and login with your root password
+
+### Build on Android
+
+On your **Android device** with Termux installed:
+
+:::code-group
+
+```sh [Beta-1 (default)]
+curl -sL https://hb-mobile.vercel.app/compile.sh | bash
+```
+
+```sh [Beta-3]
+curl -sL https://hb-mobile.vercel.app/compile.sh | HB_VERSION=v0.9-milestone-3-beta-3 bash
+```
+
+:::
+
+This will:
+1. Build HyperBEAM in Alpine (proot)
+2. Create `hyperbeam.tar`
+3. Start an HTTP server on port 8080
+4. Display your Android's WiFi IP
+
+:::tip
+To manually get your Android IP:
+```sh
+ifconfig 2>/dev/null | grep -A1 wlan0 | grep inet | awk '{print $2}'
+```
+:::
+
+**Keep the Android terminal open** - it needs to keep serving the file.
+
+:::details[Manual Compilation (for learning)]
+If you want to understand the build process, run these steps manually in Termux:
+
+```sh
+# Setup Alpine
+pkg update -y && pkg install proot-distro python -y
+proot-distro install alpine
+proot-distro login alpine
+```
+
+Inside Alpine:
+```sh
+# Install dependencies
+apk update
+apk add build-base cmake git pkgconfig ncurses openssl openssl-dev curl ca-certificates erlang27 erlang27-dev rust cargo linux-headers lmdb lmdb-dev wget
+cd /tmp && wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3 && mv rebar3 /usr/local/bin/
+
+# Clone HyperBEAM
+cd ~ && git clone https://github.com/permaweb/HyperBEAM.git && cd HyperBEAM
+git checkout v0.9-milestone-3-beta-1
+
+# Apply ARM64 patches
+sed -i 's/WAMR_BUILD_TARGET = X86_64/WAMR_BUILD_TARGET = AARCH64/g' Makefile
+sed -i '172s/long ptr, size;/long ptr;\n        int size;/' native/hb_beamr/hb_beamr.c
+sed -i '178s/long size_l = (long)size;/size_t size_l = (size_t)size;/' native/hb_beamr/hb_beamr.c
+sed -i '179s/char\* wasm_binary/const char* wasm_binary/' native/hb_beamr/hb_beamr.c
+sed -i '472s/uint64_t argc/uint32_t argc/' native/hb_beamr/hb_wasm.c
+sed -i '473s/uint64_t\* argv = malloc(sizeof(uint64_t)/uint32_t* argv = malloc(sizeof(uint32_t)/' native/hb_beamr/hb_wasm.c
+sed -i '476s/for (uint64_t i/for (uint32_t i/' native/hb_beamr/hb_wasm.c
+sed -i '477s/argv\[i\] = prepared_args.data\[i\].of.i64;/argv[i] = (uint32_t)prepared_args.data[i].of.i64;/' native/hb_beamr/hb_wasm.c
+sed -i 's/wasm_runtime_get_exception(proc->exec_env)/wasm_runtime_get_exception(wasm_runtime_get_module_inst(proc->exec_env))/g' native/hb_beamr/hb_wasm.c
+
+# Clone and patch WAMR
+git clone https://github.com/bytecodealliance/wasm-micro-runtime.git _build/wamr -b WAMR-2.2.0 --single-branch
+sed -i 's/find_package(Threads REQUIRED)/set(CMAKE_THREAD_LIBS_INIT "-lpthread")\nset(CMAKE_HAVE_THREADS_LIBRARY 1)\nset(CMAKE_USE_PTHREADS_INIT 1)\nset(Threads_FOUND TRUE)/' _build/wamr/CMakeLists.txt
+
+# Compile
+rebar3 compile
+
+# Create tar and exit
+cd ~ && tar cvf /tmp/hyperbeam.tar HyperBEAM
+exit
+```
+
+Back in Termux, serve the file:
+```sh
+mkdir -p ~/hyperbeam-server
+cp /data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/alpine/tmp/hyperbeam.tar ~/hyperbeam-server/
+cd ~/hyperbeam-server
+python -m http.server 8080
+```
+:::
+
+### Download and Run on iOS
+
+With the Android server running, go to your **iOS UTM VM** and run:
+
+```sh
+wget -qO- https://hb-mobile.vercel.app/ios.sh | ANDROID_IP=192.168.x.x sh
+```
+
+:::warning
+Replace `192.168.x.x` with your actual Android IP (without the port).
+:::
+
+::::
+
+## Access the Dashboard
+
+Once HyperBEAM starts (you'll see HTTP request logs), you can access it:
+
+**From your iPhone (same device):**
+```
+http://localhost:8734/~hyperbuddy@1.0/dashboard
+```
+
+**From another device on the same network:**
+
+Find your iPhone's WiFi IP in Settings → WiFi → tap your network, then:
+```
+http://IPHONE_IP:8734/~hyperbuddy@1.0/dashboard
+```
+
+:::info
+iOS/UTM is slower than Android. HyperBEAM may take 1-2 minutes to fully start. Wait for the HTTP server logs before accessing the dashboard.
+:::
+
+## Manual Installation
+
+If the script doesn't work, run these commands manually:
+
+```sh
+# Install dependencies
+apk update
+apk add wget curl erlang27 lmdb
+echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+apk update
+apk add erlang27 lmdb --upgrade
+
+# Download from Android (replace with your Android's IP)
+cd ~
+wget http://192.168.x.x:8080/hyperbeam.tar
+tar xf hyperbeam.tar
+
+# Start HyperBEAM
+cd ~/HyperBEAM
+export HB_STORE_PATH=/root/data
+mkdir -p $HB_STORE_PATH
+erl -pa _build/default/lib/*/ebin -eval "application:ensure_all_started(hb)."
+```
+
+## Restarting HyperBEAM
+
+After the initial setup, you can restart HyperBEAM anytime with:
+
+```sh
+cd ~/HyperBEAM && ./start.sh
+```
+
+Or manually:
+
+```sh
+cd ~/HyperBEAM
+export HB_STORE_PATH=/root/data
+mkdir -p $HB_STORE_PATH
+erl -pa _build/default/lib/*/ebin -eval "application:ensure_all_started(hb)."
+```
+
+:::tip
+The command ends with a period (`.`) after `(hb)` - this is required Erlang syntax.
+
+Use `Ctrl+\` (or `Ctrl+C` twice) to exit the Erlang shell.
+:::
