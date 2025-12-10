@@ -2,6 +2,10 @@
 
 Run a full HyperBEAM decentralized computing node on your Android device.
 
+:::warning[Experimental]
+Mobile support is highly experimental and intended for educational purposes. Not recommended for production use.
+:::
+
 ## Prerequisites
 
 :::warning[Device Compatibility]
@@ -16,15 +20,6 @@ Run a full HyperBEAM decentralized computing node on your Android device.
 - **RAM**: 2GB+ recommended (HyperBEAM uses 200-400MB when running)
 - **Internet**: Stable WiFi or mobile data (initial download: ~500MB)
 
-### Check Your Device Compatibility
-
-Open Termux and run:
-
-```bash
-uname -m        # Should show: aarch64
-df -h $HOME     # Should show 2GB+ free
-```
-
 ### Required Software
 
 **Termux**: Linux environment for Android
@@ -36,6 +31,15 @@ If the Google Play Store version of Termux doesn't work on your older Android de
 **Download Options:**
 - **Recommended**: [F-Droid Termux](https://f-droid.org/en/packages/com.termux/) (better compatibility, official builds)
 - **Alternative**: [Google Play Termux](https://play.google.com/store/apps/details?id=com.termux)
+
+### Check Your Device Compatibility
+
+After installing Termux, open it and run:
+
+```bash
+uname -m        # Should show: aarch64
+df -h $HOME     # Should show 2GB+ free
+```
 
 ---
 
@@ -66,9 +70,17 @@ If the Google Play Store version of Termux doesn't work on your older Android de
 
 ### Run Installation Script
 
-```bash
-curl https://hb-mobile.vercel.app | bash
+:::code-group
+
+```bash [Beta-1 (default)]
+curl -sL https://hb-mobile.vercel.app | bash
 ```
+
+```bash [Beta-3]
+curl -sL https://hb-mobile.vercel.app | HB_VERSION=v0.9-milestone-3-beta-3 bash
+```
+
+:::
 
 ### Wait for Completion
 
@@ -87,18 +99,30 @@ The script will:
 You'll see these phases:
 
 ```
-Step 1/3: Installing Termux dependencies
-Step 2/3: Compiling in Alpine Linux
-Step 3/3: Deploying to Termux and finalizing
-✓✓✓ INSTALLATION COMPLETE ✓✓✓
+================================
+HyperBEAM Android Installer
+================================
+Installing: v0.9-milestone-3-beta-1
+================================
+```
+
+Then compilation messages, followed by:
+
+```
+✓✓✓ ALPINE COMPILATION COMPLETE ✓✓✓
+✓ b64fast compiled
+✓ elmdb compiled
+✓✓✓ SETUP COMPLETE ✓✓✓
 ```
 
 :::success[Installation Complete!]
-When successful, you'll see the HyperBEAM banner with:
+When successful, you'll see HyperBEAM starting with:
 ```
-== Node activate at:               http://localhost:8734 ==
+================================
+HyperBEAM Starting
+WiFi IP: 192.168.x.x
+================================
 ```
-Your HyperBEAM node is now running! 🎉
 :::
 
 :::tip[Don't Worry About These Errors]
@@ -115,6 +139,10 @@ These are OS monitoring tools that don't work in Termux due to Android restricti
 ## Option 2: Quick Manual Installation
 
 **Perfect for**: Users who want to see what's happening
+
+:::tip[Version Selection]
+These commands use `v0.9-milestone-3-beta-1`. For beta-3, replace the version in `git checkout`.
+:::
 
 ::::steps
 
@@ -142,7 +170,7 @@ apk update && \
 apk add build-base cmake git pkgconfig ncurses openssl openssl-dev curl ca-certificates erlang27 erlang27-dev rust cargo linux-headers lmdb lmdb-dev && \
 cd /tmp && wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3 && mv rebar3 /usr/local/bin/ && \
 cd ~ && git clone https://github.com/permaweb/HyperBEAM.git && cd HyperBEAM && \
-git checkout d58f16b806f3e54e528624a3f6c0c81e34160ba6 && \
+git checkout v0.9-milestone-3-beta-1 && \
 sed -i 's/WAMR_BUILD_TARGET = X86_64/WAMR_BUILD_TARGET = AARCH64/g' Makefile && \
 sed -i '172s/long ptr, size;/long ptr;\n        int size;/' native/hb_beamr/hb_beamr.c && \
 sed -i '178s/long size_l = (long)size;/size_t size_l = (size_t)size;/' native/hb_beamr/hb_beamr.c && \
@@ -215,6 +243,10 @@ exec ./start.sh < /dev/tty
 
 **Perfect for**: Users who want to understand every step and learn the architecture
 
+:::tip[Version Selection]
+These commands use `v0.9-milestone-3-beta-1`. For beta-3, replace the version in `git checkout`.
+:::
+
 :::info[Understanding the Architecture]
 We use **two separate Linux environments**:
 
@@ -277,7 +309,7 @@ mv rebar3 /usr/local/bin/
 cd ~
 git clone https://github.com/permaweb/HyperBEAM.git
 cd HyperBEAM
-git checkout d58f16b806f3e54e528624a3f6c0c81e34160ba6
+git checkout v0.9-milestone-3-beta-1
 ```
 
 Apply ARM64 patches:

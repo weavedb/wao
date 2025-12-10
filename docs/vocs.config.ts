@@ -8,8 +8,8 @@ export default defineConfig({
   topNav: [
     { text: "Get Started", link: "/getting-started" },
     { text: "HyperBEAM", link: "/hyperbeam/decoding-from-scratch" },
-    { text: "Mobile", link: "/mobile/overview" },
-    { text: "API", link: "/api/ao" },
+    { text: "Mobile", link: "/mobile" },
+    { text: "SDK", link: "/api/ao" },
   ],
   socials: [
     {
@@ -31,20 +31,12 @@ export default defineConfig({
       link: "/getting-started",
     },
     {
-      text: "HyperBEAM",
-      link: "/hyperbeam",
-    },
-    {
       text: "Legacynet AOS",
       link: "/legacynet",
     },
     {
-      text: "AO The Web",
-      link: "/web",
-    },
-    {
-      text: "WAO Hub",
-      link: "/hub",
+      text: "HyperBEAM",
+      link: "/hyperbeam",
     },
     {
       text: "Decoding HyperBEAM",
@@ -110,7 +102,7 @@ export default defineConfig({
       items: [
         {
           text: "Overview",
-          link: "/mobile/overview",
+          link: "/mobile",
         },
         {
           text: "Android",
@@ -119,6 +111,20 @@ export default defineConfig({
         {
           text: "iOS",
           link: "/mobile/ios",
+        },
+      ],
+    },
+    {
+      text: "AO The Web",
+      collapsed: true,
+      items: [
+        {
+          text: "Overview",
+          link: "/web",
+        },
+        {
+          text: "WAO Hub",
+          link: "/hub",
         },
       ],
     },
@@ -153,7 +159,7 @@ export default defineConfig({
       ],
     },
     {
-      text: "API",
+      text: "WAO SDK",
       collapsed: true,
       items: [
         {
