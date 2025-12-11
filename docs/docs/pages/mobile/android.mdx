@@ -106,13 +106,20 @@ Installing: v0.9-milestone-3-beta-1
 ================================
 ```
 
-Then compilation messages, followed by:
+Then compilation in Alpine, followed by:
 
 ```
 ✓✓✓ ALPINE COMPILATION COMPLETE ✓✓✓
+
+================================
+Deploying to Termux...
+================================
+
 ✓ b64fast compiled
+✓ lmdb_nif compiled
 ✓ elmdb compiled
-✓✓✓ SETUP COMPLETE ✓✓✓
+
+✓✓✓ INSTALLATION COMPLETE ✓✓✓
 ```
 
 :::success[Installation Complete!]
@@ -183,7 +190,7 @@ sed -i 's/wasm_runtime_get_exception(proc->exec_env)/wasm_runtime_get_exception(
 git clone https://github.com/bytecodealliance/wasm-micro-runtime.git _build/wamr -b WAMR-2.2.0 --single-branch && \
 sed -i 's/find_package(Threads REQUIRED)/set(CMAKE_THREAD_LIBS_INIT "-lpthread")\nset(CMAKE_HAVE_THREADS_LIBRARY 1)\nset(CMAKE_USE_PTHREADS_INIT 1)\nset(Threads_FOUND TRUE)/' _build/wamr/CMakeLists.txt && \
 rebar3 compile && \
-cd ~ && tar czf /tmp/hyperbeam-compiled.tar.gz -h -C HyperBEAM _build priv 2>&1 | grep -v "No such file" || true && \
+cd ~ && tar czf /tmp/hyperbeam-compiled.tar.gz -h -C HyperBEAM _build priv 2>/dev/null; \
 ls -lh /tmp/hyperbeam-compiled.tar.gz && echo "✓✓✓ ALPINE COMPILATION COMPLETE ✓✓✓" && exit
 ```
 
@@ -194,23 +201,31 @@ ls -lh /tmp/hyperbeam-compiled.tar.gz && echo "✓✓✓ ALPINE COMPILATION COMP
 Copy and paste this entire block:
 
 ```bash
-cd ~ && \
-cp /data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/alpine/tmp/hyperbeam-compiled.tar.gz . && \
-mkdir -p HyperBEAM && cd HyperBEAM && \
-tar xzf ../hyperbeam-compiled.tar.gz 2>&1 | grep -v "Cannot hard link" | grep -v "Permission denied" || true && \
-pkg install -y erlang rust clang liblmdb liblmdb-static git && \
-sed -i '1s|#!/system/bin/sh|#!/data/data/com.termux/files/usr/bin/sh|' /data/data/com.termux/files/usr/bin/erl && \
-cd _build/default/lib/b64fast && rm -rf priv ebin && mkdir -p priv ebin && \
-erlc -o ebin src/*.erl && \
-clang -fPIC -shared -o priv/b64fast.so c_src/b64fast.c -I$PREFIX/lib/erlang/usr/include && \
-echo "✓ b64fast compiled" && \
-cd ~/HyperBEAM/_build/default/lib/elmdb/native/elmdb_nif && \
-echo "Compiling elmdb (this takes 15 seconds)..." && \
-cargo build --release 2>&1 | tail -1 && \
-sleep 2 && \
-cp target/release/libelmdb_nif.so ../../priv/elmdb_nif.so && \
-echo "✓ elmdb compiled" && \
-cd ~/HyperBEAM && \
+cd ~
+cp /data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/alpine/tmp/hyperbeam-compiled.tar.gz .
+rm -rf HyperBEAM
+mkdir -p HyperBEAM && cd HyperBEAM
+tar xzf ../hyperbeam-compiled.tar.gz 2>/dev/null || true
+pkg install -y -o Dpkg::Options::="--force-overwrite" erlang rust clang liblmdb liblmdb-static git
+sed -i '1s|#!/system/bin/sh|#!/data/data/com.termux/files/usr/bin/sh|' $PREFIX/bin/erl
+
+cd ~/HyperBEAM/_build/default/lib/b64fast
+rm -rf priv ebin && mkdir -p priv ebin
+erlc -o ebin src/*.erl
+clang -fPIC -shared -o priv/b64fast.so c_src/b64fast.c -I$PREFIX/lib/erlang/usr/include
+echo "✓ b64fast compiled"
+
+cd ~/HyperBEAM/_build/default/lib/lmdb
+rm -rf priv && mkdir -p priv
+clang -fPIC -O2 -std=c99 -finline-functions -Wall -I$PREFIX/lib/erlang/usr/include -I$PREFIX/include -fPIC -shared -o priv/lmdb_nif.so c_src/lmdb_nif.c -llmdb
+echo "✓ lmdb_nif compiled"
+
+cd ~/HyperBEAM/_build/default/lib/elmdb
+rm -rf priv && mkdir -p priv
+clang -fPIC -O2 -std=c99 -finline-functions -Wall -I$PREFIX/lib/erlang/usr/include -Ic_src -DMDB_USE_ROBUST=0 -fPIC -shared -o priv/elmdb.so c_src/elmdb_nif.c c_src/mdb.c c_src/midl.c -lpthread
+echo "✓ elmdb compiled"
+
+cd ~/HyperBEAM
 cat > start.sh << 'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 cd ~/HyperBEAM
@@ -229,10 +244,9 @@ echo ""
 
 erl -pa _build/default/lib/*/ebin -eval "application:ensure_all_started(hb)."
 EOF
-chmod +x start.sh && \
-echo "✓✓✓ SETUP COMPLETE ✓✓✓" && \
-cd ~/HyperBEAM && \
-exec ./start.sh < /dev/tty
+chmod +x start.sh
+echo "✓✓✓ SETUP COMPLETE ✓✓✓"
+./start.sh
 ```
 
 ::::
@@ -360,20 +374,21 @@ exit
 ```bash
 cd ~
 cp /data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/alpine/tmp/hyperbeam-compiled.tar.gz .
+rm -rf HyperBEAM
 mkdir -p HyperBEAM && cd HyperBEAM
-tar xzf ../hyperbeam-compiled.tar.gz 2>&1 | grep -v "Cannot hard link" | grep -v "Permission denied" || true
+tar xzf ../hyperbeam-compiled.tar.gz 2>/dev/null || true
 ```
 
 Install runtime dependencies:
 
 ```bash
-pkg install -y erlang rust clang liblmdb liblmdb-static git
+pkg install -y -o Dpkg::Options::="--force-overwrite" erlang rust clang liblmdb liblmdb-static git
 ```
 
 Fix Erlang shebang:
 
 ```bash
-sed -i '1s|#!/system/bin/sh|#!/data/data/com.termux/files/usr/bin/sh|' /data/data/com.termux/files/usr/bin/erl
+sed -i '1s|#!/system/bin/sh|#!/data/data/com.termux/files/usr/bin/sh|' $PREFIX/bin/erl
 ```
 
 ### Phase 9: Recompile NIFs
@@ -381,18 +396,26 @@ sed -i '1s|#!/system/bin/sh|#!/data/data/com.termux/files/usr/bin/sh|' /data/dat
 **b64fast:**
 
 ```bash
-cd _build/default/lib/b64fast
+cd ~/HyperBEAM/_build/default/lib/b64fast
 rm -rf priv ebin && mkdir -p priv ebin
 erlc -o ebin src/*.erl
 clang -fPIC -shared -o priv/b64fast.so c_src/b64fast.c -I$PREFIX/lib/erlang/usr/include
 ```
 
+**lmdb_nif:**
+
+```bash
+cd ~/HyperBEAM/_build/default/lib/lmdb
+rm -rf priv && mkdir -p priv
+clang -fPIC -O2 -std=c99 -finline-functions -Wall -I$PREFIX/lib/erlang/usr/include -I$PREFIX/include -fPIC -shared -o priv/lmdb_nif.so c_src/lmdb_nif.c -llmdb
+```
+
 **elmdb:**
 
 ```bash
-cd ~/HyperBEAM/_build/default/lib/elmdb/native/elmdb_nif
-cargo build --release
-cp target/release/libelmdb_nif.so ../../priv/elmdb_nif.so
+cd ~/HyperBEAM/_build/default/lib/elmdb
+rm -rf priv && mkdir -p priv
+clang -fPIC -O2 -std=c99 -finline-functions -Wall -I$PREFIX/lib/erlang/usr/include -Ic_src -DMDB_USE_ROBUST=0 -fPIC -shared -o priv/elmdb.so c_src/elmdb_nif.c c_src/mdb.c c_src/midl.c -lpthread
 ```
 
 ### Phase 10: Create Startup Script

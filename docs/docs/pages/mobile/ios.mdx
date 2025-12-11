@@ -118,13 +118,13 @@ setup-disk
 6. After install completes, power off the VM:
 
 ```sh
-exit
+poweroff
 ```
 
-6. Long-press the VM and tap **Edit**
-7. In **DRIVES** section:
+7. Long-press the VM and tap **Edit**
+8. In **DRIVES** section:
    - Drag **VirtIO Drive** above **USB Drive** (reorder so VirtIO is first)
-8. In **Network** section:
+9. In **Network** section:
    - Tap **New** under PORT FORWARD
    - Set:
      - Protocol: `TCP`
@@ -133,8 +133,8 @@ exit
      - Host Address: `0.0.0.0`
      - Host Port: `8734`
    - Tap **Save**
-9. Tap **Save** to save VM settings
-10. Start the VM again and login with your root password
+10. Tap **Save** to save VM settings
+11. Start the VM again and login with your root password
 
 ### Build on Android
 
@@ -173,7 +173,7 @@ If you want to understand the build process, run these steps manually in Termux:
 ```sh
 # Setup Alpine
 pkg update -y && pkg install proot-distro python -y
-proot-distro install alpine
+proot-distro install alpine 2>/dev/null || true
 proot-distro login alpine
 ```
 
@@ -185,7 +185,7 @@ apk add build-base cmake git pkgconfig ncurses openssl openssl-dev curl ca-certi
 cd /tmp && wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3 && mv rebar3 /usr/local/bin/
 
 # Clone HyperBEAM
-cd ~ && git clone https://github.com/permaweb/HyperBEAM.git && cd HyperBEAM
+cd ~ && rm -rf HyperBEAM && git clone https://github.com/permaweb/HyperBEAM.git && cd HyperBEAM
 git checkout v0.9-milestone-3-beta-1
 
 # Apply ARM64 patches
