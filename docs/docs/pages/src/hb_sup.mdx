@@ -1,0 +1,507 @@
+# hb_sup.erl - HyperBEAM Root Supervisor
+
+## Overview
+
+**Purpose:** Root OTP supervisor for HyperBEAM application  
+**Module:** `hb_sup`  
+**Behavior:** `supervisor`  
+**Strategy:** `one_for_all` with zero intensity
+
+This module implements the root supervisor for the HyperBEAM application, managing the HTTP client and any configured store processes. Uses a `one_for_all` restart strategy with zero intensity, meaning any child failure triggers a complete application restart.
+
+## Dependencies
+
+- **Erlang/OTP:** `supervisor`
+- **HyperBEAM:** `hb_opts`, `hb_http_client`, `hb_store_rocksdb`
+- **Records:** None
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Supervisor Lifecycle
+-spec start_link() -> {ok, Pid} | {error, Reason}.
+-spec start_link(Opts) -> {ok, Pid} | {error, Reason}.
+-spec init(Opts) -> {ok, {SupFlags, ChildSpecs}}.
+```
+
+---
+
+## Public Functions
+
+### 1. start_link/0, start_link/1
+
+```erlang
+-spec start_link() -> {ok, Pid} | {error, Reason}
+    when
+        Pid :: pid(),
+        Reason :: term().
+
+-spec start_link(Opts) -> {ok, Pid} | {error, Reason}
+    when
+        Opts :: map(),
+        Pid :: pid(),
+        Reason :: term().
+```
+
+**Description:** Start the root supervisor with optional configuration. Registers locally as `hb_sup`. The 0-arity version uses an empty options map.
+
+**Test Code:**
+```erlang
+-module(hb_sup_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_link_basic_test() ->
+    {ok, Pid} = hb_sup:start_link(),
+    ?assert(is_pid(Pid)),
+    ?assert(is_process_alive(Pid)),
+    ?assertEqual(Pid, whereis(hb_sup)),
+    supervisor:terminate_child(hb_sup, hb_http_client),
+    ok.
+
+start_link_with_opts_test() ->
+    Opts = #{
+        store => []
+    },
+    {ok, Pid} = hb_sup:start_link(Opts),
+    ?assert(is_pid(Pid)),
+    ?assert(is_process_alive(Pid)),
+    supervisor:terminate_child(hb_sup, hb_http_client),
+    ok.
+
+start_link_with_store_test() ->
+    Opts = #{
+        store => [
+            #{
+                <<"store-module">> => hb_store_rocksdb,
+                <<"name">> => <<"test-rocks">>
+            }
+        ]
+    },
+    case hb_store_rocksdb:enabled() of
+        true ->
+            {ok, Pid} = hb_sup:start_link(Opts),
+            ?assert(is_pid(Pid)),
+            Children = supervisor:which_children(hb_sup),
+            ?assert(lists:keymember(hb_store_rocksdb, 1, Children)),
+            supervisor:terminate_child(hb_sup, hb_http_client),
+            supervisor:terminate_child(hb_sup, hb_store_rocksdb);
+        false ->
+            ok
+    end.
+```
+
+---
+
+### 2. init/1
+
+```erlang
+-spec init(Opts) -> {ok, {SupFlags, ChildSpecs}}
+    when
+        Opts :: map(),
+        SupFlags :: supervisor:sup_flags(),
+        ChildSpecs :: [supervisor:child_spec()].
+```
+
+**Description:** Initialize the supervisor with child specifications. Creates children for the HTTP client (always) and any configured stores. Called automatically by `supervisor:start_link/3`.
+
+**Supervisor Flags:**
+```erlang
+#{
+    strategy => one_for_all,    % All children restart if one fails
+    intensity => 0,             % Zero failures allowed
+    period => 1                 % Within 1 second
+}
+```
+
+**Child Specifications:**
+1. **HTTP Client** (`hb_http_client`) - Always started
+2. **RocksDB Store** (optional) - Only if configured and enabled
+
+**Test Code:**
+```erlang
+-module(hb_sup_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_basic_test() ->
+    {ok, {SupFlags, Children}} = hb_sup:init(#{}),
+    
+    % Verify supervisor flags
+    ?assertEqual(one_for_all, maps:get(strategy, SupFlags)),
+    ?assertEqual(0, maps:get(intensity, SupFlags)),
+    ?assertEqual(1, maps:get(period, SupFlags)),
+    
+    % Verify HTTP client child always present
+    ?assert(lists:any(
+        fun(#{id := Id}) -> Id =:= hb_http_client end,
+        Children
+    )).
+
+init_with_store_test() ->
+    Opts = #{
+        store => [
+            #{
+                <<"store-module">> => hb_store_rocksdb,
+                <<"name">> => <<"test">>
+            }
+        ]
+    },
+    {ok, {_SupFlags, Children}} = hb_sup:init(Opts),
+    
+    case hb_store_rocksdb:enabled() of
+        true ->
+            % RocksDB child should be present
+            ?assert(lists:any(
+                fun(#{id := Id}) -> Id =:= hb_store_rocksdb end,
+                Children
+            ));
+        false ->
+            % RocksDB not enabled, should not be present
+            ?assertNot(lists:any(
+                fun(#{id := Id}) -> Id =:= hb_store_rocksdb end,
+                Children
+            ))
+    end.
+
+init_multiple_stores_test() ->
+    Opts = #{
+        store => [
+            #{<<"store-module">> => hb_store_fs, <<"name">> => <<"fs">>},
+            #{<<"store-module">> => hb_store_lmdb, <<"name">> => <<"lmdb">>}
+        ]
+    },
+    {ok, {_SupFlags, Children}} = hb_sup:init(Opts),
+    
+    % Non-RocksDB stores should be filtered out
+    ?assertNot(lists:any(
+        fun(#{id := Id}) -> Id =:= hb_store_fs end,
+        Children
+    )),
+    ?assertNot(lists:any(
+        fun(#{id := Id}) -> Id =:= hb_store_lmdb end,
+        Children
+    )).
+```
+
+---
+
+## Internal Functions
+
+### store_children/1
+
+```erlang
+-spec store_children(Store) -> [ChildSpec]
+    when
+        Store :: map() | [map()],
+        ChildSpec :: supervisor:child_spec().
+```
+
+**Description:** Generate child specifications for stores. Currently only supports RocksDB stores that need supervision. Other store types (LMDB, FS) are started on-demand and don't need supervision.
+
+**Behavior:**
+- Accepts single store map or list of stores
+- Filters for `hb_store_rocksdb` modules only
+- Returns child spec for each RocksDB store
+- Recursively processes store lists
+
+**Test Code:**
+```erlang
+-module(hb_sup_store_children_test).
+-include_lib("eunit/include/eunit.hrl").
+
+% Note: store_children is not exported, testing through init
+
+store_children_empty_test() ->
+    {ok, {_SupFlags, Children}} = hb_sup:init(#{store => []}),
+    % Should only have HTTP client
+    ?assertEqual(1, length(Children)).
+
+store_children_rocksdb_test() ->
+    Store = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"test">>
+    },
+    {ok, {_SupFlags, Children}} = hb_sup:init(#{store => [Store]}),
+    
+    case hb_store_rocksdb:enabled() of
+        true ->
+            % Should have HTTP client + RocksDB
+            ?assert(length(Children) >= 1);
+        false ->
+            % Should only have HTTP client
+            ?assertEqual(1, length(Children))
+    end.
+
+store_children_filtered_test() ->
+    Stores = [
+        #{<<"store-module">> => hb_store_fs},
+        #{<<"store-module">> => hb_store_lmdb},
+        #{<<"store-module">> => hb_store_rocksdb, <<"name">> => <<"rocks">>}
+    ],
+    {ok, {_SupFlags, Children}} = hb_sup:init(#{store => Stores}),
+    
+    % Non-RocksDB stores should not create children
+    FsChild = lists:any(fun(#{id := Id}) -> Id =:= hb_store_fs end, Children),
+    LmdbChild = lists:any(fun(#{id := Id}) -> Id =:= hb_store_lmdb end, Children),
+    
+    ?assertEqual(false, FsChild),
+    ?assertEqual(false, LmdbChild).
+```
+
+---
+
+## Child Specifications
+
+### HTTP Client Child
+
+```erlang
+#{
+    id => hb_http_client,
+    start => {hb_http_client, start_link, [Opts]},
+    restart => permanent,
+    shutdown => 5000,
+    type => worker,
+    modules => [hb_http_client]
+}
+```
+
+**Properties:**
+- **ID**: `hb_http_client`
+- **Restart**: `permanent` - Always restarted
+- **Shutdown**: 5000ms timeout
+- **Type**: `worker`
+
+### RocksDB Store Child
+
+```erlang
+#{
+    id => hb_store_rocksdb,
+    start => {hb_store_rocksdb, start_link, [RocksDBOpts]}
+}
+```
+
+**Properties:**
+- **ID**: `hb_store_rocksdb`
+- **Restart**: Uses defaults (permanent)
+- **Shutdown**: Uses defaults
+- **Type**: Uses defaults (worker)
+
+---
+
+## Supervision Tree
+
+```
+hb_sup (one_for_all, 0, 1)
+  ├─ hb_http_client (permanent worker)
+  └─ hb_store_rocksdb (optional, if configured)
+```
+
+### Restart Strategy
+
+**`one_for_all`**: If any child terminates, all children are terminated and restarted.
+
+**Intensity 0**: Zero failures allowed within the period - any failure triggers application shutdown.
+
+**Why zero intensity?**
+- Ensures clean state on any error
+- Prevents partial system recovery
+- All components restart together
+- Suitable for tightly coupled systems
+
+---
+
+## Common Patterns
+
+```erlang
+%% Start supervisor with default configuration
+{ok, Pid} = hb_sup:start_link().
+
+%% Start with custom store configuration
+Opts = #{
+    store => [
+        #{
+            <<"store-module">> => hb_store_rocksdb,
+            <<"name">> => <<"cache-mainnet/rocks">>
+        }
+    ]
+},
+{ok, Pid} = hb_sup:start_link(Opts).
+
+%% Check supervisor status
+Children = supervisor:which_children(hb_sup),
+io:format("Children: ~p~n", [Children]).
+
+%% Get child PIDs
+{_, HTTPClientPid, _, _} = lists:keyfind(hb_http_client, 1, Children).
+
+%% Manually restart child (rarely needed)
+supervisor:terminate_child(hb_sup, hb_http_client),
+supervisor:restart_child(hb_sup, hb_http_client).
+
+%% Shutdown supervisor
+supervisor:terminate_child(whereis(hb_sup), hb_http_client),
+exit(whereis(hb_sup), shutdown).
+```
+
+---
+
+## Application Integration
+
+### In `hb.app.src`
+
+```erlang
+{application, hb,
+ [{mod, {hb_app, []}},
+  {registered, [hb_sup]},
+  ...
+ ]}.
+```
+
+### In `hb_app.erl`
+
+```erlang
+-module(hb_app).
+-behaviour(application).
+
+start(_Type, _Args) ->
+    Opts = load_config(),
+    hb_sup:start_link(Opts).
+
+stop(_State) ->
+    ok.
+```
+
+---
+
+## Store Configuration
+
+### Supported Store Modules
+
+Only RocksDB stores require supervision:
+
+```erlang
+% RocksDB - supervised
+#{
+    <<"store-module">> => hb_store_rocksdb,
+    <<"name">> => <<"cache/rocks">>
+}
+
+% LMDB - not supervised (started on demand)
+#{
+    <<"store-module">> => hb_store_lmdb,
+    <<"name">> => <<"cache/lmdb">>
+}
+
+% Filesystem - not supervised (started on demand)
+#{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"cache/fs">>
+}
+```
+
+### Multiple Stores
+
+```erlang
+Opts = #{
+    store => [
+        #{<<"store-module">> => hb_store_rocksdb, <<"name">> => <<"rocks1">>},
+        #{<<"store-module">> => hb_store_rocksdb, <<"name">> => <<"rocks2">>},
+        #{<<"store-module">> => hb_store_lmdb, <<"name">> => <<"lmdb">>}
+    ]
+},
+{ok, _} = hb_sup:start_link(Opts).
+% Creates children for rocks1 and rocks2 only
+```
+
+---
+
+## Restart Behavior
+
+### Child Failure Scenario
+
+```
+1. hb_http_client crashes
+2. one_for_all triggers
+3. All children terminated
+4. All children restarted
+5. If restart fails → intensity limit (0) exceeded
+6. Supervisor terminates
+7. Application manager handles supervisor termination
+```
+
+### Intensity Zero Implications
+
+```erlang
+% Single failure causes application restart
+intensity => 0,
+period => 1
+
+% Even one failure within 1 second:
+- Supervisor shuts down
+- Application terminates
+- Can trigger VM shutdown depending on app config
+```
+
+---
+
+## Debugging
+
+### Check Supervisor State
+
+```erlang
+% Get supervisor info
+supervisor:count_children(hb_sup).
+% => #{specs => 2, active => 2, supervisors => 0, workers => 2}
+
+% List children
+supervisor:which_children(hb_sup).
+% => [{hb_http_client, <0.123.0>, worker, [hb_http_client]}, ...]
+
+% Get supervisor flags
+{ok, {SupFlags, _}} = hb_sup:init(#{}),
+SupFlags.
+% => #{strategy => one_for_all, intensity => 0, period => 1}
+```
+
+### Common Issues
+
+**Issue**: Child fails to start
+```erlang
+% Check child spec
+{ok, {_, Children}} = hb_sup:init(Opts),
+lists:foreach(fun(Child) -> io:format("~p~n", [Child]) end, Children).
+```
+
+**Issue**: RocksDB not starting
+```erlang
+% Check if enabled
+hb_store_rocksdb:enabled().
+
+% Check store config
+hb_opts:get(store, [], Opts).
+```
+
+---
+
+## References
+
+- **OTP Supervisor** - `supervisor` behavior documentation
+- **hb_http_client** - HTTP client module
+- **hb_store_rocksdb** - RocksDB store module
+- **hb_opts** - Configuration management
+
+---
+
+## Notes
+
+1. **Zero Intensity**: Any failure triggers complete restart
+2. **One For All**: All children restart together
+3. **RocksDB Only**: Only RocksDB stores are supervised
+4. **HTTP Client**: Always started as first child
+5. **Local Registration**: Registered as `hb_sup`
+6. **Permanent Restart**: HTTP client always restarted
+7. **Shutdown Timeout**: 5 seconds for HTTP client
+8. **Store Filtering**: Only RocksDB creates child specs
+9. **Options Propagation**: Opts passed to all children
+10. **Simple Hierarchy**: Single-level supervision (no sub-supervisors)

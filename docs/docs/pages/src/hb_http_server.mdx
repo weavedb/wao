@@ -1,0 +1,701 @@
+# hb_http_server.erl - HTTP Server & AO-Core Router
+
+## Overview
+
+**Purpose:** HTTP server routing requests to AO-Core resolver  
+**Module:** `hb_http_server`  
+**Behavior:** Cowboy HTTP handler  
+**Pattern:** HTTP request → Message → AO-Core → Message → HTTP response
+
+This module implements a Cowboy-based HTTP server that marshals incoming HTTP requests into HyperBEAM messages, passes them to the AO-Core resolver, and converts the results back into HTTP responses. The server configuration is stored in Cowboy's environment and can be dynamically updated.
+
+## Core Responsibilities
+
+- **HTTP Server Lifecycle:** Start, configure, and manage HTTP listeners
+- **Request Marshaling:** Convert HTTP requests to HyperBEAM messages
+- **AO-Core Integration:** Route messages through singleton resolution
+- **Response Conversion:** Transform message results to HTTP responses
+- **Configuration Management:** Dynamic server options via Cowboy environment
+- **Hook System:** Execute startup hooks for configuration modification
+- **Greeting Display:** ASCII art banner with configuration on startup
+
+## Dependencies
+
+- **HyperBEAM:** `hb_http`, `hb_ao`, `hb_util`, `hb_maps`, `hb_opts`, `hb_message`, `hb_singleton`, `hb_store`, `hb_format`, `hb_private`, `hb_features`
+- **Arweave:** `ar_wallet`
+- **Hooks:** `dev_hook`
+- **HTTP:** `cowboy`, `cowboy_req`, `ranch`, `gun`
+- **OTP:** `kernel`, `stdlib`, `inets`, `ssl`, `os_mon`
+- **Metrics:** `prometheus`, `prometheus_cowboy`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Server Lifecycle
+-spec start() -> {ok, pid()}.
+-spec start(Opts) -> {ok, pid()}.
+-spec start_node() -> NodeURL.
+-spec start_node(Opts) -> NodeURL.
+
+%% Configuration Management
+-spec set_opts(Opts) -> ok.
+-spec set_opts(Request, Opts) -> {ok, UpdatedOpts}.
+-spec get_opts() -> Opts.
+-spec get_opts(NodeMsg) -> Opts.
+-spec set_default_opts(Opts) -> Opts.
+-spec set_proc_server_id(ServerID) -> ok.
+
+%% Cowboy Callbacks
+-spec init(Req, ServerID) -> {ok, Req, State}.
+-spec allowed_methods(Req, State) -> {[Method], Req, State}.
+```
+
+---
+
+## Public Functions
+
+### 1. start/0, start/1
+
+```erlang
+-spec start() -> {ok, pid()}
+    when
+        pid() :: pid().
+
+-spec start(Opts) -> {ok, pid()}
+    when
+        Opts :: map(),
+        pid() :: pid().
+```
+
+**Description:** Start the HTTP server with configuration from file or provided options. Initializes store, loads wallet, displays greeting banner, and starts Cowboy listener.
+
+**Startup Flow:**
+```erlang
+Load Config File (config.flat)
+    ↓
+Merge with Environment Defaults
+    ↓
+Initialize Store
+    ↓
+Load Private Wallet
+    ↓
+Display Greeting Banner
+    ↓
+Execute Startup Hooks
+    ↓
+Start Cowboy Listener
+    ↓
+Return {ok, ListenerPID}
+```
+
+**Test Code:**
+```erlang
+-module(hb_http_server_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_basic_test() ->
+    {ok, _Pid} = hb_http_server:start(#{
+        port => 8734,
+        priv_wallet => ar_wallet:new()
+    }),
+    ?assert(true).
+
+start_with_config_test() ->
+    Config = #{
+        port => 9000,
+        store => [hb_test_utils:test_store()],
+        priv_wallet => ar_wallet:new()
+    },
+    {ok, _Pid} = hb_http_server:start(Config),
+    ?assert(true).
+```
+
+---
+
+### 2. start_node/0, start_node/1
+
+```erlang
+-spec start_node() -> NodeURL
+    when
+        NodeURL :: binary().
+
+-spec start_node(Opts) -> NodeURL
+    when
+        Opts :: map(),
+        NodeURL :: binary().
+```
+
+**Description:** Start a test node with random port and return its URL. Used primarily for testing.
+
+**Implementation:**
+```erlang
+start_node(Opts) ->
+    application:ensure_all_started([kernel, stdlib, inets, ssl, ranch, cowboy, gun, os_mon]),
+    hb:init(),
+    hb_sup:start_link(Opts),
+    ServerOpts = set_default_opts(Opts),
+    {ok, _Listener, Port} = new_server(ServerOpts),
+    <<"http://localhost:", (integer_to_binary(Port))/binary, "/">>.
+```
+
+**Test Code:**
+```erlang
+-module(hb_http_server_node_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_node_test() ->
+    Node = hb_http_server:start_node(),
+    ?assert(is_binary(Node)),
+    ?assert(binary:match(Node, <<"http://localhost:">>) =/= nomatch).
+
+start_node_with_opts_test() ->
+    Node = hb_http_server:start_node(#{
+        <<"test-key">> => <<"test-value">>
+    }),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assertEqual(<<"test-value">>, hb_ao:get(<<"test-key">>, Info, #{})).
+```
+
+---
+
+### 3. set_opts/1, set_opts/2
+
+```erlang
+-spec set_opts(Opts) -> ok
+    when
+        Opts :: map().
+
+-spec set_opts(Request, Opts) -> {ok, UpdatedOpts}
+    when
+        Request :: map(),
+        Opts :: map(),
+        UpdatedOpts :: map().
+```
+
+**Description:** Update server configuration dynamically. Single-arity version updates Cowboy environment; two-arity version merges request with options and maintains history.
+
+**set_opts/1 - Update Cowboy Environment:**
+```erlang
+set_opts(Opts) ->
+    case hb_opts:get(http_server, no_server_ref, Opts) of
+        no_server_ref -> ok;
+        ServerRef -> cowboy:set_env(ServerRef, node_msg, Opts)
+    end.
+```
+
+**set_opts/2 - Merge and Track History:**
+```erlang
+set_opts(Request, Opts) ->
+    PreparedOpts = hb_opts:mimic_default_types(Opts, false, Opts),
+    PreparedRequest = hb_opts:mimic_default_types(
+        hb_message:uncommitted(Request),
+        false,
+        Opts
+    ),
+    MergedOpts = maps:merge(PreparedOpts, PreparedRequest),
+    History = hb_opts:get(node_history, [], Opts) ++ [ResetRequest],
+    FinalOpts = MergedOpts#{
+        http_server => hb_opts:get(http_server, no_server, Opts),
+        node_history => History
+    },
+    {set_opts(FinalOpts), FinalOpts}.
+```
+
+**Test Code:**
+```erlang
+-module(hb_http_server_set_opts_test).
+-include_lib("eunit/include/eunit.hrl").
+
+set_opts_test() ->
+    Wallet = ar_wallet:new(),
+    Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    
+    % Get initial options
+    Opts = hb_http_server:get_opts(#{
+        http_server => hb_util:human_id(ar_wallet:to_address(Wallet))
+    }),
+    
+    % Update with new request
+    Request = #{<<"hello">> => <<"world">>},
+    {ok, UpdatedOpts} = hb_http_server:set_opts(Request, Opts),
+    
+    % Verify history was tracked
+    History = hb_opts:get(node_history, [], UpdatedOpts),
+    ?assertEqual(1, length(History)),
+    ?assertEqual(<<"world">>, hb_opts:get(<<"hello">>, not_found, UpdatedOpts)).
+```
+
+---
+
+### 4. get_opts/0, get_opts/1
+
+```erlang
+-spec get_opts() -> Opts
+    when
+        Opts :: map().
+
+-spec get_opts(NodeMsg) -> Opts
+    when
+        NodeMsg :: map(),
+        Opts :: map().
+```
+
+**Description:** Retrieve current server configuration from Cowboy environment.
+
+**Implementation:**
+```erlang
+get_opts() ->
+    get_opts(#{http_server => get(server_id)}).
+
+get_opts(NodeMsg) ->
+    ServerRef = hb_opts:get(http_server, no_server_ref, NodeMsg),
+    cowboy:get_env(ServerRef, node_msg, no_node_msg).
+```
+
+---
+
+### 5. set_default_opts/1
+
+```erlang
+-spec set_default_opts(Opts) -> OptsWithDefaults
+    when
+        Opts :: map(),
+        OptsWithDefaults :: map().
+```
+
+**Description:** Apply default values to server options: random port (10000-60000), new wallet, test store.
+
+**Defaults:**
+```erlang
+#{
+    port => RandomPort,           % 10000-60000
+    priv_wallet => NewWallet,     % Fresh RSA-4096 keypair
+    store => [TestStore],         % In-memory test store
+    address => HumanAddress,      % Base64url address
+    force_signed => true          % Require signatures
+}
+```
+
+---
+
+### 6. set_proc_server_id/1
+
+```erlang
+-spec set_proc_server_id(ServerID) -> ok
+    when
+        ServerID :: binary().
+```
+
+**Description:** Store server ID in process dictionary for current process.
+
+**Implementation:**
+```erlang
+set_proc_server_id(ServerID) ->
+    put(server_id, ServerID).
+```
+
+---
+
+### 7. init/2 (Cowboy Callback)
+
+```erlang
+-spec init(Req, ServerID) -> {ok, Req, State}
+    when
+        Req :: cowboy_req:req(),
+        ServerID :: binary(),
+        State :: term().
+```
+
+**Description:** Handle incoming HTTP request. Marshals request to message, resolves through AO-Core, handles errors, and sends response.
+
+**Request Flow:**
+```erlang
+Cowboy Request
+    ↓
+Set Process Server ID
+    ↓
+Get Node Configuration
+    ↓
+Convert to TABM Singleton Messages
+    ↓
+Resolve Through AO-Core
+    ↓
+Handle Success/Error
+    ↓
+Convert to HTTP Response
+    ↓
+Send to Client
+```
+
+**Error Handling:**
+```erlang
+try
+    Messages = hb_http:req_to_tabm_singleton(Req, undefined, NodeMsg),
+    Results = hb_ao:resolve_many(Messages, NodeMsg),
+    case dev_monitor:get_error(Results) of
+        no_error ->
+            hb_http:reply(Req, lists:last(Results), <<>>, NodeMsg);
+        ErrorMsg ->
+            format_error_response(Req, ErrorMsg, NodeMsg)
+    end
+catch
+    Type:Error:Stack ->
+        format_error_response(Req, {Type, Error, Stack}, NodeMsg)
+end.
+```
+
+---
+
+### 8. allowed_methods/2 (Cowboy Callback)
+
+```erlang
+-spec allowed_methods(Req, State) -> {[Method], Req, State}
+    when
+        Req :: cowboy_req:req(),
+        State :: term(),
+        Method :: binary().
+```
+
+**Description:** Return list of allowed HTTP methods.
+
+**Implementation:**
+```erlang
+allowed_methods(Req, State) ->
+    {[<<"GET">>, <<"POST">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>, <<"PATCH">>], Req, State}.
+```
+
+---
+
+## Server Configuration
+
+### Configuration File Format
+
+Default location: `config.flat`
+
+```erlang
+#{
+    % Network
+    port => 8734,
+    host => <<"localhost">>,
+    
+    % Security
+    priv_key_location => <<"hyperbeam-key.json">>,
+    force_signed => true,
+    
+    % Storage
+    store => [
+        #{type => rocksdb, path => <<"data/rocksdb">>}
+    ],
+    store_defaults => #{
+        create_if_missing => true
+    },
+    
+    % Monitoring
+    prometheus => true,
+    
+    % Timeouts
+    idle_timeout => 300000,  % 5 minutes
+    
+    % Protocol
+    protocol => http2 | http3,
+    
+    % Hooks
+    on => #{
+        <<"start">> => StartHookMessage
+    }
+}.
+```
+
+---
+
+## Startup Hooks
+
+### Start Hook Execution
+
+```erlang
+HookMsg = #{<<"body">> => NodeMsg},
+Result = dev_hook:on(<<"start">>, HookMsg, NodeMsg),
+{ok, #{<<"body">> := ModifiedNodeMsg}} = Result.
+```
+
+**Use Cases:**
+- Modify server configuration dynamically
+- Initialize custom devices
+- Set up monitoring
+- Configure routing
+
+**Test Code:**
+```erlang
+set_node_opts_test() ->
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"start">> => #{
+                <<"device">> => #{
+                    <<"start">> => fun(_, #{<<"body">> := NodeMsg}, _) ->
+                        {ok, #{<<"body">> => NodeMsg#{<<"test-success">> => true}}}
+                    end
+                }
+            }
+        }
+    }),
+    {ok, LiveOpts} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assert(hb_ao:get(<<"test-success">>, LiveOpts, false, #{})).
+```
+
+---
+
+## Greeting Banner
+
+### ASCII Art Display
+
+```
+===========================================================
+==    ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗           ==
+==    ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗          ==
+==    ███████║ ╚████╔╝ ██████╔╝█████╗  ██████╔╝          ==
+==    ██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══╝  ██╔══██╗          ==
+==    ██║  ██║   ██║   ██║     ███████╗██║  ██║          ==
+==    ╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚══════╝╚═╝  ╚═╝          ==
+==                                                       ==
+==        ██████╗ ███████╗ █████╗ ███╗   ███╗ VERSION:   ==
+==        ██╔══██╗██╔════╝██╔══██╗████╗ ████║      v1.0. ==
+==        ██████╔╝█████╗  ███████║██╔████╔██║            ==
+==        ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║ EAT GLASS, ==
+==        ██████╔╝███████╗██║  ██║██║ ╚═╝ ██║ BUILD THE  ==
+==        ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝    FUTURE. ==
+===========================================================
+== Node activate at: http://localhost:8734              ==
+== Operator: xABCD...1234                               ==
+===========================================================
+== Config:                                               ==
+===========================================================
+   #{port => 8734, ...}
+===========================================================
+```
+
+**Suppression:** Automatically disabled in test mode
+
+---
+
+## Error Handling
+
+### Error Response Format
+
+```erlang
+format_error_response(Req, ErrorMsg, NodeMsg) ->
+    Singleton = #{
+        <<"status">> => 500,
+        <<"status-reason">> => <<"Internal Server Error">>,
+        <<"content-type">> => <<"text/plain">>
+    },
+    FormattedErrorMsg = iolist_to_binary([
+        "Error: ", hb_util:bin(ErrorMsg), "\n",
+        "Path: ", cowboy_req:path(Req), "\n",
+        "Method: ", cowboy_req:method(Req)
+    ]),
+    hb_http:reply(Req, Singleton, FormattedErrorMsg, NodeMsg).
+```
+
+**Error Types:**
+- `{error, Reason}` - Standard errors
+- `{throw, Exception}` - Exceptions
+- `{exit, Reason}` - Process exits
+- `{Type, Error, Stack}` - Catches with stack trace
+
+---
+
+## Server Restart
+
+### Dynamic Server Updates
+
+```erlang
+% Start first server
+Node1 = hb_http_server:start_node(#{
+    <<"key">> => <<"value1">>,
+    priv_wallet => Wallet
+}),
+
+% Restart with same wallet (updates configuration)
+Node2 = hb_http_server:start_node(#{
+    <<"key">> => <<"value2">>,
+    priv_wallet => Wallet
+}),
+
+% Node2 URL reflects updated configuration
+{ok, <<"value2">>} = hb_http:get(Node2, <<"/~meta@1.0/info/key">>, #{}).
+```
+
+**Test Code:**
+```erlang
+restart_server_test() ->
+    Wallet = ar_wallet:new(),
+    BaseOpts = #{
+        <<"test-key">> => <<"server-1">>,
+        priv_wallet => Wallet,
+        protocol => http2
+    },
+    _Node1 = hb_http_server:start_node(BaseOpts),
+    Node2 = hb_http_server:start_node(BaseOpts#{<<"test-key">> => <<"server-2">>}),
+    ?assertEqual(
+        {ok, <<"server-2">>},
+        hb_http:get(Node2, <<"/~meta@1.0/info/test-key">>, #{protocol => http2})
+    ).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Start production server
+{ok, _} = hb_http_server:start().
+
+%% Start with custom configuration
+{ok, _} = hb_http_server:start(#{
+    port => 9000,
+    store => [#{type => rocksdb, path => <<"data">>}],
+    priv_key_location => <<"keys/node.json">>
+}).
+
+%% Start test node
+Node = hb_http_server:start_node(),
+{ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}).
+
+%% Dynamic configuration update
+Opts = hb_http_server:get_opts(),
+{ok, NewOpts} = hb_http_server:set_opts(#{<<"new-key">> => <<"value">>}, Opts).
+
+%% Get current server configuration
+Config = hb_http_server:get_opts(),
+Port = hb_opts:get(port, 8734, Config).
+
+%% Use startup hook
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"start">> => #{
+            <<"device">> => #{
+                <<"start">> => fun(_, #{<<"body">> := Msg}, _) ->
+                    io:format("Server starting with config: ~p~n", [Msg]),
+                    {ok, #{<<"body">> => Msg}}
+                end
+            }
+        }
+    }
+}).
+```
+
+---
+
+## Node History Tracking
+
+```erlang
+% Initial state
+Opts1 = get_opts(),
+History1 = hb_opts:get(node_history, [], Opts1),
+% []
+
+% First update
+{ok, Opts2} = set_opts(#{<<"key1">> => <<"val1">>}, Opts1),
+History2 = hb_opts:get(node_history, [], Opts2),
+% [#{<<"key1">> => <<"val1">>}]
+
+% Second update
+{ok, Opts3} = set_opts(#{<<"key2">> => <<"val2">>}, Opts2),
+History3 = hb_opts:get(node_history, [], Opts3),
+% [#{<<"key1">> => <<"val1">>}, #{<<"key2">> => <<"val2">>}]
+```
+
+---
+
+## Protocol Support
+
+### HTTP/2 (Default)
+
+```erlang
+ProtoOpts = #{
+    protocols => [http2],
+    transport => tcp
+}.
+```
+
+### HTTP/3 (QUIC)
+
+```erlang
+ProtoOpts = #{
+    protocols => [http3],
+    transport => quicer
+}.
+```
+
+**Configuration:**
+```erlang
+#{
+    protocol => http3,
+    port => 8734
+}
+```
+
+---
+
+## Prometheus Integration
+
+### Metrics Collection
+
+```erlang
+ProtoOpts = #{
+    metrics_callback => fun prometheus_cowboy2_instrumenter:observe/1,
+    stream_handlers => [cowboy_metrics_h, cowboy_stream_h]
+}
+```
+
+**Metrics Tracked:**
+- Request count by method/path
+- Response time distribution
+- Status code distribution
+- Connection count
+- Bytes sent/received
+
+**Disabled in Tests:** Automatically disabled when `hb_features:test()` returns `true`
+
+---
+
+## Configuration Precedence
+
+1. **Command Line/Explicit:** Options passed to `start/1`
+2. **Configuration File:** Loaded from `config.flat`
+3. **Environment Defaults:** From `hb_opts:default_message_with_env()`
+4. **Hardcoded Defaults:** In `set_default_opts/1`
+
+---
+
+## References
+
+- **HTTP Client** - `hb_http.erl`
+- **AO-Core** - `hb_ao.erl`, `hb_singleton.erl`
+- **Message Handling** - `hb_message.erl`
+- **Options** - `hb_opts.erl`
+- **Store** - `hb_store.erl`
+- **Hooks** - `dev_hook.erl`
+
+---
+
+## Notes
+
+1. **Cowboy Integration:** Uses Cowboy as HTTP server framework
+2. **Dynamic Configuration:** Server options can be updated at runtime
+3. **History Tracking:** Maintains history of configuration changes
+4. **Startup Hooks:** Allows modification of configuration before server starts
+5. **Test Mode:** Greeting banner and Prometheus disabled in tests
+6. **Random Ports:** Test nodes use random ports (10000-60000)
+7. **Default Security:** `force_signed => true` for test nodes
+8. **Store Initialization:** Automatic test store creation if not provided
+9. **Wallet Management:** Loads from file or creates new for tests
+10. **Server Restart:** Same wallet allows configuration updates
+11. **Protocol Choice:** HTTP/2 default, HTTP/3 optional
+12. **CORS Support:** Handled by `hb_http:reply/4`
+13. **Error Formatting:** Detailed error messages with stack traces
+14. **Process Dictionary:** Server ID stored per-process
+15. **Environment Storage:** Configuration stored in Cowboy environment

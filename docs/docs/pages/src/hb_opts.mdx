@@ -1,0 +1,675 @@
+# hb_opts.erl - Global and Local Configuration Management
+
+## Overview
+
+**Purpose:** Manage global and local options across HyperBEAM with strict determinism guarantees  
+**Module:** `hb_opts`  
+**Pattern:** Hierarchical configuration with environment variables, file loading, and identity management
+
+This module provides a comprehensive system for managing configuration options in HyperBEAM. It supports both global settings (stored in the application environment) and local overrides (passed in `Opts` maps), with built-in safeguards to prevent non-deterministic behavior that could lead to economic penalties for node operators.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_util`, `hb_maps`, `hb_json`, `dev_lua_test`
+- **Arweave:** `ar_wallet`
+- **Erlang/OTP:** `application`, `file`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Configuration Access
+-spec get(Key) -> Value | undefined.
+-spec get(Key, Default) -> Value.
+-spec get(Key, Default, Opts) -> Value.
+
+%% Configuration Loading
+-spec load(Path) -> {ok, Config} | {error, Reason}.
+-spec load(Path, Opts) -> {ok, Config} | {error, Reason}.
+-spec load_bin(Binary, Format) -> {ok, Config} | {error, Reason}.
+
+%% Default Messages
+-spec default_message() -> Map.
+-spec default_message_with_env() -> Map.
+
+%% Identity Management
+-spec identities(Opts) -> IdentitiesMap.
+-spec as(Identity, Opts) -> {ok, OptsWithIdentity} | not_found.
+
+%% Type Conversion
+-spec mimic_default_types(Key, Value, Default) -> TypedValue.
+
+%% Validation
+-spec ensure_node_history(Opts, RequiredOpts) -> {ok, valid} | {error, invalid_values}.
+-spec check_required_opts(Opts, RequiredKeys) -> {ok, valid} | {error, missing_keys, MissingKeys}.
+```
+
+---
+
+## Public Functions
+
+### 1. get/1, get/2, get/3
+
+```erlang
+-spec get(Key) -> Value | undefined
+    when
+        Key :: atom() | binary(),
+        Value :: term().
+
+-spec get(Key, Default) -> Value
+    when
+        Key :: atom() | binary(),
+        Default :: term(),
+        Value :: term().
+
+-spec get(Key, Default, Opts) -> Value
+    when
+        Key :: atom() | binary(),
+        Default :: term(),
+        Opts :: map(),
+        Value :: term().
+```
+
+**Description:** Retrieve configuration values with hierarchical precedence. Local options override global settings unless preference is explicitly set. Returns `undefined` or `Default` if key not found.
+
+**Precedence Rules:**
+1. If `Opts` contains `prefer => local`: Local value takes precedence
+2. If `Opts` contains `prefer => global`: Global value takes precedence
+3. Default: Local overrides global if present
+
+**Test Code:**
+```erlang
+-module(hb_opts_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_global_test() ->
+    % Global option set in application environment
+    ?assertNotEqual(undefined, hb_opts:get(mode)),
+    ?assertEqual(1234, hb_opts:get(unset_global_key, 1234)).
+
+get_local_test() ->
+    Local = #{only => local},
+    ?assertEqual(undefined, hb_opts:get(test_key, undefined, Local)),
+    ?assertEqual(correct, hb_opts:get(test_key, undefined, Local#{test_key => correct})).
+
+get_local_preference_test() ->
+    Local = #{prefer => local},
+    ?assertEqual(correct, hb_opts:get(test_key, undefined, Local#{test_key => correct})),
+    ?assertEqual(correct, hb_opts:get(mode, undefined, Local#{mode => correct})),
+    ?assertNotEqual(undefined, hb_opts:get(mode, undefined, Local)).
+
+get_global_preference_test() ->
+    Global = #{prefer => global},
+    ?assertEqual(undefined, hb_opts:get(test_key, undefined, Global)),
+    ?assertNotEqual(incorrect, hb_opts:get(mode, undefined, Global#{mode => incorrect})),
+    ?assertNotEqual(undefined, hb_opts:get(mode, undefined, Global)).
+```
+
+---
+
+### 2. load/1, load/2
+
+```erlang
+-spec load(Path) -> {ok, Config} | {error, Reason}
+    when
+        Path :: binary() | string(),
+        Config :: map(),
+        Reason :: term().
+
+-spec load(Path, Opts) -> {ok, Config} | {error, Reason}
+    when
+        Path :: binary() | string(),
+        Opts :: map(),
+        Config :: map(),
+        Reason :: term().
+```
+
+**Description:** Load configuration from file. Supports both `.flat` (key-value format) and `.json` formats. Automatically converts types and normalizes keys (e.g., `await-inprogress` → `await_inprogress`).
+
+**Supported Formats:**
+- **Flat Format (.flat):** Simple key-value pairs separated by colons
+- **JSON Format (.json):** Standard JSON with automatic type preservation
+
+**Test Code:**
+```erlang
+-module(hb_opts_load_test).
+-include_lib("eunit/include/eunit.hrl").
+
+load_flat_test() ->
+    % File contents:
+    % port: 1234
+    % host: https://ao.computer
+    % await-inprogress: false
+    {ok, Conf} = hb_opts:load("test/config.flat", #{}),
+    % Ensure we convert types as expected
+    ?assertEqual(1234, hb_maps:get(port, Conf)),
+    % A binary
+    ?assertEqual(<<"https://ao.computer">>, hb_maps:get(host, Conf)),
+    % An atom, where the key contained a header-key '-' rather than a '_'
+    ?assertEqual(false, hb_maps:get(await_inprogress, Conf)).
+
+load_json_test() ->
+    {ok, Conf} = hb_opts:load("test/config.json", #{}),
+    ?assertEqual(1234, hb_maps:get(port, Conf)),
+    ?assertEqual(9001, hb_maps:get(example, Conf)),
+    ?assertEqual(<<"https://ao.computer">>, hb_maps:get(host, Conf)),
+    ?assertEqual(false, hb_maps:get(await_inprogress, Conf)),
+    % Ensure that a store with 'ao-types' is loaded correctly
+    ?assertMatch(
+        [#{<<"store-module">> := hb_store_fs}|_],
+        hb_maps:get(store, Conf)
+    ).
+```
+
+---
+
+### 3. load_bin/2
+
+```erlang
+-spec load_bin(Binary, Format) -> {ok, Config} | {error, Reason}
+    when
+        Binary :: binary(),
+        Format :: flat | json,
+        Config :: map(),
+        Reason :: term().
+```
+
+**Description:** Load configuration from binary data instead of file. Useful for dynamic configuration or testing.
+
+**Test Code:**
+```erlang
+-module(hb_opts_load_bin_test).
+-include_lib("eunit/include/eunit.hrl").
+
+load_bin_flat_test() ->
+    Config = <<"port: 8080\nhost: localhost">>,
+    {ok, Loaded} = hb_opts:load_bin(Config, flat),
+    ?assertEqual(8080, maps:get(port, Loaded)),
+    ?assertEqual(<<"localhost">>, maps:get(host, Loaded)).
+
+load_bin_json_test() ->
+    Config = <<"{\"port\": 8080, \"host\": \"localhost\"}">>,
+    {ok, Loaded} = hb_opts:load_bin(Config, json),
+    ?assertEqual(8080, maps:get(port, Loaded)),
+    ?assertEqual(<<"localhost">>, maps:get(host, Loaded)).
+```
+
+---
+
+### 4. default_message/0, default_message_with_env/0
+
+```erlang
+-spec default_message() -> Map
+    when
+        Map :: map().
+
+-spec default_message_with_env() -> Map
+    when
+        Map :: map().
+```
+
+**Description:** Return the default HyperBEAM node configuration. `default_message_with_env/0` includes environment variable overrides.
+
+**Default Configuration Includes:**
+- HTTP client settings (`gun` or `httpc`)
+- Scheduling mode (aggressive, local_confirmation, remote_confirmation, disabled)
+- Compute mode (aggressive, lazy)
+- Gateway and bundler URLs
+- Preloaded devices (50+ device modules)
+- Cache control settings
+- Store configuration
+- Wallet location
+
+**Test Code:**
+```erlang
+-module(hb_opts_default_test).
+-include_lib("eunit/include/eunit.hrl").
+
+default_message_test() ->
+    Defaults = hb_opts:default_message(),
+    ?assert(is_map(Defaults)),
+    ?assertEqual(gun, maps:get(http_client, Defaults)),
+    ?assertEqual(lazy, maps:get(compute_mode, Defaults)),
+    ?assertEqual(local_confirmation, maps:get(scheduling_mode, Defaults)).
+
+default_message_with_env_test() ->
+    Defaults = hb_opts:default_message_with_env(),
+    ?assert(is_map(Defaults)),
+    % Should include environment variable overrides
+    ?assert(maps:is_key(port, Defaults)).
+```
+
+---
+
+### 5. identities/1
+
+```erlang
+-spec identities(Opts) -> IdentitiesMap
+    when
+        Opts :: map(),
+        IdentitiesMap :: map().
+```
+
+**Description:** Extract and expand all identity configurations from options. Creates mappings for both identity names and their human-readable IDs. Automatically includes the default wallet.
+
+**Returns:** Map with keys:
+- Identity names (e.g., `<<"alice">>`)
+- Human-readable IDs (e.g., `<<"vKk...abc">>`)
+- `<<"default">>` for the primary wallet
+
+**Test Code:**
+```erlang
+-module(hb_opts_identities_test).
+-include_lib("eunit/include/eunit.hrl").
+
+identities_test() ->
+    DefaultWallet = ar_wallet:new(),
+    TestWallet1 = ar_wallet:new(),
+    TestWallet2 = ar_wallet:new(),
+    TestID2 = hb_util:human_id(TestWallet2),
+    Opts = #{
+        priv_wallet => DefaultWallet,
+        identities => #{
+            <<"testname-1">> => #{
+                priv_wallet => TestWallet1,
+                test_key => 1
+            },
+            TestID2 => #{
+                priv_wallet => TestWallet2,
+                test_key => 2
+            }
+        }
+    },
+    Identities = hb_opts:identities(Opts),
+    % The number of identities should be 5: 'default', its ID, 'testname-1',
+    % and its ID, and just the ID of TestWallet2
+    ?assertEqual(5, maps:size(Identities)).
+```
+
+---
+
+### 6. as/2
+
+```erlang
+-spec as(Identity, Opts) -> {ok, OptsWithIdentity} | not_found
+    when
+        Identity :: binary(),
+        Opts :: map(),
+        OptsWithIdentity :: map().
+```
+
+**Description:** Switch context to a specific identity, merging its configuration with base options. Useful for multi-wallet operations.
+
+**Test Code:**
+```erlang
+-module(hb_opts_as_test).
+-include_lib("eunit/include/eunit.hrl").
+
+as_identity_test() ->
+    DefaultWallet = ar_wallet:new(),
+    TestWallet1 = ar_wallet:new(),
+    Opts = #{
+        test_key => 0,
+        priv_wallet => DefaultWallet,
+        identities => #{
+            <<"testname-1">> => #{
+                priv_wallet => TestWallet1,
+                test_key => 1
+            }
+        }
+    },
+    ?assertMatch(
+        {ok, #{priv_wallet := DefaultWallet, test_key := 0}},
+        hb_opts:as(<<"default">>, Opts)
+    ),
+    ?assertMatch(
+        {ok, #{priv_wallet := TestWallet1, test_key := 1}},
+        hb_opts:as(<<"testname-1">>, Opts)
+    ),
+    ?assertMatch(
+        {ok, #{priv_wallet := TestWallet1, test_key := 1}},
+        hb_opts:as(hb_util:human_id(TestWallet1), Opts)
+    ).
+```
+
+---
+
+### 7. mimic_default_types/3
+
+```erlang
+-spec mimic_default_types(Key, Value, Default) -> TypedValue
+    when
+        Key :: atom() | binary(),
+        Value :: term(),
+        Default :: map(),
+        TypedValue :: term().
+```
+
+**Description:** Convert a value to match the type of the corresponding default value. Used during configuration loading to ensure type consistency.
+
+**Type Conversions:**
+- String numbers → Integers
+- String "true"/"false" → Booleans
+- Preserves binaries, lists, maps as-is
+
+**Test Code:**
+```erlang
+-module(hb_opts_mimic_test).
+-include_lib("eunit/include/eunit.hrl").
+
+mimic_default_types_test() ->
+    Default = #{port => 8080, enabled => true, name => <<"test">>},
+    ?assertEqual(1234, hb_opts:mimic_default_types(port, "1234", Default)),
+    ?assertEqual(true, hb_opts:mimic_default_types(enabled, "true", Default)),
+    ?assertEqual(<<"value">>, hb_opts:mimic_default_types(name, <<"value">>, Default)).
+```
+
+---
+
+### 8. ensure_node_history/2
+
+```erlang
+-spec ensure_node_history(Opts, RequiredOpts) -> {ok, valid} | {error, invalid_values}
+    when
+        Opts :: map(),
+        RequiredOpts :: map().
+```
+
+**Description:** Validate that all items in the `node_history` list contain required options with correct values. Used for consensus validation.
+
+**Test Code:**
+```erlang
+-module(hb_opts_ensure_test).
+-include_lib("eunit/include/eunit.hrl").
+
+ensure_node_history_valid_test() ->
+    RequiredOpts = #{
+        key1 => #{<<"type">> => <<"string">>, <<"value">> => <<"value1">>},
+        key2 => <<"value2">>
+    },
+    ValidOpts = #{
+        <<"key1">> => #{<<"type">> => <<"string">>, <<"value">> => <<"value1">>},
+        <<"key2">> => <<"value2">>,
+        node_history => [
+            #{
+                <<"key1">> => #{<<"type">> => <<"string">>, <<"value">> => <<"value1">>},
+                <<"key2">> => <<"value2">>
+            }
+        ]
+    },
+    ?assertEqual({ok, valid}, hb_opts:ensure_node_history(ValidOpts, RequiredOpts)).
+
+ensure_node_history_missing_test() ->
+    RequiredOpts = #{key1 => <<"value1">>, key2 => <<"value2">>},
+    MissingItems = #{
+        <<"key1">> => <<"value1">>,
+        node_history => [#{<<"key1">> => <<"value1">>}]  % missing key2
+    },
+    ?assertEqual({error, invalid_values}, hb_opts:ensure_node_history(MissingItems, RequiredOpts)).
+
+ensure_node_history_invalid_test() ->
+    RequiredOpts = #{key1 => <<"value1">>, key2 => <<"value2">>},
+    InvalidItems = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>,
+        node_history => [
+            #{<<"key1">> => <<"wrong">>, <<"key2">> => <<"value2">>}
+        ]
+    },
+    ?assertEqual({error, invalid_values}, hb_opts:ensure_node_history(InvalidItems, RequiredOpts)).
+```
+
+---
+
+### 9. check_required_opts/2
+
+```erlang
+-spec check_required_opts(Opts, RequiredKeys) -> {ok, valid} | {error, missing_keys, MissingKeys}
+    when
+        Opts :: map(),
+        RequiredKeys :: [atom() | binary()],
+        MissingKeys :: [atom() | binary()].
+```
+
+**Description:** Verify that all required configuration keys are present in the options map.
+
+**Test Code:**
+```erlang
+-module(hb_opts_check_test).
+-include_lib("eunit/include/eunit.hrl").
+
+check_required_opts_valid_test() ->
+    Opts = #{port => 8080, host => <<"localhost">>, mode => prod},
+    Required = [port, host, mode],
+    ?assertEqual({ok, valid}, hb_opts:check_required_opts(Opts, Required)).
+
+check_required_opts_missing_test() ->
+    Opts = #{port => 8080},
+    Required = [port, host, mode],
+    {error, missing_keys, Missing} = hb_opts:check_required_opts(Opts, Required),
+    ?assertEqual(2, length(Missing)),
+    ?assert(lists:member(host, Missing)),
+    ?assert(lists:member(mode, Missing)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Get configuration with fallback
+Port = hb_opts:get(port, 8080),
+Gateway = hb_opts:get(gateway, <<"https://arweave.net">>, Opts).
+
+%% Load configuration from file
+{ok, Config} = hb_opts:load("config.json"),
+NodeOpts = hb_maps:merge(hb_opts:default_message(), Config).
+
+%% Use local override
+Opts = #{
+    gateway => <<"https://custom-gateway.com">>,
+    http_client => httpc
+},
+Gateway = hb_opts:get(gateway, <<"https://arweave.net">>, Opts).
+
+%% Multi-identity operations
+Opts = #{
+    priv_wallet => MainWallet,
+    identities => #{
+        <<"alice">> => #{priv_wallet => AliceWallet},
+        <<"bob">> => #{priv_wallet => BobWallet}
+    }
+},
+{ok, AliceOpts} = hb_opts:as(<<"alice">>, Opts),
+{ok, BobOpts} = hb_opts:as(<<"bob">>, Opts),
+% Now use AliceOpts and BobOpts for operations.
+
+%% Environment-aware defaults
+Defaults = hb_opts:default_message_with_env(),
+% Includes overrides from HB_PORT, HB_MODE, etc.
+
+%% Validate required options
+Required = [port, gateway, bundler_ans104],
+case hb_opts:check_required_opts(Opts, Required) of
+    {ok, valid} -> proceed();
+    {error, missing_keys, Missing} -> 
+        io:format("Missing: ~p~n", [Missing])
+end.
+```
+
+---
+
+## Environment Variables
+
+### Supported Environment Variables
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `HB_KEY` | string | `hyperbeam-key.json` | Private key file location |
+| `HB_CONFIG` | string | `config.flat` | Configuration file path |
+| `HB_PORT` | integer | `8734` | HTTP server port |
+| `HB_MODE` | atom | - | Operating mode (prod/debug) |
+| `HB_PRINT` | string/boolean | See DEFAULT_PRINT_OPTS | Debug print topics |
+| `LUA_SCRIPTS` | string | `scripts` | Lua scripts directory |
+| `LUA_TESTS` | string | `tests` | Lua test specifications |
+| `HB_INDEX` | string | `ui` | Default index route |
+
+### Example Usage
+
+```bash
+# Set environment variables
+export HB_PORT=9000
+export HB_MODE=prod
+export HB_PRINT="error,http_error,compute_short"
+export HB_CONFIG="custom-config.json"
+
+# Start HyperBEAM
+./start.sh
+```
+
+---
+
+## Configuration File Formats
+
+### Flat Format (.flat)
+
+```
+port: 8734
+host: https://ao.computer
+gateway: https://arweave.net
+http-client: gun
+await-inprogress: false
+```
+
+**Features:**
+- Simple key-value pairs
+- Hyphens in keys converted to underscores
+- Automatic type inference from defaults
+- Comments not supported
+
+### JSON Format (.json)
+
+```json
+{
+  "port": 8734,
+  "host": "https://ao.computer",
+  "gateway": "https://arweave.net",
+  "http_client": "gun",
+  "await_inprogress": false,
+  "store": [
+    {
+      "name": "cache-mainnet/lmdb",
+      "store-module": "hb_store_lmdb"
+    }
+  ]
+}
+```
+
+**Features:**
+- Full JSON support with nested structures
+- Preserves types explicitly
+- Supports complex configurations
+- Standard JSON formatting
+
+---
+
+## Default Configuration Options
+
+### Functional Options
+
+```erlang
+#{
+    % HTTP client implementation
+    http_client => gun,  % or httpc
+    
+    % Scheduling mode for message assignments
+    scheduling_mode => local_confirmation,  
+    % Options: aggressive, local_confirmation, remote_confirmation, disabled
+    
+    % Compute mode for process device
+    compute_mode => lazy,  % or aggressive
+    
+    % Remote node URLs
+    gateway => <<"https://arweave.net">>,
+    bundler_ans104 => <<"https://up.arweave.net:443">>,
+    
+    % Wallet location
+    priv_key_location => <<"hyperbeam-key.json">>,
+    
+    % Scheduler TTL (7 days in milliseconds)
+    scheduler_location_ttl => (60 * 60 * 24 * 7) * 1000,
+    
+    % Cache control
+    cache_control => [<<"no-cache">>, <<"no-store">>],
+    await_inprogress => named  % false, named, or true
+}
+```
+
+### Preloaded Devices
+
+50+ devices including:
+- **Core:** `arweave@2.9-pre`, `apply@1.0`, `compute@1.0`
+- **Codecs:** `ans104@1.0`, `json@1.0`, `flat@1.0`, `httpsig@1.0`
+- **Process Management:** `process@1.0`, `scheduler@1.0`, `cron@1.0`
+- **Storage:** `cache@1.0`, `poda@1.0`, `volume@1.0`
+- **Execution:** `wasm-64@1.0`, `lua@5.3a`, `wasi@1.0`
+- **Utilities:** `router@1.0`, `query@1.0`, `monitor@1.0`
+
+---
+
+## Determinism Guarantees
+
+### Critical Safety Rules
+
+**NEVER use local options to make deterministic functions non-deterministic:**
+
+```erlang
+% ❌ BAD - Non-deterministic behavior based on local config
+compute(Input, Opts) ->
+    case hb_opts:get(use_random, false, Opts) of
+        true -> crypto:strong_rand_bytes(32);  % Different results!
+        false -> crypto:hash(sha256, Input)
+    end.
+
+% ✓ GOOD - Deterministic regardless of options
+compute(Input, _Opts) ->
+    crypto:hash(sha256, Input).
+```
+
+**Options should only affect:**
+- Performance characteristics
+- Storage locations
+- Network endpoints
+- Logging verbosity
+- Non-deterministic operations explicitly marked as such
+
+**Economic Risk:** Violating determinism can lead to:
+- Failed verifications
+- Economic slashing for staked operators
+- Loss of funds due to incorrect execution results
+
+---
+
+## References
+
+- **HyperBEAM Core** - `hb_ao.erl`, `hb_ao_device.erl`
+- **Configuration Loading** - `hb_json.erl`, `hb_maps.erl`
+- **Wallet Management** - `ar_wallet.erl`
+- **Environment Variables** - Erlang application environment
+
+---
+
+## Notes
+
+1. **Hierarchical Override:** Local options override global unless `prefer => global`
+2. **Type Safety:** Configuration values are type-converted to match defaults
+3. **Identity Management:** Supports multiple wallets with named identities
+4. **File Formats:** Both flat and JSON formats supported with automatic detection
+5. **Environment Variables:** Auto-loaded in `default_message_with_env/0`
+6. **Determinism:** Options must never break deterministic execution guarantees
+7. **Economic Safety:** Non-deterministic configurations can lead to slashing
+8. **Key Normalization:** Hyphens converted to underscores (`await-inprogress` → `await_inprogress`)
+9. **Default Values:** Comprehensive defaults provided for all essential options
+10. **Validation:** Built-in validation for required options and node history

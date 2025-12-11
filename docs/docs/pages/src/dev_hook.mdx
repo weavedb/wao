@@ -1,0 +1,620 @@
+# dev_hook.erl - Node Lifecycle Hook System
+
+## Overview
+
+**Purpose:** Generalized interface for hooking into HyperBEAM node lifecycle events  
+**Module:** `dev_hook`  
+**Pattern:** Event-driven handler pipeline with chainable execution  
+**Integration:** Node startup, request handling, message evaluation, and response
+
+This module provides a flexible hook system that allows developers to execute custom logic at various points in the node and message lifecycle. Hooks are maintained in the node message options and can be chained together to form processing pipelines.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_message`, `hb_opts`, `hb_util`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info(Msg) -> DeviceInfo.
+
+%% Hook Execution
+-spec on(HookName, Req, Opts) -> {ok, Result} | {error, Reason} | {Status, Result}.
+
+%% Hook Discovery
+-spec find(HookName, Opts) -> [Handler].
+-spec find(Base, Req, Opts) -> [Handler].
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(Msg) -> DeviceInfo
+    when
+        Msg :: term(),
+        DeviceInfo :: #{excludes => [binary()]}.
+```
+
+**Description:** Return device information. Excludes `on` from direct API access for security.
+
+**Test Code:**
+```erlang
+-module(dev_hook_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    Info = dev_hook:info(#{}),
+    ?assert(is_map(Info)),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"on">>, Excludes)).
+```
+
+---
+
+### 2. on/3
+
+```erlang
+-spec on(HookName, Req, Opts) -> {ok, Result} | {Status, Result}
+    when
+        HookName :: binary(),
+        Req :: map(),
+        Opts :: map(),
+        Result :: map(),
+        Status :: ok | error | failure.
+```
+
+**Description:** Execute a named hook with the provided request. Finds all handlers for the hook and evaluates them in sequence, passing the result of each to the next.
+
+**Execution Flow:**
+1. Find all handlers for the hook
+2. If no handlers found, return original request with `ok` status
+3. Execute handlers in sequence as pipeline
+4. Each handler's result becomes input to next handler
+5. Halt on non-ok status and return error
+
+**Handler Chain:**
+```
+Request → Handler1 → Handler2 → Handler3 → Final Result
+          ↓           ↓           ↓
+       {ok, R1}   {ok, R2}   {ok, R3}
+```
+
+**Test Code:**
+```erlang
+-module(dev_hook_on_test).
+-include_lib("eunit/include/eunit.hrl").
+
+on_no_handlers_test() ->
+    Req = #{<<"test">> => <<"value">>},
+    Opts = #{},
+    {ok, Result} = dev_hook:on(<<"nonexistent">>, Req, Opts),
+    ?assertEqual(Req, Result).
+
+on_single_handler_test() ->
+    Handler = #{
+        <<"device">> => #{
+            <<"test-hook">> =>
+                fun(_, Req, _) ->
+                    {ok, Req#{<<"handler_executed">> => true}}
+                end
+        }
+    },
+    Req = #{<<"test">> => <<"value">>},
+    Opts = #{on => #{<<"test-hook">> => Handler}},
+    {ok, Result} = dev_hook:on(<<"test-hook">>, Req, Opts),
+    ?assertEqual(true, maps:get(<<"handler_executed">>, Result)).
+
+on_pipeline_test() ->
+    Handler1 = #{
+        <<"device">> => #{
+            <<"test-hook">> =>
+                fun(_, Req, _) -> {ok, Req#{<<"h1">> => true}} end
+        }
+    },
+    Handler2 = #{
+        <<"device">> => #{
+            <<"test-hook">> =>
+                fun(_, Req, _) -> {ok, Req#{<<"h2">> => true}} end
+        }
+    },
+    Req = #{<<"test">> => <<"value">>},
+    Opts = #{on => #{<<"test-hook">> => [Handler1, Handler2]}},
+    {ok, Result} = dev_hook:on(<<"test-hook">>, Req, Opts),
+    ?assertEqual(true, maps:get(<<"h1">>, Result)),
+    ?assertEqual(true, maps:get(<<"h2">>, Result)).
+
+on_halt_on_error_test() ->
+    Handler1 = #{
+        <<"device">> => #{
+            <<"test-hook">> =>
+                fun(_, Req, _) -> {ok, Req#{<<"h1">> => true}} end
+        }
+    },
+    Handler2 = #{
+        <<"device">> => #{
+            <<"test-hook">> =>
+                fun(_, _, _) -> {error, <<"Error in handler2">>} end
+        }
+    },
+    Handler3 = #{
+        <<"device">> => #{
+            <<"test-hook">> =>
+                fun(_, Req, _) -> {ok, Req#{<<"h3">> => true}} end
+        }
+    },
+    Req = #{<<"test">> => <<"value">>},
+    Opts = #{on => #{<<"test-hook">> => [Handler1, Handler2, Handler3]}},
+    {error, Result} = dev_hook:on(<<"test-hook">>, Req, Opts),
+    ?assertEqual(<<"Error in handler2">>, Result).
+```
+
+---
+
+### 3. find/2, find/3
+
+```erlang
+-spec find(HookName, Opts) -> [Handler]
+    when
+        HookName :: binary(),
+        Opts :: map(),
+        Handler :: map().
+
+-spec find(Base, Req, Opts) -> [Handler]
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Handler :: map().
+```
+
+**Description:** Find all handlers for a specific hook from node message options.
+
+**find/2:** Simple lookup by hook name  
+**find/3:** API-accessible version with request parameter
+
+**Handler Storage:**
+Handlers are stored in `on` key of node message:
+```erlang
+#{
+    on => #{
+        <<"hook-name">> => Handler | [Handler1, Handler2, ...]
+    }
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_hook_find_test).
+-include_lib("eunit/include/eunit.hrl").
+
+find_no_handlers_test() ->
+    Opts = #{},
+    Handlers = dev_hook:find(<<"nonexistent">>, Opts),
+    ?assertEqual([], Handlers).
+
+find_single_handler_test() ->
+    Handler = #{<<"test">> => <<"handler">>},
+    Opts = #{on => #{<<"test-hook">> => Handler}},
+    Handlers = dev_hook:find(<<"test-hook">>, Opts),
+    ?assertEqual([Handler], Handlers).
+
+find_multiple_handlers_test() ->
+    Handler1 = #{<<"test">> => <<"handler1">>},
+    Handler2 = #{<<"test">> => <<"handler2">>},
+    Opts = #{on => #{<<"test-hook">> => [Handler1, Handler2]}},
+    Handlers = dev_hook:find(<<"test-hook">>, Opts),
+    ?assertEqual([Handler1, Handler2], Handlers).
+
+find_via_request_test() ->
+    Handler = #{<<"test">> => <<"handler">>},
+    Opts = #{on => #{<<"test-hook">> => Handler}},
+    Req = #{<<"body">> => <<"test-hook">>},
+    Handlers = dev_hook:find(#{}, Req, Opts),
+    ?assertEqual([Handler], Handlers).
+```
+
+---
+
+## Built-in Hooks
+
+### start
+**Executed:** When the node starts
+
+**Request:**
+```erlang
+#{
+    <<"body">> => InitialNodeConfiguration
+}
+```
+
+**Result:**
+```erlang
+#{
+    <<"body">> => UpdatedNodeConfiguration
+}
+```
+
+**Use Cases:**
+- Load configuration from storage
+- Initialize databases
+- Set up monitoring
+- Register services
+
+---
+
+### request
+**Executed:** When a request is received via HTTP API
+
+**Request:**
+```erlang
+#{
+    <<"body">> => MessageSequence,
+    <<"request">> => RawRequest
+}
+```
+
+**Result:**
+```erlang
+#{
+    <<"body">> => ModifiedMessageSequence
+}
+```
+
+**Use Cases:**
+- Request validation
+- Authentication
+- Rate limiting
+- Request transformation
+
+---
+
+### step
+**Executed:** After each message in a sequence has been evaluated
+
+**Request:**
+```erlang
+#{
+    <<"body">> => EvaluationResult
+}
+```
+
+**Result:**
+```erlang
+#{
+    <<"body">> => ModifiedResult
+}
+```
+
+**Special Handling:** Step hook is temporarily removed during execution to prevent infinite recursion.
+
+**Use Cases:**
+- Result logging
+- Metrics collection
+- State tracking
+- Side effects
+
+---
+
+### response
+**Executed:** When a response is sent via HTTP API
+
+**Request:**
+```erlang
+#{
+    <<"body">> => EvaluationResult,
+    <<"request">> => OriginalRequest
+}
+```
+
+**Result:**
+```erlang
+#{
+    <<"body">> => ResponseMessage
+}
+```
+
+**Use Cases:**
+- Response transformation
+- Header injection
+- Response caching
+- Metrics recording
+
+---
+
+## Common Patterns
+
+```erlang
+%% Register single handler
+Opts = #{
+    on => #{
+        <<"start">> => #{
+            <<"device">> => <<"custom-init@1.0">>,
+            <<"path">> => <<"initialize">>
+        }
+    }
+},
+hb_http_server:set_opts(Opts).
+
+%% Register multiple handlers (pipeline)
+Opts = #{
+    on => #{
+        <<"request">> => [
+            #{<<"device">> => <<"auth@1.0">>},
+            #{<<"device">> => <<"rate-limit@1.0">>},
+            #{<<"device">> => <<"logger@1.0">>}
+        ]
+    }
+}.
+
+%% Custom handler with inline function
+Handler = #{
+    <<"device">> => #{
+        <<"my-hook">> => fun(_, Req, Opts) ->
+            % Custom logic here
+            UpdatedReq = Req#{<<"processed">> => true},
+            {ok, UpdatedReq}
+        end
+    }
+},
+Opts = #{on => #{<<"my-hook">> => Handler}}.
+
+%% Ignore result (don't modify request)
+Handler = #{
+    <<"device">> => <<"logger@1.0">>,
+    <<"hook/result">> => <<"ignore">>
+},
+% Logger runs but doesn't modify the request
+
+%% Commit request before execution
+Handler = #{
+    <<"device">> => <<"secure-handler@1.0">>,
+    <<"hook/commit-request">> => <<"true">>
+},
+% Request is signed before being passed to handler
+
+%% Execute hook programmatically
+Req = #{<<"data">> => <<"test">>},
+{ok, Result} = dev_hook:on(<<"custom-hook">>, Req, Opts).
+```
+
+---
+
+## Handler Configuration
+
+### Basic Handler
+```erlang
+#{
+    <<"device">> => <<"handler-device@1.0">>,
+    <<"path">> => <<"handler-path">>
+}
+```
+
+### Handler with Result Control
+```erlang
+#{
+    <<"device">> => <<"handler@1.0">>,
+    <<"hook/result">> => <<"ignore">>  % or <<"return">> or <<"error">>
+}
+```
+
+**Result Options:**
+- `<<"ignore">>` - Discard handler result, use input
+- `<<"return">>` - Use handler result (default)
+- `<<"error">>` - Convert ok to error status
+
+### Handler with Request Commit
+```erlang
+#{
+    <<"device">> => <<"secure-handler@1.0">>,
+    <<"hook/commit-request">> => <<"true">>
+}
+```
+
+Commits both the handler and request before execution.
+
+---
+
+## Execution Behavior
+
+### Sequential Execution
+```erlang
+Request
+  ↓
+Handler1: {ok, R1}
+  ↓
+Handler2: {ok, R2}
+  ↓
+Handler3: {ok, R3}
+  ↓
+Final Result: R3
+```
+
+### Error Halting
+```erlang
+Request
+  ↓
+Handler1: {ok, R1}
+  ↓
+Handler2: {error, E}
+  ↓
+Execution Halts
+  ↓
+Final Result: {error, E}
+```
+
+### Result Ignore
+```erlang
+Request
+  ↓
+Handler1: {ok, R1}
+  ↓
+Handler2 (ignore): {ok, R2}  → Discarded
+  ↓
+Handler3: {ok, R3}  → Uses R1 as input
+  ↓
+Final Result: R3
+```
+
+---
+
+## Handler Resolution
+
+### Resolution Process
+```erlang
+% Handler message
+Handler = #{
+    <<"device">> => <<"my-device@1.0">>,
+    <<"path">> => <<"process">>
+},
+
+% Request
+Req = #{<<"data">> => <<"value">>},
+
+% Effective request to handler
+EffectiveReq = Req#{
+    <<"path">> => <<"process">>,  % From handler
+    <<"method">> => <<"GET">>     % Default
+},
+
+% Resolved via AO
+{Status, Result} = hb_ao:resolve(Handler, EffectiveReq, Opts).
+```
+
+### Hashpath Handling
+All hook resolutions use `hashpath => ignore` to prevent affecting message IDs.
+
+---
+
+## Step Hook Special Handling
+
+### Recursion Prevention
+```erlang
+% Original opts
+Opts = #{on => #{<<"step">> => StepHandler}},
+
+% During step hook execution
+% Step hook temporarily removed
+TempOpts = Opts#{on => maps:remove(<<"step">>, On)},
+
+% Execute with modified opts
+{Status, Result} = execute_handler(<<"step">>, Handler, Req, TempOpts).
+```
+
+This prevents infinite recursion when step hook triggers message evaluation.
+
+---
+
+## Error Handling
+
+### Exception Catching
+```erlang
+try
+    {Status, Result} = execute_handler(HookName, Handler, Req, Opts)
+catch
+    Error:Reason:Stacktrace ->
+        {failure, <<"Handler raised exception: Error:Reason">>}
+end
+```
+
+### Unexpected Results
+```erlang
+% Handler returns non-standard tuple
+case execute_handler(...) of
+    {ok, Res} -> {ok, Res};
+    {error, Res} -> {error, Res};
+    Other -> {failure, <<"Handler returned unexpected result.">>}
+end
+```
+
+---
+
+## Integration Examples
+
+### Authentication Hook
+```erlang
+AuthHandler = #{
+    <<"device">> => #{
+        <<"auth">> => fun(_, Req, Opts) ->
+            case hb_message:signers(Req, Opts) of
+                [] -> {error, <<"Unauthorized">>};
+                [Signer|_] ->
+                    case is_allowed(Signer) of
+                        true -> {ok, Req};
+                        false -> {error, <<"Forbidden">>}
+                    end
+            end
+        end
+    }
+},
+Opts = #{on => #{<<"request">> => AuthHandler}}.
+```
+
+### Logging Hook
+```erlang
+LogHandler = #{
+    <<"device">> => #{
+        <<"logger">> => fun(_, Req, _) ->
+            ?event(request_log, {req, Req}),
+            {ok, Req}
+        end
+    },
+    <<"hook/result">> => <<"ignore">>  % Don't modify request
+},
+Opts = #{on => #{
+    <<"request">> => LogHandler,
+    <<"response">> => LogHandler
+}}.
+```
+
+### Rate Limiting Hook
+```erlang
+RateLimitHandler = #{
+    <<"device">> => #{
+        <<"rate-limit">> => fun(_, Req, Opts) ->
+            Signer = hd(hb_message:signers(Req, Opts)),
+            case check_rate_limit(Signer, Opts) of
+                ok -> {ok, Req};
+                {error, Reason} -> {error, Reason}
+            end
+        end
+    }
+},
+Opts = #{on => #{<<"request">> => RateLimitHandler}}.
+```
+
+---
+
+## References
+
+- **AO Resolution** - `hb_ao.erl`
+- **Message Handling** - `hb_message.erl`
+- **Options Management** - `hb_opts.erl`
+- **HTTP Server** - `hb_http_server.erl`
+
+---
+
+## Notes
+
+1. **Pipeline Pattern:** Handlers execute in sequence as a pipeline
+2. **Error Halting:** First error stops execution
+3. **Result Control:** Handlers can ignore, return, or error results
+4. **Request Commit:** Optional signing before handler execution
+5. **Hashpath Ignore:** Hook execution doesn't affect message IDs
+6. **Step Recursion:** Special handling prevents infinite loops
+7. **Exception Safe:** All handlers execute in try-catch blocks
+8. **Built-in Hooks:** Start, request, step, response
+9. **Custom Hooks:** Any device can trigger custom hooks
+10. **Security Boundary:** `on` function not exposed via API
+11. **Multi-Handler:** Single hook can have multiple handlers
+12. **Chainable:** Output of one handler feeds next handler
+13. **Flexible:** Handlers can be maps or inline functions
+14. **Node-wide:** Hooks stored in node message options
+15. **Event-Driven:** Executes at specific lifecycle points

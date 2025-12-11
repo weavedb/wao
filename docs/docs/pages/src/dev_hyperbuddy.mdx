@@ -1,0 +1,692 @@
+# dev_hyperbuddy.erl - HTML REPL Interface & Utilities
+
+## Overview
+
+**Purpose:** REPL-like HTML interface for AO-Core with metrics and debugging tools  
+**Module:** `dev_hyperbuddy`  
+**Pattern:** Static file serving with dynamic debugging and monitoring  
+**Integration:** HTTP endpoint for interactive node exploration and monitoring
+
+This module provides a web-based interface for interacting with HyperBEAM nodes. It serves static HTML/CSS/JS files for dashboard, console, and graph visualization, along with dynamic endpoints for metrics, events, and message formatting.
+
+## Dependencies
+
+- **Erlang/OTP:** `prometheus_http_impl`, `prometheus_cowboy`, `prometheus_registry`
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_opts`, `hb_util`, `hb_format`, `hb_cache`, `hb_private`, `hb_event`, `hb_features`
+- **Device Layer:** `dev_message`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info() -> DeviceInfo.
+
+%% Metrics & Events
+-spec metrics(Base, Req, Opts) -> {ok, MetricsResponse}.
+-spec events(Base, Req, Opts) -> {ok, EventCounters}.
+
+%% Formatting
+-spec format(Base, Req, Opts) -> {ok, FormattedOutput}.
+
+%% File Serving
+-spec return_file(Name) -> {ok, FileResponse} | {error, not_found}.
+-spec return_file(Device, Name) -> {ok, FileResponse} | {error, not_found}.
+-spec return_file(Device, Name, Template) -> {ok, FileResponse} | {error, not_found}.
+-spec return_error(Error, Opts) -> {ok, ErrorPage}.
+
+%% Testing
+-spec throw(Msg, Req, Opts) -> {error, binary()} | no_return().
+```
+
+---
+
+## Public Functions
+
+### 1. info/0
+
+```erlang
+-spec info() -> DeviceInfo
+    when
+        DeviceInfo :: #{
+            default => fun(),
+            routes => map(),
+            excludes => [binary()]
+        }.
+```
+
+**Description:** Return device information including routes and configuration.
+
+**Routes:**
+- `index` → `index.html` - Default message viewer
+- `dashboard` → `dashboard.html` - HyperBEAM homepage
+- `console` → `console.html` - Interactive REPL
+- `graph` → `graph.html` - Graph visualization
+- Static assets: CSS and JavaScript files
+
+**Test Code:**
+```erlang
+-module(dev_hyperbuddy_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    Info = dev_hyperbuddy:info(),
+    ?assert(is_map(Info)),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(routes, Info)),
+    ?assert(maps:is_key(excludes, Info)).
+
+info_routes_test() ->
+    Info = dev_hyperbuddy:info(),
+    Routes = maps:get(routes, Info),
+    ?assertEqual(<<"index.html">>, maps:get(<<"index">>, Routes)),
+    ?assertEqual(<<"dashboard.html">>, maps:get(<<"dashboard">>, Routes)),
+    ?assertEqual(<<"console.html">>, maps:get(<<"console">>, Routes)).
+
+info_excludes_test() ->
+    Info = dev_hyperbuddy:info(),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"return_file">>, Excludes)).
+```
+
+---
+
+### 2. metrics/3
+
+```erlang
+-spec metrics(Base, Req, Opts) -> {ok, MetricsResponse}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        MetricsResponse :: #{
+            <<"body">> => binary(),
+            binary() => binary()
+        }.
+```
+
+**Description:** Return Prometheus-formatted metrics for the node.
+
+**Behavior:**
+- If Prometheus enabled: Returns metrics in Prometheus format
+- If Prometheus disabled: Returns message indicating metrics are disabled
+
+**Output Format:** Prometheus text exposition format
+
+**Test Code:**
+```erlang
+-module(dev_hyperbuddy_metrics_test).
+-include_lib("eunit/include/eunit.hrl").
+
+metrics_enabled_test() ->
+    Opts = #{prometheus => true},
+    meck:new(prometheus_http_impl, [passthrough]),
+    meck:new(prometheus_registry, [passthrough]),
+    meck:expect(prometheus_registry, exists, fun(_) -> true end),
+    meck:expect(prometheus_http_impl, reply, fun(_) ->
+        {200, [{<<"content-type">>, <<"text/plain">>}], <<"metrics">>}
+    end),
+    {ok, Response} = dev_hyperbuddy:metrics(#{}, #{}, Opts),
+    ?assert(maps:is_key(<<"body">>, Response)),
+    meck:unload([prometheus_http_impl, prometheus_registry]).
+
+metrics_disabled_test() ->
+    Opts = #{prometheus => false},
+    {ok, Response} = dev_hyperbuddy:metrics(#{}, #{}, Opts),
+    Body = maps:get(<<"body">>, Response),
+    ?assertEqual(<<"Prometheus metrics disabled.">>, Body).
+```
+
+---
+
+### 3. events/3
+
+```erlang
+-spec events(Base, Req, Opts) -> {ok, EventCounters}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        EventCounters :: map().
+```
+
+**Description:** Return current event counters from the event system.
+
+**Returns:** Map of event names to their occurrence counts.
+
+**Test Code:**
+```erlang
+-module(dev_hyperbuddy_events_test).
+-include_lib("eunit/include/eunit.hrl").
+
+events_test() ->
+    meck:new(hb_event, [passthrough]),
+    meck:expect(hb_event, counters, fun() ->
+        #{
+            <<"request_received">> => 42,
+            <<"message_evaluated">> => 100
+        }
+    end),
+    {ok, Counters} = dev_hyperbuddy:events(#{}, #{}, #{}),
+    ?assert(is_map(Counters)),
+    ?assertEqual(42, maps:get(<<"request_received">>, Counters)),
+    meck:unload(hb_event).
+```
+
+---
+
+### 4. format/3
+
+```erlang
+-spec format(Base, Req, Opts) -> {ok, FormattedOutput}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        FormattedOutput :: #{<<"body">> => binary()}.
+```
+
+**Description:** Format messages using HyperBEAM's pretty printer for debugging.
+
+**Format Scopes:**
+- `base` - Format the base message (default)
+- `request` - Format the request message
+- `node` - Format the node options
+- `all` - Format all three
+
+**Query Parameters:**
+- `format` - Scope to format (base/request/node/all)
+- `format+list` - List of scopes
+- `truncate-keys` - Number of keys to show (default: infinity)
+
+**Examples:**
+```
+GET /.../~hyperbuddy@1.0/format=request
+GET /.../~hyperbuddy@1.0/format+list=request,node
+GET /.../~hyperbuddy@1.0/format=request?truncate-keys=20
+```
+
+**Test Code:**
+```erlang
+-module(dev_hyperbuddy_format_test).
+-include_lib("eunit/include/eunit.hrl").
+
+format_base_test() ->
+    Base = #{<<"data">> => <<"test">>},
+    Req = #{},
+    Opts = #{},
+    {ok, Response} = dev_hyperbuddy:format(Base, Req, Opts),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(is_binary(Body)),
+    ?assert(byte_size(Body) > 0).
+
+format_request_test() ->
+    Base = #{},
+    Req = #{<<"format">> => <<"request">>, <<"test">> => <<"value">>},
+    Opts = #{},
+    {ok, Response} = dev_hyperbuddy:format(Base, Req, Opts),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(is_binary(Body)).
+
+format_all_test() ->
+    Base = #{<<"base-key">> => <<"value">>},
+    Req = #{<<"format">> => <<"all">>},
+    Opts = #{<<"node-key">> => <<"value">>},
+    {ok, Response} = dev_hyperbuddy:format(Base, Req, Opts),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(is_binary(Body)).
+
+format_with_truncation_test() ->
+    Base = maps:from_list([{integer_to_binary(I), I} || I <- lists:seq(1, 50)]),
+    Req = #{<<"truncate-keys">> => 10},
+    {ok, Response} = dev_hyperbuddy:format(Base, Req, #{}),
+    ?assert(maps:is_key(<<"body">>, Response)).
+
+format_list_test() ->
+    Base = #{<<"test">> => <<"base">>},
+    Req = #{
+        <<"format">> => [<<"base">>, <<"request">>],
+        <<"test">> => <<"request">>
+    },
+    {ok, Response} = dev_hyperbuddy:format(Base, Req, #{}),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(is_binary(Body)).
+```
+
+---
+
+### 5. return_file/1, return_file/2, return_file/3
+
+```erlang
+-spec return_file(Name) -> {ok, FileResponse} | {error, not_found}
+    when
+        Name :: binary(),
+        FileResponse :: #{
+            <<"body">> => binary(),
+            <<"content-type">> => binary()
+        }.
+
+-spec return_file(Device, Name, Template) -> {ok, FileResponse} | {error, not_found}
+    when
+        Device :: binary(),
+        Name :: binary(),
+        Template :: map().
+```
+
+**Description:** Serve static files from the priv/html directory with optional template substitution.
+
+**File Locations:**
+```
+priv/html/{device}/{filename}
+```
+
+**Content Types:**
+- `.html` → `text/html`
+- `.js` → `text/javascript`
+- `.css` → `text/css`
+- `.png` → `image/png`
+- `.ico` → `image/x-icon`
+
+**Template Substitution:**
+Templates use `{'{'}{'{'}`key`{'}'}{'}'} syntax for variable replacement.
+
+**Test Code:**
+```erlang
+-module(dev_hyperbuddy_return_file_test).
+-include_lib("eunit/include/eunit.hrl").
+
+return_file_html_test() ->
+    {ok, Response} = dev_hyperbuddy:return_file(<<"index.html">>),
+    ?assert(maps:is_key(<<"body">>, Response)),
+    ?assertEqual(<<"text/html">>, maps:get(<<"content-type">>, Response)).
+
+return_file_css_test() ->
+    {ok, Response} = dev_hyperbuddy:return_file(<<"styles.css">>),
+    ?assert(maps:is_key(<<"body">>, Response)),
+    ?assertEqual(<<"text/css">>, maps:get(<<"content-type">>, Response)).
+
+return_file_js_test() ->
+    {ok, Response} = dev_hyperbuddy:return_file(<<"utils.js">>),
+    ?assert(maps:is_key(<<"body">>, Response)),
+    ?assertEqual(<<"text/javascript">>, maps:get(<<"content-type">>, Response)).
+
+return_file_not_found_test() ->
+    ?assertEqual(
+        {error, not_found},
+        dev_hyperbuddy:return_file(<<"nonexistent.html">>)
+    ).
+
+return_file_with_template_test() ->
+    Template = #{<<"error">> => <<"This is an error message.">>},
+    {ok, Response} = dev_hyperbuddy:return_file(
+        <<"hyperbuddy@1.0">>,
+        <<"500.html">>,
+        Template
+    ),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(binary:match(Body, <<"This is an error message.">>) =/= nomatch).
+```
+
+---
+
+### 6. return_error/2
+
+```erlang
+-spec return_error(Error, Opts) -> {ok, ErrorPage}
+    when
+        Error :: binary() | map(),
+        Opts :: map(),
+        ErrorPage :: #{
+            <<"body">> => binary(),
+            <<"content-type">> => binary()
+        }.
+```
+
+**Description:** Generate and return an error page with formatted error message.
+
+**Error Input:**
+- Binary: Used directly as error message
+- Map: Formatted using `hb_format:format/3`
+
+**Test Code:**
+```erlang
+-module(dev_hyperbuddy_return_error_test).
+-include_lib("eunit/include/eunit.hrl").
+
+return_error_binary_test() ->
+    Error = <<"Something went wrong">>,
+    {ok, Response} = dev_hyperbuddy:return_error(Error, #{}),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(binary:match(Body, Error) =/= nomatch).
+
+return_error_map_test() ->
+    Error = #{<<"message">> => <<"Error occurred">>},
+    {ok, Response} = dev_hyperbuddy:return_error(Error, #{}),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(is_binary(Body)).
+```
+
+---
+
+### 7. throw/3
+
+```erlang
+-spec throw(Msg, Req, Opts) -> {error, binary()} | no_return()
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Test endpoint for validating 500 HTTP error response handling.
+
+**Behavior:**
+- In `prod` mode: Returns error message
+- In `debug` mode: Throws intentional error
+
+**Test Code:**
+```erlang
+-module(dev_hyperbuddy_throw_test).
+-include_lib("eunit/include/eunit.hrl").
+
+throw_prod_mode_test() ->
+    Opts = #{mode => prod},
+    {error, Msg} = dev_hyperbuddy:throw(#{}, #{}, Opts),
+    ?assertEqual(<<"Forced-throw unavailable in `prod` mode.">>, Msg).
+
+throw_debug_mode_test() ->
+    Opts = #{mode => debug},
+    ?assertThrow(
+        {intentional_error, _},
+        dev_hyperbuddy:throw(#{}, #{}, Opts)
+    ).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Access dashboard
+% Navigate to: http://node:port/~hyperbuddy@1.0/dashboard
+
+%% Access console REPL
+% Navigate to: http://node:port/~hyperbuddy@1.0/console
+
+%% Get Prometheus metrics
+{ok, Metrics} = hb_http:get(
+    Node,
+    <<"/~hyperbuddy@1.0/metrics">>,
+    #{}
+),
+Body = maps:get(<<"body">>, Metrics).
+
+%% Get event counters
+{ok, Events} = hb_http:get(
+    Node,
+    <<"/~hyperbuddy@1.0/events">>,
+    #{}
+).
+
+%% Format a message for debugging
+{ok, Formatted} = hb_http:get(
+    Node,
+    <<"/~hyperbuddy@1.0/format=request">>,
+    #{}
+),
+?event({formatted_output, maps:get(<<"body">>, Formatted)}).
+
+%% Format with truncation
+{ok, Truncated} = hb_http:get(
+    Node,
+    <<"/~hyperbuddy@1.0/format=base?truncate-keys=20">>,
+    #{}
+).
+
+%% Format all components
+{ok, All} = hb_http:get(
+    Node,
+    <<"/~hyperbuddy@1.0/format=all">>,
+    #{}
+).
+
+%% Serve custom error page
+ErrorMsg = #{<<"message">> => <<"Custom error">>},
+{ok, ErrorPage} = dev_hyperbuddy:return_error(ErrorMsg, Opts),
+% Return ErrorPage as HTTP response
+
+%% Serve file with template
+Template = #{
+    <<"title">> => <<"My Page">>,
+    <<"content">> => <<"Dynamic content">>
+},
+{ok, Page} = dev_hyperbuddy:return_file(
+    <<"my-device@1.0">>,
+    <<"template.html">>,
+    Template
+).
+```
+
+---
+
+## Routing System
+
+### Route Configuration
+```erlang
+#{
+    routes => #{
+        <<"index">> => <<"index.html">>,
+        <<"dashboard">> => <<"dashboard.html">>,
+        <<"console">> => <<"console.html">>,
+        <<"styles.css">> => <<"styles.css">>,
+        <<"utils.js">> => <<"utils.js">>
+    }
+}
+```
+
+### Route Resolution
+```
+Request: /~hyperbuddy@1.0/dashboard
+  ↓
+Lookup: routes[<<"dashboard">>]
+  ↓
+Filename: dashboard.html
+  ↓
+Path: priv/html/hyperbuddy@1.0/dashboard.html
+  ↓
+Serve: File contents with content-type
+```
+
+---
+
+## Template System
+
+### Template Syntax
+
+The template system uses double curly braces for variable substitution:
+
+```html
+<html>
+  <head>
+    <title>{"{{"}title{"}}"}</title>
+  </head>
+  <body>
+    <h1>{"{{"}heading{"}}"}</h1>
+    <p>{"{{"}content{"}}"}</p>
+  </body>
+</html>
+```
+
+### Template Application
+```erlang
+Template = #{
+    <<"title">> => <<"My Page">>,
+    <<"heading">> => <<"Welcome">>,
+    <<"content">> => <<"Hello, World!">>
+},
+{ok, Result} = return_file(Device, <<"template.html">>, Template).
+```
+
+### Replacement Process
+```
+1. Load file from disk
+2. For each key-value in template:
+   - Find the placeholder pattern in file
+   - Replace with value
+3. Return processed content
+```
+
+---
+
+## Formatting Options
+
+### Scope Options
+
+**base** (default)
+```erlang
+#{<<"format">> => <<"base">>}
+% Formats the base message only
+```
+
+**request**
+```erlang
+#{<<"format">> => <<"request">>}
+% Formats the request message
+```
+
+**node**
+```erlang
+#{<<"format">> => <<"node">>}
+% Formats the node options
+```
+
+**all**
+```erlang
+#{<<"format">> => <<"all">>}
+% Formats base, request, and node
+```
+
+**list**
+```erlang
+#{<<"format">> => [<<"base">>, <<"request">>]}
+% Formats multiple specified scopes
+```
+
+### Truncation
+
+**No Truncation (default)**
+```erlang
+#{<<"truncate-keys">> => infinity}
+% Shows all keys
+```
+
+**Limited Keys**
+```erlang
+#{<<"truncate-keys">> => 20}
+% Shows first 20 keys only
+```
+
+---
+
+## Static Assets
+
+### HTML Files
+- `index.html` - Message viewer
+- `dashboard.html` - Node dashboard
+- `console.html` - Interactive REPL
+- `graph.html` - Graph visualization
+- `404.html` - Not found page
+- `500.html` - Error page
+
+### JavaScript Files
+- `metrics.js` - Metrics display
+- `devices.js` - Device management
+- `utils.js` - Utility functions
+- `dashboard.js` - Dashboard logic
+- `graph.js` - Graph rendering
+
+### CSS Files
+- `styles.css` - Global styles
+
+---
+
+## Prometheus Integration
+
+### Metrics Endpoint
+```
+GET /~hyperbuddy@1.0/metrics
+```
+
+**Response Format:**
+```
+# HELP metric_name Description
+# TYPE metric_name counter
+metric_name{label="value"} 42
+```
+
+### Configuration
+```erlang
+Opts = #{
+    prometheus => true  % Enable metrics
+},
+hb_http_server:start_node(Opts).
+```
+
+### Metrics Access
+```bash
+curl http://localhost:port/~hyperbuddy@1.0/metrics
+```
+
+---
+
+## Event Counters
+
+### Counter Structure
+```erlang
+#{
+    <<"event_name">> => Count,
+    <<"another_event">> => Count2
+}
+```
+
+### Access Pattern
+```erlang
+{ok, Counters} = hb_http:get(
+    Node,
+    <<"/~hyperbuddy@1.0/events">>,
+    #{}
+),
+RequestCount = maps:get(<<"request_received">>, Counters, 0).
+```
+
+---
+
+## References
+
+- **Message Device** - `dev_message.erl`
+- **Formatting** - `hb_format.erl`
+- **Events** - `hb_event.erl`
+- **HTTP Server** - `hb_http_server.erl`
+- **Cache** - `hb_cache.erl`
+- **Prometheus** - `prometheus` library
+
+---
+
+## Notes
+
+1. **HTML Interface:** Provides web-based node interaction
+2. **Static Serving:** Serves HTML, CSS, JS files from priv directory
+3. **Template Support:** Simple placeholder template replacement
+4. **Metrics Export:** Prometheus-compatible metrics endpoint
+5. **Event Monitoring:** Real-time event counter access
+6. **Debug Formatting:** Pretty-print messages for debugging
+7. **Scope Control:** Format base, request, or node separately
+8. **Truncation:** Limit displayed keys for large messages
+9. **Content Types:** Automatic content-type detection
+10. **Error Pages:** Formatted error page generation
+11. **Security:** return_file excluded from API
+12. **Test Mode:** Intentional error throwing for testing
+13. **Route Protection:** Only serves explicitly listed files
+14. **Private Reset:** Removes private data before formatting
+15. **Cache Loading:** Ensures all references loaded before display

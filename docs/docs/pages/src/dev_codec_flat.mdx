@@ -1,0 +1,499 @@
+# dev_codec_flat.erl - Flat Map Codec for Path-Based Messages
+
+## Overview
+
+**Purpose:** Convert between TABMs and flat maps with path-based keys  
+**Module:** `dev_codec_flat`  
+**Format:** `flat@1.0`  
+**Pattern:** Nested structures ↔ Flat path-based keys
+
+This module provides a codec for converting TABMs (Type Annotated Binary Messages) to and from flat Erlang maps where keys are multi-layer paths and values are TABM binaries. It enables simple key-value representations of deeply nested message structures.
+
+## Dependencies
+
+- **Testing:** `eunit`
+- **HyperBEAM:** `hb_message`, `hb_util`, `hb_path`, `hb_maps`
+- **Codecs:** `dev_codec_httpsig` (for commitment functions)
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Codec Interface
+-spec from(Input, Req, Opts) -> {ok, TABM}.
+-spec to(TABM, Req, Opts) -> {ok, FlatMap}.
+
+%% Commitment Interface (delegates to httpsig)
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Msg, Req, Opts) -> {ok, boolean()}.
+
+%% Serialization Utilities
+-spec serialize(Map) -> {ok, Binary}.
+-spec serialize(Map, Opts) -> {ok, Binary}.
+-spec deserialize(Binary) -> {ok, StructuredMap}.
+```
+
+---
+
+## Public Functions
+
+### 1. from/3
+
+```erlang
+-spec from(Input, Req, Opts) -> {ok, TABM}
+    when
+        Input :: map() | binary(),
+        Req :: map(),
+        Opts :: map(),
+        TABM :: map() | binary().
+```
+
+**Description:** Convert a flat map with path-based keys into a nested TABM structure. Binary values pass through unchanged.
+
+**Path Format:**
+- `<<"a/b/c">>` → Nested: `#{<<"a">> => #{<<"b">> => #{<<"c">> => Value}}}`
+- `[<<"a">>, <<"b">>]` → Same as above
+- `<<"x">>` → Single level: `#{<<"x">> => Value}`
+
+**Test Code:**
+```erlang
+-module(dev_codec_flat_from_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_simple_path_test() ->
+    Flat = #{<<"a">> => <<"value">>},
+    {ok, Result} = dev_codec_flat:from(Flat, #{}, #{}),
+    ?assertEqual(#{<<"a">> => <<"value">>}, Result).
+
+from_nested_path_test() ->
+    Flat = #{<<"a/b">> => <<"value">>},
+    {ok, Result} = dev_codec_flat:from(Flat, #{}, #{}),
+    Expected = #{<<"a">> => #{<<"b">> => <<"value">>}},
+    ?assert(hb_message:match(Expected, Result)).
+
+from_multiple_paths_test() ->
+    Flat = #{
+        <<"x/y">> => <<"1">>,
+        <<"x/z">> => <<"2">>,
+        <<"a">> => <<"3">>
+    },
+    {ok, Result} = dev_codec_flat:from(Flat, #{}, #{}),
+    Expected = #{
+        <<"x">> => #{
+            <<"y">> => <<"1">>,
+            <<"z">> => <<"2">>
+        },
+        <<"a">> => <<"3">>
+    },
+    ?assert(hb_message:match(Expected, Result)).
+
+from_binary_passthrough_test() ->
+    Bin = <<"raw binary">>,
+    {ok, Result} = dev_codec_flat:from(Bin, #{}, #{}),
+    ?assertEqual(Bin, Result).
+
+from_deep_nesting_test() ->
+    Flat = #{<<"a/b/c/d">> => <<"deep">>},
+    {ok, Result} = dev_codec_flat:from(Flat, #{}, #{}),
+    Expected = #{<<"a">> => #{<<"b">> => #{<<"c">> => #{<<"d">> => <<"deep">>}}}},
+    ?assert(hb_message:match(Expected, Result)).
+```
+
+---
+
+### 2. to/3
+
+```erlang
+-spec to(TABM, Req, Opts) -> {ok, FlatMap}
+    when
+        TABM :: map() | binary(),
+        Req :: map(),
+        Opts :: map(),
+        FlatMap :: map() | binary().
+```
+
+**Description:** Convert a nested TABM structure into a flat map with path-based keys. Binary values pass through unchanged.
+
+**Test Code:**
+```erlang
+-module(dev_codec_flat_to_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_simple_test() ->
+    Nested = #{<<"a">> => <<"value">>},
+    {ok, Result} = dev_codec_flat:to(Nested, #{}, #{}),
+    ?assertEqual(#{<<"a">> => <<"value">>}, Result).
+
+to_nested_test() ->
+    Nested = #{<<"a">> => #{<<"b">> => <<"value">>}},
+    {ok, Result} = dev_codec_flat:to(Nested, #{}, #{}),
+    Expected = #{<<"a/b">> => <<"value">>},
+    ?assert(hb_message:match(Expected, Result)).
+
+to_multiple_paths_test() ->
+    Nested = #{
+        <<"x">> => #{
+            <<"y">> => <<"1">>,
+            <<"z">> => <<"2">>
+        },
+        <<"a">> => <<"3">>
+    },
+    {ok, Result} = dev_codec_flat:to(Nested, #{}, #{}),
+    Expected = #{
+        <<"x/y">> => <<"1">>,
+        <<"x/z">> => <<"2">>,
+        <<"a">> => <<"3">>
+    },
+    ?assert(hb_message:match(Expected, Result)).
+
+to_binary_passthrough_test() ->
+    Bin = <<"raw binary">>,
+    {ok, Result} = dev_codec_flat:to(Bin, #{}, #{}),
+    ?assertEqual(Bin, Result).
+
+to_empty_map_test() ->
+    {ok, Result} = dev_codec_flat:to(#{}, #{}, #{}),
+    ?assertEqual(#{}, Result).
+```
+
+---
+
+### 3. commit/3
+
+```erlang
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        SignedMsg :: map().
+```
+
+**Description:** Delegates to `dev_codec_httpsig:commit/3` for message signing. The flat codec uses HTTP signature commitment.
+
+**Test Code:**
+```erlang
+-module(dev_codec_flat_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+commit_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"key">> => <<"value">>},
+    Req = #{},
+    Opts = #{priv_wallet => Wallet},
+    {ok, Signed} = dev_codec_flat:commit(Msg, Req, Opts),
+    ?assert(maps:is_key(<<"commitments">>, Signed)).
+```
+
+---
+
+### 4. verify/3
+
+```erlang
+-spec verify(Msg, Req, Opts) -> {ok, boolean()}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Delegates to `dev_codec_httpsig:verify/3` for signature verification.
+
+**Test Code:**
+```erlang
+-module(dev_codec_flat_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+verify_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"key">> => <<"value">>},
+    {ok, Signed} = dev_codec_flat:commit(Msg, #{}, #{priv_wallet => Wallet}),
+    {ok, IsValid} = dev_codec_flat:verify(Msg, Signed, #{}),
+    ?assert(IsValid).
+```
+
+---
+
+### 5. serialize/1, serialize/2
+
+```erlang
+-spec serialize(Map, Opts) -> {ok, Binary}
+    when
+        Map :: map(),
+        Opts :: map(),
+        Binary :: binary().
+```
+
+**Description:** Serialize a map to a text format with `key: value` lines. First converts to flat format, then serializes.
+
+**Format:**
+```
+key1: value1
+key2/nested: value2
+key3/deep/path: value3
+```
+
+**Test Code:**
+```erlang
+-module(dev_codec_flat_serialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+serialize_simple_test() ->
+    Map = #{<<"key">> => <<"value">>},
+    {ok, Binary} = dev_codec_flat:serialize(Map),
+    ?assert(is_binary(Binary)),
+    ?assert(binary:match(Binary, <<"key: value">>) =/= nomatch).
+
+serialize_nested_test() ->
+    Map = #{
+        <<"x">> => #{<<"y">> => <<"1">>},
+        <<"a">> => <<"2">>
+    },
+    {ok, Binary} = dev_codec_flat:serialize(Map),
+    ?assert(binary:match(Binary, <<"x/y: 1">>) =/= nomatch),
+    ?assert(binary:match(Binary, <<"a: 2">>) =/= nomatch).
+
+serialize_sorted_test() ->
+    Map = #{
+        <<"z">> => <<"last">>,
+        <<"a">> => <<"first">>
+    },
+    {ok, Binary} = dev_codec_flat:serialize(Map),
+    Lines = binary:split(Binary, <<"\n">>, [global]),
+    % Keys should be sorted
+    ?assertEqual(2, length([L || L <- Lines, L =/= <<>>])).
+```
+
+---
+
+### 6. deserialize/1
+
+```erlang
+-spec deserialize(Binary) -> {ok, StructuredMap}
+    when
+        Binary :: binary(),
+        StructuredMap :: map().
+```
+
+**Description:** Deserialize text format back to a structured map. Parses `key: value` lines and converts from flat to structured format.
+
+**Test Code:**
+```erlang
+-module(dev_codec_flat_deserialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+deserialize_simple_test() ->
+    Binary = <<"key: value\n">>,
+    {ok, Result} = dev_codec_flat:deserialize(Binary),
+    ?assertEqual(#{<<"key">> => <<"value">>}, Result).
+
+deserialize_nested_test() ->
+    Binary = <<"x/y: 1\na: 2\n">>,
+    {ok, Result} = dev_codec_flat:deserialize(Binary),
+    Expected = #{
+        <<"x">> => #{<<"y">> => <<"1">>},
+        <<"a">> => <<"2">>
+    },
+    ?assert(hb_message:match(Expected, Result)).
+
+deserialize_roundtrip_test() ->
+    Original = #{
+        <<"x">> => #{<<"y">> => <<"1">>},
+        <<"a">> => <<"2">>
+    },
+    {ok, Binary} = dev_codec_flat:serialize(Original),
+    {ok, Deserialized} = dev_codec_flat:deserialize(Binary),
+    ?assert(hb_message:match(Original, Deserialized)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Convert flat to nested
+FlatMsg = #{
+    <<"user/name">> => <<"Alice">>,
+    <<"user/email">> => <<"alice@example.com">>,
+    <<"settings/theme">> => <<"dark">>
+},
+{ok, Nested} = dev_codec_flat:from(FlatMsg, #{}, #{}).
+% Result: #{
+%   <<"user">> => #{
+%     <<"name">> => <<"Alice">>,
+%     <<"email">> => <<"alice@example.com">>
+%   },
+%   <<"settings">> => #{
+%     <<"theme">> => <<"dark">>
+%   }
+% }
+
+%% Convert nested to flat
+NestedMsg = #{
+    <<"config">> => #{
+        <<"database">> => #{
+            <<"host">> => <<"localhost">>,
+            <<"port">> => <<"5432">>
+        }
+    }
+},
+{ok, Flat} = dev_codec_flat:to(NestedMsg, #{}, #{}).
+% Result: #{
+%   <<"config/database/host">> => <<"localhost">>,
+%   <<"config/database/port">> => <<"5432">>
+% }
+
+%% Use with hb_message:convert
+Structured = #{<<"a">> => #{<<"b">> => <<"value">>}},
+Flat = hb_message:convert(Structured, <<"flat@1.0">>, #{}),
+BackToStructured = hb_message:convert(Flat, <<"structured@1.0">>, <<"flat@1.0">>, #{}).
+
+%% Serialize to text
+Map = #{
+    <<"path1">> => <<"value1">>,
+    <<"path2/nested">> => <<"value2">>
+},
+{ok, Text} = dev_codec_flat:serialize(Map).
+% Result: <<"path1: value1\npath2/nested: value2\n">>
+
+%% Deserialize from text
+Text = <<"key: value\npath/to/data: result\n">>,
+{ok, Map} = dev_codec_flat:deserialize(Text).
+% Result: #{
+%   <<"key">> => <<"value">>,
+%   <<"path">> => #{
+%     <<"to">> => #{
+%       <<"data">> => <<"result">>
+%     }
+%   }
+% }
+```
+
+---
+
+## Path Handling
+
+### Path Separators
+```erlang
+% Slash separator
+<<"a/b/c">> → #{<<"a">> => #{<<"b">> => #{<<"c">> => Value}}}
+
+% List of parts
+[<<"a">>, <<"b">>, <<"c">>] → Same as above
+
+% Single key
+<<"key">> → #{<<"key">> => Value}
+```
+
+### Path Lists as Keys
+```erlang
+Nested = #{
+    <<"x">> => #{
+        [<<"y">>, <<"z">>] => #{<<"a">> => <<"2">>}
+    }
+},
+{ok, Flat} = dev_codec_flat:to(Nested, #{}, #{}).
+% Path lists are converted to flat keys without newlines
+```
+
+---
+
+## Conversion Examples
+
+### Example 1: User Profile
+```erlang
+% Flat format
+Flat = #{
+    <<"user/id">> => <<"123">>,
+    <<"user/profile/name">> => <<"Alice">>,
+    <<"user/profile/age">> => <<"30">>,
+    <<"user/settings/theme">> => <<"dark">>
+}
+
+% Nested format
+Nested = #{
+    <<"user">> => #{
+        <<"id">> => <<"123">>,
+        <<"profile">> => #{
+            <<"name">> => <<"Alice">>,
+            <<"age">> => <<"30">>
+        },
+        <<"settings">> => #{
+            <<"theme">> => <<"dark">>
+        }
+    }
+}
+```
+
+### Example 2: Configuration
+```erlang
+% Flat format
+Flat = #{
+    <<"db/host">> => <<"localhost">>,
+    <<"db/port">> => <<"5432">>,
+    <<"cache/enabled">> => <<"true">>,
+    <<"cache/ttl">> => <<"3600">>
+}
+
+% Nested format
+Nested = #{
+    <<"db">> => #{
+        <<"host">> => <<"localhost">>,
+        <<"port">> => <<"5432">>
+    },
+    <<"cache">> => #{
+        <<"enabled">> => <<"true">>,
+        <<"ttl">> => <<"3600">>
+    }
+}
+```
+
+---
+
+## Serialization Format
+
+### Text Format
+```
+key1: value1
+key2: value2
+nested/path: value3
+deep/nested/path: value4
+```
+
+### Properties
+- **Line-based:** One key-value pair per line
+- **Separator:** Colon and space (`: `)
+- **Sorted:** Keys are sorted alphabetically
+- **UTF-8:** Binary content is preserved as-is
+- **Newline:** Each line ends with `\n`
+
+---
+
+## References
+
+- **Message System** - `hb_message.erl`
+- **Path Utilities** - `hb_path.erl`
+- **Deep Operations** - `hb_util:deep_set/4`
+- **HTTPSig Codec** - `dev_codec_httpsig.erl`
+- **Structured Codec** - `dev_codec_structured.erl`
+
+---
+
+## Notes
+
+1. **Binary Passthrough:** Binary values pass through `from/3` and `to/3` unchanged
+2. **Path Normalization:** Uses `hb_path:term_to_path_parts/2` for path parsing
+3. **Deep Set:** Uses `hb_util:deep_set/4` for nested structure creation
+4. **Commitment:** Delegates to `dev_codec_httpsig` for signing/verification
+5. **Empty Lists:** Empty list values trigger error events but continue processing
+6. **Format Agnostic:** Works with any TABM-compatible message structure
+7. **Idempotent:** Converting back and forth preserves structure
+8. **Sorted Output:** Serialization produces sorted keys for consistency
+9. **Round-trip Safe:** `serialize → deserialize → serialize` produces same output
+10. **Integration:** Works with `hb_message:convert/3` for format conversion
+11. **Path Flexibility:** Supports both string and list path formats
+12. **Newline Handling:** Path keys never contain newlines in serialized form

@@ -1,0 +1,648 @@
+# dev_codec_cookie.erl - Cookie Management and Authentication Device
+
+## Overview
+
+**Purpose:** HTTP cookie management with HMAC-based authentication  
+**Module:** `dev_codec_cookie`  
+**Device Name:** `cookie@1.0`  
+**Codec Format:** `cookie@1.0`
+
+This utility device manages HTTP cookies for requests, providing encoding/decoding, storage, and HMAC-based authentication using the `~message@1.0` codec interface. It implements the generator interface, enabling integration with `~auth-hook@1.0` for automatic request signing based on cookie-stored secrets.
+
+## Core Capabilities
+
+- **Cookie Parsing:** Parse `cookie` and `set-cookie` headers
+- **Cookie Encoding:** Generate properly formatted cookie strings
+- **Storage Management:** Store/retrieve cookies in message private data
+- **HMAC Authentication:** Sign requests using cookie-stored secrets
+- **Generator Interface:** Automatic secret generation and management
+- **Format Conversion:** Between `cookie`, `set-cookie`, and structured formats
+
+## Dependencies
+
+- **HyperBEAM:** `hb_private`, `hb_maps`, `hb_ao`, `hb_util`, `hb_escape`, `hb_cache`
+- **Authentication:** `dev_codec_cookie_auth` (separate module)
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Cookie Operations
+-spec get_cookie(Base, Req, Opts) -> {ok, Cookie} | {error, not_found}.
+-spec store(Base, Req, Opts) -> {ok, UpdatedBase}.
+-spec extract(Base, Req, Opts) -> {ok, Cookies}.
+-spec reset(Base, Opts) -> {ok, CleanBase}.
+
+%% Format Conversion (Codec API)
+-spec to(Msg, Req, Opts) -> {ok, FormattedMsg}.
+-spec from(Msg, Req, Opts) -> {ok, ParsedMsg}.
+
+%% Authentication (Commitment API)
+-spec commit(Base, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Base, Req, Opts) -> {ok, boolean()}.
+
+%% Generator Interface
+-spec generate(Base, Req, Opts) -> {ok, NormalizedReq}.
+-spec finalize(Base, Request, Opts) -> {ok, FinalSequence}.
+
+%% Utilities
+-spec opts(Opts) -> PrivateOpts.
+```
+
+---
+
+## Public Functions
+
+### 1. get_cookie/3
+
+```erlang
+-spec get_cookie(Base, Req, Opts) -> {ok, Cookie} | {error, not_found}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Cookie :: binary() | map().
+```
+
+**Description:** Get a specific cookie by key from the base message. Format controlled by `format` option in request.
+
+**Format Options:**
+- `<<"default">>` - Raw form (binary or map)
+- `<<"set-cookie">>` - Normalized map with value, attributes, flags
+- `<<"cookie">>` - Binary value only
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_cookie_default_test() ->
+    Base = hb_private:set(#{}, <<"cookie">>, #{
+        <<"session">> => <<"abc123">>
+    }, hb_private:opts(#{})),
+    Req = #{ <<"key">> => <<"session">> },
+    {ok, Cookie} = dev_codec_cookie:get_cookie(Base, Req, #{}),
+    ?assertEqual(<<"abc123">>, Cookie).
+
+get_cookie_set_format_test() ->
+    Base = hb_private:set(#{}, <<"cookie">>, #{
+        <<"session">> => <<"value">>
+    }, hb_private:opts(#{})),
+    Req = #{ 
+        <<"key">> => <<"session">>,
+        <<"format">> => <<"set-cookie">>
+    },
+    {ok, Cookie} = dev_codec_cookie:get_cookie(Base, Req, #{}),
+    ?assert(is_map(Cookie)),
+    ?assertEqual(<<"value">>, maps:get(<<"value">>, Cookie)).
+
+get_cookie_not_found_test() ->
+    Base = #{},
+    Req = #{ <<"key">> => <<"missing">> },
+    ?assertEqual({error, not_found}, 
+                dev_codec_cookie:get_cookie(Base, Req, #{})).
+```
+
+---
+
+### 2. store/3
+
+```erlang
+-spec store(Base, Req, Opts) -> {ok, UpdatedBase}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        UpdatedBase :: map().
+```
+
+**Description:** Store keys from request into cookies, merging with existing cookies. Filters out base keys like `path`, `method`, `body`, etc.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_store_test).
+-include_lib("eunit/include/eunit.hrl").
+
+store_simple_test() ->
+    Base = #{},
+    Req = #{ 
+        <<"session">> => <<"abc123">>,
+        <<"user">> => <<"john">>
+    },
+    {ok, Updated} = dev_codec_cookie:store(Base, Req, #{}),
+    {ok, Cookies} = dev_codec_cookie:extract(Updated, #{}, #{}),
+    ?assertEqual(<<"abc123">>, maps:get(<<"session">>, Cookies)),
+    ?assertEqual(<<"john">>, maps:get(<<"user">>, Cookies)).
+
+store_merge_test() ->
+    Opts = hb_private:opts(#{}),
+    Base = hb_private:set(#{}, <<"cookie">>, #{
+        <<"existing">> => <<"value">>
+    }, Opts),
+    Req = #{ <<"new">> => <<"data">> },
+    {ok, Updated} = dev_codec_cookie:store(Base, Req, #{}),
+    {ok, Cookies} = dev_codec_cookie:extract(Updated, #{}, #{}),
+    ?assertEqual(<<"value">>, maps:get(<<"existing">>, Cookies)),
+    ?assertEqual(<<"data">>, maps:get(<<"new">>, Cookies)).
+
+store_filters_base_keys_test() ->
+    Base = #{},
+    Req = #{
+        <<"data">> => <<"keep">>,
+        <<"path">> => <<"/ignored">>,
+        <<"method">> => <<"POST">>,
+        <<"body">> => <<"ignored">>
+    },
+    {ok, Updated} = dev_codec_cookie:store(Base, Req, #{}),
+    {ok, Cookies} = dev_codec_cookie:extract(Updated, #{}, #{}),
+    ?assert(maps:is_key(<<"data">>, Cookies)),
+    ?assertNot(maps:is_key(<<"path">>, Cookies)),
+    ?assertNot(maps:is_key(<<"method">>, Cookies)).
+```
+
+---
+
+### 3. extract/3
+
+```erlang
+-spec extract(Base, Req, Opts) -> {ok, Cookies}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Cookies :: map().
+```
+
+**Description:** Extract and parse all cookies from a message, returning normalized cookie map.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_extract_test).
+-include_lib("eunit/include/eunit.hrl").
+
+extract_from_cookie_header_test() ->
+    Msg = #{ <<"cookie">> => <<"key1=value1; key2=value2">> },
+    {ok, Cookies} = dev_codec_cookie:extract(Msg, #{}, #{}),
+    ?assertEqual(<<"value1">>, maps:get(<<"key1">>, Cookies)),
+    ?assertEqual(<<"value2">>, maps:get(<<"key2">>, Cookies)).
+
+extract_from_set_cookie_test() ->
+    Msg = #{ <<"set-cookie">> => [<<"session=abc123; Path=/">>] },
+    {ok, Cookies} = dev_codec_cookie:extract(Msg, #{}, #{}),
+    SessionCookie = maps:get(<<"session">>, Cookies),
+    ?assertEqual(<<"abc123">>, maps:get(<<"value">>, SessionCookie)).
+
+extract_empty_test() ->
+    Msg = #{},
+    {ok, Cookies} = dev_codec_cookie:extract(Msg, #{}, #{}),
+    ?assertEqual(#{}, Cookies).
+```
+
+---
+
+### 4. reset/2
+
+```erlang
+-spec reset(Base, Opts) -> {ok, CleanBase}
+    when
+        Base :: map(),
+        Opts :: map(),
+        CleanBase :: map().
+```
+
+**Description:** Remove all cookie-related keys from a message, including `cookie`, `set-cookie`, and `priv/cookie`.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_reset_test).
+-include_lib("eunit/include/eunit.hrl").
+
+reset_test() ->
+    Opts = hb_private:opts(#{}),
+    Base = #{
+        <<"cookie">> => <<"key=val">>,
+        <<"set-cookie">> => [<<"session=abc">>],
+        <<"other">> => <<"keep">>
+    },
+    BaseWithPriv = hb_private:set(Base, <<"cookie">>, #{}, Opts),
+    {ok, Clean} = dev_codec_cookie:reset(BaseWithPriv, #{}),
+    ?assertNot(maps:is_key(<<"cookie">>, Clean)),
+    ?assertNot(maps:is_key(<<"set-cookie">>, Clean)),
+    ?assertEqual(<<"keep">>, maps:get(<<"other">>, Clean)).
+```
+
+---
+
+### 5. to/3
+
+```erlang
+-spec to(Msg, Req, Opts) -> {ok, FormattedMsg}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        FormattedMsg :: map().
+```
+
+**Description:** Convert message with cookie sources to specified format (`set-cookie` or `cookie` header format).
+
+**Formats:**
+- `<<"set-cookie">>` - List of Set-Cookie header lines
+- `<<"cookie">>` - Single Cookie header line
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_to_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_set_cookie_format_test() ->
+    Opts = hb_private:opts(#{}),
+    Msg = hb_private:set(#{}, <<"cookie">>, #{
+        <<"session">> => #{
+            <<"value">> => <<"abc123">>,
+            <<"attributes">> => #{ <<"Path">> => <<"/">> },
+            <<"flags">> => [<<"HttpOnly">>]
+        }
+    }, Opts),
+    Req = #{ <<"format">> => <<"set-cookie">> },
+    {ok, Result} = dev_codec_cookie:to(Msg, Req, #{}),
+    SetCookies = maps:get(<<"set-cookie">>, Result),
+    ?assert(is_list(SetCookies)),
+    [Line] = SetCookies,
+    ?assert(binary:match(Line, <<"session=abc123">>) =/= nomatch),
+    ?assert(binary:match(Line, <<"Path=/">>) =/= nomatch),
+    ?assert(binary:match(Line, <<"HttpOnly">>) =/= nomatch).
+
+to_cookie_format_test() ->
+    Opts = hb_private:opts(#{}),
+    Msg = hb_private:set(#{}, <<"cookie">>, #{
+        <<"key1">> => <<"val1">>,
+        <<"key2">> => <<"val2">>
+    }, Opts),
+    Req = #{ <<"format">> => <<"cookie">> },
+    {ok, Result} = dev_codec_cookie:to(Msg, Req, #{}),
+    Cookie = maps:get(<<"cookie">>, Result),
+    ?assert(binary:match(Cookie, <<"key1=val1">>) =/= nomatch),
+    ?assert(binary:match(Cookie, <<"key2=val2">>) =/= nomatch).
+```
+
+---
+
+### 6. from/3
+
+```erlang
+-spec from(Msg, Req, Opts) -> {ok, ParsedMsg}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        ParsedMsg :: map().
+```
+
+**Description:** Parse cookies from `cookie` or `set-cookie` headers and store in private data area.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_from_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_cookie_header_test() ->
+    Msg = #{ <<"cookie">> => <<"session=abc123; user=john">> },
+    {ok, Parsed} = dev_codec_cookie:from(Msg, #{}, #{}),
+    {ok, Cookies} = dev_codec_cookie:extract(Parsed, #{}, #{}),
+    ?assertEqual(<<"abc123">>, maps:get(<<"session">>, Cookies)),
+    ?assertEqual(<<"john">>, maps:get(<<"user">>, Cookies)).
+
+from_set_cookie_header_test() ->
+    Msg = #{ 
+        <<"set-cookie">> => [
+            <<"session=abc; Path=/; HttpOnly">>,
+            <<"user=john; Secure">>
+        ]
+    },
+    {ok, Parsed} = dev_codec_cookie:from(Msg, #{}, #{}),
+    {ok, Cookies} = dev_codec_cookie:extract(Parsed, #{}, #{}),
+    Session = maps:get(<<"session">>, Cookies),
+    ?assertEqual(<<"abc">>, maps:get(<<"value">>, Session)),
+    ?assert(lists:member(<<"HttpOnly">>, maps:get(<<"flags">>, Session))).
+```
+
+---
+
+### 7. commit/3, verify/3
+
+```erlang
+-spec commit(Base, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Base, Req, Opts) -> {ok, boolean()}.
+```
+
+**Description:** Sign message using HMAC with cookie-stored secret, or verify such signatures. Delegates to `dev_codec_cookie_auth` module.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+
+commit_and_verify_test() ->
+    Secret = crypto:strong_rand_bytes(32),
+    Opts = hb_private:opts(#{}),
+    Base = hb_private:set(#{}, <<"cookie">>, #{
+        <<"secret">> => Secret
+    }, Opts),
+    Req = #{ <<"data">> => <<"test">> },
+    {ok, Signed} = dev_codec_cookie:commit(Base, Req, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    {ok, IsValid} = dev_codec_cookie:verify(Base, Signed, #{}),
+    ?assertEqual(true, IsValid).
+```
+
+---
+
+### 8. generate/3
+
+```erlang
+-spec generate(Base, Req, Opts) -> {ok, NormalizedReq}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        NormalizedReq :: term().
+```
+
+**Description:** Generate or retrieve secret from cookies for authentication. Part of the generator interface for use with `~auth-hook@1.0`.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_generate_test).
+-include_lib("eunit/include/eunit.hrl").
+
+generate_new_secret_test() ->
+    Base = #{},
+    Req = #{},
+    Result = dev_codec_cookie:generate(Base, Req, #{}),
+    % Should generate new secret
+    ?assertMatch({ok, _}, Result).
+```
+
+---
+
+### 9. finalize/3
+
+```erlang
+-spec finalize(Base, Request, Opts) -> {ok, FinalSequence}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        FinalSequence :: list().
+```
+
+**Description:** Add `set-cookie` header to message sequence after hook processing. Part of the generator interface.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_finalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+finalize_test() ->
+    Base = #{},
+    Request = #{},
+    {ok, Sequence} = dev_codec_cookie:finalize(Base, Request, #{}),
+    ?assert(is_list(Sequence)).
+```
+
+---
+
+## Cookie Formats
+
+### Cookie Header
+
+Simple key=value pairs:
+```
+Cookie: session=abc123; user=john; theme=dark
+```
+
+Parsed to:
+```erlang
+#{
+    <<"session">> => <<"abc123">>,
+    <<"user">> => <<"john">>,
+    <<"theme">> => <<"dark">>
+}
+```
+
+### Set-Cookie Header
+
+With attributes and flags:
+```
+Set-Cookie: session=abc123; Path=/; Domain=example.com; HttpOnly; Secure
+```
+
+Parsed to:
+```erlang
+#{
+    <<"session">> => #{
+        <<"value">> => <<"abc123">>,
+        <<"attributes">> => #{
+            <<"Path">> => <<"/">>,
+            <<"Domain">> => <<"example.com">>
+        },
+        <<"flags">> => [<<"HttpOnly">>, <<"Secure">>]
+    }
+}
+```
+
+---
+
+## Generator Interface
+
+### Purpose
+
+Enables integration with `~auth-hook@1.0` for automatic request signing based on cookie-stored secrets.
+
+### Implementation
+
+**generate/3:**
+- Retrieves or creates secret in cookies
+- Returns request with secret available
+
+**finalize/3:**
+- Adds set-cookie to response sequence
+- Ensures client receives cookie updates
+
+### Usage with Auth Hook
+
+```erlang
+#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"cookie@1.0">>
+            }
+        }
+    }
+}
+```
+
+---
+
+## HMAC Authentication
+
+### Commitment Type
+
+Uses `httpsig@1.0` HMAC scheme:
+```erlang
+#{
+    <<"type">> => <<"hmac-sha256">>,
+    <<"secret">> => SecretHash,
+    <<"committer">> => SecretHash
+}
+```
+
+### Secret Storage
+
+Secret stored in cookies with key = hash(secret):
+```erlang
+SecretHash = crypto:hash(sha256, Secret),
+CookieKey = hb_util:encode(SecretHash)
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Parse incoming cookies
+Msg = #{ <<"cookie">> => <<"session=abc; user=john">> },
+{ok, Parsed} = dev_codec_cookie:from(Msg, #{}, #{}),
+{ok, Cookies} = dev_codec_cookie:extract(Parsed, #{}, #{}).
+
+%% Store cookies in message
+Base = #{},
+Req = #{ <<"session">> => <<"abc123">>, <<"user">> => <<"john">> },
+{ok, Updated} = dev_codec_cookie:store(Base, Req, #{}).
+
+%% Convert to Set-Cookie headers
+{ok, WithSetCookie} = dev_codec_cookie:to(
+    Updated,
+    #{ <<"format">> => <<"set-cookie">> },
+    #{}
+),
+SetCookies = maps:get(<<"set-cookie">>, WithSetCookie).
+
+%% Get specific cookie
+{ok, SessionCookie} = dev_codec_cookie:get_cookie(
+    Base,
+    #{ <<"key">> => <<"session">> },
+    #{}
+).
+
+%% HMAC authentication with cookies
+Secret = crypto:strong_rand_bytes(32),
+Opts = hb_private:opts(#{}),
+BaseWithSecret = hb_private:set(#{}, <<"cookie">>, #{
+    <<"secret">> => Secret
+}, Opts),
+{ok, Signed} = dev_codec_cookie:commit(BaseWithSecret, Msg, #{}),
+{ok, true} = dev_codec_cookie:verify(BaseWithSecret, Signed, #{}).
+
+%% Clean cookies from message
+{ok, Clean} = dev_codec_cookie:reset(MsgWithCookies, #{}).
+
+%% Use with auth hook
+NodeConfig = #{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"cookie@1.0">>
+            }
+        }
+    }
+},
+Node = hb_http_server:start_node(NodeConfig).
+```
+
+---
+
+## Cookie Attributes
+
+### Common Attributes
+
+- **Path:** URL path scope
+- **Domain:** Domain scope
+- **Expires:** Expiration date
+- **Max-Age:** Lifetime in seconds
+- **SameSite:** CSRF protection (Strict/Lax/None)
+
+### Common Flags
+
+- **Secure:** HTTPS only
+- **HttpOnly:** No JavaScript access
+- **SameSite:** Default cross-site policy
+
+---
+
+## URI Encoding
+
+Values automatically URI-encoded/decoded:
+```erlang
+% Input: "hello world"
+% Encoded: "hello%20world"
+% Decoded: "hello world"
+```
+
+---
+
+## Private Data Storage
+
+Cookies stored in message private data:
+```erlang
+hb_private:set(Msg, <<"cookie">>, CookieMap, Opts)
+hb_private:get(<<"cookie">>, Msg, Default, Opts)
+```
+
+---
+
+## Filtered Keys
+
+These keys excluded when storing from request:
+- `<<"path">>`
+- `<<"accept-bundle">>`
+- `<<"ao-peer">>`
+- `<<"host">>`
+- `<<"method">>`
+- `<<"body">>`
+
+---
+
+## References
+
+- **Authentication** - `dev_codec_cookie_auth.erl`
+- **Private Data** - `hb_private.erl`
+- **Auth Hook** - `dev_auth_hook.erl`
+- **HTTP Signature** - `dev_codec_httpsig.erl`
+
+---
+
+## Notes
+
+1. **Codec Interface:** Implements `~message@1.0` format conversion
+2. **Generator Interface:** For integration with auth hooks
+3. **HMAC Authentication:** Cookie-based secret storage
+4. **Format Support:** Cookie and Set-Cookie headers
+5. **Attribute Preservation:** Full support for cookie attributes
+6. **Flag Support:** HttpOnly, Secure, SameSite, etc.
+7. **URI Encoding:** Automatic encoding/decoding
+8. **Private Storage:** Uses hb_private for cookie data
+9. **Merge Support:** Combines existing and new cookies
+10. **Key Filtering:** Excludes request metadata from storage
+11. **Format Conversion:** Between header formats
+12. **Parse Robustness:** Handles various cookie formats
+13. **Secret Generation:** Automatic for authentication
+14. **Finalization:** Adds cookies to response sequence
+15. **Clean Operations:** Complete cookie removal support

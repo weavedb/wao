@@ -1,0 +1,489 @@
+# dev_manifest.erl - Arweave Path Manifest Resolution
+
+## Overview
+
+**Purpose:** Resolve Arweave path manifests following the v1 schema  
+**Module:** `dev_manifest`  
+**Device Name:** `manifest@1.0`  
+**Specification:** [Arweave Manifest v1](https://specs.ar.io/?tx=lXLd0OPwo-dJLB_Amz5jgIeDhiOkjXuM3-r0H_aiNj0)
+
+This device implements Arweave path manifest resolution, enabling structured content organization and routing. It parses JSON manifests that define file paths and automatically resolves nested paths to their corresponding content IDs.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_message`, `hb_maps`
+- **HTTP:** `hb_http`, `hb_http_server`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Information
+-spec info() -> DeviceInfo.
+
+%% Routing Functions
+-spec index(M1, M2, Opts) -> {ok, Index} | {error, not_found}.
+-spec route(Key, M1, M2, Opts) -> {ok, Result} | {error, not_found}.
+
+%% Internal Functions
+-spec manifest(Base, Req, Opts) -> {ok, Manifest} | {error, not_found}.
+-spec linkify(Manifest, Opts) -> LinkifiedManifest.
+```
+
+---
+
+## Public Functions
+
+### 1. info/0
+
+```erlang
+-spec info() -> DeviceInfo
+    when
+        DeviceInfo :: #{
+            default => fun((Key, M1, M2, Opts) -> Result),
+            excludes => [atom()]
+        }.
+```
+
+**Description:** Returns device configuration. Routes all requests except `keys`, `set`, and `committers` to the manifest routing function.
+
+**Test Code:**
+```erlang
+-module(dev_manifest_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_structure_test() ->
+    Info = dev_manifest:info(),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    ?assert(is_function(maps:get(default, Info))),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(keys, Excludes)),
+    ?assert(lists:member(set, Excludes)),
+    ?assert(lists:member(committers, Excludes)).
+```
+
+---
+
+### 2. index/3
+
+```erlang
+-spec index(M1, M2, Opts) -> {ok, Index} | {error, not_found}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        Index :: term().
+```
+
+**Description:** Return the fallback index page when the manifest itself is requested. Looks up the `index` key in the manifest and resolves its path.
+
+**Test Code:**
+```erlang
+-module(dev_manifest_index_test).
+-include_lib("eunit/include/eunit.hrl").
+
+index_resolution_test() ->
+    Opts = #{ store => hb_opts:get(store, no_viable_store, #{}) },
+    IndexPage = #{
+        <<"content-type">> => <<"text/html">>,
+        <<"body">> => <<"Index Page Content">>
+    },
+    {ok, IndexID} = hb_cache:write(IndexPage, Opts),
+    Manifest = #{
+        <<"paths">> => #{
+            <<"index.html">> => #{ <<"id">> => IndexID }
+        },
+        <<"index">> => #{ <<"path">> => <<"index.html">> }
+    },
+    JSON = hb_message:convert(Manifest, <<"json@1.0">>, <<"structured@1.0">>, Opts),
+    ManifestMsg = #{
+        <<"device">> => <<"manifest@1.0">>,
+        <<"body">> => JSON
+    },
+    {ok, Result} = dev_manifest:index(ManifestMsg, #{}, Opts),
+    ?assertEqual(IndexPage, hb_cache:ensure_all_loaded(Result, Opts)).
+
+index_not_found_test() ->
+    ManifestMsg = #{
+        <<"device">> => <<"manifest@1.0">>,
+        <<"body">> => <<"{}">>
+    },
+    Result = dev_manifest:index(ManifestMsg, #{}, #{}),
+    ?assertEqual({error, not_found}, Result).
+```
+
+---
+
+### 3. route/4
+
+```erlang
+-spec route(Key, M1, M2, Opts) -> {ok, Result} | {error, not_found}
+    when
+        Key :: binary(),
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        Result :: term().
+```
+
+**Description:** Route a request to associated data via its manifest. Special handling for `index` key; all other keys look up paths in the manifest.
+
+**Path Resolution:**
+- `<<"index">>` - Resolves to manifest's index path definition
+- Other keys - Look up in `paths/{Key}` of the manifest
+
+**Test Code:**
+```erlang
+-module(dev_manifest_route_test).
+-include_lib("eunit/include/eunit.hrl").
+
+route_simple_path_test() ->
+    Opts = #{ store => hb_opts:get(store, no_viable_store, #{}) },
+    Page = #{
+        <<"content-type">> => <<"text/html">>,
+        <<"body">> => <<"Page Content">>
+    },
+    {ok, PageID} = hb_cache:write(Page, Opts),
+    Manifest = #{
+        <<"paths">> => #{
+            <<"page1">> => #{ <<"id">> => PageID }
+        }
+    },
+    JSON = hb_message:convert(Manifest, <<"json@1.0">>, <<"structured@1.0">>, Opts),
+    ManifestMsg = #{
+        <<"device">> => <<"manifest@1.0">>,
+        <<"body">> => JSON
+    },
+    {ok, Result} = dev_manifest:route(<<"page1">>, ManifestMsg, #{}, Opts),
+    ?assert(is_map(Result)).
+
+route_nested_path_test() ->
+    Opts = #{ store => hb_opts:get(store, no_viable_store, #{}) },
+    Page = #{
+        <<"content-type">> => <<"text/html">>,
+        <<"body">> => <<"Nested Content">>
+    },
+    {ok, PageID} = hb_cache:write(Page, Opts),
+    Manifest = #{
+        <<"paths">> => #{
+            <<"nested">> => #{
+                <<"page">> => #{ <<"id">> => PageID }
+            }
+        }
+    },
+    JSON = hb_message:convert(Manifest, <<"json@1.0">>, <<"structured@1.0">>, Opts),
+    ManifestMsg = #{
+        <<"device">> => <<"manifest@1.0">>,
+        <<"body">> => JSON
+    },
+    {ok, Result} = dev_manifest:route(<<"nested/page">>, ManifestMsg, #{}, Opts),
+    ?assert(is_map(Result)).
+```
+
+---
+
+### 4. manifest/3
+
+```erlang
+-spec manifest(Base, Req, Opts) -> {ok, Manifest} | {error, not_found}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Manifest :: map().
+```
+
+**Description:** Find and deserialize a manifest from the given base message. Searches for manifest JSON in `data` or `body` fields, converts to structured format, and linkifies all ID references.
+
+**Process:**
+1. Extract JSON from `data` or `body` field
+2. Convert JSON to structured format
+3. Linkify all ID references (create lazy links)
+4. Fully load the manifest
+
+**Test Code:**
+```erlang
+-module(dev_manifest_manifest_test).
+-include_lib("eunit/include/eunit.hrl").
+
+manifest_from_body_test() ->
+    Opts = #{ store => hb_opts:get(store, no_viable_store, #{}) },
+    ManifestData = #{
+        <<"paths">> => #{
+            <<"test">> => #{ <<"id">> => <<"test-id-123">> }
+        }
+    },
+    JSON = hb_message:convert(ManifestData, <<"json@1.0">>, <<"structured@1.0">>, Opts),
+    Base = #{ <<"body">> => JSON },
+    {ok, Manifest} = dev_manifest:manifest(Base, #{}, Opts),
+    ?assert(is_map(Manifest)).
+
+manifest_from_data_test() ->
+    Opts = #{ store => hb_opts:get(store, no_viable_store, #{}) },
+    ManifestData = #{
+        <<"paths">> => #{
+            <<"test">> => #{ <<"id">> => <<"test-id-456">> }
+        }
+    },
+    JSON = hb_message:convert(ManifestData, <<"json@1.0">>, <<"structured@1.0">>, Opts),
+    Base = #{ <<"data">> => JSON },
+    {ok, Manifest} = dev_manifest:manifest(Base, #{}, Opts),
+    ?assert(is_map(Manifest)).
+```
+
+---
+
+### 5. linkify/2
+
+```erlang
+-spec linkify(Manifest, Opts) -> LinkifiedManifest
+    when
+        Manifest :: map() | list() | term(),
+        Opts :: map(),
+        LinkifiedManifest :: term().
+```
+
+**Description:** Convert ID references in a manifest to lazy link structures. Recursively processes maps and lists, converting `#{<<"id">> => ID}` to `{link, ID, LinkOpts}`.
+
+**Link Options:**
+- `scope` - Set to `[local, remote]`
+- `type` - Set to `<<"link">>`
+- `lazy` - Set to `false` (immediate resolution)
+- Inherits `store` from parent Opts
+
+**Test Code:**
+```erlang
+-module(dev_manifest_linkify_test).
+-include_lib("eunit/include/eunit.hrl").
+
+linkify_id_test() ->
+    Input = #{ <<"id">> => <<"test-id-123">> },
+    Result = dev_manifest:linkify(Input, #{}),
+    ?assertMatch({link, <<"test-id-123">>, _}, Result).
+
+linkify_nested_map_test() ->
+    Input = #{
+        <<"paths">> => #{
+            <<"page1">> => #{ <<"id">> => <<"id1">> },
+            <<"page2">> => #{ <<"id">> => <<"id2">> }
+        }
+    },
+    Result = dev_manifest:linkify(Input, #{}),
+    ?assert(is_map(Result)).
+
+linkify_list_test() ->
+    Input = [
+        #{ <<"id">> => <<"id1">> },
+        #{ <<"id">> => <<"id2">> }
+    ],
+    Result = dev_manifest:linkify(Input, #{}),
+    ?assert(is_list(Result)),
+    ?assertEqual(2, length(Result)).
+
+linkify_preserves_non_id_test() ->
+    Input = #{ <<"key">> => <<"value">> },
+    Result = dev_manifest:linkify(Input, #{}),
+    ?assertEqual(Input, Result).
+```
+
+---
+
+## Manifest Structure
+
+### Standard Manifest Format
+
+```json
+{
+  "manifest": "arweave/paths",
+  "version": "0.1.0",
+  "index": {
+    "path": "index.html"
+  },
+  "paths": {
+    "index.html": {
+      "id": "TX_ID_HERE"
+    },
+    "css/style.css": {
+      "id": "TX_ID_HERE"
+    },
+    "js/app.js": {
+      "id": "TX_ID_HERE"
+    }
+  }
+}
+```
+
+### Nested Paths
+
+```json
+{
+  "paths": {
+    "docs": {
+      "readme": {
+        "id": "README_TX_ID"
+      },
+      "api": {
+        "guide": {
+          "id": "API_GUIDE_TX_ID"
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create manifest message
+ManifestData = #{
+    <<"paths">> => #{
+        <<"index.html">> => #{ <<"id">> => IndexID },
+        <<"about.html">> => #{ <<"id">> => AboutID }
+    },
+    <<"index">> => #{ <<"path">> => <<"index.html">> }
+},
+JSON = hb_message:convert(ManifestData, <<"json@1.0">>, <<"structured@1.0">>, #{}),
+ManifestMsg = #{
+    <<"device">> => <<"manifest@1.0">>,
+    <<"body">> => JSON
+}.
+
+%% Write manifest to cache
+{ok, ManifestID} = hb_cache:write(ManifestMsg, Opts).
+
+%% Access via HTTP
+Node = hb_http_server:start_node(Opts),
+{ok, IndexContent} = hb_http:get(Node, << ManifestID/binary, "/index" >>, Opts),
+{ok, AboutContent} = hb_http:get(Node, << ManifestID/binary, "/about.html" >>, Opts).
+
+%% Nested path access
+ManifestData = #{
+    <<"paths">> => #{
+        <<"docs">> => #{
+            <<"api">> => #{ <<"id">> => ApiDocID }
+        }
+    }
+},
+{ok, ApiDoc} = hb_http:get(Node, << ManifestID/binary, "/docs/api" >>, Opts).
+
+%% Direct resolution
+{ok, Content} = dev_manifest:route(<<"path/to/content">>, ManifestMsg, #{}, Opts).
+```
+
+---
+
+## HTTP Integration
+
+### URL Pattern
+
+```
+/{MANIFEST_ID}/{PATH}
+```
+
+**Examples:**
+```
+/abc123.../index
+/abc123.../about.html
+/abc123.../docs/api/guide
+/abc123.../assets/logo.png
+```
+
+### Resolution Process
+
+1. **Parse URL**: Extract manifest ID and path
+2. **Load Manifest**: Fetch manifest from cache
+3. **Route Request**: Use `dev_manifest:route/4` to resolve path
+4. **Return Content**: Load and return content from resolved ID
+
+---
+
+## Linkification System
+
+### Link Structure
+
+```erlang
+{link, ID, LinkOpts}
+```
+
+**Components:**
+- `ID` - Binary transaction/content ID
+- `LinkOpts` - Map with link configuration:
+  - `scope` - `[local, remote]` (where to search)
+  - `type` - `<<"link">>` (link type identifier)
+  - `lazy` - `false` (resolve immediately)
+  - `store` - Store configuration from parent opts
+
+### Why Linkify?
+
+1. **Lazy Loading**: Enables deferred content resolution
+2. **Scope Control**: Defines where to search for content
+3. **Cache Integration**: Works with HyperBEAM cache system
+4. **Performance**: Avoids loading all content upfront
+
+---
+
+## Error Handling
+
+### Not Found Errors
+
+```erlang
+{error, not_found}
+```
+
+**Causes:**
+- Manifest JSON not found in body/data
+- Requested path not in manifest
+- Index path not defined
+- Referenced content ID not in cache
+
+### Recovery Strategies
+
+```erlang
+%% Provide default content
+case dev_manifest:route(Path, Manifest, #{}, Opts) of
+    {ok, Content} -> Content;
+    {error, not_found} -> DefaultContent
+end.
+
+%% Redirect to index
+case dev_manifest:index(Manifest, #{}, Opts) of
+    {ok, Index} -> Index;
+    {error, not_found} -> {error, <<"No index page">>}
+end.
+```
+
+---
+
+## References
+
+- **Arweave Specs** - [Manifest v1 Schema](https://specs.ar.io/?tx=lXLd0OPwo-dJLB_Amz5jgIeDhiOkjXuM3-r0H_aiNj0)
+- **hb_cache.erl** - Content caching and retrieval
+- **hb_message.erl** - Message format conversion
+- **hb_http.erl** - HTTP client/server
+- **hb_maps.erl** - Map operations with HyperBEAM extensions
+
+---
+
+## Notes
+
+1. **JSON Conversion**: Manifests are stored as JSON and converted to structured format
+2. **Linkification**: All ID references are converted to link structures for lazy loading
+3. **Path Resolution**: Uses AO-Core path resolution (`paths/{Key}`)
+4. **Index Handling**: Special `index` key defines default landing page
+5. **Nested Paths**: Supports arbitrary nesting depth in path hierarchy
+6. **Store Configuration**: Respects store configuration from options
+7. **Full Loading**: Results are fully loaded via `hb_cache:ensure_all_loaded/2`
+8. **Case Sensitivity**: Paths are case-sensitive
+9. **HTTP Compatible**: Designed for direct HTTP access patterns
+10. **Event Logging**: Emits debug events throughout resolution process
+11. **Format Agnostic**: Works with any content type at leaf nodes
+12. **Recursive Resolution**: Supports manifests referencing other manifests
+13. **Standard Compliance**: Follows Arweave manifest v1 specification
+14. **Cache Efficiency**: Only loads referenced content when accessed
+15. **Error Propagation**: Errors bubble up with context for debugging

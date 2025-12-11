@@ -1,0 +1,520 @@
+# dev_cacheviz.erl - Cache Visualization Device
+
+## Overview
+
+**Purpose:** Generate visual representations of node cache structure  
+**Module:** `dev_cacheviz`  
+**Device Name:** `cacheviz@1.0`  
+**Output Formats:** DOT, SVG, JSON, HTML
+
+This device generates visual representations of a node's cache, enabling developers to inspect cache structure, relationships, and data flow. It supports multiple output formats including GraphViz DOT notation, SVG images, JSON graph data for interactive visualization, and a complete HTML renderer.
+
+## Supported Formats
+
+- **DOT:** GraphViz format for graph visualization (`text/vnd.graphviz`)
+- **SVG:** Scalable Vector Graphics images (`image/svg+xml`)
+- **JSON:** Graph data compatible with graph.js library
+- **HTML:** Interactive web-based renderer (index)
+- **JavaScript:** Client-side graph rendering library (graph.js)
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_cache_render`, `hb_message`, `hb_util`
+- **Utilities:** `dev_hyperbuddy`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Visualization Formats
+-spec dot(Base, Request, Opts) -> {ok, DotGraph}.
+-spec svg(Base, Request, Opts) -> {ok, SvgImage}.
+-spec json(Base, Request, Opts) -> {ok, GraphData}.
+
+%% UI Components
+-spec index(Base, Request, Opts) -> {ok, HTMLRenderer}.
+-spec js(Base, Request, Opts) -> {ok, JSLibrary}.
+```
+
+---
+
+## Public Functions
+
+### 1. dot/3
+
+```erlang
+-spec dot(Base, Request, Opts) -> {ok, DotGraph}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        DotGraph :: map().
+```
+
+**Description:** Generate DOT (GraphViz) representation of the cache or a specific path within it. The `target` key in the request specifies which cache path to visualize (default: entire cache). The `render-data` option controls whether to include data content in nodes.
+
+**Request Parameters:**
+- `<<"target">>` - Cache path to visualize (default: `all`)
+- `<<"render-data">>` - Include data in nodes (default: `false`)
+
+**Test Code:**
+```erlang
+-module(dev_cacheviz_dot_test).
+-include_lib("eunit/include/eunit.hrl").
+
+generate_dot_all_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    % Write some test data
+    {ok, ID1} = hb_cache:write(#{ <<"key">> => <<"value1">> }, Opts),
+    {ok, ID2} = hb_cache:write(#{ <<"key">> => <<"value2">> }, Opts),
+    Request = #{},
+    {ok, Result} = dev_cacheviz:dot(#{}, Request, Opts),
+    ?assertEqual(<<"text/vnd.graphviz">>, maps:get(<<"content-type">>, Result)),
+    Dot = maps:get(<<"body">>, Result),
+    ?assert(is_binary(Dot)),
+    ?assert(byte_size(Dot) > 0).
+
+generate_dot_with_target_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    {ok, ID} = hb_cache:write(#{ <<"data">> => <<"test">> }, Opts),
+    Request = #{
+        <<"target">> => ID
+    },
+    {ok, Result} = dev_cacheviz:dot(#{}, Request, Opts),
+    Dot = maps:get(<<"body">>, Result),
+    ?assert(is_binary(Dot)),
+    % Should contain the target ID
+    ?assert(binary:match(Dot, ID) =/= nomatch).
+
+generate_dot_with_data_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    {ok, ID} = hb_cache:write(#{ <<"key">> => <<"value">> }, Opts),
+    Request = #{
+        <<"target">> => ID,
+        <<"render-data">> => true
+    },
+    {ok, Result} = dev_cacheviz:dot(#{}, Request, Opts),
+    Dot = maps:get(<<"body">>, Result),
+    ?assert(is_binary(Dot)).
+```
+
+---
+
+### 2. svg/3
+
+```erlang
+-spec svg(Base, Request, Opts) -> {ok, SvgImage}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        SvgImage :: map().
+```
+
+**Description:** Generate SVG (Scalable Vector Graphics) representation of the cache. Internally converts DOT format to SVG using GraphViz.
+
+**Request Parameters:**
+- Same as `dot/3` (target, render-data)
+
+**Test Code:**
+```erlang
+-module(dev_cacheviz_svg_test).
+-include_lib("eunit/include/eunit.hrl").
+
+generate_svg_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    {ok, _ID} = hb_cache:write(#{ <<"test">> => <<"data">> }, Opts),
+    Request = #{},
+    {ok, Result} = dev_cacheviz:svg(#{}, Request, Opts),
+    ?assertEqual(<<"image/svg+xml">>, maps:get(<<"content-type">>, Result)),
+    Svg = maps:get(<<"body">>, Result),
+    ?assert(is_binary(Svg)),
+    % SVG should contain standard SVG tags
+    ?assert(binary:match(Svg, <<"<svg">>) =/= nomatch orelse
+            binary:match(Svg, <<"<?xml">>) =/= nomatch).
+
+generate_svg_with_target_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    {ok, ID} = hb_cache:write(#{ <<"key">> => <<"value">> }, Opts),
+    Request = #{
+        <<"target">> => ID
+    },
+    {ok, Result} = dev_cacheviz:svg(#{}, Request, Opts),
+    ?assertEqual(<<"image/svg+xml">>, maps:get(<<"content-type">>, Result)),
+    ?assert(is_binary(maps:get(<<"body">>, Result))).
+```
+
+---
+
+### 3. json/3
+
+```erlang
+-spec json(Base, Request, Opts) -> {ok, GraphData}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        GraphData :: term().
+```
+
+**Description:** Generate JSON graph data compatible with the graph.js library for interactive visualization. If no target is specified and the base message is non-empty, it writes the base to cache and uses its ID as the target.
+
+**Request Parameters:**
+- `<<"target">>` - Cache path to visualize (if omitted, uses base message)
+- `<<"max-size">>` - Maximum nodes to include (default: 250)
+
+**Special Target Values:**
+- `not_found` - Uses base message (writes to cache if needed)
+- `<<".">>` - Visualizes entire cache
+- `all` - Visualizes entire cache
+
+**Test Code:**
+```erlang
+-module(dev_cacheviz_json_test).
+-include_lib("eunit/include/eunit.hrl").
+
+generate_json_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    {ok, ID} = hb_cache:write(#{ <<"data">> => <<"test">> }, Opts),
+    Request = #{
+        <<"target">> => ID
+    },
+    Result = dev_cacheviz:json(#{}, Request, Opts),
+    ?assert(is_map(Result) orelse is_list(Result)).
+
+generate_json_from_base_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Base = #{
+        <<"device">> => <<"cacheviz@1.0">>,
+        <<"key">> => <<"value">>
+    },
+    Request = #{},
+    Result = dev_cacheviz:json(Base, Request, Opts),
+    ?assert(is_map(Result) orelse is_list(Result)).
+
+generate_json_with_max_size_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    {ok, ID} = hb_cache:write(#{ <<"test">> => <<"data">> }, Opts),
+    Request = #{
+        <<"target">> => ID,
+        <<"max-size">> => 100
+    },
+    Result = dev_cacheviz:json(#{}, Request, Opts),
+    ?assert(is_map(Result) orelse is_list(Result)).
+
+generate_json_all_cache_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Request = #{
+        <<"target">> => <<".">>
+    },
+    Result = dev_cacheviz:json(#{}, Request, Opts),
+    ?assert(is_map(Result) orelse is_list(Result)).
+```
+
+---
+
+### 4. index/3
+
+```erlang
+-spec index(Base, Request, Opts) -> {ok, HTMLRenderer}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        HTMLRenderer :: term().
+```
+
+**Description:** Return an HTML renderer interface for interactive cache visualization. Returns the `graph.html` file from the cacheviz package.
+
+**Test Code:**
+```erlang
+-module(dev_cacheviz_index_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_index_test() ->
+    Base = #{},
+    Result = dev_cacheviz:index(Base, #{}, #{}),
+    ?assertMatch({ok, _}, Result).
+```
+
+---
+
+### 5. js/3
+
+```erlang
+-spec js(Base, Request, Opts) -> {ok, JSLibrary}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        JSLibrary :: term().
+```
+
+**Description:** Return the JavaScript library (`graph.js`) for client-side cache visualization rendering.
+
+**Test Code:**
+```erlang
+-module(dev_cacheviz_js_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_js_library_test() ->
+    Result = dev_cacheviz:js(#{}, #{}, #{}),
+    ?assertMatch({ok, _}, Result).
+```
+
+---
+
+## Visualization Flow
+
+### DOT Generation
+
+```
+1. Extract target path from request
+2. Extract render-data option
+3. Call hb_cache_render:cache_path_to_dot/3
+4. Return DOT text with content-type header
+```
+
+### SVG Generation
+
+```
+1. Generate DOT representation
+2. Convert DOT to SVG via hb_cache_render:dot_to_svg/1
+3. Return SVG with content-type header
+```
+
+### JSON Generation
+
+```
+1. Determine target:
+   - If target specified → use it
+   - If base non-empty → write to cache, use ID
+   - If neither → use 'all'
+2. Extract max-size parameter
+3. Call hb_cache_render:get_graph_data/3
+4. Return graph data structure
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Generate DOT visualization of entire cache
+{ok, DotResult} = dev_cacheviz:dot(
+    #{},
+    #{},
+    #{ store => Store }
+),
+Dot = maps:get(<<"body">>, DotResult).
+
+%% Generate SVG of specific cache entry
+{ok, SvgResult} = dev_cacheviz:svg(
+    #{},
+    #{ <<"target">> => CacheID },
+    #{ store => Store }
+),
+Svg = maps:get(<<"body">>, SvgResult).
+
+%% Generate JSON with data rendering enabled
+{ok, DotResult} = dev_cacheviz:dot(
+    #{},
+    #{
+        <<"target">> => CacheID,
+        <<"render-data">> => true
+    },
+    Opts
+).
+
+%% Generate JSON graph data from message
+GraphData = dev_cacheviz:json(
+    MessageToVisualize,
+    #{},
+    Opts
+).
+
+%% Generate JSON with size limit
+GraphData = dev_cacheviz:json(
+    #{},
+    #{
+        <<"target">> => CacheID,
+        <<"max-size">> => 500
+    },
+    Opts
+).
+
+%% Access via HTTP
+Node = hb_http_server:start_node(#{ store => Store }),
+% Get DOT representation
+{ok, DotResp} = hb_http:get(
+    Node,
+    <<"/~cacheviz@1.0/dot?target=", TargetID/binary>>,
+    #{}
+),
+% Get SVG representation
+{ok, SvgResp} = hb_http:get(
+    Node,
+    <<"/~cacheviz@1.0/svg?target=", TargetID/binary>>,
+    #{}
+),
+% Get JSON graph data
+{ok, JsonResp} = hb_http:get(
+    Node,
+    <<"/~cacheviz@1.0/json?target=", TargetID/binary>>,
+    #{}
+),
+% Get HTML renderer
+{ok, HtmlResp} = hb_http:get(
+    Node,
+    <<"/~cacheviz@1.0/index">>,
+    #{}
+).
+```
+
+---
+
+## Request Parameters
+
+### Common Parameters
+
+**target:**
+- Type: `binary()`
+- Default: `all`
+- Values:
+  - Cache ID (43-char base64url)
+  - `<<".">>` or `all` - Entire cache
+  - Specific path in cache
+
+**render-data:**
+- Type: `boolean()`
+- Default: `false`
+- Description: Include data content in visualization nodes
+
+**max-size:**
+- Type: `integer()`
+- Default: `250`
+- Description: Maximum number of nodes to include in graph
+
+---
+
+## Response Formats
+
+### DOT Response
+
+```erlang
+#{
+    <<"content-type">> => <<"text/vnd.graphviz">>,
+    <<"body">> => <<"digraph G { ... }">>
+}
+```
+
+### SVG Response
+
+```erlang
+#{
+    <<"content-type">> => <<"image/svg+xml">>,
+    <<"body">> => <<"<?xml version=\"1.0\" ...>">>
+}
+```
+
+### JSON Response
+
+```erlang
+% Graph data structure (format varies based on hb_cache_render implementation)
+#{
+    <<"nodes">> => [...],
+    <<"edges">> => [...],
+    % ... other graph properties
+}
+```
+
+---
+
+## Use Cases
+
+### 1. Cache Structure Analysis
+Visualize the complete cache structure to understand data relationships and organization.
+
+### 2. Debugging
+Inspect specific cache entries and their connections to debug data flow issues.
+
+### 3. Documentation
+Generate visual documentation of cache structure for team communication.
+
+### 4. Monitoring
+Track cache growth and structure changes over time through periodic visualization.
+
+### 5. Interactive Exploration
+Use the HTML/JS renderer for interactive cache exploration in a browser.
+
+---
+
+## Integration with HyperBuddy
+
+The device uses `dev_hyperbuddy:return_file/2` to serve static assets:
+- `graph.html` - Interactive visualization interface
+- `graph.js` - Client-side rendering library
+
+These files are packaged with the `cacheviz@1.0` device.
+
+---
+
+## HTTP Endpoints
+
+### GET /~cacheviz@1.0/dot
+Generate DOT representation of cache
+
+**Query Parameters:**
+- `target` - Cache ID or path
+- `render-data` - Include data (true/false)
+
+### GET /~cacheviz@1.0/svg
+Generate SVG image of cache
+
+**Query Parameters:**
+- `target` - Cache ID or path
+- `render-data` - Include data (true/false)
+
+### GET /~cacheviz@1.0/json
+Generate JSON graph data
+
+**Query Parameters:**
+- `target` - Cache ID or path
+- `max-size` - Maximum nodes
+
+### GET /~cacheviz@1.0/index
+Get interactive HTML renderer
+
+### GET /~cacheviz@1.0/js
+Get JavaScript rendering library
+
+---
+
+## References
+
+- **Cache Rendering** - `hb_cache_render.erl`
+- **Cache System** - `hb_cache.erl`
+- **HyperBuddy** - `dev_hyperbuddy.erl`
+- **GraphViz** - https://graphviz.org/
+
+---
+
+## Notes
+
+1. **Format Support:** Multiple output formats for different use cases
+2. **Target Flexibility:** Can visualize entire cache or specific paths
+3. **Data Rendering:** Optional data content inclusion in visualizations
+4. **Size Limits:** Configurable node limits to prevent overwhelming graphs
+5. **Base Message:** Automatically caches base message if no target specified
+6. **Interactive UI:** Complete HTML/JS renderer for browser-based exploration
+7. **Static Assets:** Uses HyperBuddy for serving visualization components
+8. **Graph Library:** JSON format compatible with standard graph libraries
+9. **Content Types:** Proper MIME types for all output formats
+10. **DOT to SVG:** Automatic conversion pipeline via GraphViz
+11. **HTTP Access:** Full REST API for all visualization formats
+12. **Empty Target:** Target of "." or `all` visualizes entire cache
+13. **Event Logging:** Comprehensive logging for debugging
+14. **Cache Reading:** Non-destructive read-only cache inspection
+15. **Cross-Platform:** Works with any store implementation

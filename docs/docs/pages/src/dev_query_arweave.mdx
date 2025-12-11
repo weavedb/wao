@@ -1,0 +1,516 @@
+# dev_query_arweave.erl - Arweave GraphQL Query Device
+
+## Overview
+
+**Purpose:** Implement Arweave GraphQL API queries within the `~query@1.0` device  
+**Module:** `dev_query_arweave`  
+**Parent Device:** `query@1.0`  
+**Query Types:** Transactions, Blocks, and their fields
+
+This module provides GraphQL-style query capabilities for Arweave data stored in the local cache. It supports querying transactions and blocks by various criteria including IDs, tags, owners, recipients, and block heights.
+
+## Supported Query Arguments
+
+```erlang
+-define(SUPPORTED_QUERY_ARGS,
+    [
+        <<"height">>,      % Block height range
+        <<"id">>,          % Single transaction/block ID
+        <<"ids">>,         % Multiple IDs
+        <<"tags">>,        % Tag filters
+        <<"owners">>,      % Owner address filters
+        <<"recipients">>   % Recipient address filters
+    ]
+).
+```
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_store`, `hb_opts`, `hb_message`, `hb_util`, `hb_maps`, `hb_crypto`
+- **Query:** `dev_query_graphql`
+- **Arweave:** `dev_arweave_block_cache`, `dev_codec_httpsig_keyid`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Query Handler
+-spec query(Object, Field, Args, Opts) -> {ok, Result}.
+```
+
+---
+
+## Public Functions
+
+### query/4
+
+```erlang
+-spec query(Object, Field, Args, Opts) -> {ok, Result}
+    when
+        Object :: map() | list() | term(),
+        Field :: binary(),
+        Args :: map(),
+        Opts :: map(),
+        Result :: term().
+```
+
+**Description:** Handle Arweave GraphQL queries for transactions, blocks, and their fields. Supports nested field resolution following GraphQL patterns.
+
+---
+
+## Supported Fields
+
+### Collection Queries
+
+#### transactions / transaction
+
+Query for transactions matching specified criteria.
+
+```erlang
+query(Obj, <<"transactions">>, Args, Opts) -> {ok, [Message]}.
+query(Obj, <<"transaction">>, Args, Opts) -> {ok, Message | null}.
+```
+
+**Test Code:**
+```erlang
+-module(dev_query_arweave_tx_test).
+-include_lib("eunit/include/eunit.hrl").
+
+transactions_by_id_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Wallet = ar_wallet:new(),
+    Msg = hb_message:commit(#{ <<"data">> => <<"test">> }, #{ priv_wallet => Wallet }),
+    {ok, _} = hb_cache:write(Msg, Opts),
+    ID = hb_message:id(Msg, all, Opts),
+    Args = #{ <<"id">> => ID },
+    {ok, Results} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
+    ?assert(length(Results) >= 1).
+
+transaction_single_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Wallet = ar_wallet:new(),
+    Msg = hb_message:commit(#{ <<"data">> => <<"single">> }, #{ priv_wallet => Wallet }),
+    {ok, _} = hb_cache:write(Msg, Opts),
+    ID = hb_message:id(Msg, all, Opts),
+    Args = #{ <<"id">> => ID },
+    {ok, Result} = dev_query_arweave:query(#{}, <<"transaction">>, Args, Opts),
+    ?assert(is_map(Result) orelse Result == null).
+
+transactions_not_found_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Args = #{ <<"id">> => <<"nonexistent-id">> },
+    {ok, Results} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
+    ?assertEqual([], Results).
+```
+
+---
+
+#### blocks / block
+
+Query for blocks matching specified criteria.
+
+```erlang
+query(Obj, <<"blocks">>, Args, Opts) -> {ok, [Block]}.
+query(Obj, <<"block">>, Args, Opts) -> {ok, Block | null}.
+```
+
+**Test Code:**
+```erlang
+-module(dev_query_arweave_block_test).
+-include_lib("eunit/include/eunit.hrl").
+
+blocks_by_height_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Args = #{ <<"height">> => #{ <<"min">> => 0, <<"max">> => 10 } },
+    {ok, Results} = dev_query_arweave:query(#{}, <<"blocks">>, Args, Opts),
+    ?assert(is_list(Results)).
+
+block_single_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Args = #{ <<"height">> => #{ <<"min">> => 1, <<"max">> => 1 } },
+    {ok, Result} = dev_query_arweave:query(#{}, <<"block">>, Args, Opts),
+    ?assert(is_map(Result) orelse Result == null).
+```
+
+---
+
+#### edges / node
+
+Navigate GraphQL edge/node structure.
+
+```erlang
+query(List, <<"edges">>, Args, Opts) -> {ok, [{ok, Msg} || Msg <- List]}.
+query(Msg, <<"node">>, Args, Opts) -> {ok, Msg}.
+```
+
+**Test Code:**
+```erlang
+-module(dev_query_arweave_edges_test).
+-include_lib("eunit/include/eunit.hrl").
+
+edges_test() ->
+    List = [#{<<"a">> => 1}, #{<<"b">> => 2}],
+    {ok, Edges} = dev_query_arweave:query(List, <<"edges">>, #{}, #{}),
+    ?assertEqual([{ok, #{<<"a">> => 1}}, {ok, #{<<"b">> => 2}}], Edges).
+
+node_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    {ok, Result} = dev_query_arweave:query(Msg, <<"node">>, #{}, #{}),
+    ?assertEqual(Msg, Result).
+```
+
+---
+
+### Block Fields
+
+#### previous
+
+Get the previous block hash.
+
+```erlang
+query(Block, <<"previous">>, _Args, Opts) -> {ok, PreviousBlockHash | null}.
+```
+
+---
+
+#### height
+
+Get the block height.
+
+```erlang
+query(Block, <<"height">>, _Args, Opts) -> {ok, Height | null}.
+```
+
+---
+
+#### timestamp
+
+Get the block timestamp.
+
+```erlang
+query(Block, <<"timestamp">>, _Args, Opts) -> {ok, Timestamp | null}.
+```
+
+**Test Code:**
+```erlang
+-module(dev_query_arweave_block_fields_test).
+-include_lib("eunit/include/eunit.hrl").
+
+block_fields_test() ->
+    Block = #{
+        <<"previous_block">> => <<"prev-hash">>,
+        <<"height">> => 12345,
+        <<"timestamp">> => 1234567890
+    },
+    {ok, Prev} = dev_query_arweave:query(Block, <<"previous">>, #{}, #{}),
+    ?assertEqual(<<"prev-hash">>, Prev),
+    {ok, Height} = dev_query_arweave:query(Block, <<"height">>, #{}, #{}),
+    ?assertEqual(12345, Height),
+    {ok, Timestamp} = dev_query_arweave:query(Block, <<"timestamp">>, #{}, #{}),
+    ?assertEqual(1234567890, Timestamp).
+```
+
+---
+
+### Transaction Fields
+
+#### signature
+
+Get the transaction signature from commitments.
+
+```erlang
+query(Msg, <<"signature">>, _Args, Opts) -> {ok, Signature | null}.
+```
+
+---
+
+#### owner
+
+Get the owner address and public key.
+
+```erlang
+query(Msg, <<"owner">>, _Args, Opts) -> {ok, #{ <<"address">> => Addr, <<"key">> => Key } | null}.
+```
+
+---
+
+#### key / address
+
+Extract key or address from owner object.
+
+```erlang
+query(#{ <<"key">> := Key }, <<"key">>, _Args, _Opts) -> {ok, Key}.
+query(#{ <<"address">> := Address }, <<"address">>, _Args, _Opts) -> {ok, Address}.
+```
+
+**Test Code:**
+```erlang
+-module(dev_query_arweave_owner_test).
+-include_lib("eunit/include/eunit.hrl").
+
+owner_fields_test() ->
+    Owner = #{ <<"key">> => <<"pubkey">>, <<"address">> => <<"addr">> },
+    {ok, Key} = dev_query_arweave:query(Owner, <<"key">>, #{}, #{}),
+    ?assertEqual(<<"pubkey">>, Key),
+    {ok, Addr} = dev_query_arweave:query(Owner, <<"address">>, #{}, #{}),
+    ?assertEqual(<<"addr">>, Addr).
+```
+
+---
+
+#### fee / quantity
+
+Get transaction fee or quantity (in Winston).
+
+```erlang
+query(Msg, <<"fee">>, _Args, Opts) -> {ok, Fee}.
+query(Msg, <<"quantity">>, _Args, Opts) -> {ok, Quantity}.
+query(Number, <<"winston">>, _Args, _Opts) -> {ok, Number}.
+```
+
+**Test Code:**
+```erlang
+-module(dev_query_arweave_amount_test).
+-include_lib("eunit/include/eunit.hrl").
+
+fee_quantity_test() ->
+    Msg = #{ <<"fee">> => 1000, <<"quantity">> => 5000 },
+    {ok, Fee} = dev_query_arweave:query(Msg, <<"fee">>, #{}, #{}),
+    ?assertEqual(1000, Fee),
+    {ok, Qty} = dev_query_arweave:query(Msg, <<"quantity">>, #{}, #{}),
+    ?assertEqual(5000, Qty).
+
+winston_test() ->
+    {ok, Amount} = dev_query_arweave:query(12345, <<"winston">>, #{}, #{}),
+    ?assertEqual(12345, Amount).
+
+default_values_test() ->
+    Msg = #{},
+    {ok, Fee} = dev_query_arweave:query(Msg, <<"fee">>, #{}, #{}),
+    ?assertEqual(0, Fee),
+    {ok, Qty} = dev_query_arweave:query(Msg, <<"quantity">>, #{}, #{}),
+    ?assertEqual(0, Qty).
+```
+
+---
+
+#### recipient
+
+Get the transaction recipient.
+
+```erlang
+query(Msg, <<"recipient">>, _Args, Opts) -> {ok, Recipient | <<"">>}.
+```
+
+---
+
+#### anchor
+
+Get the transaction anchor (last transaction hash).
+
+```erlang
+query(Msg, <<"anchor">>, _Args, Opts) -> {ok, Anchor | <<"">>}.
+```
+
+---
+
+#### data
+
+Get transaction data with content type.
+
+```erlang
+query(Msg, <<"data">>, _Args, Opts) -> {ok, #{ <<"data">> => Data, <<"type">> => ContentType }}.
+```
+
+---
+
+#### size / type
+
+Get data size or content type from data object.
+
+```erlang
+query(#{ <<"data">> := Data }, <<"size">>, _Args, _Opts) -> {ok, byte_size(Data)}.
+query(#{ <<"type">> := Type }, <<"type">>, _Args, _Opts) -> {ok, Type}.
+```
+
+**Test Code:**
+```erlang
+-module(dev_query_arweave_data_test).
+-include_lib("eunit/include/eunit.hrl").
+
+data_fields_test() ->
+    DataObj = #{ <<"data">> => <<"hello world">>, <<"type">> => <<"text/plain">> },
+    {ok, Size} = dev_query_arweave:query(DataObj, <<"size">>, #{}, #{}),
+    ?assertEqual(11, Size),
+    {ok, Type} = dev_query_arweave:query(DataObj, <<"type">>, #{}, #{}),
+    ?assertEqual(<<"text/plain">>, Type).
+```
+
+---
+
+## Query Matching
+
+### match/3
+
+Generates matches for each supported query argument.
+
+| Argument | Description | Match Method |
+|----------|-------------|--------------|
+| `height` | Block height range | Enumerate heights, check store |
+| `id` | Single ID | Direct lookup |
+| `ids` | Multiple IDs | Direct lookup list |
+| `tags` | Tag key-value pairs | Cache template match |
+| `owners` | Owner addresses | Commitment field match |
+| `recipients` | Recipient addresses | Commitment field match |
+
+**Test Code:**
+```erlang
+-module(dev_query_arweave_match_test).
+-include_lib("eunit/include/eunit.hrl").
+
+match_by_tags_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Wallet = ar_wallet:new(),
+    Msg = hb_message:commit(#{
+        <<"data">> => <<"tagged">>,
+        <<"App-Name">> => <<"TestApp">>,
+        <<"Version">> => <<"1.0">>
+    }, #{ priv_wallet => Wallet }),
+    {ok, _} = hb_cache:write(Msg, Opts),
+    Args = #{
+        <<"tags">> => [
+            #{ <<"name">> => <<"App-Name">>, <<"values">> => [<<"TestApp">>] }
+        ]
+    },
+    {ok, Results} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
+    ?assert(is_list(Results)).
+
+match_by_ids_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Wallet = ar_wallet:new(),
+    Msg1 = hb_message:commit(#{ <<"data">> => <<"one">> }, #{ priv_wallet => Wallet }),
+    Msg2 = hb_message:commit(#{ <<"data">> => <<"two">> }, #{ priv_wallet => Wallet }),
+    {ok, _} = hb_cache:write(Msg1, Opts),
+    {ok, _} = hb_cache:write(Msg2, Opts),
+    ID1 = hb_message:id(Msg1, all, Opts),
+    ID2 = hb_message:id(Msg2, all, Opts),
+    Args = #{ <<"ids">> => [ID1, ID2] },
+    {ok, Results} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
+    ?assert(length(Results) >= 2).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Query transactions by tag
+Args = #{
+    <<"tags">> => [
+        #{ <<"name">> => <<"App-Name">>, <<"values">> => [<<"MyApp">>] },
+        #{ <<"name">> => <<"Type">>, <<"values">> => [<<"Message">>] }
+    ]
+},
+{ok, Transactions} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts).
+
+%% Query single transaction by ID
+{ok, TX} = dev_query_arweave:query(#{}, <<"transaction">>, #{ <<"id">> => TXID }, Opts).
+
+%% Query blocks by height range
+{ok, Blocks} = dev_query_arweave:query(
+    #{},
+    <<"blocks">>,
+    #{ <<"height">> => #{ <<"min">> => 1000000, <<"max">> => 1000010 } },
+    Opts
+).
+
+%% Query by owner address
+{ok, OwnerTXs} = dev_query_arweave:query(
+    #{},
+    <<"transactions">>,
+    #{ <<"owners">> => [OwnerAddress] },
+    Opts
+).
+
+%% Navigate GraphQL-style response
+{ok, Transactions} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
+{ok, Edges} = dev_query_arweave:query(Transactions, <<"edges">>, #{}, Opts),
+lists:foreach(
+    fun({ok, Edge}) ->
+        {ok, Node} = dev_query_arweave:query(Edge, <<"node">>, #{}, Opts),
+        {ok, Owner} = dev_query_arweave:query(Node, <<"owner">>, #{}, Opts),
+        {ok, Address} = dev_query_arweave:query(Owner, <<"address">>, #{}, Opts),
+        io:format("TX from: ~s~n", [Address])
+    end,
+    Edges
+).
+
+%% Get transaction data with metadata
+{ok, TX} = dev_query_arweave:query(#{}, <<"transaction">>, #{ <<"id">> => ID }, Opts),
+{ok, DataObj} = dev_query_arweave:query(TX, <<"data">>, #{}, Opts),
+{ok, Size} = dev_query_arweave:query(DataObj, <<"size">>, #{}, Opts),
+{ok, Type} = dev_query_arweave:query(DataObj, <<"type">>, #{}, Opts).
+```
+
+---
+
+## Store Scoping
+
+The query scope can be configured to limit which stores are searched:
+
+```erlang
+%% Default: local store only
+Opts = #{ query_arweave_scope => [local] }.
+
+%% Include remote stores
+Opts = #{ query_arweave_scope => [local, remote] }.
+```
+
+---
+
+## ID Resolution
+
+The module handles multiple ID types for messages:
+
+1. **Base ID:** Unsigned message ID
+2. **Commitment IDs:** IDs derived from signatures
+3. **Store Paths:** Resolved filesystem paths
+
+```erlang
+%% Find all IDs for a message
+all_ids(ID, Opts) ->
+    Store = hb_opts:get(store, no_store, Opts),
+    case hb_store:list(Store, << ID/binary, "/commitments">>) of
+        {ok, []} -> [ID];
+        {ok, CommitmentIDs} -> CommitmentIDs;
+        _ -> []
+    end.
+```
+
+---
+
+## References
+
+- **GraphQL Device** - `dev_query_graphql.erl`
+- **Query Device** - `dev_query.erl`
+- **Block Cache** - `dev_arweave_block_cache.erl`
+- **Cache System** - `hb_cache.erl`
+- **Message Handling** - `hb_message.erl`
+
+---
+
+## Notes
+
+1. **GraphQL Compatibility:** Follows Arweave GraphQL API patterns
+2. **Local Cache:** Queries local cache, not Arweave network directly
+3. **Commitment Fields:** Owner/recipient extracted from message commitments
+4. **Null Handling:** Returns `null` for missing optional fields
+5. **Height Range:** Block height queries use min/max range
+6. **Tag Matching:** Uses `hb_cache:match/2` with template patterns
+7. **ID Intersection:** Multiple query args produce intersection of results
+8. **Edge/Node Pattern:** Supports GraphQL-style connection pagination
+9. **Data Fallback:** Checks both `data` and `body` fields for content
+10. **Store Scoping:** Configurable store scope for queries

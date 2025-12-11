@@ -1,0 +1,491 @@
+# dev_lookup.erl - Cache Lookup Device
+
+## Overview
+
+**Purpose:** Look up resources from cache by ID with format negotiation  
+**Module:** `dev_lookup`  
+**Pattern:** Cache-based retrieval with content-type awareness  
+**Integration:** HTTP API, message routing, format conversion
+
+This module provides a simple device for looking up stored resources from the cache using their ID. It supports content negotiation via the `accept` header, allowing resources to be returned in different formats (raw or JSON-encoded).
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_json`
+- **Devices:** `dev_json_iface`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lookup
+-spec read(M1, M2, Opts) -> {ok, Resource} | {error, not_found}.
+```
+
+---
+
+## Public Functions
+
+### 1. read/3
+
+```erlang
+-spec read(M1, M2, Opts) -> {ok, Resource} | {error, not_found}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        Resource :: binary() | map().
+```
+
+**Description:** Fetch a resource from the cache using the target ID from the request message. Honors the `accept` header to return the resource in the requested format.
+
+**Request Format:**
+```erlang
+#{
+    <<"target">> => ResourceID,
+    <<"accept">> => ContentType  % Optional
+}
+```
+
+**Supported Content Types:**
+- Default (no accept header): Returns raw resource
+- `application/aos-2`: Returns JSON-encoded message structure
+
+**Response Formats:**
+
+**Raw (default):**
+```erlang
+{ok, Resource}
+% Resource is returned as-is from cache
+```
+
+**AOS-2 JSON:**
+```erlang
+{ok, #{
+    <<"body">> => JSONEncodedMessage,
+    <<"content-type">> => <<"application/aos-2">>
+}}
+```
+
+**Test Code:**
+```erlang
+-module(dev_lookup_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_binary_test() ->
+    Bin = <<"Simple unsigned data item">>,
+    {ok, ID} = hb_cache:write(Bin, #{}),
+    {ok, Retrieved} = dev_lookup:read(
+        #{},
+        #{<<"target">> => ID},
+        #{}
+    ),
+    ?assertEqual(Bin, Retrieved).
+
+read_message_test() ->
+    Msg = #{
+        <<"test-key">> => <<"test-value">>,
+        <<"data">> => <<"test-data">>
+    },
+    {ok, ID} = hb_cache:write(Msg, #{}),
+    {ok, Retrieved} = dev_lookup:read(
+        #{},
+        #{<<"target">> => ID},
+        #{}
+    ),
+    ?assert(hb_message:match(Msg, Retrieved)).
+
+read_aos2_format_test() ->
+    Msg = #{
+        <<"test-key">> => <<"test-value">>,
+        <<"data">> => <<"test-data">>
+    },
+    {ok, ID} = hb_cache:write(Msg, #{}),
+    {ok, Response} = dev_lookup:read(
+        #{},
+        #{
+            <<"target">> => ID,
+            <<"accept">> => <<"application/aos-2">>
+        },
+        #{}
+    ),
+    ?assert(maps:is_key(<<"body">>, Response)),
+    ?assertEqual(
+        <<"application/aos-2">>,
+        maps:get(<<"content-type">>, Response)
+    ),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(is_binary(Body)),
+    {ok, Decoded} = dev_json_iface:json_to_message(Body, #{}),
+    ?assertEqual(<<"test-data">>, hb_ao:get(<<"data">>, Decoded, #{})).
+
+read_not_found_test() ->
+    {error, not_found} = dev_lookup:read(
+        #{},
+        #{<<"target">> => <<"nonexistent-id">>},
+        #{}
+    ).
+
+read_with_full_load_test() ->
+    % Message with references should be fully loaded
+    RefMsg = #{
+        <<"id">> => <<"ref-123">>,
+        <<"data">> => <<"referenced-data">>
+    },
+    {ok, RefID} = hb_cache:write(RefMsg, #{}),
+    
+    Msg = #{
+        <<"ref">> => RefID,
+        <<"data">> => <<"main-data">>
+    },
+    {ok, ID} = hb_cache:write(Msg, #{}),
+    
+    {ok, Retrieved} = dev_lookup:read(
+        #{},
+        #{
+            <<"target">> => ID,
+            <<"accept">> => <<"application/aos-2">>
+        },
+        #{}
+    ),
+    % Should have fully loaded referenced content
+    ?assert(is_binary(maps:get(<<"body">>, Retrieved))).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Look up a message by ID (raw format)
+ID = <<"message-id-abc123...">>,
+{ok, Message} = dev_lookup:read(
+    #{},
+    #{<<"target">> => ID},
+    #{}
+).
+
+%% Look up a message in AOS-2 JSON format
+{ok, Response} = dev_lookup:read(
+    #{},
+    #{
+        <<"target">> => ID,
+        <<"accept">> => <<"application/aos-2">>
+    },
+    #{}
+),
+JSONBody = maps:get(<<"body">>, Response),
+{ok, Decoded} = dev_json_iface:json_to_message(JSONBody, #{}).
+
+%% HTTP API usage
+% GET /~lookup@1.0/read?target={ID}
+{ok, Resource} = hb_http:get(
+    Node,
+    <<"/~lookup@1.0/read?target=", ID/binary>>,
+    #{}
+).
+
+% GET /~lookup@1.0/read?target={ID} with AOS-2 format
+Req = hb_message:commit(
+    #{
+        <<"path">> => <<"/~lookup@1.0/read?target=", ID/binary>>,
+        <<"accept">> => <<"application/aos-2">>
+    },
+    Wallet
+),
+{ok, JSONResponse} = hb_http:post(Node, Req, Opts).
+
+%% Use in message resolution
+{ok, Resource} = hb_ao:resolve(
+    #{<<"device">> => <<"lookup@1.0">>},
+    #{<<"target">> => ResourceID},
+    Opts
+).
+```
+
+---
+
+## Lookup Flow
+
+```
+1. Extract target ID from request
+   ↓
+2. Read from cache: hb_cache:read(ID, Opts)
+   ↓
+3. Check accept header
+   ↓
+   ├─ No accept / default
+   │  ↓
+   │  Return raw resource
+   └─ "application/aos-2"
+      ↓
+      a. Ensure all references loaded
+      ↓
+      b. Convert to JSON structure
+      ↓
+      c. Encode to JSON string
+      ↓
+      d. Return with content-type header
+```
+
+---
+
+## Format Conversion
+
+### Raw Format
+```erlang
+% Input: Any cached resource
+{ok, Resource}
+
+% Examples:
+{ok, <<"binary data">>}
+{ok, #{<<"key">> => <<"value">>}}
+{ok, #tx{...}}
+```
+
+### AOS-2 JSON Format
+```erlang
+% Input: Cached message
+{ok, #{
+    <<"body">> => EncodedJSON,
+    <<"content-type">> => <<"application/aos-2">>
+}}
+
+% JSON Structure (from dev_json_iface):
+{
+  "Id": "message-id",
+  "Owner": "owner-address",
+  "Target": "target-id",
+  "Tags": [
+    {"name": "Tag1", "value": "Value1"}
+  ],
+  "Data": "message-data",
+  "Signature": "signature-base64"
+}
+```
+
+---
+
+## Content Negotiation
+
+### Accept Header Values
+
+**No Accept Header (Default):**
+```erlang
+#{<<"target">> => ID}
+% Returns: Raw resource from cache
+```
+
+**AOS-2 Format:**
+```erlang
+#{
+    <<"target">> => ID,
+    <<"accept">> => <<"application/aos-2">>
+}
+% Returns: JSON-encoded message with content-type
+```
+
+**Future Extensions:**
+The pattern allows for additional format support:
+```erlang
+case hb_ao:get(<<"accept">>, M2, Opts) of
+    <<"application/json">> -> json_format(Res);
+    <<"application/cbor">> -> cbor_format(Res);
+    <<"text/html">> -> html_format(Res);
+    _ -> Res
+end
+```
+
+---
+
+## Reference Loading
+
+### Automatic Loading
+Resources are fully loaded before transmission:
+```erlang
+RawRes = hb_cache:read(ID, Opts),
+FullyLoaded = hb_cache:ensure_all_loaded(RawRes)
+```
+
+This ensures:
+- All message references are resolved
+- Recipient doesn't need additional lookups
+- Reduced latency for remote requests
+
+---
+
+## HTTP Integration
+
+### GET Request
+```
+GET /~lookup@1.0/read?target={ID}
+```
+
+### POST Request with Accept
+```
+POST /~lookup@1.0/read
+Body: {
+  "target": "message-id",
+  "accept": "application/aos-2"
+}
+```
+
+### Response Examples
+
+**Success (Raw):**
+```
+200 OK
+Content-Type: application/octet-stream
+
+[Binary or Message Data]
+```
+
+**Success (AOS-2):**
+```
+200 OK
+Content-Type: application/aos-2
+
+{
+  "Id": "...",
+  "Owner": "...",
+  "Data": "..."
+}
+```
+
+**Not Found:**
+```
+404 Not Found
+
+{
+  "error": "not_found"
+}
+```
+
+---
+
+## Error Handling
+
+### Not Found
+```erlang
+{error, not_found}
+% Resource does not exist in cache
+```
+
+### Cache Read Errors
+```erlang
+case hb_cache:read(ID, Opts) of
+    {ok, Resource} -> process(Resource);
+    not_found -> {error, not_found}
+end
+```
+
+---
+
+## Use Cases
+
+### Message Retrieval
+```erlang
+% Fetch a stored message
+MsgID = hb_message:id(Message, all),
+{ok, _} = hb_cache:write(Message, Opts),
+{ok, Retrieved} = dev_lookup:read(
+    #{},
+    #{<<"target">> => MsgID},
+    Opts
+).
+```
+
+### Process State Lookup
+```erlang
+% Retrieve process state by ID
+ProcessID = <<"proc-abc123...">>,
+{ok, ProcessState} = dev_lookup:read(
+    #{},
+    #{<<"target">> => ProcessID},
+    Opts
+).
+```
+
+### Cross-Node Message Sharing
+```erlang
+% Node A: Store message
+{ok, ID} = hb_cache:write(Message, Opts),
+
+% Node B: Request in AOS-2 format
+Req = #{
+    <<"target">> => ID,
+    <<"accept">> => <<"application/aos-2">>
+},
+{ok, JSONResponse} = hb_http:post(NodeA, Req, Opts),
+{ok, Message} = dev_json_iface:json_to_message(
+    maps:get(<<"body">>, JSONResponse),
+    Opts
+).
+```
+
+### Data Item Retrieval
+```erlang
+% Fetch binary data item
+DataID = <<"data-item-id">>,
+{ok, BinaryData} = dev_lookup:read(
+    #{},
+    #{<<"target">> => DataID},
+    #{}
+).
+```
+
+---
+
+## Performance Considerations
+
+### Caching
+- Direct cache access (fast)
+- No computation required
+- I/O bound by cache backend
+
+### Full Loading
+```erlang
+% For AOS-2 format
+Loaded = hb_cache:ensure_all_loaded(Resource)
+% May require multiple cache reads for referenced content
+% Beneficial for remote transmission (single round-trip)
+```
+
+### Format Conversion
+```erlang
+% JSON encoding adds overhead
+Struct = dev_json_iface:message_to_json_struct(Resource, Opts),
+JSON = hb_json:encode(Struct)
+% Consider for large messages
+```
+
+---
+
+## References
+
+- **Cache** - `hb_cache.erl`
+- **JSON Interface** - `dev_json_iface.erl`
+- **AO Resolution** - `hb_ao.erl`
+- **Message Handling** - `hb_message.erl`
+
+---
+
+## Notes
+
+1. **Simple Interface:** Single function for resource lookup
+2. **Content Negotiation:** Supports multiple output formats via accept header
+3. **Full Loading:** Automatically loads all references for transmission
+4. **Cache Direct:** Reads directly from cache (no processing)
+5. **Format Support:** Currently supports raw and AOS-2 JSON formats
+6. **HTTP Ready:** Designed for HTTP API integration
+7. **Not Found:** Returns error for missing resources
+8. **Bandwidth Optimization:** Full loading reduces round-trips
+9. **Zero Computation:** Pure retrieval, no transformation (except format)
+10. **Extensible:** Pattern allows adding more format types
+11. **Target Required:** Target ID must be provided in request
+12. **Message Compatible:** Works with any cached message type
+13. **Binary Support:** Handles both messages and raw binary data
+14. **JSON Encoding:** Uses standard dev_json_iface for consistency
+15. **Latency Reduction:** Full load prevents subsequent lookups by recipient

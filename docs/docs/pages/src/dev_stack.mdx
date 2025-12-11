@@ -1,0 +1,542 @@
+# dev_stack.erl - Device Stack Execution Engine
+
+## Overview
+
+**Purpose:** Manage execution of stacked devices with fold and map modes  
+**Module:** `dev_stack`  
+**Device Name:** `stack@1.0`  
+**Type:** Meta-device for device composition
+
+This device contains a stack of other devices and manages their execution. It supports two execution modes: fold (sequential with state passing) and map (parallel with result aggregation). The stack enables complex device pipelines while maintaining correct HashPath tracking.
+
+## Execution Modes
+
+- **Fold Mode (default):** Executes devices sequentially, passing accumulated state forward
+- **Map Mode:** Executes all devices independently, combining results into a single message
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_opts`, `hb_maps`, `hb_path`
+- **Message Device:** `dev_message`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info(Msg, Opts) -> InfoMap.
+
+%% Key Router
+-spec router(Key, Message1, Message2, Opts) -> Result.
+
+%% Prefix Management
+-spec prefix(Msg1, Msg2, Opts) -> Prefix.
+-spec input_prefix(Msg1, Msg2, Opts) -> InputPrefix.
+-spec output_prefix(Msg1, Msg2, Opts) -> OutputPrefix.
+
+%% Test Utilities
+-spec generate_append_device(Separator) -> Device.
+```
+
+---
+
+## Public Functions
+
+### 1. info/2
+
+```erlang
+-spec info(Msg, Opts) -> InfoMap
+    when
+        Msg :: map(),
+        Opts :: map(),
+        InfoMap :: map().
+```
+
+**Description:** Returns device information including the handler function and excluded keys. If `stack-keys` is present in the message, those keys are exported.
+
+**Return Structure:**
+```erlang
+#{
+    handler => fun router/4,
+    excludes => [<<"set">>, <<"keys">>],
+    exports => StackKeys  % if stack-keys present
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_stack_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_basic_test() ->
+    Msg = #{},
+    Info = dev_stack:info(Msg, #{}),
+    ?assert(maps:is_key(handler, Info)),
+    ?assertEqual([<<"set">>, <<"keys">>], maps:get(excludes, Info)).
+
+info_with_stack_keys_test() ->
+    Msg = #{ <<"stack-keys">> => [<<"compute">>, <<"init">>] },
+    Info = dev_stack:info(Msg, #{}),
+    ?assertEqual([<<"compute">>, <<"init">>], maps:get(exports, Info)).
+```
+
+---
+
+### 2. router/4
+
+```erlang
+-spec router(Key, Message1, Message2, Opts) -> Result
+    when
+        Key :: binary(),
+        Message1 :: map(),
+        Message2 :: map(),
+        Opts :: map(),
+        Result :: {ok, map()} | {skip, map()} | {pass, map()} | {error, term()}.
+```
+
+**Description:** Routes requests to the appropriate execution mode. Handles the `keys` key specially, and routes `transform` requests to the transformer. All other keys are delegated to fold or map execution based on the mode setting.
+
+**Mode Selection:**
+1. Check `mode` in Message2
+2. Fall back to `mode` in Message1
+3. Default to `<<"Fold">>`
+
+**Test Code:**
+```erlang
+-module(dev_stack_router_test).
+-include_lib("eunit/include/eunit.hrl").
+
+router_fold_mode_test() ->
+    Msg1 = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => dev_stack:generate_append_device(<<"+A">>)
+        },
+        <<"result">> => <<"INIT">>
+    },
+    Msg2 = #{ <<"path">> => <<"append">>, <<"bin">> => <<"X">> },
+    {ok, Result} = hb_ao:resolve(Msg1, Msg2, #{}),
+    ?assertEqual(<<"INIT+AX">>, maps:get(<<"result">>, Result)).
+
+router_map_mode_test() ->
+    Msg1 = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => dev_stack:generate_append_device(<<"+A">>),
+            <<"2">> => dev_stack:generate_append_device(<<"+B">>)
+        },
+        <<"result">> => <<"INIT">>
+    },
+    Msg2 = #{ <<"path">> => <<"append">>, <<"mode">> => <<"Map">>, <<"bin">> => <<"/">> },
+    {ok, Result} = hb_ao:resolve(Msg1, Msg2, #{}),
+    ?assertEqual(<<"INIT+A/">>, hb_ao:get(<<"1/result">>, Result, #{})),
+    ?assertEqual(<<"INIT+B/">>, hb_ao:get(<<"2/result">>, Result, #{})).
+```
+
+---
+
+### 3. prefix/3, input_prefix/3, output_prefix/3
+
+```erlang
+-spec prefix(Msg1, Msg2, Opts) -> Prefix
+    when Prefix :: binary().
+
+-spec input_prefix(Msg1, Msg2, Opts) -> InputPrefix
+    when InputPrefix :: binary().
+
+-spec output_prefix(Msg1, Msg2, Opts) -> OutputPrefix
+    when OutputPrefix :: binary().
+```
+
+**Description:** Return the current prefix settings for the stack. Prefixes control where devices read inputs from and write outputs to.
+
+**Test Code:**
+```erlang
+-module(dev_stack_prefix_test).
+-include_lib("eunit/include/eunit.hrl").
+
+prefix_default_test() ->
+    Msg1 = #{ <<"device">> => <<"stack@1.0">> },
+    ?assertEqual(<<"">>, dev_stack:prefix(Msg1, #{}, #{})),
+    ?assertEqual(<<"">>, dev_stack:input_prefix(Msg1, #{}, #{})),
+    ?assertEqual(<<"">>, dev_stack:output_prefix(Msg1, #{}, #{})).
+
+prefix_custom_test() ->
+    Msg1 = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"output-prefix">> => <<"out/">>
+    },
+    ?assertEqual(<<"out/">>, dev_stack:prefix(Msg1, #{}, #{})).
+```
+
+---
+
+## Stack Configuration
+
+### Basic Stack Structure
+
+```erlang
+Msg = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => Device1,
+        <<"2">> => Device2,
+        <<"3">> => Device3
+    }
+}
+```
+
+### Execution Order
+
+Devices are executed in key order (lexicographic):
+- `<<"1">>` → `<<"2">>` → `<<"3">>` → ...
+- `<<"a">>` → `<<"b">>` → `<<"c">>` → ...
+
+---
+
+## Fold Mode
+
+### Behavior
+
+In fold mode, devices execute sequentially with state accumulated and passed forward:
+
+```
+Input → Device1 → State1 → Device2 → State2 → ... → Output
+```
+
+### Example
+
+```erlang
+%% Stack configuration
+Msg = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => AddOneDevice,
+        <<"2">> => AddTwoDevice
+    },
+    <<"value">> => 0
+}.
+
+%% Input: value = 0
+%% After Device1: value = 1
+%% After Device2: value = 3
+%% Output: value = 3
+```
+
+**Test Code:**
+```erlang
+simple_stack_fold_test() ->
+    Msg = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => dev_stack:generate_append_device(<<"!D1!">>),
+            <<"2">> => dev_stack:generate_append_device(<<"_D2_">>)
+        },
+        <<"result">> => <<"INIT">>
+    },
+    {ok, Result} = hb_ao:resolve(Msg, #{ <<"path">> => <<"append">>, <<"bin">> => <<"2">> }, #{}),
+    ?assertEqual(<<"INIT!D1!2_D2_2">>, maps:get(<<"result">>, Result)).
+```
+
+---
+
+## Map Mode
+
+### Behavior
+
+In map mode, each device executes independently on the original input, and results are combined:
+
+```
+         ┌→ Device1 → Result1 ─┐
+Input ───┼→ Device2 → Result2 ─┼→ Combined Output
+         └→ Device3 → Result3 ─┘
+```
+
+### Example
+
+```erlang
+%% Stack configuration with map mode
+Msg2 = #{
+    <<"path">> => <<"compute">>,
+    <<"mode">> => <<"Map">>
+}.
+
+%% Output structure:
+#{
+    <<"1">> => Device1Result,
+    <<"2">> => Device2Result,
+    <<"3">> => Device3Result
+}
+```
+
+**Test Code:**
+```erlang
+simple_map_test() ->
+    Msg = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => dev_stack:generate_append_device(<<"+D1">>),
+            <<"2">> => dev_stack:generate_append_device(<<"+D2">>)
+        },
+        <<"result">> => <<"INIT">>
+    },
+    {ok, Result} = hb_ao:resolve(
+        Msg,
+        #{ <<"path">> => <<"append">>, <<"mode">> => <<"Map">>, <<"bin">> => <<"/">> },
+        #{}
+    ),
+    ?assertEqual(<<"INIT+D1/">>, hb_ao:get(<<"1/result">>, Result, #{})),
+    ?assertEqual(<<"INIT+D2/">>, hb_ao:get(<<"2/result">>, Result, #{})).
+```
+
+---
+
+## Special Response Statuses
+
+### skip
+
+Skips remaining devices in the current pass:
+
+```erlang
+{skip, UpdatedMsg}
+```
+
+**Test Code:**
+```erlang
+skip_test() ->
+    Msg1 = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => dev_stack:generate_append_device(<<"+D1">>, skip),
+            <<"2">> => dev_stack:generate_append_device(<<"+D2">>)
+        },
+        <<"result">> => <<"INIT">>
+    },
+    {ok, Result} = hb_ao:resolve(Msg1, #{ <<"path">> => <<"append">>, <<"bin">> => <<"2">> }, #{}),
+    % Device 2 skipped, only D1 output present
+    ?assertEqual(<<"INIT+D12">>, maps:get(<<"result">>, Result)).
+```
+
+### pass
+
+Re-executes stack from first device (fold mode only):
+
+```erlang
+{pass, UpdatedMsg}
+```
+
+**Test Code:**
+```erlang
+pass_test() ->
+    Msg = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => dev_stack:generate_append_device(<<"+D1">>, pass)
+        },
+        <<"result">> => <<"INIT">>
+    },
+    % Device returns 'pass' until pass count reaches 3
+    {ok, Result} = hb_ao:resolve(Msg, #{ <<"path">> => <<"append">>, <<"bin">> => <<"_">> }, #{}),
+    ?assertEqual(<<"INIT+D1_+D1_">>, maps:get(<<"result">>, Result)).
+```
+
+---
+
+## Stack Metadata
+
+The stack adds metadata keys during execution:
+
+| Key | Description |
+|-----|-------------|
+| `Stack-Pass` | Current pass number (resets increment on `pass`) |
+| `Input-Prefix` | Prefix for device inputs |
+| `Output-Prefix` | Prefix for device outputs |
+| `Device-Key` | Current device being executed |
+| `Previous-Device` | Previously executed device |
+
+---
+
+## Prefix Configuration
+
+### Per-Device Prefixes
+
+```erlang
+Msg = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => Device1,
+        <<"2">> => Device2
+    },
+    <<"input-prefixes">> => #{
+        <<"1">> => <<"in1/">>,
+        <<"2">> => <<"in2/">>
+    },
+    <<"output-prefixes">> => #{
+        <<"1">> => <<"out1/">>,
+        <<"2">> => <<"out2/">>
+    }
+}
+```
+
+### Global Prefixes
+
+```erlang
+Msg = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"input-prefix">> => <<"combined-in/">>,
+    <<"output-prefix">> => <<"combined-out/">>
+}
+```
+
+---
+
+## Transformer
+
+Access individual devices from a stack:
+
+```erlang
+%% Transform to single device
+{ok, TransformedMsg} = hb_ao:resolve(
+    StackMsg,
+    #{ <<"path">> => <<"/transform/device-name/key">> },
+    #{}
+)
+```
+
+**Test Code:**
+```erlang
+transform_test() ->
+    Msg1 = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"make-cool">> => #{
+                info => fun() -> #{
+                    handler => fun(Key, MsgX1) ->
+                        {ok, Value} = dev_message:get(Key, MsgX1, #{}),
+                        dev_message:set(MsgX1, #{ Key => <<Value/binary, "-Cool">> }, #{})
+                    end
+                } end
+            }
+        },
+        <<"value">> => <<"Super">>
+    },
+    {ok, Result} = hb_ao:resolve(Msg1, #{ <<"path">> => <<"/transform/make-cool/value">> }, #{}),
+    ?assertEqual(<<"Super-Cool">>, maps:get(<<"value">>, Result)).
+```
+
+---
+
+## Error Handling
+
+### Error Strategy
+
+Control error handling via `error_strategy` option:
+
+```erlang
+%% Throw exception (default)
+Opts = #{ error_strategy => throw }
+
+%% Return error tuple
+Opts = #{ error_strategy => stop }
+```
+
+### Error Response
+
+```erlang
+{error, {stack_call_failed, Message1, Message2, DevNum, Info}}
+
+%% Or exception:
+error:{device_failed, {dev_num, N}, {msg1, M1}, {msg2, M2}, {info, Info}}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create a processing pipeline
+Pipeline = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => ValidatorDevice,
+        <<"2">> => TransformerDevice,
+        <<"3">> => PersisterDevice
+    }
+}.
+
+%% Execute pipeline
+{ok, Result} = hb_ao:resolve(Pipeline, #{ <<"path">> => <<"process">> }, #{}).
+
+%% Parallel processing with map mode
+ParallelTask = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"validator">> => ValidatorDevice,
+        <<"enricher">> => EnricherDevice,
+        <<"scorer">> => ScorerDevice
+    }
+},
+{ok, Results} = hb_ao:resolve(
+    ParallelTask,
+    #{ <<"path">> => <<"analyze">>, <<"mode">> => <<"Map">> },
+    #{}
+).
+
+%% Multi-pass computation
+IterativeMsg = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => ConvergenceDevice  % Returns 'pass' until converged
+    },
+    <<"allow-multipass">> => true
+}.
+
+%% Re-invocation maintains state
+{ok, Msg2} = hb_ao:resolve(Msg1, Request1, #{}),
+{ok, Msg3} = hb_ao:resolve(Msg2, Request2, #{}).
+```
+
+---
+
+## HashPath Tracking
+
+The stack maintains correct HashPath during execution:
+
+```
+/Msg1/Key →
+    dev_stack:execute →
+        /Msg1/Set?device=/Device-Stack/1 →
+        /Msg2/Key →
+        /Msg3/Set?device=/Device-Stack/2 →
+        /Msg4/Key →
+        ... →
+        /MsgN/Set?device=[This-Device] →
+    returns {ok, /MsgN+1} →
+/MsgN+1
+```
+
+---
+
+## References
+
+- **Message Device** - `dev_message.erl`
+- **AO Resolution** - `hb_ao.erl`
+- **Path Handling** - `hb_path.erl`
+
+---
+
+## Notes
+
+1. **Execution Order:** Devices execute in lexicographic key order
+2. **Mode Override:** Message2 mode takes precedence over Message1
+3. **State Accumulation:** Fold mode passes state between devices
+4. **Skip Behavior:** Skips remaining devices in current pass only
+5. **Pass Behavior:** Re-executes from first device (fold only)
+6. **HashPath Integrity:** Correct tracking through device mutations
+7. **Prefix Isolation:** Devices can have isolated input/output namespaces
+8. **Not Found Handling:** Devices not exposing a key are safely skipped
+9. **Transformer Access:** Individual devices accessible via transform path
+10. **Re-invocation:** Stack can be called multiple times on same message

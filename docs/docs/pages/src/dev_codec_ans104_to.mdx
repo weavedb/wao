@@ -1,0 +1,533 @@
+# dev_codec_ans104_to.erl - TABM to ANS-104 Encoder
+
+## Overview
+
+**Purpose:** Encode TABM messages to ANS-104 TX record format  
+**Module:** `dev_codec_ans104_to`  
+**Pattern:** TABM Message → TX Record Components → ANS-104
+
+This library provides specialized functions for converting TABM (Type Annotated Binary Messages) into ANS-104 data item format (Arweave TX records). It handles bundle loading, signature reconstruction, data field calculation, tag generation, and commitment preservation.
+
+## Core Responsibilities
+
+- **Bundle Loading:** Ensure nested messages fully loaded from cache
+- **Signature Reconstruction:** Extract signature info from commitments
+- **Data Calculation:** Determine data field content and structure
+- **Tag Generation:** Create tag list from committed keys
+- **Target Handling:** Manage target field vs tag placement
+- **ao-data-key:** Apply custom data field naming
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_util`, `hb_cache`, `hb_message`, `hb_private`, `hb_link`
+- **Codecs:** `dev_codec_ans104` (circular), `dev_codec_httpsig_keyid`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Bundle Processing
+-spec maybe_load(TABM, Req, Opts) -> LoadedTABM.
+
+%% TX Component Generation
+-spec siginfo(Message, Opts) -> BaseTX.
+-spec data(TABM, Req, Opts) -> DataField.
+-spec tags(TX, TABM, Data, Opts) -> TagsList.
+```
+
+---
+
+## Public Functions
+
+### 1. maybe_load/3
+
+```erlang
+-spec maybe_load(TABM, Req, Opts) -> LoadedTABM
+    when
+        TABM :: map(),
+        Req :: map(),
+        Opts :: map(),
+        LoadedTABM :: map().
+```
+
+**Description:** Load nested messages from cache if `bundle` option is true. Ensures all referenced messages are fully loaded before conversion. Preserves original commitments.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_to_maybe_load_test).
+-include_lib("eunit/include/eunit.hrl").
+
+maybe_load_no_bundle_test() ->
+    TABM = #{ <<"key">> => <<"value">> },
+    Req = #{ <<"bundle">> => false },
+    Result = dev_codec_ans104_to:maybe_load(TABM, Req, #{}),
+    ?assertEqual(TABM, Result).
+
+maybe_load_with_bundle_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    % Create and cache a nested message
+    Inner = #{ <<"inner">> => <<"data">> },
+    {ok, InnerID} = hb_cache:write(Inner, Opts),
+    TABM = #{ 
+        <<"key">> => <<"value">>,
+        <<"nested">> => InnerID  % Link to cached message
+    },
+    Req = #{ <<"bundle">> => true },
+    Result = dev_codec_ans104_to:maybe_load(TABM, Req, Opts),
+    % Should have loaded nested message
+    ?assert(is_map(Result)),
+    Nested = maps:get(<<"nested">>, Result),
+    ?assertEqual(<<"data">>, maps:get(<<"inner">>, Nested)).
+```
+
+---
+
+### 2. siginfo/2
+
+```erlang
+-spec siginfo(Message, Opts) -> BaseTX
+    when
+        Message :: map(),
+        Opts :: map(),
+        BaseTX :: #tx{}.
+```
+
+**Description:** Extract signature information from message commitments and construct initial TX record. Handles owner, signature, tags, anchor, and target fields. Returns empty TX if no ANS-104 commitment found.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_to_siginfo_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+siginfo_from_commitment_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = hb_message:commit(
+        #{ <<"key">> => <<"value">> },
+        #{ priv_wallet => Wallet },
+        #{ <<"commitment-device">> => <<"ans104@1.0">> }
+    ),
+    TX = dev_codec_ans104_to:siginfo(Msg, #{}),
+    ?assert(is_record(TX, tx)),
+    ?assert(TX#tx.owner =/= ?DEFAULT_OWNER),
+    ?assert(TX#tx.signature =/= ?DEFAULT_SIG).
+
+siginfo_no_commitment_test() ->
+    Msg = #{ <<"key">> => <<"value">> },
+    TX = dev_codec_ans104_to:siginfo(Msg, #{}),
+    ?assert(is_record(TX, tx)),
+    ?assertEqual(?DEFAULT_OWNER, TX#tx.owner),
+    ?assertEqual(?DEFAULT_SIG, TX#tx.signature).
+
+siginfo_with_target_test() ->
+    TargetID = crypto:strong_rand_bytes(32),
+    EncodedTarget = hb_util:encode(TargetID),
+    Msg = #{ <<"target">> => EncodedTarget },
+    TX = dev_codec_ans104_to:siginfo(Msg, #{}),
+    ?assertEqual(TargetID, TX#tx.target).
+
+siginfo_with_field_target_test() ->
+    Wallet = ar_wallet:new(),
+    TargetID = crypto:strong_rand_bytes(32),
+    EncodedTarget = hb_util:encode(TargetID),
+    Msg = hb_message:commit(
+        #{ <<"target">> => EncodedTarget },
+        #{ priv_wallet => Wallet },
+        #{ <<"commitment-device">> => <<"ans104@1.0">> }
+    ),
+    TX = dev_codec_ans104_to:siginfo(Msg, #{}),
+    ?assertEqual(TargetID, TX#tx.target).
+```
+
+---
+
+### 3. data/3
+
+```erlang
+-spec data(TABM, Req, Opts) -> DataField
+    when
+        TABM :: map(),
+        Req :: map(),
+        Opts :: map(),
+        DataField :: binary() | map().
+```
+
+**Description:** Calculate the data field for the TX record. Determines which keys should be nested as messages (>3KB or maps), applies ao-data-key, and recursively converts nested messages.
+
+**Data Field Rules:**
+- Simple binary → Direct inclusion
+- No nested msgs + binary data key → Binary
+- Nested messages → Map of TX records
+- Mixed → Map with data key included
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_to_data_test).
+-include_lib("eunit/include/eunit.hrl").
+
+data_simple_binary_test() ->
+    TABM = #{ <<"data">> => <<"test binary">> },
+    Data = dev_codec_ans104_to:data(TABM, #{}, #{}),
+    ?assertEqual(<<"test binary">>, Data).
+
+data_large_value_test() ->
+    LargeValue = binary:copy(<<"X">>, 4000),  % > 3KB
+    TABM = #{ 
+        <<"small">> => <<"tiny">>,
+        <<"large">> => LargeValue
+    },
+    Data = dev_codec_ans104_to:data(TABM, #{}, #{}),
+    % Large value should be nested
+    ?assert(is_map(Data)),
+    ?assert(maps:is_key(<<"large">>, Data)).
+
+data_nested_message_test() ->
+    TABM = #{
+        <<"simple">> => <<"value">>,
+        <<"nested">> => #{ <<"inner">> => <<"data">> }
+    },
+    Data = dev_codec_ans104_to:data(TABM, #{}, #{}),
+    ?assert(is_map(Data)),
+    ?assert(maps:is_key(<<"nested">>, Data)),
+    Nested = maps:get(<<"nested">>, Data),
+    ?assert(is_record(Nested, tx)).
+
+data_with_body_key_test() ->
+    TABM = #{ <<"body">> => <<"body content">> },
+    Data = dev_codec_ans104_to:data(TABM, #{}, #{}),
+    % Should use body as inline key
+    ?assertEqual(<<"body content">>, Data).
+```
+
+---
+
+### 4. tags/4
+
+```erlang
+-spec tags(TX, TABM, Data, Opts) -> TagsList
+    when
+        TX :: #tx{},
+        TABM :: map(),
+        Data :: term(),
+        Opts :: map(),
+        TagsList :: [{binary(), binary()}].
+```
+
+**Description:** Generate the tags list for the TX record. Uses existing tags from commitment or calculates from TABM keys. Handles ao-data-key, target inclusion, and maintains commitment order.
+
+**Tag Generation Rules:**
+- If TX has existing tags → Use them
+- If commitment exists → Use committed key order
+- Otherwise → Generate from sorted TABM keys
+- Exclude: commitments, data keys, conditionally target
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_to_tags_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+tags_from_commitment_test() ->
+    Wallet = ar_wallet:new(),
+    TABM = hb_message:commit(
+        #{
+            <<"tag1">> => <<"val1">>,
+            <<"tag2">> => <<"val2">>
+        },
+        #{ priv_wallet => Wallet },
+        #{ <<"commitment-device">> => <<"ans104@1.0">> }
+    ),
+    TX = #tx{},
+    Tags = dev_codec_ans104_to:tags(TX, TABM, ?DEFAULT_DATA, #{}),
+    ?assert(is_list(Tags)),
+    ?assert(length(Tags) > 0),
+    % Should maintain committed order
+    TagKeys = [K || {K, _} <- Tags],
+    ?assertEqual([<<"tag1">>, <<"tag2">>], TagKeys).
+
+tags_with_data_key_test() ->
+    TABM = #{ <<"body">> => <<"content">> },
+    TX = #tx{ data = <<"content">> },
+    Tags = dev_codec_ans104_to:tags(TX, TABM, <<"content">>, #{}),
+    % Should include ao-data-key tag
+    ?assert(lists:member({<<"ao-data-key">>, <<"body">>}, Tags)).
+
+tags_excludes_nested_test() ->
+    NestedTX = #tx{ data = <<"nested">> },
+    TABM = #{
+        <<"tag1">> => <<"val1">>,
+        <<"nested">> => #{ <<"inner">> => <<"data">> }
+    },
+    TX = #tx{ data = #{ <<"nested">> => NestedTX } },
+    Tags = dev_codec_ans104_to:tags(TX, TABM, TX#tx.data, #{}),
+    % Nested key should not be in tags
+    TagKeys = [K || {K, _} <- Tags],
+    ?assertNot(lists:member(<<"nested">>, TagKeys)).
+
+tags_existing_preserved_test() ->
+    ExistingTags = [{<<"Tag1">>, <<"val1">>}, {<<"Tag2">>, <<"val2">>}],
+    TX = #tx{ tags = ExistingTags },
+    TABM = #{ <<"tag3">> => <<"val3">> },
+    Tags = dev_codec_ans104_to:tags(TX, TABM, ?DEFAULT_DATA, #{}),
+    % Should return existing tags unchanged
+    ?assertEqual(ExistingTags, Tags).
+```
+
+---
+
+## Encoding Process
+
+### Complete Flow
+
+```
+1. Maybe load bundle (if requested)
+2. Extract signature info → Initial TX
+3. Calculate data field
+4. Generate tags list
+5. Set TX fields
+6. Reset IDs and normalize
+```
+
+### Data Field Calculation
+
+```
+1. Determine inline key (ao-data-key)
+2. Find messages to nest:
+   - Maps
+   - Values > 3KB
+   - Keys > 1KB
+3. Convert nested messages to TX
+4. Return:
+   - Binary (if simple)
+   - Map of TX records (if nested)
+```
+
+### Tag Generation
+
+```
+1. Check for existing tags in TX
+   → If present, return as-is
+2. Find commitment
+   → If present, use committed order
+   → If not, generate from TABM keys
+3. Apply ao-data-key if needed
+4. Exclude data keys and commitments
+5. Handle target inclusion
+6. Convert to tag pairs
+```
+
+---
+
+## Target Handling
+
+### Field vs Tag
+
+**Target in Field:**
+- When value is valid 32-byte ID
+- Encoded in commitment field-target
+- Not included in tags
+
+**Target in Tag:**
+- When value is not a valid ID
+- Included in tags list
+- Not in TX target field
+
+### Inclusion Logic
+
+```erlang
+% Include target tag when:
+1. TX target is default (not set)
+2. TX target differs from TABM target
+
+% Exclude target tag when:
+TX target matches TABM target
+```
+
+---
+
+## ao-data-key Logic
+
+### Determination
+
+```erlang
+% Priority:
+1. Explicit ao-data-key in TABM
+2. Body key present (and not link) + no data key → <<"body">>
+3. Default → <<"data">>
+```
+
+### Application
+
+```erlang
+% If ao-data-key is not "data":
+- Add ao-data-key tag
+- Use key for data field extraction
+- Exclude key from tags
+```
+
+---
+
+## Size Limits
+
+### ANS-104 Constraints
+
+- **Max Tags:** 128
+- **Max Tag Key Size:** 1024 bytes
+- **Max Tag Value Size:** 3072 bytes
+
+### Nesting Trigger
+
+Values exceeding limits nested as TX records:
+```erlang
+% Nested if:
+- Is a map
+- Key size > 1024 bytes
+- Value size > 3072 bytes
+```
+
+---
+
+## Bundle Loading
+
+### When Loaded
+
+Bundle loading triggered by:
+```erlang
+Req = #{ <<"bundle">> => true }
+```
+
+### Loading Process
+
+```
+1. Convert TABM to structured@1.0
+2. Call hb_cache:ensure_all_loaded/2
+3. Convert back to TABM with bundle enabled
+4. Restore original commitments
+```
+
+---
+
+## Commitment Preservation
+
+### Original Tags
+
+Stored when tag names non-normalized:
+```erlang
+#{
+    <<"original-tags">> => #{
+        <<"1">> => #{ <<"name">> => <<"Test">>, <<"value">> => <<"val">> }
+    }
+}
+```
+
+Used to reconstruct exact tag list.
+
+### Link Resolution
+
+For bundled messages with +link suffixes:
+```erlang
+% Committed: [<<"output+link">>]
+% TABM has: <<"output">> (resolved)
+% Tags use: <<"output">> (base key)
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple conversion
+TABM = #{ <<"key">> => <<"value">> },
+{ok, TX} = dev_codec_ans104:to(TABM, #{}, #{}).
+
+%% With bundle loading
+TABM = #{ <<"nested">> => MessageID },
+{ok, TX} = dev_codec_ans104:to(
+    TABM,
+    #{ <<"bundle">> => true },
+    #{ store => Store }
+).
+
+%% With commitment
+Signed = hb_message:commit(TABM, Wallet, <<"ans104@1.0">>),
+{ok, SignedTX} = dev_codec_ans104:to(Signed, #{}, #{}).
+
+%% Custom data key
+TABM = #{ 
+    <<"body">> => <<"content">>,
+    <<"ao-data-key">> => <<"body">>
+},
+{ok, TX} = dev_codec_ans104:to(TABM, #{}, #{}).
+
+%% Large values (auto-nesting)
+LargeValue = binary:copy(<<"X">>, 5000),
+TABM = #{ 
+    <<"small">> => <<"tiny">>,
+    <<"large">> => LargeValue
+},
+{ok, TX} = dev_codec_ans104:to(TABM, #{}, #{}),
+% TX#tx.data will be a map with nested TX for large value
+
+%% Nested messages
+TABM = #{
+    <<"item1">> => #{ <<"data">> => <<"val1">> },
+    <<"item2">> => #{ <<"data">> => <<"val2">> }
+},
+{ok, BundleTX} = dev_codec_ans104:to(TABM, #{}, #{}).
+```
+
+---
+
+## Error Handling
+
+### Too Many Keys
+
+```erlang
+% If TABM has > 128 keys:
+throw({too_many_keys, TABM})
+```
+
+### Missing Committed Key
+
+```erlang
+% If committed key not in TABM:
+throw({missing_committed_key, Key})
+```
+
+### Multiple Commitments
+
+```erlang
+% If multiple ans104 commitments:
+throw({multiple_ans104_commitments_unsupported, TABM})
+```
+
+---
+
+## References
+
+- **Main Codec** - `dev_codec_ans104.erl`
+- **From Decoder** - `dev_codec_ans104_from.erl`
+- **Arweave Bundles** - `ar_bundles.erl`
+- **Cache System** - `hb_cache.erl`
+
+---
+
+## Notes
+
+1. **Bundle Loading:** Optional full cache load
+2. **Signature Extraction:** From ANS-104 commitments
+3. **Data Calculation:** Size-based nesting
+4. **Tag Generation:** Commitment-ordered or sorted
+5. **Target Handling:** Field vs tag placement
+6. **ao-data-key:** Custom data field naming
+7. **Size Limits:** ANS-104 specification compliance
+8. **Recursive Conversion:** Nested message handling
+9. **Link Resolution:** +link suffix handling
+10. **Original Tags:** Preserved from commitment
+11. **Commitment Order:** Maintained in tags
+12. **Exclusion Logic:** Data keys, commitments filtered
+13. **Binary Optimization:** Direct binary when possible
+14. **Map Nesting:** Automatic TX record creation
+15. **Error Detection:** Validates key count and presence

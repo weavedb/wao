@@ -1,0 +1,636 @@
+# dev_local_name.erl - Local Name Registry Device
+
+## Overview
+
+**Purpose:** Register and lookup local names for messages and resources  
+**Module:** `dev_local_name`  
+**Pattern:** Cache-backed name-to-message mapping with admin-only registration  
+**Integration:** Node message storage with persistent cache layer
+
+This module provides a local name registry that maps human-readable names to message IDs or other resources. It uses both in-memory cache (node message) and persistent storage (cache layer) for name resolution, with admin-only name registration.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_opts`, `hb_http_server`
+- **Devices:** `dev_meta`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info(Opts) -> DeviceInfo.
+
+%% Name Operations
+-spec lookup(Base, Req, Opts) -> {ok, Value} | {error, not_found}.
+-spec register(Base, Req, Opts) -> {ok, binary()} | {error, ErrorMap}.
+
+%% Direct Registration (Non-API)
+-spec direct_register(Req, Opts) -> {ok, binary()} | not_found.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(Opts) -> DeviceInfo
+    when
+        Opts :: map(),
+        DeviceInfo :: #{
+            excludes => [binary()],
+            default => fun()
+        }.
+```
+
+**Description:** Return device information. Excludes internal functions from API and sets default handler.
+
+**Default Handler:** All unrecognized keys are treated as lookup requests.
+
+**Test Code:**
+```erlang
+-module(dev_local_name_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    Info = dev_local_name:info(#{}),
+    ?assert(is_map(Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    ?assert(maps:is_key(default, Info)).
+
+info_excludes_test() ->
+    Info = dev_local_name:info(#{}),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"direct_register">>, Excludes)),
+    ?assert(lists:member(<<"keys">>, Excludes)),
+    ?assert(lists:member(<<"set">>, Excludes)).
+
+info_default_handler_test() ->
+    Info = dev_local_name:info(#{}),
+    Default = maps:get(default, Info),
+    ?assert(is_function(Default, 4)).
+```
+
+---
+
+### 2. lookup/3
+
+```erlang
+-spec lookup(Base, Req, Opts) -> {ok, Value} | {error, not_found}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Value :: term().
+```
+
+**Description:** Look up a name and return its associated value.
+
+**Request Format:**
+```erlang
+#{<<"key">> => <<"name-to-lookup">>}
+```
+
+**Name Resolution:**
+1. Check in-memory cache (node message)
+2. If not found, load from persistent storage
+3. Return value or not_found error
+
+**Test Code:**
+```erlang
+-module(dev_local_name_lookup_test).
+-include_lib("eunit/include/eunit.hrl").
+
+lookup_not_found_test() ->
+    Req = #{<<"key">> => <<"nonexistent">>},
+    ?assertEqual(
+        {error, not_found},
+        dev_local_name:lookup(#{}, Req, #{})
+    ).
+
+lookup_from_opts_test() ->
+    Req = #{<<"key">> => <<"name1">>},
+    Opts = #{
+        local_names => #{
+            <<"name1">> => <<"value1">>
+        }
+    },
+    {ok, Value} = dev_local_name:lookup(#{}, Req, Opts),
+    ?assertEqual(<<"value1">>, Value).
+
+lookup_nested_value_test() ->
+    Req = #{<<"key">> => <<"process1">>},
+    Opts = #{
+        local_names => #{
+            <<"process1">> => #{
+                <<"id">> => <<"proc-123">>,
+                <<"data">> => <<"test">>
+            }
+        }
+    },
+    {ok, Value} = dev_local_name:lookup(#{}, Req, Opts),
+    ?assert(is_map(Value)),
+    ?assertEqual(<<"proc-123">>, maps:get(<<"id">>, Value)).
+
+lookup_via_default_handler_test() ->
+    % Can lookup by using key as path
+    Opts = #{
+        local_names => #{
+            <<"myname">> => <<"myvalue">>
+        }
+    },
+    Info = dev_local_name:info(#{}),
+    Default = maps:get(default, Info),
+    {ok, Value} = Default(<<"myname">>, #{}, #{}, Opts),
+    ?assertEqual(<<"myvalue">>, Value).
+```
+
+---
+
+### 3. register/3
+
+```erlang
+-spec register(Base, Req, Opts) -> {ok, binary()} | {error, ErrorMap}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        ErrorMap :: #{
+            <<"status">> => 403,
+            <<"message">> => binary()
+        }.
+```
+
+**Description:** Register a new name (admin only).
+
+**Request Format:**
+```erlang
+#{
+    <<"key">> => <<"name">>,
+    <<"value">> => ValueToStore
+}
+```
+
+**Authorization:** Only node admin can register names.
+
+**Registration Process:**
+1. Verify requester is admin
+2. Write value to cache
+3. Create cache link for name
+4. Update in-memory names
+5. Return success message
+
+**Test Code:**
+```erlang
+-module(dev_local_name_register_test).
+-include_lib("eunit/include/eunit.hrl").
+
+register_as_admin_test() ->
+    Wallet = ar_wallet:new(),
+    Opts = #{priv_wallet => Wallet},
+    Req = hb_message:commit(
+        #{
+            <<"key">> => <<"test-name">>,
+            <<"value">> => <<"test-value">>
+        },
+        Opts
+    ),
+    {ok, Result} = dev_local_name:register(#{}, Req, Opts),
+    ?assertEqual(<<"Registered.">>, Result).
+
+register_unauthorized_test() ->
+    AdminWallet = ar_wallet:new(),
+    UserWallet = ar_wallet:new(),
+    Opts = #{priv_wallet => AdminWallet},
+    Req = hb_message:commit(
+        #{
+            <<"key">> => <<"test-name">>,
+            <<"value">> => <<"test-value">>
+        },
+        #{priv_wallet => UserWallet}
+    ),
+    {error, Error} = dev_local_name:register(#{}, Req, Opts),
+    ?assertEqual(403, maps:get(<<"status">>, Error)),
+    ?assertEqual(<<"Unauthorized.">>, maps:get(<<"message">>, Error)).
+
+register_and_lookup_test() ->
+    TestName = <<"TEST-", (integer_to_binary(os:system_time(millisecond)))/binary>>,
+    TestValue = <<"VALUE-", (integer_to_binary(os:system_time(millisecond)))/binary>>,
+    Wallet = ar_wallet:new(),
+    Opts = #{priv_wallet => Wallet},
+    Req = hb_message:commit(
+        #{
+            <<"key">> => TestName,
+            <<"value">> => TestValue
+        },
+        Opts
+    ),
+    {ok, _} = dev_local_name:register(#{}, Req, Opts),
+    LookupReq = #{<<"key">> => TestName},
+    {ok, Value} = dev_local_name:lookup(#{}, LookupReq, Opts),
+    ?assertEqual(TestValue, Value).
+```
+
+---
+
+### 4. direct_register/2
+
+```erlang
+-spec direct_register(Req, Opts) -> {ok, binary()} | not_found
+    when
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Register a name without authorization check. For internal use by other devices.
+
+**Use Cases:**
+- System initialization
+- Automated name registration
+- Device-to-device name sharing
+
+**Security:** Not exposed via API (excluded in info/1).
+
+**Test Code:**
+```erlang
+-module(dev_local_name_direct_register_test).
+-include_lib("eunit/include/eunit.hrl").
+
+direct_register_test() ->
+    Req = #{
+        <<"key">> => <<"internal-name">>,
+        <<"value">> => <<"internal-value">>
+    },
+    Opts = #{},
+    {ok, Result} = dev_local_name:direct_register(Req, Opts),
+    ?assertEqual(<<"Registered.">>, Result).
+
+direct_register_with_map_value_test() ->
+    Req = #{
+        <<"key">> => <<"process-name">>,
+        <<"value">> => #{
+            <<"id">> => <<"proc-123">>,
+            <<"type">> => <<"Process">>
+        }
+    },
+    {ok, _} = dev_local_name:direct_register(Req, #{}),
+    LookupReq = #{<<"key">> => <<"process-name">>},
+    {ok, Value} = dev_local_name:lookup(#{}, LookupReq, #{}),
+    ?assert(is_map(Value)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Register a name (as admin)
+Req = hb_message:commit(
+    #{
+        <<"key">> => <<"my-process">>,
+        <<"value">> => ProcessMessage
+    },
+    #{priv_wallet => AdminWallet}
+),
+{ok, _} = dev_local_name:register(#{}, Req, Opts).
+
+%% Lookup a name
+LookupReq = #{<<"key">> => <<"my-process">>},
+{ok, Process} = dev_local_name:lookup(#{}, LookupReq, Opts).
+
+%% Lookup via default handler (direct path)
+{ok, Value} = hb_ao:resolve(
+    #{<<"device">> => <<"local-name@1.0">>},
+    #{<<"path">> => <<"my-process">>},
+    Opts
+).
+
+%% Register internally (no auth check)
+dev_local_name:direct_register(
+    #{
+        <<"key">> => <<"system-resource">>,
+        <<"value">> => Resource
+    },
+    Opts
+).
+
+%% HTTP API usage
+% Register
+hb_http:post(
+    Node,
+    <<"/~local-name@1.0/register">>,
+    hb_message:commit(
+        #{<<"key">> => Name, <<"value">> => Value},
+        Opts
+    ),
+    Opts
+).
+
+% Lookup
+{ok, Value} = hb_http:get(
+    Node,
+    <<"/~local-name@1.0/lookup?key=", Name/binary>>,
+    Opts
+).
+
+% Lookup via path
+{ok, Value} = hb_http:get(
+    Node,
+    <<"/~local-name@1.0/", Name/binary>>,
+    Opts
+).
+```
+
+---
+
+## Storage Architecture
+
+### Two-Layer Storage
+
+**Layer 1: In-Memory Cache**
+```erlang
+#{
+    local_names => #{
+        <<"name1">> => Value1,
+        <<"name2">> => Value2
+    }
+}
+```
+- Stored in node message options
+- Fast lookup
+- Cleared on node restart
+- Automatically loaded from Layer 2
+
+**Layer 2: Persistent Cache**
+```
+cache-dir/
+  local-name@1.0/
+    name1 -> message-path
+    name2 -> message-path
+```
+- Stored in cache directory
+- Persists across restarts
+- Links names to message storage paths
+
+---
+
+## Name Registration Flow
+
+```
+1. Receive registration request
+   ↓
+2. Check if requester is admin
+   ↓
+3. Write value to cache (hb_cache:write)
+   ↓
+4. Create cache link: local-name@1.0/{key} → value-path
+   ↓
+5. Load all names into memory (load_names)
+   ↓
+6. Update node message with new names
+   ↓
+7. Return "Registered." success message
+```
+
+---
+
+## Name Lookup Flow
+
+```
+1. Receive lookup request with key
+   ↓
+2. Check in-memory cache (local_names in Opts)
+   ↓
+   ├─ Found → Return value
+   └─ Not found ↓
+3. Load names from persistent cache
+   ↓
+4. Update in-memory cache
+   ↓
+5. Retry lookup in updated cache
+   ↓
+   ├─ Found → Return value
+   └─ Not found → Return {error, not_found}
+```
+
+---
+
+## Authorization
+
+### Admin Check
+```erlang
+case dev_meta:is(admin, Req, Opts) of
+    true -> 
+        % Allow registration
+        direct_register(Req, Opts);
+    false -> 
+        % Deny registration
+        {error, #{
+            <<"status">> => 403,
+            <<"message">> => <<"Unauthorized.">>
+        }}
+end
+```
+
+### Admin Determination
+Admin is determined by wallet signature matching node wallet.
+
+---
+
+## Cache Integration
+
+### Cache Write
+```erlang
+{ok, MsgPath} = hb_cache:write(Value, Opts)
+% Returns: <<"cache/path/to/message">>
+```
+
+### Cache Link
+```erlang
+LinkPath = <<"local-name@1.0/", NormalizedKey/binary>>,
+hb_cache:link(MsgPath, LinkPath, Opts)
+% Creates: cache/local-name@1.0/key → cache/path/to/message
+```
+
+### Cache Read
+```erlang
+Path = <<"local-name@1.0/", Key/binary>>,
+{ok, Value} = hb_cache:read(Path, Opts)
+```
+
+### Cache List
+```erlang
+Keys = hb_cache:list(<<"local-name@1.0">>, Opts)
+% Returns: [<<"key1">>, <<"key2">>, ...]
+```
+
+---
+
+## Name Normalization
+
+### Key Normalization
+```erlang
+NormKey = hb_ao:normalize_key(RawKey)
+% Converts to lowercase, replaces special chars
+```
+
+**Examples:**
+```erlang
+<<"My-Process">> → <<"my-process">>
+<<"User_Name">> → <<"user-name">>
+<<"TEST.VALUE">> → <<"test-value">>
+```
+
+---
+
+## Use Cases
+
+### Process Name Registration
+```erlang
+% Register a process with friendly name
+Req = #{
+    <<"key">> => <<"my-app">>,
+    <<"value">> => ProcessMessage
+},
+dev_local_name:direct_register(Req, Opts).
+
+% Later, lookup by name
+{ok, Process} = dev_local_name:lookup(
+    #{},
+    #{<<"key">> => <<"my-app">>},
+    Opts
+).
+```
+
+### Resource Aliases
+```erlang
+% Create alias for complex ID
+Req = #{
+    <<"key">> => <<"main-scheduler">>,
+    <<"value">> => <<"abc123...xyz789">>
+},
+dev_local_name:direct_register(Req, Opts).
+
+% Use alias instead of ID
+{ok, SchedulerID} = dev_local_name:lookup(
+    #{},
+    #{<<"key">> => <<"main-scheduler">>},
+    Opts
+).
+```
+
+### Configuration Values
+```erlang
+% Store configuration under names
+Req = #{
+    <<"key">> => <<"api-endpoint">>,
+    <<"value">> => <<"https://api.example.com">>
+},
+dev_local_name:direct_register(Req, Opts).
+```
+
+---
+
+## Default Handler Behavior
+
+### Path-Based Lookup
+```erlang
+% Request: GET /~local-name@1.0/my-name
+% Equivalent to: lookup(#{}, #{<<"key">> => <<"my-name">>}, Opts)
+
+default_lookup(Key, _, Req, Opts) ->
+    lookup(Key, Req#{<<"key">> => Key}, Opts).
+```
+
+### Examples:
+```
+/~local-name@1.0/my-process → lookup("my-process")
+/~local-name@1.0/config → lookup("config")
+/~local-name@1.0/main-scheduler → lookup("main-scheduler")
+```
+
+---
+
+## HTTP API
+
+### Register Name
+```
+POST /~local-name@1.0/register
+Body: {
+  "key": "name",
+  "value": "value"
+}
+Headers: {
+  "Authorization": "Bearer <signed-message>"
+}
+```
+
+### Lookup Name
+```
+GET /~local-name@1.0/lookup?key=name
+GET /~local-name@1.0/name  (via default handler)
+```
+
+---
+
+## State Management
+
+### Node Message Updates
+```erlang
+update_names(LocalNames, Opts) ->
+    NewOpts = Opts#{local_names => LocalNames},
+    hb_http_server:set_opts(NewOpts),
+    NewOpts.
+```
+
+Updates the running node message with new name mappings.
+
+### Loading Names
+```erlang
+load_names(Opts) ->
+    % List all names from cache
+    Keys = hb_cache:list(<<"local-name@1.0">>, Opts),
+    
+    % Load each name's value
+    LocalNames = maps:from_list([
+        {Key, hb_cache:read(Path, Opts)}
+        || Key <- Keys
+    ]),
+    
+    % Update node message
+    update_names(LocalNames, Opts).
+```
+
+---
+
+## References
+
+- **Meta Device** - `dev_meta.erl`
+- **Cache** - `hb_cache.erl`
+- **AO Resolution** - `hb_ao.erl`
+- **HTTP Server** - `hb_http_server.erl`
+- **Options Management** - `hb_opts.erl`
+
+---
+
+## Notes
+
+1. **Admin Only:** Name registration requires admin privileges
+2. **Two-Layer:** In-memory + persistent storage
+3. **Auto-Load:** Names loaded from cache on first lookup
+4. **Persistent:** Names survive node restarts
+5. **Default Handler:** Path becomes lookup key
+6. **Normalized Keys:** Keys converted to lowercase
+7. **Cache Links:** Uses symlink-style cache links
+8. **No TTL:** Names persist until manually removed
+9. **Direct API:** Internal devices can bypass auth
+10. **Message Storage:** Values stored as cached messages
+11. **Fast Lookup:** In-memory cache for performance
+12. **Node-Wide:** Names shared across all requests
+13. **Update Live:** New registrations immediately available
+14. **Security:** Only admin can register/modify names
+15. **Flexible Values:** Can store any Erlang term as value

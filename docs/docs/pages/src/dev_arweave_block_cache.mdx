@@ -1,0 +1,431 @@
+# dev_arweave_block_cache.erl - Arweave Block Cache Management
+
+## Overview
+
+**Purpose:** Cache and index Arweave block metadata with pseudo-path support  
+**Module:** `dev_arweave_block_cache`  
+**Cache Prefix:** `~arweave@2.9`  
+**Pattern:** Height-based indexing with multi-path linking
+
+This module provides specialized caching operations for Arweave blocks, ensuring block metadata is queryable via pseudo-paths. It maintains height-based indexes and links block IDs (both independent and dependent hashes) to cached message IDs for fast retrieval.
+
+## Key Features
+
+- **Height-Based Indexing:** Fast block lookups by height
+- **Multi-Path Linking:** Blocks accessible via ID, hash, or height
+- **Latest Block Tracking:** Quick access to most recent cached block
+- **Pseudo-Path System:** Structured paths for organized storage
+
+## Dependencies
+
+- **HyperBEAM:** `hb_cache`, `hb_store`, `hb_opts`, `hb_maps`, `hb_util`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Cache Queries
+-spec latest(Opts) -> {ok, Height} | not_found.
+-spec heights(Opts) -> {ok, [Height]}.
+
+%% Block Operations
+-spec read(BlockRef, Opts) -> {ok, Block} | not_found.
+-spec write(Block, Opts) -> {ok, MessageID}.
+
+%% Path Management
+-spec path(BlockHeight, Opts) -> Path.
+```
+
+---
+
+## Public Functions
+
+### 1. latest/1
+
+```erlang
+-spec latest(Opts) -> {ok, LatestHeight} | not_found
+    when
+        Opts :: map(),
+        LatestHeight :: integer().
+```
+
+**Description:** Get the latest (highest) block height from the cache. Returns `not_found` if no blocks are cached.
+
+**Test Code:**
+```erlang
+-module(dev_arweave_block_cache_latest_test).
+-include_lib("eunit/include/eunit.hrl").
+
+latest_with_blocks_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    % Write some blocks
+    Block1 = #{
+        <<"height">> => 1000,
+        <<"indep_hash">> => <<"hash1">>,
+        <<"hash">> => <<"dhash1">>
+    },
+    Block2 = #{
+        <<"height">> => 1001,
+        <<"indep_hash">> => <<"hash2">>,
+        <<"hash">> => <<"dhash2">>
+    },
+    dev_arweave_block_cache:write(Block1, Opts),
+    dev_arweave_block_cache:write(Block2, Opts),
+    {ok, Latest} = dev_arweave_block_cache:latest(Opts),
+    ?assertEqual(1001, Latest).
+
+latest_no_blocks_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    hb_store:reset(maps:get(store, Opts)),
+    ?assertEqual(not_found, dev_arweave_block_cache:latest(Opts)).
+```
+
+---
+
+### 2. heights/1
+
+```erlang
+-spec heights(Opts) -> {ok, HeightList}
+    when
+        Opts :: map(),
+        HeightList :: [integer()].
+```
+
+**Description:** Get a list of all cached block heights. Returns empty list if no blocks are cached.
+
+**Test Code:**
+```erlang
+-module(dev_arweave_block_cache_heights_test).
+-include_lib("eunit/include/eunit.hrl").
+
+heights_multiple_blocks_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    hb_store:reset(maps:get(store, Opts)),
+    % Write multiple blocks
+    Heights = [1000, 1001, 1005, 1010],
+    lists:foreach(
+        fun(H) ->
+            Block = #{
+                <<"height">> => H,
+                <<"indep_hash">> => <<"hash-", (integer_to_binary(H))/binary>>,
+                <<"hash">> => <<"dhash-", (integer_to_binary(H))/binary>>
+            },
+            dev_arweave_block_cache:write(Block, Opts)
+        end,
+        Heights
+    ),
+    {ok, CachedHeights} = dev_arweave_block_cache:heights(Opts),
+    ?assertEqual(lists:sort(Heights), lists:sort(CachedHeights)).
+
+heights_empty_cache_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    hb_store:reset(maps:get(store, Opts)),
+    {ok, Heights} = dev_arweave_block_cache:heights(Opts),
+    ?assertEqual([], Heights).
+```
+
+---
+
+### 3. read/2
+
+```erlang
+-spec read(BlockRef, Opts) -> {ok, Block} | not_found
+    when
+        BlockRef :: integer(),
+        Opts :: map(),
+        Block :: map().
+```
+
+**Description:** Read a block from the cache by height. Returns the full block message if found.
+
+**Test Code:**
+```erlang
+-module(dev_arweave_block_cache_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_existing_block_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Block = #{
+        <<"height">> => 12345,
+        <<"indep_hash">> => <<"test-hash-43-chars">>,
+        <<"hash">> => <<"test-dhash-43-chars">>,
+        <<"timestamp">> => 1234567890,
+        <<"txs">> => []
+    },
+    {ok, _MsgID} = dev_arweave_block_cache:write(Block, Opts),
+    {ok, ReadBlock} = dev_arweave_block_cache:read(12345, Opts),
+    ?assertEqual(12345, maps:get(<<"height">>, ReadBlock)),
+    ?assertEqual(<<"test-hash-43-chars">>, maps:get(<<"indep_hash">>, ReadBlock)).
+
+read_nonexistent_block_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    hb_store:reset(maps:get(store, Opts)),
+    ?assertEqual(not_found, dev_arweave_block_cache:read(99999, Opts)).
+```
+
+---
+
+### 4. write/2
+
+```erlang
+-spec write(Block, Opts) -> {ok, MessageID}
+    when
+        Block :: map(),
+        Opts :: map(),
+        MessageID :: binary().
+```
+
+**Description:** Write a block to the cache and create all necessary pseudo-path links. Links the message ID to:
+- Block independent hash (indep_hash)
+- Block dependent hash (hash)
+- Height-based pseudo-path
+
+**Test Code:**
+```erlang
+-module(dev_arweave_block_cache_write_test).
+-include_lib("eunit/include/eunit.hrl").
+
+write_block_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Block = #{
+        <<"height">> => 1000000,
+        <<"indep_hash">> => <<"independent-hash-43-characters">>,
+        <<"hash">> => <<"dependent-hash-43-characters">>,
+        <<"timestamp">> => 1234567890,
+        <<"txs">> => [<<"tx1">>, <<"tx2">>]
+    },
+    {ok, MsgID} = dev_arweave_block_cache:write(Block, Opts),
+    ?assert(is_binary(MsgID)),
+    ?assertEqual(43, byte_size(MsgID)),
+    % Verify block is readable by height
+    {ok, ReadBlock} = dev_arweave_block_cache:read(1000000, Opts),
+    ?assertEqual(Block, ReadBlock).
+
+write_creates_links_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    IndepHash = <<"indep-hash-43-characters">>,
+    DepHash = <<"dep-hash-43-characters">>,
+    Block = #{
+        <<"height">> => 2000,
+        <<"indep_hash">> => IndepHash,
+        <<"hash">> => DepHash
+    },
+    {ok, MsgID} = dev_arweave_block_cache:write(Block, Opts),
+    % Verify links work
+    {ok, ByIndepHash} = hb_cache:read(IndepHash, Opts),
+    {ok, ByDepHash} = hb_cache:read(DepHash, Opts),
+    {ok, ByHeight} = dev_arweave_block_cache:read(2000, Opts),
+    ?assertEqual(Block, ByIndepHash),
+    ?assertEqual(Block, ByDepHash),
+    ?assertEqual(Block, ByHeight).
+```
+
+---
+
+### 5. path/2
+
+```erlang
+-spec path(BlockHeight, Opts) -> Path
+    when
+        BlockHeight :: integer(),
+        Opts :: map(),
+        Path :: binary().
+```
+
+**Description:** Return the pseudo-path for a block at the given height. Used internally for cache storage organization.
+
+**Test Code:**
+```erlang
+-module(dev_arweave_block_cache_path_test).
+-include_lib("eunit/include/eunit.hrl").
+
+path_generation_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Path = dev_arweave_block_cache:path(1234567, Opts),
+    ?assert(is_binary(Path)),
+    ?assert(binary:match(Path, <<"~arweave@2.9">>) =/= nomatch),
+    ?assert(binary:match(Path, <<"block">>) =/= nomatch),
+    ?assert(binary:match(Path, <<"height">>) =/= nomatch),
+    ?assert(binary:match(Path, <<"1234567">>) =/= nomatch).
+
+path_different_heights_test() ->
+    Opts = #{ store => hb_test_utils:test_store() },
+    Path1 = dev_arweave_block_cache:path(1000, Opts),
+    Path2 = dev_arweave_block_cache:path(2000, Opts),
+    ?assertNotEqual(Path1, Path2).
+```
+
+---
+
+## Cache Structure
+
+### Pseudo-Path Format
+
+```
+~arweave@2.9/block/height/[HEIGHT]
+```
+
+**Example:**
+```
+~arweave@2.9/block/height/1234567
+```
+
+### Storage Organization
+
+```
+Cache Entry (Message ID)
+├── Link: Independent Hash (indep_hash)
+├── Link: Dependent Hash (hash)
+└── Link: Height Path (~arweave@2.9/block/height/N)
+```
+
+---
+
+## Linking Strategy
+
+### Multi-Path Access
+
+Each block can be accessed via three different paths:
+
+1. **By Independent Hash:** Primary block identifier
+2. **By Dependent Hash:** Alternative block identifier
+3. **By Height:** Numeric sequential identifier
+
+### Link Creation Flow
+
+```
+1. Write block to cache → Get Message ID
+2. Link Message ID ← Independent Hash
+3. Link Message ID ← Dependent Hash
+4. Link Message ID ← Height Pseudo-Path
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Write a block and create links
+Block = #{
+    <<"height">> => 1234567,
+    <<"indep_hash">> => <<"block-id-43-chars">>,
+    <<"hash">> => <<"block-hash-43-chars">>,
+    <<"timestamp">> => 1234567890,
+    <<"txs">> => [<<"tx1">>, <<"tx2">>]
+},
+{ok, MsgID} = dev_arweave_block_cache:write(Block, Opts).
+
+%% Read block by height
+{ok, Block} = dev_arweave_block_cache:read(1234567, Opts).
+
+%% Read block by independent hash (via hb_cache)
+{ok, Block} = hb_cache:read(<<"block-id-43-chars">>, Opts).
+
+%% Read block by dependent hash (via hb_cache)
+{ok, Block} = hb_cache:read(<<"block-hash-43-chars">>, Opts).
+
+%% Get latest cached block
+case dev_arweave_block_cache:latest(Opts) of
+    {ok, Height} ->
+        {ok, LatestBlock} = dev_arweave_block_cache:read(Height, Opts);
+    not_found ->
+        no_blocks_cached
+end.
+
+%% List all cached block heights
+{ok, Heights} = dev_arweave_block_cache:heights(Opts),
+Blocks = lists:map(
+    fun(H) ->
+        {ok, Block} = dev_arweave_block_cache:read(H, Opts),
+        Block
+    end,
+    Heights
+).
+
+%% Get path for a height
+Path = dev_arweave_block_cache:path(1234567, Opts).
+```
+
+---
+
+## Integration with dev_arweave
+
+### Automatic Caching Flow
+
+```
+1. dev_arweave:block/3 retrieves block from network
+2. Calls dev_arweave_block_cache:write/2
+3. Block cached with all links created
+4. Future requests served from cache
+```
+
+### Cache-First Strategy
+
+```
+1. dev_arweave:block/3 checks cache first
+2. If found: Return cached block immediately
+3. If not found: Fetch from network, cache, then return
+```
+
+---
+
+## Block Required Fields
+
+For successful caching, blocks must contain:
+
+- `<<"height">>` - Block height (integer)
+- `<<"indep_hash">>` - Independent hash (binary, 43 chars)
+- `<<"hash">>` - Dependent hash (binary, 43 chars)
+
+---
+
+## Cache Prefix
+
+**Default Prefix:** `~arweave@2.9`
+
+This prefix:
+- Organizes Arweave-related data
+- Separates from other cached content
+- Enables easy cache management
+- Supports version-specific organization
+
+---
+
+## Height Listing
+
+The `heights/1` function uses `hb_cache:list_numbered/2` to:
+- Extract numeric suffixes from paths
+- Return sorted list of heights
+- Efficiently scan height directory
+
+---
+
+## References
+
+- **Arweave Device** - `dev_arweave.erl`
+- **Cache System** - `hb_cache.erl`
+- **Store Interface** - `hb_store.erl`
+- **Options** - `hb_opts.erl`
+
+---
+
+## Notes
+
+1. **Height Indexing:** Primary access method for sequential block queries
+2. **Multi-Path Links:** Three access paths per block for flexibility
+3. **Pseudo-Paths:** Structured paths enable organized cache storage
+4. **Latest Tracking:** Quick access to most recent block via max height
+5. **List Numbered:** Efficient height enumeration from directory structure
+6. **Cache Integration:** Seamless integration with hb_cache system
+7. **Path Generation:** Deterministic paths based on height
+8. **Link Creation:** Atomic linking of all three access methods
+9. **Required Fields:** Must have height, indep_hash, and hash
+10. **Version Prefix:** Uses versioned prefix for future compatibility
+11. **Read Performance:** Cache-first strategy minimizes network calls
+12. **Write Atomicity:** All links created in single write operation
+13. **Store Agnostic:** Works with any hb_store implementation
+14. **Event Logging:** Comprehensive logging for debugging
+15. **Test Friendly:** Easy to test with temporary stores

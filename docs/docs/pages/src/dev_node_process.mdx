@@ -1,0 +1,581 @@
+# dev_node_process.erl - Node Singleton Process Management
+
+## Overview
+
+**Purpose:** Singleton pattern implementation for node-specific processes  
+**Module:** `dev_node_process`  
+**Device Name:** `node-process@1.0`  
+**Pattern:** Lazy initialization with persistence via `local-name@1.0`
+
+This device implements the singleton pattern for processes specific to an individual node. Process definitions are configured in the node message and automatically spawned, initialized, and registered on first access.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_message`, `hb_opts`, `hb_util`
+- **Devices:** `dev_local_name`
+- **Arweave:** `ar_wallet`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Information
+-spec info(Opts) -> DeviceInfo.
+
+%% Process Lookup
+-spec lookup(Name, Base, Req, Opts) -> {ok, Process} | {error, not_found}.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(Opts) -> DeviceInfo
+    when
+        Opts :: map(),
+        DeviceInfo :: #{
+            default => HandlerFun,
+            excludes => [binary()]
+        },
+        HandlerFun :: fun((Name, Base, Req, Opts) -> Result).
+```
+
+**Description:** Configure device to handle all requests except `set` and `keys`.
+
+**Test Code:**
+```erlang
+-module(dev_node_process_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_structure_test() ->
+    Info = dev_node_process:info(#{}),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"set">>, Excludes)),
+    ?assert(lists:member(<<"keys">>, Excludes)).
+```
+
+---
+
+### 2. lookup/4
+
+```erlang
+-spec lookup(Name, Base, Req, Opts) -> {ok, Process} | {error, not_found}
+    when
+        Name :: binary(),
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Process :: map().
+```
+
+**Description:** Lookup a process by name. If not found and `spawn=true`, spawns and registers a new process from the definition in `node_processes`.
+
+**Lookup Flow:**
+1. Query `local-name@1.0` for registered process
+2. If found: Load and return process from cache
+3. If not found and `spawn=true`: Spawn new process
+4. If not found and `spawn=false`: Return error
+
+**Spawn Process:**
+- Create process from `node_processes/{Name}` definition
+- Augment with node's address as scheduler/authority
+- Sign with node wallet
+- Initialize via POST to `/schedule`
+- Register with `local-name@1.0`
+
+**Test Code:**
+```erlang
+-module(dev_node_process_lookup_test).
+-include_lib("eunit/include/eunit.hrl").
+
+lookup_no_spawn_test() ->
+    Opts = #{
+        node_processes => #{},
+        priv_wallet => ar_wallet:new()
+    },
+    Result = dev_node_process:lookup(
+        <<"nonexistent">>,
+        #{},
+        #{},
+        Opts
+    ),
+    ?assertEqual({error, not_found}, Result).
+
+lookup_spawn_test() ->
+    {ok, Module} = file:read_file("test/test.lua"),
+    Opts = #{
+        node_processes => #{
+            <<"test-process">> => #{
+                <<"device">> => <<"process@1.0">>,
+                <<"execution-device">> => <<"lua@5.3a">>,
+                <<"scheduler-device">> => <<"scheduler@1.0">>,
+                <<"module">> => #{
+                    <<"content-type">> => <<"text/x-lua">>,
+                    <<"body">> => Module
+                }
+            }
+        },
+        priv_wallet => ar_wallet:new()
+    },
+    {ok, Process} = hb_ao:resolve(
+        #{ <<"device">> => <<"node-process@1.0">> },
+        <<"test-process">>,
+        Opts
+    ),
+    ?assert(maps:is_key(<<"device">>, Process)),
+    ?assertEqual(<<"process@1.0">>, maps:get(<<"device">>, Process)).
+
+singleton_behavior_test() ->
+    {ok, Module} = file:read_file("test/test.lua"),
+    Opts = #{
+        node_processes => #{
+            <<"singleton">> => #{
+                <<"device">> => <<"process@1.0">>,
+                <<"execution-device">> => <<"lua@5.3a">>,
+                <<"module">> => #{
+                    <<"content-type">> => <<"text/x-lua">>,
+                    <<"body">> => Module
+                }
+            }
+        },
+        priv_wallet => ar_wallet:new()
+    },
+    % First access spawns process
+    {ok, Process1} = hb_ao:resolve(
+        #{ <<"device">> => <<"node-process@1.0">> },
+        <<"singleton">>,
+        Opts
+    ),
+    % Second access returns same process
+    {ok, Process2} = hb_ao:resolve(
+        #{ <<"device">> => <<"node-process@1.0">> },
+        <<"singleton">>,
+        Opts
+    ),
+    ?assertEqual(
+        hb_cache:ensure_all_loaded(Process1, Opts),
+        hb_cache:ensure_all_loaded(Process2, Opts)
+    ).
+```
+
+---
+
+## Process Definition Format
+
+### Basic Definition
+
+```erlang
+#{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"scheduler-device">> => <<"scheduler@1.0">>,
+    <<"module">> => #{
+        <<"content-type">> => <<"text/x-lua">>,
+        <<"body">> => LuaCode
+    }
+}
+```
+
+### With Additional Fields
+
+```erlang
+#{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"scheduler-device">> => <<"scheduler@1.0">>,
+    <<"module">> => ModuleSpec,
+    <<"balance">> => InitialBalances,
+    <<"custom-field">> => CustomValue
+}
+```
+
+---
+
+## Node Configuration
+
+### Configuring Node Processes
+
+```erlang
+NodeMsg = #{
+    node_processes => #{
+        <<"database">> => DatabaseProcessDef,
+        <<"cache">> => CacheProcessDef,
+        <<"logger">> => LoggerProcessDef
+    },
+    priv_wallet => NodeWallet
+}
+```
+
+### Process Name Registration
+
+Processes are registered with their names in `local-name@1.0`:
+- Name: Process name (e.g., `<<"database">>`)
+- Value: Process ID (signed ID of spawned process)
+
+---
+
+## Address Augmentation
+
+### Automatic Field Addition
+
+The device automatically adds the node's address to:
+
+**Scheduler List:**
+```erlang
+% Before augmentation
+<<"scheduler">> => [<<"other-scheduler">>]
+
+% After augmentation
+<<"scheduler">> => [<<"other-scheduler">>, NodeAddress]
+```
+
+**Authority List:**
+```erlang
+% Before augmentation
+<<"authority">> => [<<"other-authority">>]
+
+% After augmentation
+<<"authority">> => [<<"other-authority">>, NodeAddress]
+```
+
+**Deduplication:**
+- Node address is moved to end of list
+- Duplicates are removed
+
+---
+
+## Spawn Control
+
+### Default Behavior (spawn=true)
+
+```erlang
+% Automatically spawns if not found
+{ok, Process} = hb_ao:resolve(
+    #{ <<"device">> => <<"node-process@1.0">> },
+    <<"myprocess">>,
+    Opts
+)
+```
+
+### Disable Spawn (spawn=false)
+
+```erlang
+% Returns error if not found
+Result = hb_ao:resolve(
+    #{ <<"device">> => <<"node-process@1.0">> },
+    #{ <<"path">> => <<"myprocess">>, <<"spawn">> => false },
+    Opts
+)
+% Result: {error, not_found} if process doesn't exist
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Configure node processes
+NodeMsg = #{
+    node_processes => #{
+        <<"ledger">> => #{
+            <<"device">> => <<"process@1.0">>,
+            <<"execution-device">> => <<"lua@5.3a">>,
+            <<"scheduler-device">> => <<"scheduler@1.0">>,
+            <<"module">> => #{
+                <<"content-type">> => <<"text/x-lua">>,
+                <<"body">> => LedgerCode
+            },
+            <<"balance">> => #{ Alice => 1000 }
+        },
+        <<"cache">> => #{
+            <<"device">> => <<"process@1.0">>,
+            <<"execution-device">> => <<"lua@5.3a">>,
+            <<"module">> => CacheModule
+        }
+    },
+    priv_wallet => ar_wallet:new()
+}.
+
+%% Access singleton process (auto-spawns if needed)
+{ok, Ledger} = hb_ao:resolve(
+    #{ <<"device">> => <<"node-process@1.0">> },
+    <<"ledger">>,
+    NodeMsg
+).
+
+%% Execute on singleton process
+{ok, Result} = hb_ao:resolve_many(
+    [
+        #{ <<"device">> => <<"node-process@1.0">> },
+        <<"ledger">>,
+        #{
+            <<"path">> => <<"schedule">>,
+            <<"method">> => <<"POST">>,
+            <<"body">> => TransferMessage
+        }
+    ],
+    NodeMsg
+).
+
+%% Check process state
+Balance = hb_ao:get(
+    <<"ledger~node-process@1.0/now/balance/", Address/binary>>,
+    #{ <<"device">> => <<"node-process@1.0">> },
+    NodeMsg
+).
+
+%% Disable auto-spawn
+Result = hb_ao:resolve(
+    #{ <<"device">> => <<"node-process@1.0">> },
+    #{ <<"path">> => <<"unknown">>, <<"spawn">> => false },
+    NodeMsg
+).
+% Result: {error, not_found}
+```
+
+---
+
+## HTTP Integration
+
+### URL Pattern
+
+```
+GET /{ProcessName}~node-process@1.0
+GET /{ProcessName}~node-process@1.0/{Path}
+POST /{ProcessName}~node-process@1.0/{Path}
+```
+
+### Examples
+
+```bash
+# Access singleton process
+GET /ledger~node-process@1.0
+
+# Query process state
+GET /ledger~node-process@1.0/now/balance
+
+# Send message to process
+POST /ledger~node-process@1.0/schedule
+```
+
+---
+
+## Initialization Flow
+
+### Spawn and Initialize
+
+1. **Load Definition**: Get from `node_processes/{Name}`
+2. **Augment**: Add node address to scheduler/authority
+3. **Sign**: Commit with node wallet
+4. **Initialize**: POST to process's `/schedule` endpoint
+5. **Register**: Store ID in `local-name@1.0`
+6. **Return**: Return signed process
+
+### Example Flow
+
+```erlang
+% User requests: GET /ledger~node-process@1.0
+% 1. Lookup in local-name: not found
+% 2. Get definition from node_processes
+% 3. Augment with node address
+% 4. Sign with node wallet
+% 5. POST to ledger/schedule to initialize
+% 6. Register ledger -> ProcessID
+% 7. Return process
+```
+
+---
+
+## Process Persistence
+
+### Registration
+
+Processes are registered with `dev_local_name`:
+```erlang
+dev_local_name:direct_register(
+    #{
+        <<"key">> => ProcessName,
+        <<"value">> => ProcessID
+    },
+    Opts
+)
+```
+
+### Persistence Across Restarts
+
+- Process IDs stored in `local-name@1.0` (persistent)
+- Process definitions in node message
+- On restart: Existing processes found via lookup
+- New processes spawned on first access
+
+---
+
+## Codec Configuration
+
+### Custom Spawn Codec
+
+```erlang
+Opts = #{
+    node_process_spawn_codec => <<"ans104@1.0">>
+}
+```
+
+**Default**: `<<"httpsig@1.0">>`
+
+---
+
+## Error Handling
+
+### Process Not Defined
+
+```erlang
+% No definition in node_processes
+{error, not_found}
+```
+
+### Registration Failure
+
+```erlang
+{error, #{
+    <<"status">> => 500,
+    <<"body">> => <<"Failed to register process.">>,
+    <<"details">> => ErrorDetails
+}}
+```
+
+### No Wallet
+
+If `priv_wallet` not in options, process cannot be signed/spawned.
+
+---
+
+## Use Cases
+
+### 1. Ledger Service
+
+```erlang
+NodeMsg = #{
+    node_processes => #{
+        <<"ledger">> => #{
+            <<"device">> => <<"process@1.0">>,
+            <<"execution-device">> => <<"lua@5.3a">>,
+            <<"module">> => LedgerModule,
+            <<"balance">> => InitialBalances
+        }
+    }
+}
+```
+
+### 2. Logging Service
+
+```erlang
+NodeMsg = #{
+    node_processes => #{
+        <<"logger">> => #{
+            <<"device">> => <<"process@1.0">>,
+            <<"execution-device">> => <<"lua@5.3a">>,
+            <<"module">> => LoggerModule
+        }
+    }
+}
+```
+
+### 3. Configuration Service
+
+```erlang
+NodeMsg = #{
+    node_processes => #{
+        <<"config">> => #{
+            <<"device">> => <<"process@1.0">>,
+            <<"execution-device">> => <<"lua@5.3a">>,
+            <<"module">> => ConfigModule,
+            <<"settings">> => DefaultSettings
+        }
+    }
+}
+```
+
+---
+
+## Testing Patterns
+
+```erlang
+%% Setup test environment
+setup_test_node() ->
+    {ok, Module} = file:read_file("test/test.lua"),
+    #{
+        node_processes => #{
+            <<"test">> => #{
+                <<"device">> => <<"process@1.0">>,
+                <<"execution-device">> => <<"lua@5.3a">>,
+                <<"module">> => #{
+                    <<"content-type">> => <<"text/x-lua">>,
+                    <<"body">> => Module
+                }
+            }
+        },
+        priv_wallet => ar_wallet:new()
+    }.
+
+%% Test process access
+test_process_access() ->
+    Opts = setup_test_node(),
+    {ok, Process} = hb_ao:resolve(
+        #{ <<"device">> => <<"node-process@1.0">> },
+        <<"test">>,
+        Opts
+    ),
+    ?assert(is_map(Process)).
+
+%% Test singleton behavior
+test_singleton() ->
+    Opts = setup_test_node(),
+    {ok, P1} = hb_ao:resolve(
+        #{ <<"device">> => <<"node-process@1.0">> },
+        <<"test">>,
+        Opts
+    ),
+    {ok, P2} = hb_ao:resolve(
+        #{ <<"device">> => <<"node-process@1.0">> },
+        <<"test">>,
+        Opts
+    ),
+    ?assertEqual(hb_message:id(P1, all), hb_message:id(P2, all)).
+```
+
+---
+
+## References
+
+- **dev_local_name.erl** - Name registration and lookup
+- **hb_message.erl** - Message signing and ID generation
+- **hb_cache.erl** - Process storage
+- **hb_ao.erl** - Process initialization
+- **ar_wallet.erl** - Wallet operations
+
+---
+
+## Notes
+
+1. **Singleton Pattern**: One instance per name per node
+2. **Lazy Initialization**: Processes spawned on first access
+3. **Persistence**: Process IDs persist across restarts
+4. **Auto-Augmentation**: Node address automatically added
+5. **Local Name Storage**: Uses `local-name@1.0` for registration
+6. **Spawn Control**: Can disable auto-spawn via `spawn=false`
+7. **Custom Codec**: Configurable signing codec
+8. **Initialization**: Processes initialized via POST to /schedule
+9. **Error Handling**: Structured error responses
+10. **HTTP Compatible**: Works with HTTP endpoints
+11. **Address Deduplication**: Removes duplicate addresses
+12. **Definition Required**: Must exist in `node_processes`
+13. **Wallet Required**: Node wallet required for signing
+14. **Cache Integration**: Process stored and retrieved from cache
+15. **Path Resolution**: Supports nested path access on processes

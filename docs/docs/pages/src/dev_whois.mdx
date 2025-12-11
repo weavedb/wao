@@ -1,0 +1,470 @@
+# dev_whois.erl - Network Identity Device
+
+## Overview
+
+**Purpose:** Return IP/host information for requesters and nodes  
+**Module:** `dev_whois`  
+**Device Name:** `whois@1.0`  
+**Type:** Network utility device
+
+This device provides network identity information for both requesters and the node itself. It enables nodes to discover their external IP address through bootstrap nodes and allows requesters to see how they appear to the network.
+
+## Key Features
+
+- **Echo Service:** Return requester's IP/host information
+- **Node Identity:** Return node's own host information
+- **Bootstrap Discovery:** Automatic host detection via bootstrap nodes
+- **Configuration Persistence:** Saves discovered host information
+
+## Dependencies
+
+- **HyperBEAM:** `hb_opts`, `hb_maps`, `hb_http_server`, `hb_http`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device API
+-spec echo(Base, Req, Opts) -> {ok, Host}.
+-spec node(Base, Req, Opts) -> {ok, Host} | {error, Reason}.
+
+%% Public Utilities
+-spec ensure_host(Opts) -> {ok, UpdatedOpts} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. echo/3
+
+```erlang
+-spec echo(Base, Req, Opts) -> {ok, Host}
+    when
+        Base :: term(),
+        Req :: map(),
+        Opts :: map(),
+        Host :: binary().
+```
+
+**Description:** Return the calculated host information for the requester. Extracts the `ao-peer` key from the request, which is automatically populated by HyperBEAM with the requester's IP and port.
+
+**Returns:**
+- Host information in format: `<<"IP:Port">>` (e.g., `<<"127.0.0.1:8080">>`)
+- `<<"unknown">>` if not available
+
+**Test Code:**
+```erlang
+-module(dev_whois_echo_test).
+-include_lib("eunit/include/eunit.hrl").
+
+echo_test() ->
+    Req = #{ <<"ao-peer">> => <<"192.168.1.100:3000">> },
+    {ok, Host} = dev_whois:echo(#{}, Req, #{}),
+    ?assertEqual(<<"192.168.1.100:3000">>, Host).
+
+echo_unknown_test() ->
+    Req = #{},
+    {ok, Host} = dev_whois:echo(#{}, Req, #{}),
+    ?assertEqual(<<"unknown">>, Host).
+```
+
+---
+
+### 2. node/3
+
+```erlang
+-spec node(Base, Req, Opts) -> {ok, Host} | {error, Reason}
+    when
+        Base :: term(),
+        Req :: term(),
+        Opts :: map(),
+        Host :: binary(),
+        Reason :: binary().
+```
+
+**Description:** Return the host information for the node. If not already set, attempts to discover it via the configured bootstrap node. Persists the discovered host information in node options.
+
+**Host Discovery Process:**
+1. Check if `host` is already set in node options
+2. If set, return it immediately
+3. If not set and `host_bootstrap_node` is configured:
+   - Query bootstrap node's `/~whois@1.0/echo` endpoint
+   - Receive external IP/port from bootstrap node
+   - Save host information to node configuration
+   - Return discovered host
+4. If no bootstrap node configured, return error
+
+**Test Code:**
+```erlang
+-module(dev_whois_node_test).
+-include_lib("eunit/include/eunit.hrl").
+
+node_with_host_set_test() ->
+    Opts = #{ host => <<"192.168.1.1:8080">> },
+    {ok, Host} = dev_whois:node(#{}, #{}, Opts),
+    ?assertEqual(<<"192.168.1.1:8080">>, Host).
+
+node_discovers_host_test() ->
+    BootstrapNode = hb_http_server:start_node(#{
+        priv_wallet => ar_wallet:new()
+    }),
+    PeerNode = hb_http_server:start_node(#{
+        port => Port = rand:uniform(40000) + 10000,
+        priv_wallet => ar_wallet:new(),
+        host_bootstrap_node => BootstrapNode,
+        http_client => httpc
+    }),
+    {ok, ReceivedHost} = hb_http:get(PeerNode, <<"/~whois@1.0/node">>, #{}),
+    Expected = <<"127.0.0.1:", (hb_util:bin(Port))/binary>>,
+    ?assertEqual(Expected, ReceivedHost).
+
+node_no_bootstrap_error_test() ->
+    Opts = #{},
+    Result = dev_whois:node(#{}, #{}, Opts),
+    ?assertMatch({error, _}, Result).
+```
+
+---
+
+### 3. ensure_host/1
+
+```erlang
+-spec ensure_host(Opts) -> {ok, UpdatedOpts} | {error, Reason}
+    when
+        Opts :: map(),
+        UpdatedOpts :: map(),
+        Reason :: binary().
+```
+
+**Description:** Return node options ensuring that the host is set. If not set, attempts to find host information from the specified bootstrap node. Persists discovered host to node configuration.
+
+**Process:**
+1. Check if `host` key exists in options
+2. If `host` is `<<"unknown">>`:
+   - Call `bootstrap_node_echo/1` to discover host
+   - If successful, save to options via `hb_http_server:set_opts/1`
+   - Return updated options
+3. If `host` exists and is not unknown, return as-is
+4. If discovery fails, return error
+
+**Test Code:**
+```erlang
+-module(dev_whois_ensure_host_test).
+-include_lib("eunit/include/eunit.hrl").
+
+ensure_host_already_set_test() ->
+    Opts = #{ host => <<"10.0.0.1:9000">> },
+    {ok, Result} = dev_whois:ensure_host(Opts),
+    ?assertEqual(<<"10.0.0.1:9000">>, maps:get(host, Result)).
+
+ensure_host_discovery_test() ->
+    BootstrapNode = hb_http_server:start_node(#{}),
+    Opts = #{
+        host => <<"unknown">>,
+        host_bootstrap_node => BootstrapNode
+    },
+    {ok, Result} = dev_whois:ensure_host(Opts),
+    ?assertNotEqual(<<"unknown">>, maps:get(host, Result)).
+
+ensure_host_no_bootstrap_test() ->
+    Opts = #{ host => <<"unknown">> },
+    Result = dev_whois:ensure_host(Opts),
+    ?assertMatch({error, <<"No bootstrap node configured.">>}, Result).
+```
+
+---
+
+## Configuration
+
+### Node Options
+
+```erlang
+NodeOpts = #{
+    %% Optional: Pre-configured host
+    host => <<"192.168.1.100:8080">>,
+    
+    %% Optional: Bootstrap node for host discovery
+    host_bootstrap_node => BootstrapNodeURL,
+    
+    %% Optional: HTTP client to use
+    http_client => httpc  % or cowboy
+}
+```
+
+### Bootstrap Node Setup
+
+```erlang
+%% Start bootstrap node (publicly accessible)
+BootstrapNode = hb_http_server:start_node(#{
+    port => 8080,
+    priv_wallet => ar_wallet:new()
+}).
+
+%% Start peer node that discovers its host via bootstrap
+PeerNode = hb_http_server:start_node(#{
+    port => 9000,
+    priv_wallet => ar_wallet:new(),
+    host_bootstrap_node => <<"http://bootstrap.example.com:8080">>,
+    http_client => httpc
+}).
+```
+
+---
+
+## Host Discovery Flow
+
+```
+Peer Node                Bootstrap Node
+    |                           |
+    | GET /~whois@1.0/echo     |
+    |------------------------->|
+    |                           |
+    |      ao-peer header      |
+    |      (IP:Port)           |
+    |<-------------------------|
+    |                           |
+    | Save to node config      |
+    | Return to caller         |
+    v                           v
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Check requester's host information
+{ok, RequesterHost} = hb_http:post(Node, #{
+    <<"path">> => <<"/~whois@1.0/echo">>
+}, #{}).
+
+%% Get node's own host information
+{ok, NodeHost} = hb_http:get(Node, <<"/~whois@1.0/node">>, #{}).
+
+%% Set up node with bootstrap discovery
+BootstrapNode = <<"https://bootstrap.example.com:443">>,
+Node = hb_http_server:start_node(#{
+    host_bootstrap_node => BootstrapNode,
+    http_client => httpc
+}).
+
+%% Manually set host
+Node = hb_http_server:start_node(#{
+    host => <<"203.0.113.1:8080">>
+}).
+
+%% Ensure host is set before proceeding
+case dev_whois:ensure_host(NodeOpts) of
+    {ok, UpdatedOpts} ->
+        Host = maps:get(host, UpdatedOpts),
+        io:format("Node host: ~s~n", [Host]);
+    {error, Reason} ->
+        io:format("Cannot determine host: ~s~n", [Reason])
+end.
+```
+
+---
+
+## HTTP Endpoints
+
+### Echo Endpoint
+
+**URL:** `/~whois@1.0/echo`  
+**Method:** GET or POST  
+**Purpose:** Return requester's IP/host  
+**Response:** `<<"IP:Port">>` or `<<"unknown">>`
+
+**Example:**
+```bash
+curl http://node.example.com:8080/~whois@1.0/echo
+# Returns: 203.0.113.45:54321
+```
+
+### Node Endpoint
+
+**URL:** `/~whois@1.0/node`  
+**Method:** GET  
+**Purpose:** Return node's own host  
+**Response:** `<<"IP:Port">>` or error
+
+**Example:**
+```bash
+curl http://node.example.com:8080/~whois@1.0/node
+# Returns: 203.0.113.1:8080
+```
+
+---
+
+## Host Detection Mechanism
+
+### ao-peer Header
+
+HyperBEAM automatically populates the `ao-peer` key in requests with the requester's connection information:
+
+```erlang
+%% Automatically added by HTTP server
+Req = #{
+    <<"ao-peer">> => <<"IP:Port">>
+}
+```
+
+### Bootstrap Echo
+
+The bootstrap node echoes back the requester's perceived address:
+
+```erlang
+%% Bootstrap node's echo handler
+echo(_, Req, Opts) ->
+    PeerInfo = hb_maps:get(<<"ao-peer">>, Req, <<"unknown">>, Opts),
+    {ok, PeerInfo}.
+```
+
+---
+
+## Persistence
+
+Discovered host information is persisted in node configuration:
+
+```erlang
+%% Save to node options
+hb_http_server:set_opts(Opts#{ host => DiscoveredHost })
+
+%% Later retrieval
+Host = hb_opts:get(host, <<"unknown">>, Opts)
+```
+
+---
+
+## Use Cases
+
+### 1. NAT Traversal
+
+Nodes behind NAT can discover their external IP:
+
+```erlang
+Node = hb_http_server:start_node(#{
+    host_bootstrap_node => PublicBootstrapNode
+}),
+{ok, ExternalHost} = hb_http:get(Node, <<"/~whois@1.0/node">>, #{}).
+```
+
+### 2. Network Diagnostics
+
+Check how your node appears to others:
+
+```erlang
+{ok, MyHost} = hb_http:get(Node, <<"/~whois@1.0/node">>, #{}),
+io:format("I am visible as: ~s~n", [MyHost]).
+```
+
+### 3. Peer Discovery
+
+Share your host information with other nodes:
+
+```erlang
+{ok, MyHost} = hb_http:get(Node, <<"/~whois@1.0/node">>, #{}),
+register_with_directory(DirectoryNode, MyHost).
+```
+
+### 4. Load Balancer Detection
+
+Detect if behind a load balancer:
+
+```erlang
+{ok, Echo1} = hb_http:get(Node, <<"/~whois@1.0/node">>, #{}),
+timer:sleep(1000),
+{ok, Echo2} = hb_http:get(Node, <<"/~whois@1.0/node">>, #{}),
+case Echo1 == Echo2 of
+    true -> io:format("Direct connection~n");
+    false -> io:format("Behind load balancer~n")
+end.
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+| Error | Description |
+|-------|-------------|
+| No bootstrap node configured | `host_bootstrap_node` not set when needed |
+| Bootstrap unreachable | Cannot connect to bootstrap node |
+| Unknown host | Host information unavailable |
+
+### Error Responses
+
+```erlang
+%% No bootstrap configured
+{error, <<"No bootstrap node configured.">>}
+
+%% Bootstrap request failed
+{error, HTTPError}
+```
+
+---
+
+## Network Topology
+
+### Simple Network
+
+```
+Client -> Node
+          |
+          v
+     [Returns ao-peer]
+```
+
+### NAT Scenario
+
+```
+Private Node (192.168.1.10:8080)
+       |
+       | (discovers via bootstrap)
+       v
+Bootstrap Node (public IP)
+       |
+       v
+External IP: 203.0.113.1:8080
+```
+
+### Multi-Node Network
+
+```
+Bootstrap Node (public)
+    ^       ^
+    |       |
+Peer 1  Peer 2
+(discovers) (discovers)
+    |       |
+    v       v
+Host1   Host2
+```
+
+---
+
+## References
+
+- **HTTP Server** - `hb_http_server.erl`
+- **HTTP Client** - `hb_http.erl`
+- **Options** - `hb_opts.erl`
+- **Maps Utility** - `hb_maps.erl`
+
+---
+
+## Notes
+
+1. **Automatic Discovery:** Nodes can discover external IP via bootstrap
+2. **ao-peer Header:** HyperBEAM automatically populates peer information
+3. **Configuration Persistence:** Discovered host saved to node options
+4. **Bootstrap Pattern:** Common pattern for NAT traversal
+5. **Echo Service:** Simple reflection of requester's connection info
+6. **No Authentication:** whois endpoints typically public
+7. **Format:** Host always in `IP:Port` format
+8. **IPv4/IPv6:** Supports both IP versions
+9. **Port Included:** Always includes port number
+10. **Single Bootstrap:** Only needs one reachable bootstrap node

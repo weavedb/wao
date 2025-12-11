@@ -1,0 +1,646 @@
+# hb_name.erl - Generic Name Registration System
+
+## Overview
+
+**Purpose:** Atomic name registration for any Erlang term  
+**Module:** `hb_name`  
+**Pattern:** ETS-based registry with atom fallback  
+**Key Feature:** Register non-atom names (hashpaths, process IDs, etc.)
+
+This module provides a registration system that extends Erlang's built-in `register/2` to support any term as a name, not just atoms. It uses ETS for non-atom names while falling back to standard Erlang registration for atoms. All operations are atomic - only one process can own a name at a time.
+
+## Motivation
+
+**Problem:** Erlang's `register/2` only accepts atoms  
+**Solution:** ETS-based registry supporting any term
+
+**Use Cases:**
+- Process IDs as hashpaths: `<<"/process/abc123">>`
+- Binary identifiers: `<<"user-session-xyz">>`
+- Composite keys: `{scheduler, ProcessID}`
+- Complex terms: `#{type => worker, id => 123}`
+
+## Core Features
+
+- **Any Term:** Keys can be any Erlang term
+- **Atomic:** Only one registrant per name
+- **Concurrent:** Safe multi-process access
+- **Atom Compatible:** Atoms use standard `register/2`
+- **Auto-cleanup:** Dead processes automatically removed
+- **Fast Lookup:** O(1) ETS lookup
+
+## Dependencies
+
+- **Erlang/OTP:** `ets`, `erlang`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## ETS Table Configuration
+
+```erlang
+-define(NAME_TABLE, hb_name_registry).
+
+ets:new(?NAME_TABLE, [
+    named_table,              % Access by name
+    public,                   % All processes can access
+    {keypos, 1},             % Key is first element
+    {write_concurrency, true},  % Safe atomic writes
+    {read_concurrency, true}    % Optimized reads
+]).
+```
+
+**Table Structure:**
+```erlang
+{Name, PID}
+```
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Initialization
+-spec start() -> ok.
+
+%% Registration
+-spec register(Name) -> ok | error.
+-spec register(Name, PID) -> ok | error.
+
+%% Deregistration
+-spec unregister(Name) -> ok.
+
+%% Lookup
+-spec lookup(Name) -> PID | undefined.
+
+%% Queries
+-spec all() -> [{Name, PID}].
+```
+
+---
+
+## Public Functions
+
+### 1. start/0
+
+```erlang
+-spec start() -> ok.
+```
+
+**Description:** Initialize ETS table for name registry. Safe to call multiple times - checks if table exists first.
+
+**Implementation:**
+```erlang
+start() ->
+    try ets:info(?NAME_TABLE) of
+        undefined -> start_ets();
+        _ -> ok
+    catch
+        error:badarg -> start_ets()
+    end.
+```
+
+**Auto-initialization:** Called automatically by other functions
+
+**Test Code:**
+```erlang
+-module(hb_name_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_idempotent_test() ->
+    ?assertEqual(ok, hb_name:start()),
+    ?assertEqual(ok, hb_name:start()),
+    ?assert(ets:info(hb_name_registry) =/= undefined).
+```
+
+---
+
+### 2. register/1, register/2
+
+```erlang
+-spec register(Name) -> ok | error
+    when
+        Name :: term().
+
+-spec register(Name, PID) -> ok | error
+    when
+        Name :: term(),
+        PID :: pid().
+```
+
+**Description:** Register a name for a process. Fails if name already registered. Atomic operation.
+
+**Atom Handling:**
+```erlang
+register(Name, PID) when is_atom(Name) ->
+    try erlang:register(Name, PID) of
+        true -> ok
+    catch
+        error:badarg -> error  % Already registered
+    end.
+```
+
+**Non-atom Handling:**
+```erlang
+register(Name, PID) ->
+    case ets:insert_new(?NAME_TABLE, {Name, PID}) of
+        true -> ok;      % Successfully registered
+        false -> error   % Name taken
+    end.
+```
+
+**Test Code:**
+```erlang
+-module(hb_name_register_test).
+-include_lib("eunit/include/eunit.hrl").
+
+atom_test() ->
+    ?assertEqual(ok, hb_name:register(test_atom)),
+    ?assertEqual(self(), hb_name:lookup(test_atom)),
+    ?assertEqual(error, hb_name:register(test_atom)),
+    hb_name:unregister(test_atom).
+
+term_test() ->
+    Name = {term, os:timestamp()},
+    ?assertEqual(ok, hb_name:register(Name)),
+    ?assertEqual(self(), hb_name:lookup(Name)),
+    ?assertEqual(error, hb_name:register(Name)),
+    hb_name:unregister(Name).
+
+binary_name_test() ->
+    Name = <<"/process/", (hb_util:encode(crypto:strong_rand_bytes(16)))/binary>>,
+    ?assertEqual(ok, hb_name:register(Name)),
+    ?assertEqual(self(), hb_name:lookup(Name)),
+    hb_name:unregister(Name).
+
+complex_term_test() ->
+    Name = #{type => scheduler, id => <<"abc123">>, timestamp => os:timestamp()},
+    ?assertEqual(ok, hb_name:register(Name)),
+    ?assertEqual(self(), hb_name:lookup(Name)),
+    hb_name:unregister(Name).
+```
+
+---
+
+### 3. unregister/1
+
+```erlang
+-spec unregister(Name) -> ok
+    when
+        Name :: term().
+```
+
+**Description:** Unregister a name. Always succeeds (idempotent).
+
+**Implementation:**
+```erlang
+unregister(Name) when is_atom(Name) ->
+    catch erlang:unregister(Name),
+    ets:delete(?NAME_TABLE, Name),  % Also cleanup ETS
+    ok;
+unregister(Name) ->
+    ets:delete(?NAME_TABLE, Name),
+    ok.
+```
+
+**Test Code:**
+```erlang
+-module(hb_name_unregister_test).
+-include_lib("eunit/include/eunit.hrl").
+
+unregister_test() ->
+    Name = {test, os:timestamp()},
+    hb_name:register(Name),
+    ?assertEqual(self(), hb_name:lookup(Name)),
+    
+    hb_name:unregister(Name),
+    ?assertEqual(undefined, hb_name:lookup(Name)).
+
+unregister_idempotent_test() ->
+    Name = {test, os:timestamp()},
+    ?assertEqual(ok, hb_name:unregister(Name)),
+    ?assertEqual(ok, hb_name:unregister(Name)).
+```
+
+---
+
+### 4. lookup/1
+
+```erlang
+-spec lookup(Name) -> PID | undefined
+    when
+        Name :: term(),
+        PID :: pid().
+```
+
+**Description:** Find PID registered to name. Returns `undefined` if not found or process dead.
+
+**Atom Lookup:**
+```erlang
+lookup(Name) when is_atom(Name) ->
+    case whereis(Name) of
+        undefined -> ets_lookup(Name);  % Check ETS as fallback
+        PID -> PID
+    end.
+```
+
+**ETS Lookup with Liveness Check:**
+```erlang
+ets_lookup(Name) ->
+    case ets:lookup(?NAME_TABLE, Name) of
+        [{Name, PID}] ->
+            case is_process_alive(PID) of
+                true -> PID;
+                false ->
+                    ets:delete(?NAME_TABLE, Name),  % Auto-cleanup
+                    undefined
+            end;
+        [] -> undefined
+    end.
+```
+
+**Test Code:**
+```erlang
+-module(hb_name_lookup_test).
+-include_lib("eunit/include/eunit.hrl").
+
+lookup_found_test() ->
+    Name = {lookup, os:timestamp()},
+    hb_name:register(Name),
+    ?assertEqual(self(), hb_name:lookup(Name)),
+    hb_name:unregister(Name).
+
+lookup_not_found_test() ->
+    Name = {nonexistent, os:timestamp()},
+    ?assertEqual(undefined, hb_name:lookup(Name)).
+
+dead_process_test() ->
+    Name = {dead_process_test, os:timestamp()},
+    {PID, Ref} = spawn_monitor(fun() -> hb_name:register(Name), ok end),
+    receive {'DOWN', Ref, process, PID, _} -> ok end,
+    
+    % Should auto-cleanup dead process
+    ?assertEqual(undefined, hb_name:lookup(Name)).
+```
+
+---
+
+### 5. all/0
+
+```erlang
+-spec all() -> [{Name, PID}]
+    when
+        Name :: term(),
+        PID :: pid().
+```
+
+**Description:** List all registered names with their PIDs. Filters out dead processes.
+
+**Implementation:**
+```erlang
+all() ->
+    % Get ETS entries
+    ETSEntries = ets:tab2list(?NAME_TABLE),
+    
+    % Get Erlang registered atoms
+    RegisteredAtoms = lists:filtermap(
+        fun(Name) ->
+            case whereis(Name) of
+                undefined -> false;
+                PID -> {true, {Name, PID}}
+            end
+        end,
+        erlang:registered()
+    ),
+    
+    % Combine and filter alive processes
+    All = ETSEntries ++ RegisteredAtoms,
+    lists:filter(
+        fun({_, PID}) -> is_process_alive(PID) end,
+        All
+    ).
+```
+
+**Test Code:**
+```erlang
+-module(hb_name_all_test).
+-include_lib("eunit/include/eunit.hrl").
+
+all_test() ->
+    Name = test_name_all,
+    hb_name:register(Name, self()),
+    
+    AllNames = hb_name:all(),
+    ?assert(lists:member({Name, self()}, AllNames)),
+    
+    hb_name:unregister(Name).
+
+all_filters_dead_test() ->
+    Name = {dead, os:timestamp()},
+    {PID, Ref} = spawn_monitor(fun() -> timer:sleep(100) end),
+    hb_name:register(Name, PID),
+    
+    InitialCount = length(hb_name:all()),
+    
+    exit(PID, kill),
+    receive {'DOWN', Ref, process, PID, _} -> ok end,
+    timer:sleep(100),
+    
+    % Dead process should be filtered out
+    FinalCount = length(hb_name:all()),
+    ?assertEqual(InitialCount - 1, FinalCount).
+```
+
+---
+
+## Concurrency Safety
+
+### Atomic Registration
+
+```erlang
+% Only one process succeeds
+Pids = [
+    spawn(fun() -> hb_name:register(shared_name) end)
+    || _ <- lists:seq(1, 100)
+],
+
+% Exactly one registration succeeds
+% Others get 'error'
+```
+
+**Test Code:**
+```erlang
+concurrency_test() ->
+    Name = {concurrent_test, os:timestamp()},
+    
+    % Spawn 10 concurrent registration attempts
+    Results = spawn_test_workers(Name),
+    
+    % Exactly one should succeed
+    SuccessCount = length([R || R <- Results, R =:= ok]),
+    ?assertEqual(1, SuccessCount),
+    
+    % Name should be registered
+    ?assert(is_pid(hb_name:lookup(Name))),
+    
+    hb_name:unregister(Name).
+
+spawn_test_workers(Name) ->
+    Self = self(),
+    PIDs = [
+        spawn(fun() ->
+            Result = hb_name:register(Name),
+            Self ! {result, self(), Result},
+            timer:sleep(500)  % Keep alive
+        end)
+        || _ <- lists:seq(1, 10)
+    ],
+    
+    % Collect results
+    [
+        receive {result, PID, Res} -> Res after 100 -> timeout end
+        || PID <- PIDs
+    ].
+```
+
+---
+
+## Auto-cleanup
+
+### Dead Process Detection
+
+```erlang
+% Register process
+PID = spawn(fun() -> timer:sleep(1000) end),
+hb_name:register(worker, PID),
+
+% Kill process
+exit(PID, kill),
+
+% Lookup automatically cleans up
+undefined = hb_name:lookup(worker).
+```
+
+**Implementation:**
+```erlang
+ets_lookup(Name) ->
+    case ets:lookup(?NAME_TABLE, Name) of
+        [{Name, PID}] ->
+            case is_process_alive(PID) of
+                true -> PID;
+                false ->
+                    ets:delete(?NAME_TABLE, Name),  % Cleanup
+                    undefined
+            end;
+        [] -> undefined
+    end.
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Register current process with binary ID
+ProcessID = <<"proc-", (hb_util:encode(crypto:strong_rand_bytes(8)))/binary>>,
+ok = hb_name:register(ProcessID).
+
+%% Register another process
+WorkerPID = spawn(fun worker_loop/0),
+ok = hb_name:register({worker, 1}, WorkerPID).
+
+%% Find process by name
+case hb_name:lookup(ProcessID) of
+    undefined -> spawn_new_process();
+    PID -> PID
+end.
+
+%% Check if name is available
+case hb_name:register(Name) of
+    ok -> start_work();
+    error -> already_running()
+end.
+
+%% Unregister on cleanup
+hb_name:unregister(ProcessID).
+
+%% List all registered workers
+AllWorkers = [
+    {Name, PID}
+    || {Name = {worker, _}, PID} <- hb_name:all()
+].
+
+%% Singleton pattern
+ensure_singleton(Name) ->
+    case hb_name:register(Name) of
+        ok -> {ok, started};
+        error -> {error, already_running}
+    end.
+
+%% Process registry pattern
+register_process(ProcessDef) ->
+    Name = maps:get(<<"process">>, ProcessDef),
+    case hb_name:lookup(Name) of
+        undefined ->
+            PID = spawn(fun() -> process_loop(ProcessDef) end),
+            ok = hb_name:register(Name, PID),
+            {ok, PID};
+        PID ->
+            {already_registered, PID}
+    end.
+```
+
+---
+
+## Performance Characteristics
+
+### Registration
+
+- **Atom:** O(1) - Hash table lookup in VM
+- **Term:** O(1) - ETS insert_new
+
+### Lookup
+
+- **Atom:** O(1) - whereis/1
+- **Term:** O(1) - ETS lookup + liveness check
+
+### Memory
+
+- **Per Entry:** ~40 bytes (overhead minimal)
+- **Total:** Scales linearly with registrations
+
+---
+
+## Error Handling
+
+```erlang
+% Registration fails silently
+case hb_name:register(Name) of
+    ok -> success();
+    error -> handle_already_registered()
+end.
+
+% Lookup returns undefined for missing/dead
+case hb_name:lookup(Name) of
+    undefined -> not_found();
+    PID when is_pid(PID) -> found(PID)
+end.
+
+% Unregister always succeeds
+ok = hb_name:unregister(MaybeExistingName).
+```
+
+---
+
+## Integration with AO-Core
+
+```erlang
+%% Register process by hashpath
+Hashpath = <<"/process/abc123">>,
+hb_name:register(Hashpath, ProcessPID).
+
+%% Lookup process
+case hb_name:lookup(Hashpath) of
+    undefined -> spawn_process(Hashpath);
+    PID -> send_message(PID, Message)
+end.
+
+%% Process ID as name
+ProcessID = hb_message:id(ProcessDef, unsigned, #{}),
+hb_name:register(ProcessID, self()).
+```
+
+---
+
+## Comparison to Alternatives
+
+### vs gproc
+
+**hb_name:**
+- ✅ Simpler API
+- ✅ No dependencies
+- ✅ Atom fallback
+- ❌ No property storage
+- ❌ No pub/sub
+
+**gproc:**
+- ✅ Property storage
+- ✅ Pub/sub support
+- ❌ More complex
+- ❌ External dependency
+
+---
+
+### vs Process Dictionary
+
+**hb_name:**
+- ✅ Global registry
+- ✅ Any process can lookup
+- ✅ Atomic registration
+- ✅ Auto-cleanup
+
+**Process Dictionary:**
+- ✅ Per-process only
+- ❌ No global visibility
+- ❌ Manual management
+- ❌ No atomicity
+
+---
+
+## Testing Utilities
+
+```erlang
+%% Wait for registration
+wait_for_registration(Name, Timeout) ->
+    wait_for_registration(Name, Timeout, os:timestamp()).
+
+wait_for_registration(Name, Timeout, Start) ->
+    case hb_name:lookup(Name) of
+        PID when is_pid(PID) -> {ok, PID};
+        undefined ->
+            Elapsed = timer:now_diff(os:timestamp(), Start) div 1000,
+            if
+                Elapsed > Timeout -> {error, timeout};
+                true ->
+                    timer:sleep(10),
+                    wait_for_registration(Name, Timeout, Start)
+            end
+    end.
+
+%% Cleanup test registrations
+cleanup_test_names(Prefix) ->
+    [
+        hb_name:unregister(Name)
+        || {Name, _} <- hb_name:all(),
+           is_test_name(Name, Prefix)
+    ].
+```
+
+---
+
+## References
+
+- **Erlang Registration** - `erlang:register/2`, `whereis/1`
+- **ETS** - [ETS Documentation](https://www.erlang.org/doc/man/ets.html)
+- **gproc** - [gproc library](https://github.com/uwiger/gproc)
+
+---
+
+## Notes
+
+1. **Any Term:** Supports any Erlang term as name
+2. **Atomic:** insert_new ensures atomicity
+3. **Auto-cleanup:** Dead processes automatically removed
+4. **Atom Fallback:** Atoms use standard registration
+5. **Concurrent Safe:** write_concurrency for safety
+6. **Read Optimized:** read_concurrency for performance
+7. **No Monitoring:** Does not monitor processes (checked on lookup)
+8. **Idempotent:** start/0 and unregister/1 safe to call multiple times
+9. **Global:** Single ETS table shared across node
+10. **No Replication:** Local to node (not distributed)
+11. **Fast Lookup:** O(1) for both atoms and terms
+12. **Minimal Overhead:** ~40 bytes per registration
+13. **Process Death:** Cleaned up on next lookup
+14. **Named Table:** Table accessible by name
+15. **Public Access:** All processes can read/write
