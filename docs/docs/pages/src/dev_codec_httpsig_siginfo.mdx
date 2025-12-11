@@ -1,0 +1,586 @@
+# dev_codec_httpsig_siginfo.erl - HTTP Signature Info Conversion
+
+## Overview
+
+**Purpose:** Convert between commitments and signature/signature-input headers  
+**Module:** `dev_codec_httpsig_siginfo`  
+**Format:** RFC 9421 Structured Fields  
+**Pattern:** Commitments ↔ HTTP Signature Headers
+
+This module handles the bidirectional conversion between HyperBEAM commitment structures and their encoded `signature` and `signature-input` HTTP headers as defined in RFC 9421. It manages the transformation of committed keys, parameters, and signature data.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_util`, `hb_structured_fields`, `hb_crypto`
+- **Codecs:** `dev_codec_httpsig`, `dev_codec_httpsig_keyid`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Main Conversion Functions
+-spec commitments_to_siginfo(Msg, Commitments, Opts) -> SigInfoHeaders.
+-spec siginfo_to_commitments(Msg, BodyKeys, Opts) -> Commitments.
+
+%% Key Normalization
+-spec to_siginfo_keys(Msg, Commitment, Opts) -> HTTPSigKeys.
+-spec from_siginfo_keys(HTTPMsg, BodyKeys, SigInfoKeys) -> AOKeys.
+
+%% Committed Keys Conversion
+-spec committed_keys_to_siginfo(CommittedKeys) -> SigInfoKeys.
+
+%% Specifier Management
+-spec add_derived_specifiers(Keys) -> KeysWithSpecifiers.
+-spec remove_derived_specifiers(Keys) -> KeysWithoutSpecifiers.
+
+%% Utilities
+-spec commitment_to_sig_name(Commitment) -> SignatureName.
+```
+
+---
+
+## Public Functions
+
+### 1. commitments_to_siginfo/3
+
+```erlang
+-spec commitments_to_siginfo(Msg, Commitments, Opts) -> SigInfoHeaders
+    when
+        Msg :: map(),
+        Commitments :: map(),
+        Opts :: map(),
+        SigInfoHeaders :: #{
+            <<"signature">> => binary(),
+            <<"signature-input">> => binary()
+        }.
+```
+
+**Description:** Generate `signature` and `signature-input` HTTP headers from a map of commitments. Each commitment becomes an entry in the structured field dictionary.
+
+**Test Code:**
+```erlang
+-module(commitments_to_siginfo_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+commitments_to_siginfo_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    Commitments = #{
+        <<"sig1">> => #{
+            <<"signature">> => hb_util:encode(<<"abc123">>),
+            <<"committed">> => [<<"data">>],
+            <<"keyid">> => <<"key1">>,
+            <<"type">> => <<"hmac-sha256">>
+        }
+    },
+    Result = dev_codec_httpsig_siginfo:commitments_to_siginfo(Msg, Commitments, #{}),
+    ?assert(maps:is_key(<<"signature">>, Result)),
+    ?assert(maps:is_key(<<"signature-input">>, Result)),
+    Signature = maps:get(<<"signature">>, Result),
+    SigInput = maps:get(<<"signature-input">>, Result),
+    ?assert(is_binary(Signature)),
+    ?assert(is_binary(SigInput)).
+
+commitments_to_siginfo_empty_test() ->
+    Result = dev_codec_httpsig_siginfo:commitments_to_siginfo(#{}, #{}, #{}),
+    ?assertEqual(#{}, Result).
+
+commitments_to_siginfo_multiple_test() ->
+    Msg = #{<<"key1">> => <<"val1">>, <<"key2">> => <<"val2">>},
+    Commitments = #{
+        <<"sig1">> => #{
+            <<"signature">> => hb_util:encode(<<"abc">>),
+            <<"committed">> => [<<"key1">>],
+            <<"type">> => <<"hmac-sha256">>
+        },
+        <<"sig2">> => #{
+            <<"signature">> => hb_util:encode(<<"def">>),
+            <<"committed">> => [<<"key2">>],
+            <<"type">> => <<"rsa-pss-sha512">>
+        }
+    },
+    Result = dev_codec_httpsig_siginfo:commitments_to_siginfo(Msg, Commitments, #{}),
+    Signature = maps:get(<<"signature">>, Result),
+    % Should contain both signatures in dictionary
+    ?assert(binary:match(Signature, <<"comm-">>) =/= nomatch).
+```
+
+---
+
+### 2. siginfo_to_commitments/3
+
+```erlang
+-spec siginfo_to_commitments(Msg, BodyKeys, Opts) -> Commitments
+    when
+        Msg :: map(),
+        BodyKeys :: [binary()],
+        Opts :: map(),
+        Commitments :: map().
+```
+
+**Description:** Parse `signature` and `signature-input` HTTP headers back into commitment structures. Returns empty map if no signature headers present.
+
+**Test Code:**
+```erlang
+-module(siginfo_to_commitments_test).
+-include_lib("eunit/include/eunit.hrl").
+
+siginfo_to_commitments_test() ->
+    Msg = #{
+        <<"data">> => <<"test">>,
+        <<"signature">> => <<"comm-abc=:dGVzdA==:">>,
+        <<"signature-input">> => <<"comm-abc=(\"data\");keyid=\"test\"">>
+    },
+    Result = dev_codec_httpsig_siginfo:siginfo_to_commitments(Msg, [], #{}),
+    ?assert(is_map(Result)),
+    ?assert(maps:size(Result) > 0).
+
+siginfo_to_commitments_no_sigs_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    Result = dev_codec_httpsig_siginfo:siginfo_to_commitments(Msg, [], #{}),
+    ?assertEqual(#{}, Result).
+
+siginfo_to_commitments_with_body_keys_test() ->
+    Msg = #{
+        <<"body">> => <<"content">>,
+        <<"signature">> => <<"comm-xyz=:c2lnbmF0dXJl:">>,
+        <<"signature-input">> => <<"comm-xyz=(\"content-digest\");keyid=\"k1\"">>
+    },
+    BodyKeys = [<<"body">>],
+    Result = dev_codec_httpsig_siginfo:siginfo_to_commitments(Msg, BodyKeys, #{}),
+    ?assert(maps:size(Result) > 0).
+```
+
+---
+
+### 3. to_siginfo_keys/3
+
+```erlang
+-spec to_siginfo_keys(Msg, Commitment, Opts) -> HTTPSigKeys
+    when
+        Msg :: map(),
+        Commitment :: map(),
+        Opts :: map(),
+        HTTPSigKeys :: [binary()].
+```
+
+**Description:** Normalize AO-Core committed keys to their HTTPSig equivalents. Handles `body` → `content-digest` conversion and `ao-body-key` substitution.
+
+**Test Code:**
+```erlang
+-module(to_siginfo_keys_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_siginfo_keys_simple_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    Commitment = #{<<"committed">> => [<<"key">>]},
+    Result = dev_codec_httpsig_siginfo:to_siginfo_keys(Msg, Commitment, #{}),
+    ?assert(is_list(Result)),
+    ?assert(lists:member(<<"key">>, Result)).
+
+to_siginfo_keys_with_body_test() ->
+    Msg = #{<<"body">> => <<"content">>},
+    Commitment = #{<<"committed">> => [<<"body">>]},
+    Result = dev_codec_httpsig_siginfo:to_siginfo_keys(Msg, Commitment, #{}),
+    % Body should be converted to content-digest
+    ?assert(lists:member(<<"content-digest">>, Result)).
+```
+
+---
+
+### 4. from_siginfo_keys/3
+
+```erlang
+-spec from_siginfo_keys(HTTPMsg, BodyKeys, SigInfoKeys) -> AOKeys
+    when
+        HTTPMsg :: map(),
+        BodyKeys :: [binary()],
+        SigInfoKeys :: [binary()],
+        AOKeys :: [binary()].
+```
+
+**Description:** Normalize HTTPSig keys back to AO-Core format. Reverses transformations: removes `@` specifiers, replaces `content-digest` with body keys, handles `ao-body-key`.
+
+**Test Code:**
+```erlang
+-module(from_siginfo_keys_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_siginfo_keys_simple_test() ->
+    HTTPMsg = #{},
+    BodyKeys = [],
+    SigInfoKeys = [<<"key1">>, <<"key2">>],
+    Result = dev_codec_httpsig_siginfo:from_siginfo_keys(HTTPMsg, BodyKeys, SigInfoKeys),
+    ?assertEqual([<<"key1">>, <<"key2">>], Result).
+
+from_siginfo_keys_with_content_digest_test() ->
+    HTTPMsg = #{},
+    BodyKeys = [<<"body">>],
+    SigInfoKeys = [<<"content-digest">>, <<"other">>],
+    Result = dev_codec_httpsig_siginfo:from_siginfo_keys(HTTPMsg, BodyKeys, SigInfoKeys),
+    ?assert(lists:member(<<"body">>, Result)),
+    ?assertNot(lists:member(<<"content-digest">>, Result)).
+
+from_siginfo_keys_removes_specifiers_test() ->
+    HTTPMsg = #{},
+    BodyKeys = [],
+    SigInfoKeys = [<<"@method">>, <<"@path">>, <<"key">>],
+    Result = dev_codec_httpsig_siginfo:from_siginfo_keys(HTTPMsg, BodyKeys, SigInfoKeys),
+    ?assertNot(lists:member(<<"@method">>, Result)),
+    ?assertNot(lists:member(<<"@path">>, Result)),
+    ?assert(lists:member(<<"key">>, Result)).
+```
+
+---
+
+### 5. add_derived_specifiers/1
+
+```erlang
+-spec add_derived_specifiers(Keys) -> KeysWithSpecifiers
+    when
+        Keys :: [binary()],
+        KeysWithSpecifiers :: [binary()].
+```
+
+**Description:** Add `@` prefix to derived component identifiers per RFC 9421 (method, path, authority, etc.).
+
+**Derived Components:**
+- `method`, `target-uri`, `authority`, `scheme`, `request-target`, `path`, `query`, `query-param`
+
+**Test Code:**
+```erlang
+-module(add_derived_specifiers_test).
+-include_lib("eunit/include/eunit.hrl").
+
+add_derived_specifiers_test() ->
+    Keys = [<<"method">>, <<"path">>, <<"key1">>],
+    Result = dev_codec_httpsig_siginfo:add_derived_specifiers(Keys),
+    ?assert(lists:member(<<"@method">>, Result)),
+    ?assert(lists:member(<<"@path">>, Result)),
+    ?assert(lists:member(<<"key1">>, Result)),
+    ?assertNot(lists:member(<<"method">>, Result)).
+
+add_derived_specifiers_no_change_test() ->
+    Keys = [<<"custom">>, <<"header">>],
+    Result = dev_codec_httpsig_siginfo:add_derived_specifiers(Keys),
+    ?assertEqual(Keys, Result).
+```
+
+---
+
+### 6. remove_derived_specifiers/1
+
+```erlang
+-spec remove_derived_specifiers(Keys) -> KeysWithoutSpecifiers
+    when
+        Keys :: [binary()],
+        KeysWithoutSpecifiers :: [binary()].
+```
+
+**Description:** Remove `@` prefix from derived component identifiers, converting them back to base names.
+
+**Test Code:**
+```erlang
+-module(remove_derived_specifiers_test).
+-include_lib("eunit/include/eunit.hrl").
+
+remove_derived_specifiers_test() ->
+    Keys = [<<"@method">>, <<"@path">>, <<"key1">>],
+    Result = dev_codec_httpsig_siginfo:remove_derived_specifiers(Keys),
+    ?assert(lists:member(<<"method">>, Result)),
+    ?assert(lists:member(<<"path">>, Result)),
+    ?assert(lists:member(<<"key1">>, Result)),
+    ?assertNot(lists:member(<<"@method">>, Result)).
+
+remove_derived_specifiers_no_change_test() ->
+    Keys = [<<"custom">>, <<"header">>],
+    Result = dev_codec_httpsig_siginfo:remove_derived_specifiers(Keys),
+    ?assertEqual(Keys, Result).
+```
+
+---
+
+### 7. commitment_to_sig_name/1
+
+```erlang
+-spec commitment_to_sig_name(Commitment) -> SignatureName
+    when
+        Commitment :: map(),
+        SignatureName :: binary().
+```
+
+**Description:** Generate a signature name from a commitment by hashing the signature and adding `comm-` prefix.
+
+**Test Code:**
+```erlang
+-module(commitment_to_sig_name_test).
+-include_lib("eunit/include/eunit.hrl").
+
+commitment_to_sig_name_test() ->
+    Commitment = #{<<"signature">> => hb_util:encode(<<"test-sig">>)},
+    Name = dev_codec_httpsig_siginfo:commitment_to_sig_name(Commitment),
+    ?assert(is_binary(Name)),
+    ?assert(binary:match(Name, <<"comm-">>) =/= nomatch).
+
+commitment_to_sig_name_deterministic_test() ->
+    Commitment = #{<<"signature">> => hb_util:encode(<<"sig">>)},
+    Name1 = dev_codec_httpsig_siginfo:commitment_to_sig_name(Commitment),
+    Name2 = dev_codec_httpsig_siginfo:commitment_to_sig_name(Commitment),
+    ?assertEqual(Name1, Name2).
+```
+
+---
+
+## Internal Functions
+
+### commitment_to_sf_siginfo/3
+
+```erlang
+-spec commitment_to_sf_siginfo(Msg, Commitment, Opts) -> 
+    {ok, SigName, SFSig, SFSigInput}
+    when
+        Msg :: map(),
+        Commitment :: map(),
+        Opts :: map(),
+        SigName :: binary(),
+        SFSig :: structured_field(),
+        SFSigInput :: structured_field().
+```
+
+**Description:** Convert a single commitment to structured field representations for signature and signature-input.
+
+---
+
+### sf_siginfo_to_commitment/5
+
+```erlang
+-spec sf_siginfo_to_commitment(Msg, BodyKeys, SFSig, SFSigInput, Opts) -> 
+    {ok, CommitmentID, Commitment}
+    when
+        Msg :: map(),
+        BodyKeys :: [binary()],
+        SFSig :: structured_field(),
+        SFSigInput :: structured_field(),
+        Opts :: map(),
+        CommitmentID :: binary(),
+        Commitment :: map().
+```
+
+**Description:** Parse structured field signature and signature-input back into a commitment structure.
+
+---
+
+### commitment_to_alg/2
+
+```erlang
+-spec commitment_to_alg(Commitment, Opts) -> Algorithm
+    when
+        Commitment :: map(),
+        Opts :: map(),
+        Algorithm :: binary().
+```
+
+**Description:** Derive the `alg` parameter from a commitment's type field.
+
+**Mappings:**
+- `<<"rsa-pss-sha512">>` → `<<"rsa-pss-sha512">>`
+- `<<"hmac-sha256">>` → `<<"hmac-sha256">>`
+
+---
+
+## Key Transformation Examples
+
+### Body Key Handling
+
+```erlang
+% AO → HTTPSig
+[<<"body">>, <<"key">>]
+% →
+[<<"content-digest">>, <<"key">>]
+
+% HTTPSig → AO (with body keys)
+[<<"content-digest">>, <<"key">>]  % + BodyKeys = [<<"body">>]
+% →
+[<<"body">>, <<"key">>]
+```
+
+### Custom Body Key
+
+```erlang
+% With ao-body-key
+HTTPMsg = #{<<"ao-body-key">> => <<"custom-body">>}
+[<<"body">>, <<"ao-body-key">>]
+% →
+[<<"custom-body">>, <<"ao-body-key">>]
+```
+
+### Derived Components
+
+```erlang
+% Add specifiers
+[<<"method">>, <<"path">>, <<"custom">>]
+% →
+[<<"@method">>, <<"@path">>, <<"custom">>]
+
+% Remove specifiers
+[<<"@method">>, <<"@path">>, <<"custom">>]
+% →
+[<<"method">>, <<"path">>, <<"custom">>]
+```
+
+---
+
+## Signature Header Format
+
+### Signature Header
+```
+signature: comm-abc123=:dGVzdA==:, comm-xyz789=:YWJjZGVm:
+```
+
+Structured Field Dictionary where:
+- Key: `comm-{hash}` (signature name)
+- Value: Base64-encoded signature as byte sequence
+
+### Signature-Input Header
+```
+signature-input: comm-abc123=("data" "key");keyid="pubkey:...";alg="rsa-pss-sha512", 
+                 comm-xyz789=("other");keyid="secret:...";alg="hmac-sha256"
+```
+
+Structured Field Dictionary where:
+- Key: `comm-{hash}` (matching signature name)
+- Value: Inner list of committed keys + parameters
+
+---
+
+## Parameter Handling
+
+### Standard Parameters
+```erlang
+#{
+    <<"alg">> => <<"rsa-pss-sha512">>,
+    <<"keyid">> => <<"publickey:...">>,
+    <<"tag">> => <<"hashpath">>,
+    <<"created">> => 1234567890,
+    <<"expires">> => 1234567999,
+    <<"nonce">> => <<"random-nonce">>
+}
+```
+
+### Additional Parameters
+Any non-standard commitment keys become additional structured field parameters.
+
+---
+
+## Common Patterns
+
+```erlang
+%% Convert commitments to headers
+Commitments = #{
+    <<"sig1">> => #{
+        <<"signature">> => Sig,
+        <<"committed">> => [<<"key1">>, <<"key2">>],
+        <<"type">> => <<"hmac-sha256">>,
+        <<"keyid">> => <<"constant:ao">>
+    }
+},
+Headers = dev_codec_httpsig_siginfo:commitments_to_siginfo(Msg, Commitments, #{}).
+% Returns: #{
+%   <<"signature">> => <<"comm-xyz=:...:">>,
+%   <<"signature-input">> => <<"comm-xyz=(\"key1\" \"key2\");...">>
+% }
+
+%% Parse headers back to commitments
+Msg = #{
+    <<"data">> => <<"test">>,
+    <<"signature">> => <<"comm-abc=:sig:">>,
+    <<"signature-input">> => <<"comm-abc=(\"data\");keyid=\"k1\"">>
+},
+Commitments = dev_codec_httpsig_siginfo:siginfo_to_commitments(Msg, [], #{}).
+
+%% Normalize keys for signing
+AOKeys = [<<"body">>, <<"data">>],
+Commitment = #{<<"committed">> => AOKeys},
+HTTPSigKeys = dev_codec_httpsig_siginfo:to_siginfo_keys(Msg, Commitment, #{}).
+% Returns: [<<"content-digest">>, <<"data">>]
+
+%% Normalize keys after parsing
+HTTPSigKeys = [<<"content-digest">>, <<"@method">>, <<"data">>],
+AOKeys = dev_codec_httpsig_siginfo:from_siginfo_keys(Msg, [<<"body">>], HTTPSigKeys).
+% Returns: [<<"body">>, <<"method">>, <<"data">>]
+
+%% Add/remove derived specifiers
+Keys = [<<"method">>, <<"path">>, <<"custom">>],
+WithSpecifiers = dev_codec_httpsig_siginfo:add_derived_specifiers(Keys),
+% Returns: [<<"@method">>, <<"@path">>, <<"custom">>]
+WithoutSpecifiers = dev_codec_httpsig_siginfo:remove_derived_specifiers(WithSpecifiers),
+% Returns: [<<"method">>, <<"path">>, <<"custom">>]
+```
+
+---
+
+## Derived Components
+
+Per RFC 9421, these component identifiers get `@` prefix:
+
+```erlang
+-define(DERIVED_COMPONENTS, [
+    <<"method">>,
+    <<"target-uri">>,
+    <<"authority">>,
+    <<"scheme">>,
+    <<"request-target">>,
+    <<"path">>,
+    <<"query">>,
+    <<"query-param">>
+]).
+```
+
+**Note:** `status` is commented out as some libraries don't support it.
+
+---
+
+## Commitment ID Generation
+
+```erlang
+% For 32-byte signatures (e.g., HMAC-SHA256)
+ID = hb_util:human_id(Signature)
+
+% For other signatures (e.g., RSA-PSS)
+ID = hb_util:human_id(crypto:hash(sha256, Signature))
+```
+
+The ID is used as the key in the commitments map.
+
+---
+
+## References
+
+- **RFC 9421** - HTTP Message Signatures
+- **RFC 8941** - Structured Field Values for HTTP
+- **HTTPSig Module** - `dev_codec_httpsig.erl`
+- **KeyID Module** - `dev_codec_httpsig_keyid.erl`
+- **Structured Fields** - `hb_structured_fields.erl`
+
+---
+
+## Notes
+
+1. **Bidirectional:** Full round-trip conversion between formats
+2. **Structured Fields:** Uses RFC 8941 for header encoding
+3. **Signature Names:** Prefixed with `comm-` for clarity
+4. **Body Handling:** Automatic content-digest substitution
+5. **Derived Components:** RFC 9421 `@` prefix for special components
+6. **Custom Body Keys:** Supports `ao-body-key` for non-standard body fields
+7. **Parameter Preservation:** All commitment parameters encoded in signature-input
+8. **Committer Derivation:** Automatic committer calculation from keyid
+9. **ID Generation:** Deterministic IDs from signature hashes
+10. **Type Conversion:** Automatic encoding/decoding of binary parameters
+11. **Empty Handling:** Returns empty map when no signatures present
+12. **Multiple Signatures:** Supports multiple commitments per message
+13. **Algorithm Mapping:** Converts type to alg parameter
+14. **Multipart Filtering:** Removes multipart content-type from committed keys
+15. **Nested Maps:** Special handling for nested map parameters

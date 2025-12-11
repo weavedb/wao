@@ -1,0 +1,524 @@
+# hb_ao.erl - AO-Core Resolution Engine
+
+## Overview
+
+**Purpose:** Core message resolution and device execution engine  
+**Module:** `hb_ao`  
+**Protocol:** AO-Core  
+**Pattern:** Recursive message resolution with device-based computation
+
+This module is the heart of the AO-Core protocol in HyperBEAM. It resolves messages to other messages by executing device functions, managing computation state, and maintaining cryptographic linkages between messages.
+
+## Core Concept
+
+```erlang
+%% Basic Resolution
+ao(BaseMessage, RequestMessage) -> {Status, ResultMessage}
+
+%% Under the hood
+DeviceMod:KeyFunction(Msg1, Msg2, Opts) -> {ok | error, Msg3}
+```
+
+Every message is a collection of keys that can be resolved via its device. The resolution process creates a cryptographic chain of computation.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_cache`, `hb_store`, `hb_path`, `hb_singleton`, `hb_ao_device`, `hb_message`, `hb_opts`, `hb_maps`, `hb_util`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Core Resolution
+-spec resolve(Path | Message, Opts) -> {Status, Result}.
+-spec resolve(Msg1, Msg2, Opts) -> {Status, Result}.
+-spec resolve_many(Messages, Opts) -> {Status, Result}.
+
+%% Key/Value Operations  
+-spec get(Msg, Key) -> Result.
+-spec get(Msg, Key, Opts) -> Result.
+-spec get_first(Msg, Keys) -> Result.
+-spec set(Msg1, Msg2, Opts) -> UpdatedMsg.
+-spec set(Msg, Key, Value, Opts) -> UpdatedMsg.
+-spec remove(Msg, Key, Opts) -> UpdatedMsg.
+
+%% Introspection
+-spec keys(Msg) -> [Key].
+-spec keys(Msg, Opts) -> [Key].
+
+%% Normalization
+-spec normalize_key(Key) -> NormalizedKey.
+-spec normalize_keys(Msg) -> NormalizedMsg.
+
+%% Utilities
+-spec force_message(Msg, Opts) -> Message.
+```
+
+---
+
+## Resolution Phases
+
+The resolver operates in 13 discrete phases:
+
+```erlang
+1.  Normalization          % Prepare messages for execution
+2.  Cache lookup           % Check if result cached
+3.  Validation check       % Verify message validity
+4.  Persistent resolver    % Check persistent store
+5.  Device lookup          % Find device module
+6.  Execution              % Run device function
+7.  Step hook              % Execute step callback
+8.  Subresolution          % Resolve nested messages
+9.  Cryptographic linking  % Update hash path
+10. Result caching         % Store result
+11. Notify waiters         % Alert pending processes
+12. Fork worker            % Spawn concurrent worker
+13. Recurse or terminate   % Continue or return
+```
+
+---
+
+## Public Functions
+
+### 1. resolve/2
+
+```erlang
+-spec resolve(Path | Message, Opts) -> {Status, Result}
+    when
+        Path :: binary(),
+        Message :: map(),
+        Opts :: map(),
+        Status :: ok | error,
+        Result :: term().
+```
+
+**Description:** Resolve a path or message. If given a binary path, wraps it in a message with that path.
+
+**Test Code:**
+```erlang
+-module(hb_ao_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_path_test() ->
+    Msg = #{
+        <<"path">> => <<"/test">>,
+        <<"data">> => <<"value">>
+    },
+    {ok, Result} = hb_ao:resolve(Msg, #{}),
+    ?assert(is_map(Result)).
+
+resolve_binary_path_test() ->
+    {ok, Result} = hb_ao:resolve(<<"/id">>, #{}),
+    ?assert(is_binary(Result) orelse is_map(Result)).
+
+resolve_no_path_error_test() ->
+    {error, Reason} = hb_ao:resolve(#{<<"data">> => <<"test">>}, #{}),
+    ?assert(is_binary(Reason)).
+```
+
+---
+
+### 2. resolve/3
+
+```erlang
+-spec resolve(Msg1, Msg2 | Path, Opts) -> {Status, Result}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Path :: binary(),
+        Opts :: map(),
+        Status :: ok | error,
+        Result :: term().
+```
+
+**Description:** Resolve Msg2 against Msg1. Msg2 specifies what computation to perform on Msg1.
+
+**Test Code:**
+```erlang
+-module(hb_ao_resolve3_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_with_base_test() ->
+    Base = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>
+    },
+    Request = #{<<"path">> => <<"key1">>},
+    
+    {ok, Result} = hb_ao:resolve(Base, Request, #{}),
+    ?assertEqual(<<"value1">>, Result).
+
+resolve_with_path_test() ->
+    Base = #{<<"data">> => <<"test">>},
+    {ok, Result} = hb_ao:resolve(Base, <<"/data">>, #{}),
+    ?assertEqual(<<"test">>, Result).
+
+resolve_nested_test() ->
+    Base = #{
+        <<"outer">> => #{
+            <<"inner">> => <<"value">>
+        }
+    },
+    Request = #{<<"path">> => <<"/outer/inner">>},
+    
+    {ok, Result} = hb_ao:resolve(Base, Request, #{}),
+    ?assertEqual(<<"value">>, Result).
+```
+
+---
+
+### 3. resolve_many/2
+
+```erlang
+-spec resolve_many(Messages, Opts) -> {Status, Result}
+    when
+        Messages :: [Message] | Message,
+        Message :: map() | binary(),
+        Opts :: map(),
+        Status :: ok | error,
+        Result :: term().
+```
+
+**Description:** Resolve a sequence of messages. Each message's output becomes input for the next.
+
+**Special Cases:**
+- Single ID: Direct read from store
+- Ordered map: Converts to list automatically
+- `{as, DevID, Msg}`: Subresolution with specific device
+
+**Test Code:**
+```erlang
+-module(hb_ao_resolve_many_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_many_single_id_test() ->
+    ID = crypto:strong_rand_bytes(32),
+    Msg = #{<<"data">> => <<"test">>},
+    
+    % Store message
+    hb_cache:write(hb_opts:get(store), ID, Msg),
+    
+    {ok, Result} = hb_ao:resolve_many([ID], #{}),
+    ?assertEqual(Msg, Result).
+
+resolve_many_sequence_test() ->
+    Base = #{<<"count">> => 0},
+    Req1 = #{<<"path">> => <<"set">>, <<"count">> => 1},
+    Req2 = #{<<"path">> => <<"set">>, <<"count">> => 2},
+    
+    {ok, Result} = hb_ao:resolve_many([Base, Req1, Req2], #{}),
+    ?assertEqual(2, maps:get(<<"count">>, Result)).
+
+resolve_many_ordered_map_test() ->
+    OrderedMap = #{
+        <<"1">> => #{<<"data">> => <<"first">>},
+        <<"2">> => #{<<"path">> => <<"/data">>}
+    },
+    
+    {ok, Result} = hb_ao:resolve_many(OrderedMap, #{}),
+    ?assertEqual(<<"first">>, Result).
+```
+
+---
+
+### 4. get/2, get/3, get/4
+
+```erlang
+-spec get(Msg, Key) -> Result.
+-spec get(Msg, Key, Opts) -> Result.
+-spec get(Msg, Key, Default, Opts) -> Result.
+```
+
+**Description:** Get value of a key from message. Resolves via device if needed.
+
+**Test Code:**
+```erlang
+-module(hb_ao_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_simple_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    Result = hb_ao:get(Msg, <<"key">>),
+    ?assertEqual(<<"value">>, Result).
+
+get_with_default_test() ->
+    Msg = #{<<"existing">> => <<"value">>},
+    Result = hb_ao:get(Msg, <<"missing">>, <<"default">>, #{}),
+    ?assertEqual(<<"default">>, Result).
+
+get_nested_test() ->
+    Msg = #{
+        <<"outer">> => #{
+            <<"inner">> => <<"value">>
+        }
+    },
+    Result = hb_ao:get(Msg, <<"/outer/inner">>, #{}),
+    ?assertEqual(<<"value">>, Result).
+
+get_with_device_test() ->
+    Msg = #{
+        <<"device">> => <<"test@1.0">>,
+        <<"data">> => <<"value">>
+    },
+    % Device would process the get request
+    Result = hb_ao:get(Msg, <<"data">>, #{}),
+    ?assert(is_binary(Result) orelse is_map(Result)).
+```
+
+---
+
+### 5. set/3, set/4
+
+```erlang
+-spec set(Msg1, Msg2, Opts) -> UpdatedMsg.
+-spec set(Msg, Key, Value, Opts) -> UpdatedMsg.
+```
+
+**Description:** Set key(s) in message using device's set function.
+
+**Test Code:**
+```erlang
+-module(hb_ao_set_test).
+-include_lib("eunit/include/eunit.hrl").
+
+set_single_key_test() ->
+    Msg = #{<<"old">> => <<"value">>},
+    Updated = hb_ao:set(Msg, <<"new">>, <<"data">>, #{}),
+    ?assertEqual(<<"data">>, maps:get(<<"new">>, Updated)).
+
+set_multiple_keys_test() ->
+    Msg = #{<<"a">> => 1},
+    Updates = #{<<"b">> => 2, <<"c">> => 3},
+    Updated = hb_ao:set(Msg, Updates, #{}),
+    ?assertEqual(2, maps:get(<<"b">>, Updated)),
+    ?assertEqual(3, maps:get(<<"c">>, Updated)).
+
+set_nested_path_test() ->
+    Msg = #{<<"outer">> => #{}},
+    Updated = hb_ao:set(Msg, <<"/outer/inner">>, <<"value">>, #{}),
+    Inner = maps:get(<<"outer">>, Updated),
+    ?assertEqual(<<"value">>, maps:get(<<"inner">>, Inner)).
+
+set_override_test() ->
+    Msg = #{<<"key">> => <<"old">>},
+    Updated = hb_ao:set(Msg, <<"key">>, <<"new">>, #{}),
+    ?assertEqual(<<"new">>, maps:get(<<"key">>, Updated)).
+```
+
+---
+
+### 6. remove/2, remove/3
+
+```erlang
+-spec remove(Msg, Key) -> UpdatedMsg.
+-spec remove(Msg, Key, Opts) -> UpdatedMsg.
+```
+
+**Description:** Remove key from message using device's remove function.
+
+**Test Code:**
+```erlang
+-module(hb_ao_remove_test).
+-include_lib("eunit/include/eunit.hrl").
+
+remove_key_test() ->
+    Msg = #{<<"key">> => <<"value">>, <<"keep">> => <<"this">>},
+    Updated = hb_ao:remove(Msg, <<"key">>, #{}),
+    ?assertEqual(false, maps:is_key(<<"key">>, Updated)),
+    ?assertEqual(<<"this">>, maps:get(<<"keep">>, Updated)).
+
+remove_nonexistent_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    Updated = hb_ao:remove(Msg, <<"missing">>, #{}),
+    ?assertEqual(Msg, Updated).
+```
+
+---
+
+### 7. keys/1, keys/2, keys/3
+
+```erlang
+-spec keys(Msg) -> [Key].
+-spec keys(Msg, Opts) -> [Key].
+-spec keys(Msg, Recurse, Opts) -> [Key].
+```
+
+**Description:** Get list of keys from message. Can optionally recurse into nested structures.
+
+**Test Code:**
+```erlang
+-module(hb_ao_keys_test).
+-include_lib("eunit/include/eunit.hrl").
+
+keys_simple_test() ->
+    Msg = #{<<"a">> => 1, <<"b">> => 2, <<"c">> => 3},
+    Keys = hb_ao:keys(Msg),
+    ?assertEqual(3, length(Keys)),
+    ?assert(lists:member(<<"a">>, Keys)),
+    ?assert(lists:member(<<"b">>, Keys)),
+    ?assert(lists:member(<<"c">>, Keys)).
+
+keys_with_device_test() ->
+    Msg = #{
+        <<"device">> => <<"test@1.0">>,
+        <<"data">> => <<"value">>
+    },
+    Keys = hb_ao:keys(Msg, #{}),
+    ?assert(is_list(Keys)).
+```
+
+---
+
+### 8. normalize_key/1, normalize_key/2
+
+```erlang
+-spec normalize_key(Key) -> NormalizedKey
+    when
+        Key :: binary() | atom() | integer() | list(),
+        NormalizedKey :: binary().
+```
+
+**Description:** Convert any key type to normalized binary form.
+
+**Test Code:**
+```erlang
+-module(hb_ao_normalize_key_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_binary_test() ->
+    ?assertEqual(<<"test">>, hb_ao:normalize_key(<<"test">>)).
+
+normalize_atom_test() ->
+    ?assertEqual(<<"test">>, hb_ao:normalize_key(test)).
+
+normalize_integer_test() ->
+    ?assertEqual(<<"42">>, hb_ao:normalize_key(42)).
+
+normalize_string_test() ->
+    ?assertEqual(<<"test">>, hb_ao:normalize_key("test")).
+
+normalize_path_list_test() ->
+    ?assertEqual(<<"a/b/c">>, hb_ao:normalize_key([<<"a">>, <<"b">>, <<"c">>])).
+```
+
+---
+
+### 9. normalize_keys/1, normalize_keys/2
+
+```erlang
+-spec normalize_keys(Msg) -> NormalizedMsg
+    when
+        Msg :: map() | list(),
+        NormalizedMsg :: map().
+```
+
+**Description:** Normalize all keys in a message to binary form. Converts lists to numbered maps.
+
+**Test Code:**
+```erlang
+-module(hb_ao_normalize_keys_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_keys_map_test() ->
+    Msg = #{atom_key => <<"value">>, 123 => <<"number">>},
+    Normalized = hb_ao:normalize_keys(Msg),
+    ?assert(maps:is_key(<<"atom_key">>, Normalized)),
+    ?assert(maps:is_key(<<"123">>, Normalized)).
+
+normalize_keys_list_test() ->
+    List = [<<"a">>, <<"b">>, <<"c">>],
+    Normalized = hb_ao:normalize_keys(List),
+    ?assert(is_map(Normalized)),
+    ?assertEqual(<<"a">>, maps:get(<<"1">>, Normalized)),
+    ?assertEqual(<<"b">>, maps:get(<<"2">>, Normalized)),
+    ?assertEqual(<<"c">>, maps:get(<<"3">>, Normalized)).
+```
+
+---
+
+## Device Resolution
+
+### Device Function Lookup
+
+```erlang
+%% Priority order:
+1. Handler function (info/handler)
+2. Exported function matching key name
+3. Default handler (info/default)
+4. Default device (dev_message)
+
+%% Example device
+-module(my_device).
+-export([my_key/3, info/0]).
+
+my_key(Msg1, Msg2, Opts) ->
+    {ok, #{ <<"result">> => <<"computed">> }}.
+
+info() ->
+    #{
+        exports => [my_key],
+        default => dev_message
+    }.
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple resolution
+{ok, Result} = hb_ao:resolve(
+    #{<<"data">> => <<"test">>},
+    #{<<"path">> => <<"/data">>},
+    #{}
+).
+
+%% Sequential resolution
+Base = #{<<"count">> => 0},
+Increment1 = #{<<"path">> => <<"set">>, <<"count">> => 1},
+Increment2 = #{<<"path">> => <<"set">>, <<"count">> => 2},
+{ok, Final} = hb_ao:resolve_many([Base, Increment1, Increment2], #{}).
+
+%% Get with default
+Value = hb_ao:get(Msg, <<"key">>, <<"default">>, #{}).
+
+%% Set nested value
+Updated = hb_ao:set(Msg, <<"/path/to/key">>, <<"value">>, #{}).
+
+%% Remove multiple keys
+Updated1 = hb_ao:remove(Msg, <<"key1">>, #{}),
+Updated2 = hb_ao:remove(Updated1, <<"key2">>, #{}).
+
+%% Get all keys
+Keys = hb_ao:keys(Msg, #{}).
+
+%% Normalize input
+NormMsg = hb_ao:normalize_keys(RawMsg),
+NormKey = hb_ao:normalize_key(atom_key).
+```
+
+---
+
+## References
+
+- **AO-Core Protocol** - `docs/ao-core-protocol.md`
+- **Device System** - `hb_ao_device.erl`
+- **Message Format** - `dev_message.erl`
+- **Path Resolution** - `hb_path.erl`
+
+---
+
+## Notes
+
+1. **13 Phases**: Resolution goes through distinct phases
+2. **Device Lookup**: Hierarchical device function resolution
+3. **Caching**: Results automatically cached for reuse
+4. **Hash Path**: Cryptographic chain of computation maintained
+5. **Recursive**: Handles nested message structures
+6. **Concurrent**: Worker processes for parallel execution
+7. **Normalization**: All keys converted to binaries
+8. **Lists to Maps**: Lists become numbered maps (1, 2, 3...)
+9. **Error Handling**: Returns `{ok | error, Result}` tuples
+10. **Options**: Extensive runtime configuration via Opts map

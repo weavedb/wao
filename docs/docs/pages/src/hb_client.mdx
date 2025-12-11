@@ -1,0 +1,439 @@
+# hb_client.erl - Remote Node Communication & Data Upload
+
+## Overview
+
+**Purpose:** Remote message resolution and data upload to Arweave bundlers  
+**Module:** `hb_client`  
+**Pattern:** HTTP-based remote execution and ANS-104/HTTPSig upload
+
+This module provides client-side functionality for interacting with remote HyperBEAM nodes and uploading data to Arweave bundlers. It handles message pair transformation for remote resolution, routing management, and supports both ANS-104 and HTTPSig commitment formats.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_http`, `hb_maps`, `hb_message`, `hb_util`, `hb_json`, `hb_opts`
+- **Arweave:** `ar_bundles`
+- **Erlang/OTP:** `httpc`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Remote Resolution
+-spec resolve(Node, Msg1, Msg2, Opts) -> {Status, Result}.
+-spec routes(Node, Opts) -> {Status, Routes}.
+-spec add_route(Node, Route, Opts) -> {Status, Result}.
+
+%% Arweave Node API
+-spec arweave_timestamp() -> {Timestamp, Height, Hash}.
+
+%% Data Upload
+-spec upload(Msg, Opts) -> {ok, Results}.
+-spec upload(Msg, Opts, Device) -> {ok | error, Result}.
+```
+
+---
+
+## Public Functions
+
+### 1. resolve/4
+
+```erlang
+-spec resolve(Node, Msg1, Msg2, Opts) -> {Status, Result}
+    when
+        Node :: binary(),
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Status :: ok | error,
+        Result :: term().
+```
+
+**Description:** Resolve a message pair on a remote HyperBEAM node. Transforms the message pair into a singleton request by prefixing keys with `1.` and `2.` and sends via HTTP.
+
+**Test Code:**
+```erlang
+-module(hb_client_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+resolve_basic_test() ->
+    Node = <<"http://localhost:8421">>,
+    Msg1 = #{
+        <<"device">> => <<"test@1.0">>,
+        <<"data">> => <<"value">>
+    },
+    Msg2 = #{
+        <<"path">> => <<"/data">>,
+        <<"method">> => <<"GET">>
+    },
+    
+    {Status, Result} = hb_client:resolve(Node, Msg1, Msg2, #{}),
+    ?assert(Status == ok orelse Status == error),
+    ?assert(is_map(Result) orelse is_binary(Result)).
+
+resolve_with_path_test() ->
+    Node = <<"http://localhost:8421">>,
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = #{<<"path">> => <<"/key">>},
+    
+    Result = hb_client:resolve(Node, Msg1, Msg2, #{}),
+    ?assert(is_tuple(Result)).
+```
+
+---
+
+### 2. routes/2
+
+```erlang
+-spec routes(Node, Opts) -> {Status, Routes}
+    when
+        Node :: binary(),
+        Opts :: map(),
+        Status :: ok | error,
+        Routes :: map() | binary().
+```
+
+**Description:** Get the list of registered routes from a remote node's Router device.
+
+**Test Code:**
+```erlang
+-module(hb_client_routes_test).
+-include_lib("eunit/include/eunit.hrl").
+
+routes_test() ->
+    Node = <<"http://localhost:8421">>,
+    Result = hb_client:routes(Node, #{}),
+    ?assert(is_tuple(Result)),
+    ?assert(tuple_size(Result) == 2).
+
+routes_returns_map_test() ->
+    Node = <<"http://localhost:8421">>,
+    {Status, Result} = hb_client:routes(Node, #{}),
+    ?assert(Status == ok orelse Status == error),
+    ?assert(is_map(Result) orelse is_binary(Result)).
+```
+
+---
+
+### 3. add_route/3
+
+```erlang
+-spec add_route(Node, Route, Opts) -> {Status, Result}
+    when
+        Node :: binary(),
+        Route :: map(),
+        Opts :: map(),
+        Status :: ok | error,
+        Result :: term().
+```
+
+**Description:** Add a new route to a remote node's Router device via POST request.
+
+**Test Code:**
+```erlang
+-module(hb_client_add_route_test).
+-include_lib("eunit/include/eunit.hrl").
+
+add_route_test() ->
+    Node = <<"http://localhost:8421">>,
+    Route = #{
+        <<"path">> => <<"/test">>,
+        <<"handler">> => <<"test_handler@1.0">>
+    },
+    
+    Result = hb_client:add_route(Node, Route, #{}),
+    ?assert(is_tuple(Result)),
+    ?assert(tuple_size(Result) == 2).
+
+add_route_with_device_test() ->
+    Node = <<"http://localhost:8421">>,
+    Route = #{
+        <<"path">> => <<"/custom">>,
+        <<"device">> => <<"custom@1.0">>,
+        <<"method">> => <<"POST">>
+    },
+    
+    {Status, _Result} = hb_client:add_route(Node, Route, #{}),
+    ?assert(Status == ok orelse Status == error).
+```
+
+---
+
+### 4. arweave_timestamp/0
+
+```erlang
+-spec arweave_timestamp() -> {Timestamp, Height, Hash}
+    when
+        Timestamp :: integer(),
+        Height :: integer(),
+        Hash :: binary().
+```
+
+**Description:** Fetch the current block information from the Arweave gateway. Returns timestamp, height, and block hash. In debug mode, returns zeroed values.
+
+**Test Code:**
+```erlang
+-module(hb_client_timestamp_test).
+-include_lib("eunit/include/eunit.hrl").
+
+arweave_timestamp_debug_mode_test() ->
+    % This test assumes debug mode
+    {Timestamp, Height, Hash} = hb_client:arweave_timestamp(),
+    ?assert(is_integer(Timestamp)),
+    ?assert(is_integer(Height)),
+    ?assert(is_binary(Hash)).
+
+arweave_timestamp_structure_test() ->
+    Result = hb_client:arweave_timestamp(),
+    ?assertMatch({_, _, _}, Result),
+    {T, H, Hash} = Result,
+    ?assert(is_integer(T)),
+    ?assert(is_integer(H)),
+    ?assert(is_binary(Hash)),
+    ?assertEqual(32, byte_size(Hash)).
+```
+
+---
+
+### 5. upload/2, upload/3
+
+```erlang
+-spec upload(Msg, Opts) -> {ok, Results}
+    when
+        Msg :: map() | binary(),
+        Opts :: map(),
+        Results :: [Result],
+        Result :: term().
+
+-spec upload(Msg, Opts, Device) -> {ok | error, Result}
+    when
+        Msg :: map() | binary(),
+        Opts :: map(),
+        Device :: binary(),
+        Result :: term().
+```
+
+**Description:** Upload data to Arweave bundlers. The 2-arity version uploads to all commitment devices in the message. The 3-arity version uploads to a specific device (either `ans104@1.0` or `httpsig@1.0`).
+
+**Supported Devices:**
+- `ans104@1.0`: ANS-104 bundle format (default Arweave bundler)
+- `httpsig@1.0`: HTTP signature-based authentication
+
+**Test Code:**
+```erlang
+-module(hb_client_upload_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+upload_empty_raw_ans104_test() ->
+    Serialized = ar_bundles:serialize(
+        ar_bundles:sign_item(#tx{
+            data = <<"TEST">>
+        }, hb:wallet())
+    ),
+    Result = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>),
+    ?assertMatch({ok, _}, Result).
+
+upload_raw_ans104_test() ->
+    Serialized = ar_bundles:serialize(
+        ar_bundles:sign_item(#tx{
+            data = <<"TEST">>,
+            tags = [{<<"test-tag">>, <<"test-value">>}]
+        }, hb:wallet())
+    ),
+    Result = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>),
+    ?assertMatch({ok, _}, Result).
+
+upload_raw_ans104_with_anchor_test() ->
+    Serialized = ar_bundles:serialize(
+        ar_bundles:sign_item(#tx{
+            data = <<"TEST">>,
+            anchor = crypto:strong_rand_bytes(32),
+            tags = [{<<"test-tag">>, <<"test-value">>}]
+        }, hb:wallet())
+    ),
+    Result = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>),
+    ?assertMatch({ok, _}, Result).
+
+upload_empty_message_test() ->
+    Msg = #{<<"data">> => <<"TEST">>},
+    Committed = hb_message:commit(Msg, hb:wallet(), <<"ans104@1.0">>),
+    Result = hb_client:upload(Committed, #{}, <<"ans104@1.0">>),
+    ?assertMatch({ok, _}, Result).
+
+upload_single_layer_message_test() ->
+    Msg = #{
+        <<"data">> => <<"TEST">>,
+        <<"basic">> => <<"value">>,
+        <<"integer">> => 1
+    },
+    Committed = hb_message:commit(Msg, hb:wallet(), <<"ans104@1.0">>),
+    Result = hb_client:upload(Committed, #{}, <<"ans104@1.0">>),
+    ?assertMatch({ok, _}, Result).
+
+upload_multiple_devices_test() ->
+    Msg = #{
+        <<"data">> => <<"TEST">>,
+        <<"commitments">> => [
+            <<"ans104@1.0">>,
+            <<"httpsig@1.0">>
+        ]
+    },
+    Committed = hb_message:commit(Msg, hb:wallet(), <<"ans104@1.0">>),
+    {ok, Results} = hb_client:upload(Committed, #{}),
+    ?assert(is_list(Results)),
+    ?assert(length(Results) > 0).
+
+upload_no_bundler_error_test() ->
+    Msg = #{<<"data">> => <<"TEST">>},
+    Committed = hb_message:commit(Msg, hb:wallet(), <<"httpsig@1.0">>),
+    Result = hb_client:upload(Committed, #{}, <<"httpsig@1.0">>),
+    ?assertMatch({error, no_httpsig_bundler}, Result).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Resolve a message on a remote node
+Node = <<"http://localhost:8421">>,
+BaseMsg = #{
+    <<"device">> => <<"MyDevice@1.0">>,
+    <<"data">> => <<"value">>
+},
+RequestMsg = #{
+    <<"path">> => <<"/data">>,
+    <<"method">> => <<"GET">>
+},
+{ok, Result} = hb_client:resolve(Node, BaseMsg, RequestMsg, #{}).
+
+%% Get routes from remote node
+{ok, Routes} = hb_client:routes(<<"http://localhost:8421">>, #{}).
+
+%% Add a new route
+Route = #{
+    <<"path">> => <<"/my-endpoint">>,
+    <<"handler">> => <<"handler@1.0">>
+},
+{ok, _} = hb_client:add_route(<<"http://localhost:8421">>, Route, #{}).
+
+%% Get Arweave block info
+{Timestamp, Height, Hash} = hb_client:arweave_timestamp().
+
+%% Upload to ANS-104 bundler (message)
+Msg = #{<<"data">> => <<"content">>},
+Committed = hb_message:commit(Msg, Wallet, <<"ans104@1.0">>),
+{ok, _} = hb_client:upload(Committed, #{}, <<"ans104@1.0">>).
+
+%% Upload to ANS-104 bundler (raw binary)
+Item = ar_bundles:sign_item(#tx{data = <<"data">>}, Wallet),
+Serialized = ar_bundles:serialize(Item),
+{ok, _} = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>).
+
+%% Upload to all commitment devices
+Msg = #{
+    <<"data">> => <<"content">>,
+    <<"commitments">> => [<<"ans104@1.0">>, <<"httpsig@1.0">>]
+},
+Committed = hb_message:commit(Msg, Wallet),
+{ok, Results} = hb_client:upload(Committed, #{}).
+```
+
+---
+
+## Message Transformation
+
+### Remote Resolution Transformation
+
+When resolving on a remote node, `resolve/4` transforms messages:
+
+```erlang
+%% Input
+Msg1 = #{<<"key1">> => <<"val1">>, <<"key2">> => <<"val2">>}
+Msg2 = #{<<"path">> => <<"/key1">>, <<"param">> => <<"value">>}
+
+%% Transformed to singleton request
+TransformedMsg = #{
+    <<"1.key1">> => <<"val1">>,
+    <<"1.key2">> => <<"val2">>,
+    <<"2.param">> => <<"value">>,
+    <<"path">> => <<"/key1">>
+}
+```
+
+This transformation allows the remote node to process both messages as a single request.
+
+---
+
+## Configuration Options
+
+### Bundler Configuration
+
+```erlang
+%% ANS-104 bundler
+Opts = #{
+    bundler_ans104 => <<"https://turbo.ardrive.io">>,
+    bundler_ans104_http_client => httpc  % or gun
+}.
+
+%% HTTPSig bundler
+Opts = #{
+    bundler_httpsig => <<"https://custom-bundler.com">>
+}.
+
+%% Arweave gateway
+Opts = #{
+    gateway => <<"https://arweave.net">>
+}.
+
+%% Debug mode (returns mock data)
+Opts = #{
+    mode => debug  % or prod
+}.
+```
+
+---
+
+## Upload Flow
+
+### ANS-104 Upload Process
+
+1. **Message Input**: Either map message or binary serialized item
+2. **Conversion**: If map, convert to ANS-104 format via `hb_message:convert/3`
+3. **Serialization**: Serialize to binary via `ar_bundles:serialize/1`
+4. **HTTP POST**: Send to bundler endpoint `/tx` with content-type `application/octet-stream`
+5. **Return Result**: `{ok, Response}` or `{error, Reason}`
+
+### HTTPSig Upload Process
+
+1. **Check Config**: Verify `bundler_httpsig` is configured
+2. **HTTP POST**: Send message directly to `/tx` endpoint
+3. **Return Result**: `{ok, Response}` or `{error, no_httpsig_bundler}`
+
+---
+
+## References
+
+- **HyperBEAM HTTP** - `hb_http.erl`
+- **Message System** - `hb_message.erl`
+- **ANS-104 Bundles** - `ar_bundles.erl`
+- **Router Device** - `dev_router.erl`
+- **Arweave Gateway API** - https://docs.arweave.org/developers/server/http-api
+
+---
+
+## Notes
+
+1. **Remote Resolution**: Messages are prefixed with `1.` and `2.` for remote execution
+2. **Multiple Uploads**: `upload/2` uploads to all commitment devices in message
+3. **Binary Upload**: `upload/3` with binary automatically serializes as ANS-104
+4. **Debug Mode**: Returns mock timestamps when `mode => debug`
+5. **Gateway**: Defaults to configured gateway or Arweave mainnet
+6. **Bundler Requirement**: Must configure bundler URLs in opts
+7. **HTTP Client**: Supports both `httpc` and `gun` clients
+8. **Commitment Devices**: Automatically extracted from message metadata
+9. **Error Handling**: Returns `{error, Reason}` for configuration or network issues
+10. **Router Device**: Routes management requires remote node running Router@1.0

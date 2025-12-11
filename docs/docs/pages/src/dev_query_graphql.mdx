@@ -1,0 +1,482 @@
+# dev_query_graphql.erl - GraphQL Query Interface
+
+## Overview
+
+**Purpose:** GraphQL interface for querying a node's cache  
+**Module:** `dev_query_graphql`  
+**Device Key:** `~query@1.0/graphql`  
+**Query Language:** GraphQL
+
+This module provides a GraphQL interface for querying messages stored in a HyperBEAM node's cache. It supports both HyperBEAM native message queries and Arweave-compatible transaction/block queries through a unified GraphQL schema.
+
+## Dependencies
+
+- **Erlang/OTP:** `application`
+- **External:** `graphql` (Erlang GraphQL library)
+- **HyperBEAM:** `hb_util`, `hb_json`, `hb_maps`, `hb_cache`, `hb_http`, `hb_ao`, `hb_message`, `hb_private`, `hb_opts`, `hb_name`
+- **Related:** `dev_query_arweave` (Arweave-compatible queries)
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% AO-Core API
+-spec handle(Base, Request, Opts) -> {ok, Response} | {error, Reason}.
+
+%% GraphQL Callbacks
+-spec execute(Context, Object, Field, Args) -> {ok, Result}.
+
+%% Submodule Helpers
+-spec keys_to_template(Keys) -> Template.
+-spec test_query(Node, Query, Opts) -> Response.
+-spec test_query(Node, Query, Variables, Opts) -> Response.
+```
+
+---
+
+## Public Functions
+
+### 1. handle/3
+
+```erlang
+-spec handle(Base, RawReq, Opts) -> {ok, Response} | {error, Reason}
+    when
+        Base :: map(),
+        RawReq :: map(),
+        Opts :: map(),
+        Response :: map(),
+        Reason :: term().
+```
+
+**Description:** Main entry point for handling GraphQL requests. Parses the query from the request body (JSON), initializes the GraphQL schema if needed, type-checks and validates the query, then executes it and returns a JSON response.
+
+**Request Format:**
+- `query` - The GraphQL query string
+- `operationName` - (Optional) Name of the operation to execute
+- `variables` - (Optional) Map of variable values
+
+**Test Code:**
+```erlang
+-module(dev_query_graphql_handle_test).
+-include_lib("eunit/include/eunit.hrl").
+
+handle_query_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    Node = hb_http_server:start_node(Opts),
+    Query = <<"query { message(keys: [{name: \"type\", value: \"Message\"}]) { id } }">>,
+    {ok, Res} = hb_http:post(
+        Node,
+        #{
+            <<"path">> => <<"~query@1.0/graphql">>,
+            <<"content-type">> => <<"application/json">>,
+            <<"body">> => hb_json:encode(#{<<"query">> => Query})
+        },
+        Opts
+    ),
+    ?assertMatch(#{<<"body">> := _}, Res).
+
+handle_with_variables_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    Node = hb_http_server:start_node(Opts),
+    {ok, Res} = hb_http:post(
+        Node,
+        #{
+            <<"path">> => <<"~query@1.0/graphql">>,
+            <<"content-type">> => <<"application/json">>,
+            <<"body">> => hb_json:encode(#{
+                <<"query">> => <<"query($keys: [KeyInput]) { message(keys: $keys) { id } }">>,
+                <<"variables">> => #{
+                    <<"keys">> => [#{<<"name">> => <<"type">>, <<"value">> => <<"Message">>}]
+                }
+            })
+        },
+        Opts
+    ),
+    ?assertMatch(#{<<"body">> := _}, Res).
+```
+
+---
+
+### 2. execute/4
+
+```erlang
+-spec execute(Context, Object, Field, Args) -> {ok, Result}
+    when
+        Context :: #{opts := map()},
+        Object :: map() | undefined,
+        Field :: binary(),
+        Args :: map(),
+        Result :: term().
+```
+
+**Description:** Main GraphQL resolver callback invoked by the GraphQL library. Routes queries to either the HyperBEAM native message query handler or the Arweave-compatible query handler based on the field name.
+
+**Message Query Keys:** `id`, `message`, `keys`, `tags`, `name`, `value`, `cursor`
+
+**Test Code:**
+```erlang
+-module(dev_query_graphql_execute_test).
+-include_lib("eunit/include/eunit.hrl").
+
+execute_message_query_test() ->
+    Opts = #{store => [hb_test_utils:test_store()]},
+    Context = #{opts => Opts},
+    Args = #{<<"keys">> => [#{<<"name">> => <<"type">>, <<"value">> => <<"Message">>}]},
+    Result = dev_query_graphql:execute(Context, undefined, <<"message">>, Args),
+    ?assertMatch({ok, _}, Result).
+
+execute_arweave_query_test() ->
+    Opts = #{store => [hb_test_utils:test_store()]},
+    Context = #{opts => Opts},
+    Args = #{},
+    % Non-message fields are routed to dev_query_arweave
+    Result = dev_query_graphql:execute(Context, undefined, <<"transactions">>, Args),
+    ?assertMatch({ok, _}, Result).
+```
+
+---
+
+### 3. keys_to_template/1
+
+```erlang
+-spec keys_to_template(Keys) -> Template
+    when
+        Keys :: [map()],
+        Template :: map().
+```
+
+**Description:** Convert a list of GraphQL key input objects to a message template map for cache matching. Each key object should have `name` and either `value` or `values` fields.
+
+**Test Code:**
+```erlang
+-module(dev_query_graphql_keys_test).
+-include_lib("eunit/include/eunit.hrl").
+
+keys_single_value_test() ->
+    Keys = [#{<<"name">> => <<"type">>, <<"value">> => <<"Message">>}],
+    Template = dev_query_graphql:keys_to_template(Keys),
+    ?assertEqual(#{<<"type">> => <<"Message">>}, Template).
+
+keys_multiple_test() ->
+    Keys = [
+        #{<<"name">> => <<"type">>, <<"value">> => <<"Message">>},
+        #{<<"name">> => <<"variant">>, <<"value">> => <<"ao.N.1">>}
+    ],
+    Template = dev_query_graphql:keys_to_template(Keys),
+    ?assertEqual(
+        #{<<"type">> => <<"Message">>, <<"variant">> => <<"ao.N.1">>},
+        Template
+    ).
+
+keys_single_values_array_test() ->
+    Keys = [#{<<"name">> => <<"type">>, <<"values">> => [<<"Message">>]}],
+    Template = dev_query_graphql:keys_to_template(Keys),
+    ?assertEqual(#{<<"type">> => <<"Message">>}, Template).
+
+keys_multi_values_throws_test() ->
+    Keys = [#{<<"name">> => <<"type">>, <<"values">> => [<<"A">>, <<"B">>]}],
+    ?assertThrow({multivalue_tag_search_not_supported, _}, 
+        dev_query_graphql:keys_to_template(Keys)).
+```
+
+---
+
+### 4. test_query/3, test_query/4, test_query/5
+
+```erlang
+-spec test_query(Node, Query, Opts) -> Response.
+-spec test_query(Node, Query, Variables, Opts) -> Response.
+-spec test_query(Node, Query, Variables, OperationName, Opts) -> Response
+    when
+        Node :: binary(),
+        Query :: binary(),
+        Variables :: map() | undefined,
+        OperationName :: binary() | undefined,
+        Opts :: map(),
+        Response :: map().
+```
+
+**Description:** Test helper functions for executing GraphQL queries against a node. Used primarily for testing and development.
+
+**Test Code:**
+```erlang
+-module(dev_query_graphql_test_query_test).
+-include_lib("eunit/include/eunit.hrl").
+
+test_query_simple_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    Node = hb_http_server:start_node(Opts),
+    Query = <<"query { message(keys: [{name: \"basic\", value: \"binary-value\"}]) { id } }">>,
+    Res = dev_query_graphql:test_query(Node, Query, Opts),
+    ?assertMatch(#{<<"data">> := _}, Res).
+
+test_query_with_variables_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    Node = hb_http_server:start_node(Opts),
+    Query = <<"query($keys: [KeyInput]) { message(keys: $keys) { id } }">>,
+    Variables = #{<<"keys">> => [#{<<"name">> => <<"basic">>, <<"value">> => <<"binary-value">>}]},
+    Res = dev_query_graphql:test_query(Node, Query, Variables, Opts),
+    ?assertMatch(#{<<"data">> := _}, Res).
+```
+
+---
+
+## GraphQL Schema
+
+The module loads its schema from `scripts/schema.gql`. The schema supports:
+
+### HyperBEAM Native Queries
+
+```graphql
+type Query {
+    message(keys: [KeyInput]): Message
+}
+
+type Message {
+    id: ID
+    keys: [KeyValue]
+    tags: [KeyValue]
+    cursor: String
+}
+
+type KeyValue {
+    name: String
+    value: String
+}
+
+input KeyInput {
+    name: String!
+    value: String
+    values: [String]
+}
+```
+
+### Arweave-Compatible Queries
+
+```graphql
+type Query {
+    transactions(
+        ids: [ID]
+        owners: [String]
+        tags: [TagInput]
+        first: Int
+        after: String
+    ): TransactionConnection
+    
+    transaction(id: ID!): Transaction
+    
+    blocks(
+        ids: [ID]
+        height: HeightInput
+    ): BlockConnection
+}
+```
+
+---
+
+## Query Examples
+
+### HyperBEAM Message Query
+
+```graphql
+query GetMessage($keys: [KeyInput]) {
+    message(keys: $keys) {
+        id
+        keys {
+            name
+            value
+        }
+    }
+}
+```
+
+Variables:
+```json
+{
+    "keys": [
+        {"name": "type", "value": "Message"},
+        {"name": "variant", "value": "ao.N.1"}
+    ]
+}
+```
+
+### Arweave Transaction Query
+
+```graphql
+query GetTransactions($owners: [String!], $tags: [TagInput]) {
+    transactions(owners: $owners, tags: $tags) {
+        edges {
+            node {
+                id
+                tags {
+                    name
+                    value
+                }
+            }
+        }
+    }
+}
+```
+
+### Block Query
+
+```graphql
+query GetBlocks {
+    blocks(height: {min: 1745749, max: 1745750}) {
+        edges {
+            node {
+                id
+                height
+                timestamp
+                previous
+            }
+        }
+    }
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Execute a simple message lookup
+Query = <<"query { message(keys: [{name: \"type\", value: \"Process\"}]) { id keys { name value } } }">>,
+{ok, Res} = hb_http:post(
+    Node,
+    #{
+        <<"path">> => <<"~query@1.0/graphql">>,
+        <<"content-type">> => <<"application/json">>,
+        <<"body">> => hb_json:encode(#{<<"query">> => Query})
+    },
+    Opts
+),
+#{<<"data">> := #{<<"message">> := Message}} = hb_json:decode(maps:get(<<"body">>, Res)).
+
+%% Query with variables
+Query = <<"query($id: ID!) { transaction(id: $id) { id tags { name value } } }">>,
+Variables = #{<<"id">> => TxID},
+Res = dev_query_graphql:test_query(Node, Query, Variables, Opts).
+
+%% Match messages by multiple tags
+Template = dev_query_graphql:keys_to_template([
+    #{<<"name">> => <<"type">>, <<"value">> => <<"Message">>},
+    #{<<"name">> => <<"action">>, <<"value">> => <<"Eval">>}
+]),
+{ok, IDs} = hb_cache:match(Template, Opts).
+```
+
+---
+
+## Initialization
+
+The GraphQL schema is lazily initialized on first use:
+
+1. **Schema Loading:** Reads `scripts/schema.gql`
+2. **Type Registration:** Registers scalars, interfaces, unions, objects, and enums
+3. **Root Definition:** Sets up Query root type
+4. **Validation:** Validates the complete schema
+5. **Controller Registration:** Registers the controller process with `hb_name`
+
+The initialization is guarded by a singleton process to prevent concurrent initialization.
+
+---
+
+## Configuration
+
+### Query Timeout
+
+```erlang
+Opts = #{
+    query_timeout => 10000  % Default: 10 seconds
+}
+```
+
+---
+
+## Response Format
+
+### Success Response
+
+```json
+{
+    "data": {
+        "message": {
+            "id": "abc123...",
+            "keys": [
+                {"name": "type", "value": "Message"}
+            ]
+        }
+    }
+}
+```
+
+### Error Response
+
+```json
+{
+    "errors": [
+        {
+            "message": "Field not found",
+            "path": ["message", "unknownField"]
+        }
+    ]
+}
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+**Parse Error:**
+```erlang
+{error, {parse_error, Details}}
+```
+
+**Type Check Error:**
+```erlang
+{error, {type_check_failed, Details}}
+```
+
+**Validation Error:**
+```erlang
+{error, {validation_failed, Details}}
+```
+
+**Multivalue Tag Search:**
+```erlang
+throw({multivalue_tag_search_not_supported, #{
+    <<"name">> => Name,
+    <<"values">> => Values
+}})
+```
+
+---
+
+## References
+
+- **Arweave Queries** - `dev_query_arweave.erl`
+- **Test Vectors** - `dev_query_test_vectors.erl`
+- **Cache System** - `hb_cache.erl`
+- **Message Format** - `hb_message.erl`
+- **GraphQL Library** - https://github.com/shopgun/graphql-erlang
+
+---
+
+## Notes
+
+1. **Schema Singleton:** The GraphQL schema is initialized once per node
+2. **Dual API:** Supports both HyperBEAM native and Arweave-compatible queries
+3. **Cache Integration:** Queries are resolved against the local cache
+4. **JSON Encoding:** Responses are automatically JSON-encoded
+5. **Variable Support:** Full support for GraphQL variables
+6. **Operation Names:** Optional operation names for multi-operation documents
+7. **Type Safety:** Full GraphQL type checking and validation
+8. **Timeout Configuration:** Configurable query timeout via `query_timeout` option
+9. **Content-Type:** Expects and returns `application/json`
+10. **Test Helpers:** Built-in test utilities for query execution

@@ -1,0 +1,650 @@
+# hb_store_fs.erl - Filesystem Storage Implementation
+
+## Overview
+
+**Purpose:** Key-value store using local filesystem as storage backend  
+**Module:** `hb_store_fs`  
+**Behavior:** `hb_store`  
+**Pattern:** Direct filesystem operations with symlink support
+
+This module implements the `hb_store` behavior using the local filesystem. It provides high-performance storage using native OS file operations, supports symbolic links for key aliasing, and can integrate with any FUSE-mounted storage (S3, cloud storage, etc.).
+
+## Dependencies
+
+- **HyperBEAM:** `hb_store`, `hb_util`, `hb_path`
+- **Erlang/OTP:** `file`, `filelib`
+- **Records:** `#file_info{}` from `kernel/include/file.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lifecycle
+-spec start(StoreOpts) -> ok.
+-spec stop(StoreOpts) -> ok.
+-spec reset(StoreOpts) -> ok.
+
+%% Scope
+-spec scope() -> local.
+-spec scope(StoreOpts) -> Scope.
+
+%% Data Operations
+-spec read(StoreOpts, Key) -> {ok, Binary} | not_found.
+-spec write(StoreOpts, Key, Value) -> ok.
+-spec type(StoreOpts, Key) -> simple | composite | not_found.
+-spec list(StoreOpts, Key) -> {ok, [Key]} | not_found.
+
+%% Group Operations
+-spec make_group(StoreOpts, Key) -> ok.
+-spec make_link(StoreOpts, Existing, New) -> ok.
+-spec resolve(StoreOpts, Key) -> ResolvedKey.
+```
+
+---
+
+## Public Functions
+
+### 1. start/1, stop/1, reset/1
+
+```erlang
+-spec start(StoreOpts) -> ok
+    when
+        StoreOpts :: #{<<"name">> := DataDir},
+        DataDir :: binary().
+
+-spec stop(StoreOpts) -> ok
+    when
+        StoreOpts :: map().
+
+-spec reset(StoreOpts) -> ok
+    when
+        StoreOpts :: #{<<"name">> := DataDir},
+        DataDir :: binary().
+```
+
+**Description:** Initialize, stop, or reset the filesystem store. `start/1` creates the data directory, `reset/1` removes all data.
+
+**Test Code:**
+```erlang
+-module(hb_store_fs_lifecycle_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_creates_directory_test() ->
+    Dir = <<"test-data/fs-start">>,
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => Dir},
+    ?assertEqual(ok, hb_store_fs:start(Store)),
+    ?assert(filelib:is_dir(Dir)).
+
+reset_clears_data_test() ->
+    Dir = <<"test-data/fs-reset">>,
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => Dir},
+    hb_store_fs:start(Store),
+    hb_store_fs:write(Store, <<"key">>, <<"value">>),
+    hb_store_fs:reset(Store),
+    hb_store_fs:start(Store),
+    ?assertEqual(not_found, hb_store_fs:read(Store, <<"key">>)).
+```
+
+---
+
+### 2. read/2, write/3
+
+```erlang
+-spec read(StoreOpts, Key) -> {ok, Binary} | not_found
+    when
+        StoreOpts :: map(),
+        Key :: binary() | list(),
+        Binary :: binary().
+
+-spec write(StoreOpts, Key, Value) -> ok
+    when
+        StoreOpts :: map(),
+        Key :: binary() | list(),
+        Value :: binary().
+```
+
+**Description:** Read and write binary data. Automatically follows symlinks and ensures parent directories exist.
+
+**Test Code:**
+```erlang
+-module(hb_store_fs_rw_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_write_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/rw">>},
+    hb_store_fs:start(Store),
+    Key = <<"test-key">>,
+    Value = <<"test-value">>,
+    
+    ?assertEqual(ok, hb_store_fs:write(Store, Key, Value)),
+    ?assertMatch({ok, Value}, hb_store_fs:read(Store, Key)).
+
+read_nonexistent_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/read">>},
+    hb_store_fs:start(Store),
+    ?assertEqual(not_found, hb_store_fs:read(Store, <<"missing">>)).
+
+nested_write_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/nested">>},
+    hb_store_fs:start(Store),
+    Key = [<<"group">>, <<"subgroup">>, <<"item">>],
+    Value = <<"nested-value">>,
+    
+    ?assertEqual(ok, hb_store_fs:write(Store, Key, Value)),
+    ?assertMatch({ok, Value}, hb_store_fs:read(Store, Key)).
+
+large_value_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/large">>},
+    hb_store_fs:start(Store),
+    LargeValue = crypto:strong_rand_bytes(1024 * 1024),  % 1 MB
+    
+    ?assertEqual(ok, hb_store_fs:write(Store, <<"large">>, LargeValue)),
+    ?assertMatch({ok, LargeValue}, hb_store_fs:read(Store, <<"large">>)).
+```
+
+---
+
+### 3. type/2, list/2
+
+```erlang
+-spec type(StoreOpts, Key) -> simple | composite | not_found
+    when
+        StoreOpts :: map(),
+        Key :: binary() | list().
+
+-spec list(StoreOpts, Key) -> {ok, [Key]} | not_found
+    when
+        StoreOpts :: map(),
+        Key :: binary() | list().
+```
+
+**Description:** `type/2` returns `simple` for files, `composite` for directories. `list/2` returns directory contents.
+
+**Test Code:**
+```erlang
+-module(hb_store_fs_type_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+type_simple_file_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/type">>},
+    hb_store_fs:start(Store),
+    hb_store_fs:write(Store, <<"file">>, <<"data">>),
+    ?assertEqual(simple, hb_store_fs:type(Store, <<"file">>)).
+
+type_composite_dir_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/type">>},
+    hb_store_fs:start(Store),
+    hb_store_fs:make_group(Store, <<"dir">>),
+    ?assertEqual(composite, hb_store_fs:type(Store, <<"dir">>)).
+
+list_directory_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/list">>},
+    hb_store_fs:start(Store),
+    Group = <<"group">>,
+    hb_store_fs:make_group(Store, Group),
+    hb_store_fs:write(Store, [Group, <<"item1">>], <<"val1">>),
+    hb_store_fs:write(Store, [Group, <<"item2">>], <<"val2">>),
+    
+    {ok, Items} = hb_store_fs:list(Store, Group),
+    ?assertEqual(2, length(Items)),
+    ?assert(lists:member(<<"item1">>, Items)),
+    ?assert(lists:member(<<"item2">>, Items)).
+```
+
+---
+
+### 4. make_group/2, make_link/3
+
+```erlang
+-spec make_group(StoreOpts, Key) -> ok
+    when
+        StoreOpts :: map(),
+        Key :: binary() | list().
+
+-spec make_link(StoreOpts, Existing, New) -> ok
+    when
+        StoreOpts :: map(),
+        Existing :: binary() | list(),
+        New :: binary() | list().
+```
+
+**Description:** `make_group/2` creates a directory. `make_link/3` creates a symbolic link from `New` to `Existing`.
+
+**Test Code:**
+```erlang
+-module(hb_store_fs_group_link_test).
+-include_lib("eunit/include/eunit.hrl").
+
+make_group_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/group">>},
+    hb_store_fs:start(Store),
+    ?assertEqual(ok, hb_store_fs:make_group(Store, <<"mygroup">>)),
+    ?assertEqual(composite, hb_store_fs:type(Store, <<"mygroup">>)).
+
+make_group_nested_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/nested">>},
+    hb_store_fs:start(Store),
+    Path = [<<"level1">>, <<"level2">>, <<"level3">>],
+    ?assertEqual(ok, hb_store_fs:make_group(Store, Path)),
+    ?assertEqual(composite, hb_store_fs:type(Store, Path)).
+
+make_link_basic_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/link">>},
+    hb_store_fs:start(Store),
+    Target = <<"target">>,
+    Link = <<"link">>,
+    Value = <<"value">>,
+    
+    hb_store_fs:write(Store, Target, Value),
+    hb_store_fs:make_link(Store, Target, Link),
+    
+    {ok, ReadValue} = hb_store_fs:read(Store, Link),
+    ?assertEqual(Value, ReadValue).
+
+make_link_chain_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/chain">>},
+    hb_store_fs:start(Store),
+    
+    hb_store_fs:write(Store, <<"final">>, <<"data">>),
+    hb_store_fs:make_link(Store, <<"final">>, <<"link1">>),
+    hb_store_fs:make_link(Store, <<"link1">>, <<"link2">>),
+    
+    {ok, Value} = hb_store_fs:read(Store, <<"link2">>),
+    ?assertEqual(<<"data">>, Value).
+```
+
+---
+
+### 5. resolve/2
+
+```erlang
+-spec resolve(StoreOpts, Key) -> ResolvedKey
+    when
+        StoreOpts :: map(),
+        Key :: binary() | list(),
+        ResolvedKey :: binary() | list() | not_found.
+```
+
+**Description:** Resolve all symlinks in a path recursively, allowing multi-hop link resolution.
+
+**Test Code:**
+```erlang
+-module(hb_store_fs_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_no_links_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/resolve">>},
+    hb_store_fs:start(Store),
+    hb_store_fs:write(Store, <<"direct">>, <<"value">>),
+    
+    Resolved = hb_store_fs:resolve(Store, <<"direct">>),
+    ?assertEqual(<<"direct">>, Resolved).
+
+resolve_single_link_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/resolve">>},
+    hb_store_fs:start(Store),
+    hb_store_fs:write(Store, <<"target">>, <<"value">>),
+    hb_store_fs:make_link(Store, <<"target">>, <<"link">>),
+    
+    Resolved = hb_store_fs:resolve(Store, <<"link">>),
+    ?assertEqual(<<"target">>, Resolved).
+
+resolve_multi_segment_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/resolve">>},
+    hb_store_fs:start(Store),
+    % Create: /a/b/c: "data", /a/b -> /a/alt-b, /a/alt-b/c: "data"
+    hb_store_fs:write(Store, [<<"a">>, <<"alt-b">>, <<"c">>], <<"correct">>),
+    hb_store_fs:make_link(Store, [<<"a">>, <<"alt-b">>], [<<"a">>, <<"b">>]),
+    
+    Resolved = hb_store_fs:resolve(Store, [<<"a">>, <<"b">>, <<"c">>]),
+    ?assertEqual(hb_store:join([<<"a">>, <<"alt-b">>, <<"c">>]), Resolved).
+```
+
+---
+
+### 6. scope/0, scope/1
+
+```erlang
+-spec scope() -> local.
+
+-spec scope(StoreOpts) -> Scope
+    when
+        StoreOpts :: map(),
+        Scope :: atom().
+```
+
+**Description:** Return the scope of the store. Defaults to `local` but can be configured.
+
+**Test Code:**
+```erlang
+-module(hb_store_fs_scope_test).
+-include_lib("eunit/include/eunit.hrl").
+
+scope_default_test() ->
+    ?assertEqual(local, hb_store_fs:scope()).
+
+scope_custom_test() ->
+    Store = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-data">>,
+        <<"scope">> => custom_scope
+    },
+    ?assertEqual(custom_scope, hb_store_fs:scope(Store)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic setup
+Store = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"data/storage">>
+},
+hb_store_fs:start(Store).
+
+%% Simple key-value
+ok = hb_store_fs:write(Store, <<"user">>, <<"alice">>),
+{ok, <<"alice">>} = hb_store_fs:read(Store, <<"user">>).
+
+%% Nested groups
+ok = hb_store_fs:make_group(Store, <<"users">>),
+ok = hb_store_fs:write(Store, [<<"users">>, <<"alice">>], <<"data1">>),
+ok = hb_store_fs:write(Store, [<<"users">>, <<"bob">>], <<"data2">>),
+{ok, [<<"alice">>, <<"bob">>]} = hb_store_fs:list(Store, <<"users">>).
+
+%% Symbolic links for aliases
+ok = hb_store_fs:write(Store, <<"original">>, <<"data">>),
+ok = hb_store_fs:make_link(Store, <<"original">>, <<"alias">>),
+{ok, <<"data">>} = hb_store_fs:read(Store, <<"alias">>).
+
+%% Path resolution across links
+ok = hb_store_fs:write(Store, [<<"real">>, <<"data">>], <<"value">>),
+ok = hb_store_fs:make_link(Store, <<"real">>, <<"virtual">>),
+{ok, <<"value">>} = hb_store_fs:read(Store, [<<"virtual">>, <<"data">>]).
+
+%% Check type before operation
+case hb_store_fs:type(Store, Key) of
+    simple -> read_file(Key);
+    composite -> list_directory(Key);
+    not_found -> create_new(Key)
+end.
+
+%% Absolute paths
+AbsStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"/var/hyperbeam/data">>
+},
+hb_store_fs:start(AbsStore).
+
+%% Relative paths
+RelStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"./cache">>
+},
+hb_store_fs:start(RelStore).
+```
+
+---
+
+## Path Handling
+
+### Path Prefixing
+
+```erlang
+% Store configuration
+Store = #{<<"name">> => <<"data">>}
+
+% Key: <<"users">>
+% Actual path: "data/users"
+
+% Key: [<<"users">>, <<"alice">>]
+% Actual path: "data/users/alice"
+```
+
+### Absolute vs Relative
+
+```erlang
+% Absolute path (starts with /)
+#{<<"name">> => <<"/var/hyperbeam">>}
+% Files stored at: /var/hyperbeam/key
+
+% Relative path
+#{<<"name">> => <<"cache">>}
+% Files stored at: ./cache/key (relative to working directory)
+```
+
+### Path Joining
+
+```erlang
+% List of parts
+[<<"a">>, <<"b">>, <<"c">>] → "prefix/a/b/c"
+
+% Binary path
+<<"a/b/c">> → "prefix/a/b/c"
+
+% Mixed (converted to binary)
+["a", <<"b">>, "c"] → "prefix/a/b/c"
+```
+
+---
+
+## Symlink Resolution
+
+### Single-Level Links
+
+```erlang
+% Create: target → "data"
+% Create: link → target
+% Read: link → follows to target → returns "data"
+
+hb_store_fs:write(Store, <<"target">>, <<"data">>),
+hb_store_fs:make_link(Store, <<"target">>, <<"link">>),
+{ok, <<"data">>} = hb_store_fs:read(Store, <<"link">>).
+```
+
+### Multi-Level Links
+
+```erlang
+% Create: final → "data"
+% Create: link1 → final
+% Create: link2 → link1
+% Read: link2 → link1 → final → "data"
+
+hb_store_fs:write(Store, <<"final">>, <<"data">>),
+hb_store_fs:make_link(Store, <<"final">>, <<"link1">>),
+hb_store_fs:make_link(Store, <<"link1">>, <<"link2">>),
+{ok, <<"data">>} = hb_store_fs:read(Store, <<"link2">>).
+```
+
+### Path Segment Resolution
+
+```erlang
+% Directory structure:
+% /a/real/c → "correct"
+% /a/b → /a/real (symlink)
+% Read /a/b/c:
+%   - Resolve /a (exists, no link)
+%   - Resolve /a/b (is link, points to /a/real)
+%   - Continue from /a/real
+%   - Resolve /a/real/c (file)
+%   - Return "correct"
+
+Resolved = hb_store_fs:resolve(Store, [<<"a">>, <<"b">>, <<"c">>]),
+% Returns: <<"a/real/c">>
+```
+
+---
+
+## Filesystem Integration
+
+### Direct Filesystem Access
+
+```erlang
+% Store files are regular filesystem files
+Store = #{<<"name">> => <<"data">>},
+hb_store_fs:write(Store, <<"test">>, <<"value">>),
+
+% Can access directly:
+{ok, <<"value">>} = file:read_file("data/test").
+```
+
+### FUSE Mounts
+
+```erlang
+% Mount S3 bucket via s3fs
+% $ s3fs mybucket /mnt/s3-storage
+
+% Use as HyperBEAM store
+S3Store = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"/mnt/s3-storage">>
+},
+hb_store_fs:start(S3Store),
+ok = hb_store_fs:write(S3Store, <<"key">>, <<"value">>).
+% Data written to S3 via filesystem
+```
+
+### NFS/SMB Shares
+
+```erlang
+% Mount network share
+% $ mount //server/share /mnt/network
+
+NetworkStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"/mnt/network/hyperbeam">>
+},
+hb_store_fs:start(NetworkStore).
+% Data stored on network share
+```
+
+---
+
+## Performance Characteristics
+
+### Operations
+
+| Operation | Complexity | Notes |
+|-----------|-----------|-------|
+| Read | O(1) | Direct file read |
+| Write | O(1) | Direct file write |
+| List | O(n) | Directory listing, n = items |
+| Type | O(1) | File info check |
+| Make Group | O(1) | Directory creation |
+| Make Link | O(1) | Symlink creation |
+| Resolve | O(d) | d = depth of links |
+
+### Filesystem Performance
+
+- **SSD:** Very fast (microsecond latency)
+- **HDD:** Slower (millisecond latency)
+- **Network FS:** Variable (depends on network)
+- **FUSE:** Overhead depends on backend
+
+### Optimization Tips
+
+```erlang
+% Use local SSD for hot data
+HotStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"/mnt/nvme/cache">>
+},
+
+% Use slower storage for cold data
+ColdStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"/mnt/hdd/archive">>
+},
+
+% Combine in chain
+Stores = [HotStore, ColdStore].
+```
+
+---
+
+## Configuration Examples
+
+### Basic Configuration
+
+```erlang
+#{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"data">>
+}
+```
+
+### Full Configuration
+
+```erlang
+#{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"/var/hyperbeam/storage">>,
+    <<"scope">> => local,
+    <<"access">> => [<<"read">>, <<"write">>]
+}
+```
+
+### Multi-Store Setup
+
+```erlang
+#{
+    store => [
+        #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> => <<"cache">>,
+            <<"scope">> => in_memory  % Fast local cache
+        },
+        #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> => <<"/mnt/storage">>,
+            <<"scope">> => local  % Persistent storage
+        }
+    ]
+}
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+```erlang
+% Directory doesn't exist (auto-created on write)
+hb_store_fs:write(Store, [<<"new">>, <<"dir">>, <<"file">>], <<"data">>).
+% Automatically creates directories
+
+% Broken symlink
+hb_store_fs:make_link(Store, <<"nonexistent">>, <<"link">>),
+not_found = hb_store_fs:read(Store, <<"link">>).
+
+% Permission denied (filesystem level)
+% Returns not_found or crashes depending on severity
+```
+
+---
+
+## References
+
+- **Store Interface** - `hb_store.erl`
+- **Path Utilities** - `hb_path.erl`
+- **Cache System** - `hb_cache.erl`
+- **Erlang File Module** - `file`, `filelib`
+
+---
+
+## Notes
+
+1. **Native Performance:** Uses OS filesystem directly
+2. **Symlink Support:** Full symbolic link resolution
+3. **Auto Directory Creation:** Parent directories created automatically
+4. **FUSE Compatible:** Works with any FUSE-mounted storage
+5. **Binary Data:** All values stored as binary files
+6. **No Locking:** No built-in concurrency control
+7. **Atomic Writes:** Filesystem-dependent atomicity
+8. **Large Files:** Suitable for large data (limited by filesystem)
+9. **Portability:** Works on any POSIX filesystem
+10. **Simple Implementation:** Minimal abstraction over filesystem

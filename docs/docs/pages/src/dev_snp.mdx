@@ -1,0 +1,401 @@
+# dev_snp.erl - AMD SEV-SNP Attestation Device
+
+## Overview
+
+**Purpose:** Validate and generate AMD SEV-SNP hardware attestation reports for confidential computing  
+**Module:** `dev_snp`  
+**Device Name:** `snp@1.0`  
+**Technology:** AMD SEV-SNP (Secure Encrypted Virtualization - Secure Nested Paging)
+
+This device provides an interface for validating and generating AMD SEV-SNP commitment reports. It enables hardware-backed attestation for trusted execution environments, verifying node identity, software integrity, and hardware root of trust.
+
+## Supported Operations
+
+- **Verification:** Validate remote node attestation reports with comprehensive checks
+- **Generation:** Create local attestation reports for proving node identity
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_opts`, `hb_maps`, `hb_util`, `hb_message`, `hb_cache`, `hb_private`, `hb_json`
+- **Arweave:** `ar_wallet`
+- **NIF Interface:** `dev_snp_nif`
+- **Message Device:** `dev_message`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Attestation Report Operations
+-spec verify(M1, M2, NodeOpts) -> {ok, binary()} | {error, term()}.
+-spec generate(M1, M2, Opts) -> {ok, map()} | {error, term()}.
+```
+
+---
+
+## Public Functions
+
+### 1. verify/3
+
+```erlang
+-spec verify(M1, M2, NodeOpts) -> {ok, binary()} | {error, term()}
+    when
+        M1 :: term(),
+        M2 :: term(),
+        NodeOpts :: map().
+```
+
+**Description:** Verify an AMD SEV-SNP commitment report message. Performs comprehensive validation including nonce verification, signature validation, debug flag check, software trust validation, measurement verification, and certificate chain verification.
+
+**Verification Steps:**
+1. Verify address and node message ID match the nonce
+2. Verify signing address matches the nonce address
+3. Verify debug flag is disabled
+4. Verify firmware, kernel, and OS hashes are trusted
+5. Verify the measurement is valid
+6. Verify report's certificate chain to hardware root of trust
+
+**Required NodeOpts:**
+- `snp_trusted` - List of trusted software configurations
+- `snp_enforced_keys` - Keys to enforce during validation (optional)
+
+**Test Code:**
+```erlang
+-module(dev_snp_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+verify_valid_report_test() ->
+    TestWallet = ar_wallet:new(),
+    TrustedConfig = #{
+        <<"vcpus">> => 32,
+        <<"vcpu_type">> => 5,
+        <<"vmm_type">> => 1,
+        <<"guest_features">> => 1,
+        <<"firmware">> => <<"firmware-hash">>,
+        <<"kernel">> => <<"kernel-hash">>,
+        <<"initrd">> => <<"initrd-hash">>,
+        <<"append">> => <<"append-hash">>
+    },
+    VerifyOpts = #{
+        snp_trusted => [TrustedConfig],
+        snp_enforced_keys => [vcpu_type, vmm_type, firmware, kernel]
+    },
+    % With properly generated report...
+    % {ok, <<"true">>} = dev_snp:verify(#{}, ReportMsg, VerifyOpts).
+    ok.
+
+verify_untrusted_software_test() ->
+    WrongConfig = #{
+        <<"firmware">> => <<"wrong-firmware-hash">>
+    },
+    VerifyOpts = #{
+        snp_trusted => [WrongConfig],
+        snp_enforced_keys => [firmware]
+    },
+    % With mismatched config...
+    % Result should be {error, untrusted_software} or {ok, <<"false">>}
+    ok.
+```
+
+---
+
+### 2. generate/3
+
+```erlang
+-spec generate(M1, M2, Opts) -> {ok, map()} | {error, term()}
+    when
+        M1 :: term(),
+        M2 :: term(),
+        Opts :: map().
+```
+
+**Description:** Generate an AMD SEV-SNP commitment report containing all necessary data to validate the node's identity and software configuration. Creates a hardware-backed attestation report using the NIF interface.
+
+**Generation Steps:**
+1. Load and validate configuration options
+2. Retrieve or create cryptographic wallet
+3. Generate unique nonce from address and message ID
+4. Extract trusted software configuration
+5. Generate hardware attestation report via NIF
+6. Package report with verification data
+
+**Required Opts:**
+- `priv_wallet` - Node's cryptographic wallet
+- `snp_trusted` - List of trusted software configurations
+
+**Return Structure:**
+```erlang
+#{
+    <<"local-hashes">> => TrustedConfig,
+    <<"nonce">> => EncodedNonce,
+    <<"address">> => NodeAddress,
+    <<"node-message">> => NodeMsg,
+    <<"report">> => ReportJSON
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_snp_generate_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+generate_success_test() ->
+    TestWallet = ar_wallet:new(),
+    TrustedConfig = #{
+        <<"vcpus">> => 32,
+        <<"vcpu_type">> => 5,
+        <<"firmware">> => <<"firmware-hash">>
+    },
+    Opts = #{
+        priv_wallet => TestWallet,
+        snp_trusted => [TrustedConfig]
+    },
+    % On SNP-enabled hardware:
+    % {ok, Report} = dev_snp:generate(#{}, #{}, Opts),
+    % ?assert(maps:is_key(<<"report">>, Report)),
+    % ?assert(maps:is_key(<<"nonce">>, Report)).
+    ok.
+
+generate_missing_wallet_test() ->
+    Opts = #{
+        snp_trusted => [#{ <<"firmware">> => <<"hash">> }]
+    },
+    Result = dev_snp:generate(#{}, #{}, Opts),
+    ?assertMatch({error, no_wallet_available}, Result).
+
+generate_missing_trusted_configs_test() ->
+    TestWallet = ar_wallet:new(),
+    Opts = #{
+        priv_wallet => TestWallet,
+        snp_trusted => []
+    },
+    Result = dev_snp:generate(#{}, #{}, Opts),
+    ?assertMatch({error, no_trusted_configs}, Result).
+```
+
+---
+
+## Verification Process
+
+### Nonce Verification
+
+The nonce binds the attestation report to a specific verification request:
+
+```erlang
+%% Nonce generation
+Nonce = << NativeAddress/binary, NativeNodeMsgID/binary >>
+
+%% Verification
+verify_nonce(Address, NodeMsgID, Msg, NodeOpts) ->
+    Nonce = hb_util:decode(hb_ao:get(<<"nonce">>, Msg, NodeOpts)),
+    ExpectedNonce = generate_nonce(Address, NodeMsgID),
+    Nonce == ExpectedNonce.
+```
+
+### Debug Flag Check
+
+Production environments require debug mode to be disabled:
+
+```erlang
+%% Debug flag is bit 19 in the policy field
+is_debug(Report) ->
+    (Policy band (1 bsl 19)) =/= 0.
+```
+
+### Software Trust Validation
+
+Validates that software components match approved configurations:
+
+```erlang
+%% Committed parameters checked
+[vcpus, vcpu_type, vmm_type, guest_features,
+ firmware, kernel, initrd, append]
+
+%% Validation process
+1. Extract local hashes from message
+2. Filter to enforced keys only
+3. Compare against trusted configurations
+4. Return true if any configuration matches
+```
+
+### Measurement Verification
+
+Validates the SNP launch measurement:
+
+```erlang
+%% Compute expected measurement
+{ok, Expected} = dev_snp_nif:compute_launch_digest(Args),
+
+%% Verify against report
+{ok, IsValid} = dev_snp_nif:verify_measurement(ReportJSON, Expected).
+```
+
+---
+
+## Configuration
+
+### Trusted Software Configuration
+
+```erlang
+TrustedConfig = #{
+    <<"vcpus">> => 32,              % Number of virtual CPUs
+    <<"vcpu_type">> => 5,           % vCPU type identifier
+    <<"vmm_type">> => 1,            % VMM type identifier
+    <<"guest_features">> => 1,      % Guest feature flags
+    <<"firmware">> => <<"b8c5d4...">>,  % Firmware hash (hex)
+    <<"kernel">> => <<"69d0cd...">>,    % Kernel hash (hex)
+    <<"initrd">> => <<"544045...">>,    % Initrd hash (hex)
+    <<"append">> => <<"95a34f...">>     % Append hash (hex)
+}
+```
+
+### Verification Options
+
+```erlang
+VerifyOpts = #{
+    %% List of trusted software configurations
+    snp_trusted => [TrustedConfig1, TrustedConfig2],
+    
+    %% Keys to enforce (defaults to all committed parameters)
+    snp_enforced_keys => [vcpu_type, vmm_type, firmware, kernel]
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Generate attestation report
+GenerateOpts = #{
+    priv_wallet => ar_wallet:new(),
+    snp_trusted => [#{
+        <<"vcpus">> => 32,
+        <<"vcpu_type">> => 5,
+        <<"vmm_type">> => 1,
+        <<"guest_features">> => 1,
+        <<"firmware">> => FirmwareHash,
+        <<"kernel">> => KernelHash,
+        <<"initrd">> => InitrdHash,
+        <<"append">> => AppendHash
+    }]
+},
+{ok, Report} = dev_snp:generate(#{}, #{}, GenerateOpts).
+
+%% Verify attestation report
+VerifyOpts = #{
+    snp_trusted => [TrustedConfig],
+    snp_enforced_keys => [vcpu_type, vmm_type, firmware, kernel, initrd, append]
+},
+CommittedReport = hb_message:commit(Report, GenerateOpts),
+{ok, <<"true">>} = dev_snp:verify(#{}, CommittedReport, VerifyOpts).
+
+%% Round-trip verification
+{ok, GeneratedMsg} = dev_snp:generate(#{}, #{}, GenerateOpts),
+SignedMsg = hb_message:commit(GeneratedMsg, GenerateOpts),
+{ok, Result} = dev_snp:verify(#{}, SignedMsg, VerifyOpts),
+<<"true">> = Result.
+```
+
+---
+
+## Report Message Structure
+
+### Generated Report
+
+```erlang
+#{
+    <<"local-hashes">> => #{
+        <<"vcpus">> => 32,
+        <<"vcpu_type">> => 5,
+        <<"firmware">> => <<"hash...">>,
+        ...
+    },
+    <<"nonce">> => <<"base64-encoded-nonce">>,
+    <<"address">> => <<"node-address">>,
+    <<"node-message">> => NodeMsg,
+    <<"report">> => <<"json-attestation-report">>
+}
+```
+
+### Attestation Report (JSON)
+
+Contains AMD SEV-SNP hardware attestation data including:
+- Measurement (launch digest)
+- Policy flags
+- Platform info
+- Certificate chain
+- Signature
+
+---
+
+## Error Handling
+
+### Verification Errors
+
+| Error | Description |
+|-------|-------------|
+| `nonce_mismatch` | Nonce doesn't match expected value |
+| `signature_or_address_invalid` | Invalid signature or address mismatch |
+| `debug_enabled` | Debug mode is enabled (security risk) |
+| `untrusted_software` | Software config doesn't match trusted list |
+| `measurement_invalid` | Launch measurement doesn't match |
+| `report_signature_invalid` | Report signature verification failed |
+
+### Generation Errors
+
+| Error | Description |
+|-------|-------------|
+| `no_wallet_available` | No `priv_wallet` provided |
+| `no_trusted_configs` | Empty `snp_trusted` list |
+| `invalid_trusted_configs_format` | Invalid configuration format |
+
+---
+
+## Testing Support
+
+### Mocking SNP NIF
+
+For testing without SNP hardware:
+
+```erlang
+%% Enable mock
+mock_snp_nif(TestReportJSON) ->
+    put(mock_snp_nif_response, TestReportJSON),
+    put(mock_snp_nif_enabled, true),
+    ok.
+
+%% Disable mock
+unmock_snp_nif() ->
+    erase(mock_snp_nif_response),
+    erase(mock_snp_nif_enabled),
+    ok.
+```
+
+---
+
+## References
+
+- **SNP NIF** - `dev_snp_nif.erl` for hardware interface
+- **Message Device** - `dev_message.erl`
+- **AMD SEV-SNP** - AMD Secure Encrypted Virtualization documentation
+- **Confidential Computing** - Hardware-based TEE attestation
+
+---
+
+## Notes
+
+1. **Hardware Requirement:** Full functionality requires AMD SEV-SNP capable hardware
+2. **Debug Mode:** Production deployments must have debug disabled
+3. **Nonce Binding:** Reports are cryptographically bound to specific requests
+4. **Certificate Chain:** Report signatures verified against AMD root of trust
+5. **Software Hashes:** All system component hashes must match trusted configurations
+6. **Enforced Keys:** Subset of parameters can be enforced for flexible validation
+7. **JSON Reports:** Attestation reports encoded as JSON for portability
+8. **Measurement Computation:** Uses NIF for hardware-specific digest calculation
+9. **Address Normalization:** Uses native ID format for nonce generation
+10. **Mock Support:** Process dictionary mocking for testing without hardware

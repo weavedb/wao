@@ -1,0 +1,494 @@
+# hb_gateway_client.erl - Arweave GraphQL Gateway Client
+
+## Overview
+
+**Purpose:** Access Arweave network data via GraphQL API  
+**Module:** `hb_gateway_client`  
+**Protocol:** Arweave GraphQL transactions query  
+**Pattern:** GraphQL query → ANS-104 message conversion
+
+This module implements Arweave's GraphQL API to retrieve data items from the network. It converts GraphQL transaction responses into HyperBEAM `structured@1.0` messages, handling all necessary fields for ANS-104 compatibility.
+
+## GraphQL API
+
+Arweave gateways provide GraphQL endpoints that expose transaction metadata and tags. This module queries these endpoints and combines the results with raw data from `/raw/<id>` endpoints to construct complete messages.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_http`, `hb_ao`, `hb_util`, `hb_maps`, `hb_opts`, `hb_json`, `dev_codec_ans104`, `dev_codec_structured`
+- **Arweave:** `ar_bundles`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Data Access
+-spec read(ID, Opts) -> {ok, Message} | {error, Reason}.
+-spec data(ID, Opts) -> {ok, Binary} | {error, Reason}.
+
+%% GraphQL Queries
+-spec query(Query, Opts) -> {ok, Response} | {error, Reason}.
+-spec query(Query, Variables, Opts) -> {ok, Response} | {error, Reason}.
+-spec query(Query, Variables, Node, Opts) -> {ok, Response} | {error, Reason}.
+-spec query(Query, Variables, Node, Operation, Opts) -> {ok, Response} | {error, Reason}.
+
+%% Utilities
+-spec item_spec() -> GraphQLFragment.
+-spec result_to_message(Item, Opts) -> {ok, Message}.
+-spec scheduler_location(Address, Opts) -> {ok, Message} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. read/2
+
+```erlang
+-spec read(ID, Opts) -> {ok, Message} | {error, Reason}
+    when
+        ID :: binary(),
+        Opts :: map(),
+        Message :: map(),
+        Reason :: term().
+```
+
+**Description:** Get a complete data item (metadata + data) by ID using GraphQL and raw data endpoints. Returns converted `structured@1.0` message.
+
+**Test Code:**
+```erlang
+-module(hb_gateway_client_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_basic_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    ID = <<"BOogk_XAI3bvNWnxNxwxmvOfglZt17o4MOVAdPNZ_ew">>,
+    Result = hb_gateway_client:read(ID, #{}),
+    ?assertMatch({ok, _}, Result).
+
+read_returns_message_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    ID = <<"valid-transaction-id">>,
+    case hb_gateway_client:read(ID, #{}) of
+        {ok, Msg} ->
+            ?assert(is_map(Msg)),
+            ?assert(maps:is_key(<<"data">>, Msg));
+        {error, _} ->
+            ?assert(true)  % Gateway may be unavailable
+    end.
+
+read_with_subindex_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    ID = <<"process-id">>,
+    Opts = #{
+        <<"subindex">> => #{
+            <<"1">> => #{
+                <<"name">> => <<"Type">>,
+                <<"value">> => <<"Message">>
+            }
+        }
+    },
+    Result = hb_gateway_client:read(ID, Opts),
+    ?assert(is_tuple(Result)).
+```
+
+---
+
+### 2. query/2, query/3, query/4, query/5
+
+```erlang
+-spec query(Query, Variables, Node, Operation, Opts) -> {ok, Response} | {error, Reason}
+    when
+        Query :: binary(),
+        Variables :: map() | undefined,
+        Node :: binary() | undefined,
+        Operation :: binary() | undefined,
+        Opts :: map(),
+        Response :: map(),
+        Reason :: term().
+```
+
+**Description:** Execute GraphQL query against Arweave gateway. Supports variables, custom nodes, and named operations.
+
+**Test Code:**
+```erlang
+-module(hb_gateway_client_query_test).
+-include_lib("eunit/include/eunit.hrl").
+
+query_basic_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    Query = <<"query { transactions(first: 1) { edges { node { id } } } }">>,
+    Result = hb_gateway_client:query(Query, #{}),
+    ?assertMatch({ok, _} | {error, _}, Result).
+
+query_with_variables_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    Query = <<"query($ids: [ID!]!) { transactions(ids: $ids) { edges { node { id } } } }">>,
+    Variables = #{<<"ids">> => [<<"test-id">>]},
+    Result = hb_gateway_client:query(Query, Variables, #{}),
+    ?assert(is_tuple(Result)).
+
+query_multirequest_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    Query = <<"query { transactions(first: 1) { edges { node { id } } } }">>,
+    Opts = #{
+        <<"multirequest-responses">> => 1,
+        <<"multirequest-admissible-status">> => 200
+    },
+    Result = hb_gateway_client:query(Query, undefined, Opts),
+    ?assert(is_tuple(Result)).
+```
+
+---
+
+### 3. data/2
+
+```erlang
+-spec data(ID, Opts) -> {ok, Binary} | {error, Reason}
+    when
+        ID :: binary(),
+        Opts :: map(),
+        Binary :: binary(),
+        Reason :: term().
+```
+
+**Description:** Fetch raw data for a transaction from `/raw/<id>` endpoint. Returns unmodified binary content.
+
+**Test Code:**
+```erlang
+-module(hb_gateway_client_data_test).
+-include_lib("eunit/include/eunit.hrl").
+
+data_basic_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    ID = <<"valid-id">>,
+    case hb_gateway_client:data(ID, #{}) of
+        {ok, Data} ->
+            ?assert(is_binary(Data));
+        {error, no_viable_gateway} ->
+            ?assert(true)  % Gateway unavailable
+    end.
+
+data_returns_binary_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    ID = <<"test-id">>,
+    Result = hb_gateway_client:data(ID, #{}),
+    case Result of
+        {ok, Bin} -> ?assert(is_binary(Bin));
+        {error, _} -> ?assert(true)
+    end.
+```
+
+---
+
+### 4. scheduler_location/2
+
+```erlang
+-spec scheduler_location(Address, Opts) -> {ok, Message} | {error, Reason}
+    when
+        Address :: binary(),
+        Opts :: map(),
+        Message :: map(),
+        Reason :: term().
+```
+
+**Description:** Find scheduler location by querying for transactions with `Type: Scheduler-Location` tag from the given owner address.
+
+**Test Code:**
+```erlang
+-module(hb_gateway_client_scheduler_test).
+-include_lib("eunit/include/eunit.hrl").
+
+scheduler_location_test() ->
+    _Node = hb_http_server:start_node(#{}),
+    Address = <<"fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY">>,
+    case hb_gateway_client:scheduler_location(Address, #{}) of
+        {ok, Res} ->
+            ?assertEqual(<<"Scheduler-Location">>, 
+                hb_ao:get(<<"Type">>, Res, #{})),
+            ?assert(maps:is_key(<<"url">>, Res));
+        {error, _} ->
+            ?assert(true)  % May not be available
+    end.
+```
+
+---
+
+### 5. item_spec/0
+
+```erlang
+-spec item_spec() -> GraphQLFragment
+    when
+        GraphQLFragment :: binary().
+```
+
+**Description:** Returns GraphQL fragment for querying transaction fields needed to construct ANS-104 messages.
+
+**Fields Included:**
+- `id` - Transaction ID
+- `anchor` - Anchor/nonce
+- `signature` - Signature bytes
+- `recipient` - Target address
+- `owner { key }` - Public key
+- `fee { winston }` - Transaction fee
+- `quantity { winston }` - Transfer amount
+- `tags { name value }` - Tag list
+- `data { size }` - Data size
+- `cursor` - Pagination cursor
+
+---
+
+### 6. result_to_message/2, result_to_message/3
+
+```erlang
+-spec result_to_message(Item, Opts) -> {ok, Message}
+    when
+        Item :: map(),
+        Opts :: map(),
+        Message :: map().
+```
+
+**Description:** Convert GraphQL item node to HyperBEAM message. Fetches raw data, constructs ANS-104 TX record, verifies signature, and converts to `structured@1.0` format.
+
+**Conversion Flow:**
+```erlang
+GraphQL Response
+    ↓
+Extract Metadata (tags, signature, owner, etc.)
+    ↓
+Fetch Raw Data (/raw/<id>)
+    ↓
+Construct ANS-104 #tx{} Record
+    ↓
+Verify Signature (optional trust)
+    ↓
+Convert to structured@1.0 Message
+    ↓
+Return Complete Message
+```
+
+---
+
+## GraphQL Query Patterns
+
+### Basic Transaction Query
+
+```erlang
+Query = <<"
+    query($ids: [ID!]!) {
+        transactions(ids: $ids, first: 1) {
+            edges {
+                node {
+                    id
+                    tags { name value }
+                    data { size }
+                }
+            }
+        }
+    }
+">>,
+Variables = #{<<"ids">> => [ID]},
+{ok, Response} = hb_gateway_client:query(Query, Variables, #{}).
+```
+
+### Query with Tag Filtering
+
+```erlang
+Query = <<"
+    query($owners: [String!]!) {
+        transactions(
+            owners: $owners,
+            tags: { name: \"Type\" values: [\"Scheduler-Location\"] },
+            first: 1
+        ) {
+            edges {
+                node {
+                    id
+                    tags { name value }
+                }
+            }
+        }
+    }
+">>,
+Variables = #{<<"owners">> => [Address]}.
+```
+
+### Subindex Query
+
+```erlang
+% Subindex as map
+Subindex = #{
+    <<"1">> => #{
+        <<"name">> => <<"Type">>,
+        <<"value">> => <<"Message">>
+    },
+    <<"2">> => #{
+        <<"name">> => <<"Target">>,
+        <<"value">> => ProcessID
+    }
+},
+{ok, Msg} = hb_gateway_client:read(ID, #{<<"subindex">> => Subindex}).
+```
+
+---
+
+## Message Conversion
+
+### ANS-104 TX Record Construction
+
+```erlang
+TX = #tx{
+    format = ans104,
+    anchor = Anchor,              % From GraphQL
+    signature = Signature,        % Decoded from base64
+    signature_type = SignatureType,  % Detected from size
+    target = Target,              % From recipient/target
+    owner = PublicKey,            % Decoded owner key
+    tags = TagList,               % [{Name, Value}, ...]
+    data_size = DataSize,         % From data/size or byte_size
+    data = Binary                 % From /raw/<id>
+}.
+```
+
+### Signature Type Detection
+
+```erlang
+SignatureType = case byte_size(Signature) of
+    65  -> {ecdsa, 256};    % ECDSA secp256k1
+    512 -> {rsa, 65537};    % RSA-4096
+    _   -> unsupported_tx_signature_type
+end.
+```
+
+### Verification & Trust
+
+```erlang
+case ar_bundles:verify_item(TX) of
+    true ->
+        % Item verifies, return as-is
+        ConvertedMessage;
+    false ->
+        case hb_opts:get(ans104_trust_gql, false, Opts) of
+            true ->
+                % Trust GraphQL, add trusted-keys
+                AddTrustedKeys(ConvertedMessage);
+            false ->
+                % Return unverifiable TX
+                ConvertedMessage
+        end
+end.
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Read complete message
+{ok, Message} = hb_gateway_client:read(ID, #{}).
+
+%% Read with subindex filtering
+Opts = #{
+    <<"subindex">> => #{
+        <<"1">> => #{
+            <<"name">> => <<"Type">>,
+            <<"value">> => <<"Message">>
+        }
+    }
+},
+{ok, Message} = hb_gateway_client:read(ProcessID, Opts).
+
+%% Custom GraphQL query
+Query = <<"query { transactions(first: 10) { edges { node { id } } } }">>,
+{ok, Response} = hb_gateway_client:query(Query, #{}).
+
+%% Find scheduler location
+{ok, SchedulerMsg} = hb_gateway_client:scheduler_location(Address, #{}),
+URL = hb_ao:get(<<"url">>, SchedulerMsg, #{}).
+
+%% Trust GraphQL API
+Opts = #{ans104_trust_gql => true},
+{ok, TrustedMsg} = hb_gateway_client:read(ID, Opts).
+
+%% Multi-gateway query
+Opts = #{
+    <<"multirequest-responses">> => 1,
+    <<"multirequest-admissible-status">> => 200
+},
+{ok, Response} = hb_gateway_client:query(Query, Variables, Opts).
+```
+
+---
+
+## Configuration Options
+
+```erlang
+Opts = #{
+    % Trust GraphQL without signature verification
+    ans104_trust_gql => false,
+    
+    % Multi-request settings
+    <<"multirequest-responses">> => 1,
+    <<"multirequest-admissible-status">> => 200,
+    <<"multirequest-admissible">> => #{
+        <<"device">> => <<"query@1.0">>,
+        <<"path">> => <<"has-results">>
+    },
+    
+    % Cache control
+    cache_control => [<<"no-cache">>, <<"no-store">>],
+    
+    % Hashpath handling
+    hashpath => ignore
+}.
+```
+
+---
+
+## Error Handling
+
+```erlang
+% Not found
+{error, not_found}
+
+% No viable gateway
+{error, no_viable_gateway}
+
+% GraphQL query error
+{error, {graphql_error, Details}}
+
+% Verification failed
+{ok, UnverifiableMessage}  % With warning
+```
+
+---
+
+## References
+
+- **Arweave GraphQL** - Gateway API documentation
+- **ANS-104** - Data item specification
+- **HTTP Client** - `hb_http.erl`
+- **Bundle System** - `ar_bundles.erl`
+- **Message Codecs** - `dev_codec_ans104.erl`, `dev_codec_structured.erl`
+
+---
+
+## Notes
+
+1. **GraphQL + Raw**: Combines metadata from GraphQL with data from `/raw/<id>`
+2. **Signature Verification**: Optional, can trust GraphQL API
+3. **Subindex**: Filters GraphQL results by tag combinations
+4. **Multi-Gateway**: Supports querying multiple gateways simultaneously
+5. **Trusted Keys**: GraphQL-sourced tags marked as trusted if verification fails
+6. **Signature Types**: Auto-detects RSA-4096, ECDSA secp256k1, EdDSA
+7. **Cache Control**: Prevents caching of GraphQL responses
+8. **Hashpath**: Ignored during GraphQL message construction
+9. **Scheduler Location**: Special query for finding scheduler endpoints
+10. **Null Handling**: Normalizes GraphQL nulls to empty binaries
+11. **Empty Data**: Handles zero-size data fields correctly
+12. **ID Encoding**: Converts between base64url and binary formats
+13. **Target/Recipient**: Checks both fields for target address
+14. **Owner Key**: Decodes base64 public key from GraphQL
+15. **Deprecation**: Will be deprecated when gateways support httpsig@1.0

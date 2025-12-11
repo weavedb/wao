@@ -1,0 +1,441 @@
+# hb_tracer.erl - Request Lifecycle Tracing
+
+## Overview
+
+**Purpose:** Track and trace request flow through the HyperBEAM system  
+**Module:** `hb_tracer`  
+**Pattern:** Process-based event queue with formatted error output
+
+This module provides request lifecycle tracing capabilities, allowing tracking of HTTP requests from receipt through processing to response. Uses a dedicated process per trace to collect events in a queue, with special support for formatting error traces with user-friendly emoji output.
+
+## Dependencies
+
+- **Erlang/OTP:** `queue`
+- **HyperBEAM:** None
+- **Records:** None
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Tracer Lifecycle
+-spec start_trace() -> TracePID.
+
+%% Event Recording
+-spec record_step(TracePID, Step) -> ok.
+
+%% Trace Retrieval
+-spec get_trace(TracePID) -> Trace.
+
+%% Formatting
+-spec format_error_trace(Trace) -> FormattedBinary.
+```
+
+---
+
+## Public Functions
+
+### 1. start_trace/0
+
+```erlang
+-spec start_trace() -> TracePID
+    when
+        TracePID :: pid().
+```
+
+**Description:** Start a new tracer process acting as an event queue. Returns the PID of the tracer process which should be passed to subsequent `record_step` calls.
+
+**Test Code:**
+```erlang
+-module(hb_tracer_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_trace_test() ->
+    TracePID = hb_tracer:start_trace(),
+    ?assert(is_pid(TracePID)),
+    ?assert(is_process_alive(TracePID)).
+
+start_multiple_traces_test() ->
+    Trace1 = hb_tracer:start_trace(),
+    Trace2 = hb_tracer:start_trace(),
+    ?assertNotEqual(Trace1, Trace2),
+    ?assert(is_process_alive(Trace1)),
+    ?assert(is_process_alive(Trace2)).
+```
+
+---
+
+### 2. record_step/2
+
+```erlang
+-spec record_step(TracePID, Step) -> ok
+    when
+        TracePID :: pid(),
+        Step :: term().
+```
+
+**Description:** Record an event/step in the trace queue. Steps are stored in order and can be retrieved later with `get_trace/1`. Does not block - sends async message to tracer process.
+
+**Test Code:**
+```erlang
+-module(hb_tracer_record_test).
+-include_lib("eunit/include/eunit.hrl").
+
+record_step_test() ->
+    TracePID = hb_tracer:start_trace(),
+    
+    ?assertEqual(ok, hb_tracer:record_step(TracePID, {step1, data1})),
+    ?assertEqual(ok, hb_tracer:record_step(TracePID, {step2, data2})),
+    
+    Trace = hb_tracer:get_trace(TracePID),
+    Steps = maps:get(steps, Trace),
+    ?assertEqual(2, length(Steps)).
+
+record_multiple_steps_test() ->
+    TracePID = hb_tracer:start_trace(),
+    
+    Steps = [
+        {http, parsed_request},
+        {ao_core, {stage, 1, task1}},
+        {ao_core, {stage, 2, task2}}
+    ],
+    
+    lists:foreach(
+        fun(Step) -> hb_tracer:record_step(TracePID, Step) end,
+        Steps
+    ),
+    
+    Trace = hb_tracer:get_trace(TracePID),
+    RecordedSteps = maps:get(steps, Trace),
+    ?assertEqual(3, length(RecordedSteps)).
+```
+
+---
+
+### 3. get_trace/1
+
+```erlang
+-spec get_trace(TracePID) -> Trace
+    when
+        TracePID :: pid(),
+        Trace :: #{steps := [Step]},
+        Step :: term().
+```
+
+**Description:** Retrieve all recorded steps from a tracer. Returns a map with `steps` key containing a list of all recorded events in order. Times out after 5 seconds.
+
+**Test Code:**
+```erlang
+-module(hb_tracer_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_trace_test() ->
+    TracePID = hb_tracer:start_trace(),
+    hb_tracer:record_step(TracePID, {test, step}),
+    
+    Trace = hb_tracer:get_trace(TracePID),
+    ?assert(is_map(Trace)),
+    ?assert(maps:is_key(steps, Trace)),
+    
+    Steps = maps:get(steps, Trace),
+    ?assertEqual([{test, step}], Steps).
+
+get_trace_empty_test() ->
+    TracePID = hb_tracer:start_trace(),
+    Trace = hb_tracer:get_trace(TracePID),
+    
+    Steps = maps:get(steps, Trace),
+    ?assertEqual([], Steps).
+
+get_trace_order_test() ->
+    TracePID = hb_tracer:start_trace(),
+    hb_tracer:record_step(TracePID, first),
+    hb_tracer:record_step(TracePID, second),
+    hb_tracer:record_step(TracePID, third),
+    
+    #{steps := [First, Second, Third]} = hb_tracer:get_trace(TracePID),
+    ?assertEqual(first, First),
+    ?assertEqual(second, Second),
+    ?assertEqual(third, Third).
+```
+
+---
+
+### 4. format_error_trace/1
+
+```erlang
+-spec format_error_trace(Trace) -> FormattedBinary
+    when
+        Trace :: #{steps := [Step]},
+        Step :: term(),
+        FormattedBinary :: binary().
+```
+
+**Description:** Format a trace for error display with user-friendly emoji-oriented output. Extracts key information like request parsing status, execution stage, and error details.
+
+**Recognized Events:**
+- `{http, {parsed_singleton, _, _}}` - Request parsing success
+- `{ao_core, {stage, Stage, _}}` - Execution stage reached
+- `{ao_result, {load_device_failed, ...}}` - Device load failure
+- `{ao_result, {exec_failed, ...}}` - Execution failure
+
+**Test Code:**
+```erlang
+-module(hb_tracer_format_test).
+-include_lib("eunit/include/eunit.hrl").
+
+format_error_trace_basic_test() ->
+    Trace = #{
+        steps => [
+            {http, {parsed_singleton, #{}, #{}}},
+            {ao_core, {stage, 2, task}},
+            {ao_result, {load_device_failed, a, b, c, d, 
+                {exec_exception, <<"Device not found">>}, e, f}}
+        ]
+    },
+    
+    Formatted = hb_tracer:format_error_trace(Trace),
+    ?assert(is_binary(Formatted)),
+    ?assert(byte_size(Formatted) > 0),
+    
+    % Should contain error message
+    ?assert(binary:match(Formatted, <<"Device not found">>) =/= nomatch).
+
+format_error_trace_parsing_failure_test() ->
+    Trace = #{steps => []},
+    Formatted = hb_tracer:format_error_trace(Trace),
+    
+    % Should show parsing failure (no parsed_singleton event)
+    ?assert(is_binary(Formatted)),
+    % Contains failure emoji (❌)
+    ?assert(binary:match(Formatted, <<"\xE2\x9D\x8C">>) =/= nomatch).
+
+format_error_trace_success_test() ->
+    Trace = #{
+        steps => [
+            {http, {parsed_singleton, #{}, #{}}}
+        ]
+    },
+    
+    Formatted = hb_tracer:format_error_trace(Trace),
+    % Contains checkmark emoji (✅)
+    ?assert(binary:match(Formatted, <<"\xE2\x9C\x85">>) =/= nomatch).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic request tracing
+handle_request(Req) ->
+    TracePID = hb_tracer:start_trace(),
+    hb_tracer:record_step(TracePID, {http, received_request}),
+    
+    case parse_request(Req) of
+        {ok, Parsed} ->
+            hb_tracer:record_step(TracePID, {http, parsed_request}),
+            process_request(TracePID, Parsed);
+        {error, Reason} ->
+            hb_tracer:record_step(TracePID, {error, parse_failed, Reason}),
+            {error, Reason}
+    end.
+
+%% Error handling with trace
+process_with_trace(Data) ->
+    TracePID = hb_tracer:start_trace(),
+    
+    try
+        hb_tracer:record_step(TracePID, {processing, started}),
+        Result = do_processing(Data),
+        hb_tracer:record_step(TracePID, {processing, completed}),
+        {ok, Result}
+    catch
+        error:Reason ->
+            hb_tracer:record_step(TracePID, {error, Reason}),
+            Trace = hb_tracer:get_trace(TracePID),
+            ErrorMsg = hb_tracer:format_error_trace(Trace),
+            {error, ErrorMsg}
+    end.
+
+%% Stage tracking
+execute_stages(TracePID, Stages) ->
+    lists:foldl(
+        fun({Stage, Task}, Acc) ->
+            hb_tracer:record_step(TracePID, {ao_core, {stage, Stage, Task}}),
+            execute_stage(Task),
+            Acc + 1
+        end,
+        0,
+        Stages
+    ).
+
+%% Retrieve and log trace
+log_trace(TracePID) ->
+    Trace = hb_tracer:get_trace(TracePID),
+    Steps = maps:get(steps, Trace),
+    io:format("Trace (~p steps):~n", [length(Steps)]),
+    lists:foreach(
+        fun(Step) ->
+            io:format("  ~p~n", [Step])
+        end,
+        Steps
+    ).
+```
+
+---
+
+## Error Trace Format
+
+### Output Structure
+
+```
+Oops! Something went wrong. Here's the rundown:
+✅ Parsing your request
+➊ Resolved steps of your execution
+❌ Error {function_name, {reason}}
+```
+
+### Emoji Meanings
+
+| Emoji | Meaning | Unicode |
+|-------|---------|---------|
+| ✅ | Success/Completed | `\xE2\x9C\x85` |
+| ❌ | Failed/Error | `\xE2\x9D\x8C` |
+| ➊-➒ | Stage number 1-9 | Varies |
+
+### Example Output
+
+```erlang
+TracePID = hb_tracer:start_trace(),
+hb_tracer:record_step(TracePID, {http, {parsed_singleton, #{}, #{}}}),
+hb_tracer:record_step(TracePID, {ao_core, {stage, 1, init}}),
+hb_tracer:record_step(TracePID, {ao_core, {stage, 2, execute}}),
+hb_tracer:record_step(TracePID, 
+    {ao_result, {exec_failed, a, b, c, {func, my_func}, d, 
+        {exec_exception, <<"Out of memory">>}, e, f}}
+),
+
+Trace = hb_tracer:get_trace(TracePID),
+ErrorMsg = hb_tracer:format_error_trace(Trace).
+
+% Output:
+% <<"Oops! Something went wrong. Here's the rundown:
+% ✅ Parsing your request
+% ➋ Resolved steps of your execution
+% ❌ Error {my_func,<<\"Out of memory\">>}">>
+```
+
+---
+
+## Trace Event Types
+
+### HTTP Events
+
+```erlang
+{http, received_request}
+{http, {parsed_singleton, Request, Opts}}
+{http, response_sent}
+```
+
+### AO Core Events
+
+```erlang
+{ao_core, {stage, StageNumber, Task}}
+```
+
+### AO Result Events
+
+```erlang
+% Device load failure
+{ao_result, {load_device_failed, _, _, _, _, {exec_exception, Error}, _, _}}
+
+% Execution failure
+{ao_result, {exec_failed, _, _, _, {func, FunctionName}, _, 
+    {exec_exception, Error}, _, _}}
+```
+
+---
+
+## Internal Implementation
+
+### Tracer Process Loop
+
+```erlang
+% Process maintains queue of steps
+State = #{steps => queue:new()}
+
+% Receives messages:
+{record_step, Step} → Add to queue
+{get_trace, From} → Send queue as list to From
+```
+
+### Queue to List Conversion
+
+```erlang
+% Internal state uses queue for efficiency
+Steps = queue:new(),
+NewSteps = queue:in(Step, Steps),
+
+% Converted to list for response
+StepsList = queue:to_list(Steps),
+Response = #{steps => StepsList}.
+```
+
+---
+
+## Timeout Behavior
+
+```erlang
+% get_trace/1 times out after 5 seconds
+get_trace(TracePID) ->
+    TracePID ! {get_trace, self()},
+    receive
+        {trace, Trace} -> Trace
+    after 5000 ->
+        % Returns empty trace on timeout
+        #{steps => []}
+    end.
+```
+
+---
+
+## Performance Considerations
+
+### Process Per Trace
+
+- Each `start_trace()` spawns new process
+- Lightweight - just queue management
+- No cleanup needed - process exits when done
+- Independent traces don't interfere
+
+### Async Recording
+
+- `record_step/2` doesn't block
+- Fire-and-forget message sending
+- Minimal overhead on traced code
+- Queue operations are O(1)
+
+---
+
+## References
+
+- **Erlang Queue** - `queue` module for FIFO operations
+- **Process Communication** - Message passing for event collection
+- **Unicode** - UTF-8 emoji encoding
+
+---
+
+## Notes
+
+1. **Process-Based**: Each trace is an independent process
+2. **Ordered Events**: Steps stored in FIFO queue
+3. **Async Recording**: Non-blocking step recording
+4. **Timeout Protection**: 5-second timeout on retrieval
+5. **Emoji Output**: User-friendly error formatting
+6. **Stage Numbers**: Only formats stages 1-9
+7. **Error Extraction**: Recognizes specific error patterns
+8. **No Persistence**: Traces lost when process terminates
+9. **Memory Bounded**: Limited by process memory
+10. **Pattern Matching**: Uses specific event structures for formatting

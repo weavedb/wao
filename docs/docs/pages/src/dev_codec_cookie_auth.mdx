@@ -1,0 +1,518 @@
+# dev_codec_cookie_auth.erl - Cookie-Based HMAC Authentication
+
+## Overview
+
+**Purpose:** HMAC authentication using cookie-stored secrets  
+**Module:** `dev_codec_cookie_auth`  
+**Interfaces:** `message@1.0` commitment, `generator` interface  
+**Pattern:** Secret Generation → Cookie Storage → HMAC Signing
+
+This module implements cookie-based authentication for HTTP requests by storing secrets in cookies and using them for HMAC-SHA256 commitments. It provides both the `message@1.0` commitment interface (commit/verify) and the `generator` interface for integration with `~auth-hook@1.0`.
+
+## Core Capabilities
+
+- **Secret Generation:** Create or retrieve secrets from cookies
+- **HMAC Commitment:** Sign messages using cookie-stored secrets
+- **Cookie Management:** Store secrets as cookies with hash-based keys
+- **Generator Interface:** Automatic authentication for hooks
+- **Secret Derivation:** Optional custom secret generators
+
+## Dependencies
+
+- **HyperBEAM:** `hb_maps`, `hb_ao`, `hb_cache`, `hb_util`, `hb_http`, `hb_http_server`
+- **Codecs:** `dev_codec_cookie`, `dev_codec_httpsig_proxy`, `dev_codec_httpsig_keyid`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Commitment Interface
+-spec commit(Base, Request, Opts) -> {ok, SignedMsg} | {error, Reason}.
+-spec verify(Base, Request, Opts) -> {ok, boolean()} | {error, Reason}.
+
+%% Generator Interface
+-spec generate(Base, Request, Opts) -> {ok, NormalizedReq}.
+-spec finalize(Base, Request, Opts) -> {ok, FinalSequence}.
+```
+
+---
+
+## Public Functions
+
+### 1. commit/3
+
+```erlang
+-spec commit(Base, Request, Opts) -> {ok, SignedMsg} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        SignedMsg :: map(),
+        Reason :: term().
+```
+
+**Description:** Commit a message using HMAC-SHA256 with a secret from cookies. Generates new secret if none exists, stores it in cookies, and signs the message.
+
+**Secret Sources:**
+1. Explicit `secret` key in request
+2. Secret from cookie based on `committer` key
+3. New generated secret
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_auth_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+
+commit_new_secret_test() ->
+    Base = #{ <<"data">> => <<"test">> },
+    Request = #{},
+    {ok, Signed} = dev_codec_cookie_auth:commit(Base, Request, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    % Should have cookie stored
+    {ok, Cookies} = dev_codec_cookie:extract(Signed, #{}, #{}),
+    SecretKeys = [K || <<"secret-", _/binary>> = K <- maps:keys(Cookies)],
+    ?assertEqual(1, length(SecretKeys)).
+
+commit_with_explicit_secret_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(32)),
+    Base = #{ <<"data">> => <<"test">> },
+    Request = #{ <<"secret">> => Secret },
+    {ok, Signed} = dev_codec_cookie_auth:commit(Base, Request, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)).
+
+commit_and_verify_test() ->
+    Base = #{ <<"test-key">> => <<"test-value">> },
+    CommittedMsg = hb_message:commit(
+        Base,
+        #{},
+        #{ <<"commitment-device">> => <<"cookie@1.0">> }
+    ),
+    ?assertEqual(1, length(hb_message:signers(CommittedMsg, #{}))),
+    ?assert(hb_message:verify(CommittedMsg, all, #{})).
+```
+
+---
+
+### 2. verify/3
+
+```erlang
+-spec verify(Base, Request, Opts) -> {ok, boolean()} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        Reason :: term().
+```
+
+**Description:** Verify HMAC commitment using secret from cookies. Extracts secret based on committer ID and validates signature.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_auth_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+
+verify_valid_signature_test() ->
+    Base = #{ <<"data">> => <<"test">> },
+    {ok, Signed} = dev_codec_cookie_auth:commit(Base, #{}, #{}),
+    {ok, IsValid} = dev_codec_cookie_auth:verify(Base, Signed, #{}),
+    ?assertEqual(true, IsValid).
+
+verify_with_cookie_transfer_test() ->
+    % Commit message
+    Base = #{ <<"data">> => <<"test">> },
+    {ok, Signed1} = dev_codec_cookie_auth:commit(Base, #{}, #{}),
+    % Extract cookies and apply to new request
+    {ok, Cookies} = dev_codec_cookie:extract(Signed1, #{}, #{}),
+    {ok, Request2} = dev_codec_cookie:store(#{}, Cookies, #{}),
+    % Verify with transferred cookies
+    {ok, IsValid} = dev_codec_cookie_auth:verify(Base, Request2, #{}),
+    ?assert(IsValid).
+
+verify_tampered_message_test() ->
+    Base = #{ <<"data">> => <<"test">> },
+    {ok, Signed} = dev_codec_cookie_auth:commit(Base, #{}, #{}),
+    Tampered = Signed#{ <<"data">> => <<"modified">> },
+    {ok, IsValid} = dev_codec_cookie_auth:verify(Base, Tampered, #{}),
+    ?assertEqual(false, IsValid).
+```
+
+---
+
+### 3. generate/3
+
+```erlang
+-spec generate(Base, Request, Opts) -> {ok, NormalizedReq}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        NormalizedReq :: map().
+```
+
+**Description:** Generate or retrieve secrets from cookies for authentication. Part of generator interface. Returns request with `secret` key containing list of available secrets.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_auth_generate_test).
+-include_lib("eunit/include/eunit.hrl").
+
+generate_new_secret_test() ->
+    {ok, Result} = dev_codec_cookie_auth:generate(#{}, #{}, #{}),
+    ?assert(is_map(Result)),
+    ?assert(maps:is_key(<<"secret">>, Result)),
+    Secrets = maps:get(<<"secret">>, Result),
+    ?assert(is_list(Secrets)),
+    ?assertEqual(1, length(Secrets)).
+
+generate_finds_existing_test() ->
+    % First generate
+    {ok, First} = dev_codec_cookie_auth:generate(#{}, #{}, #{}),
+    % Store the cookies
+    {ok, WithCookies} = dev_codec_cookie_auth:commit(#{}, First, #{}),
+    % Generate again with same cookies
+    {ok, Second} = dev_codec_cookie_auth:generate(#{}, WithCookies, #{}),
+    Secrets = maps:get(<<"secret">>, Second),
+    ?assert(length(Secrets) > 0).
+```
+
+---
+
+### 4. finalize/3
+
+```erlang
+-spec finalize(Base, Request, Opts) -> {ok, FinalSequence}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        FinalSequence :: list().
+```
+
+**Description:** Finalize authentication hook by adding set-cookie to response sequence. Converts cookies to Set-Cookie headers and appends to message sequence.
+
+**Test Code:**
+```erlang
+-module(dev_codec_cookie_auth_finalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+finalize_adds_set_cookie_test() ->
+    % Create signed message with cookies
+    Base = #{},
+    {ok, Signed} = dev_codec_cookie_auth:commit(Base, #{}, #{}),
+    HookReq = #{
+        <<"request">> => Signed,
+        <<"body">> => [#{ <<"data">> => <<"msg1">> }]
+    },
+    {ok, Sequence} = dev_codec_cookie_auth:finalize(Base, HookReq, #{}),
+    ?assert(is_list(Sequence)),
+    ?assert(length(Sequence) > 1),
+    % Last message should be set operation
+    LastMsg = lists:last(Sequence),
+    ?assertEqual(<<"set">>, maps:get(<<"path">>, LastMsg)),
+    ?assert(maps:is_key(<<"set-cookie">>, LastMsg)).
+```
+
+---
+
+## Secret Management
+
+### Secret Generation
+
+```erlang
+% Default: Random 64-byte secret
+Secret = crypto:strong_rand_bytes(64),
+EncodedSecret = hb_util:encode(Secret)
+```
+
+### Secret Storage
+
+Stored in cookies with key = `secret-` + hash(secret):
+```erlang
+SecretHash = crypto:hash(sha256, Secret),
+CookieAddr = hb_util:encode(SecretHash),
+CookieKey = <<"secret-", CookieAddr/binary>>
+```
+
+### Cookie Structure
+
+```erlang
+#{
+    <<"secret-<hash>">> => Base64EncodedSecret
+}
+```
+
+---
+
+## Authentication Flow
+
+### Complete Flow
+
+```
+1. User makes request (no secret)
+2. generate/3 creates new secret
+3. commit/3 signs with secret
+4. finalize/3 adds Set-Cookie header
+5. User receives cookie
+6. Next request includes cookie
+7. generate/3 finds existing secret
+8. commit/3 signs with found secret
+9. verify/3 validates signature
+```
+
+### First Request
+
+```
+Request (no cookies)
+    ↓
+generate → New Secret
+    ↓
+commit → Sign with Secret
+    ↓
+store_secret → Store in Cookies
+    ↓
+finalize → Add Set-Cookie Header
+    ↓
+Response (with Set-Cookie)
+```
+
+### Subsequent Requests
+
+```
+Request (with cookies)
+    ↓
+generate → Find Existing Secrets
+    ↓
+commit → Sign with Found Secret
+    ↓
+verify → Validate Signature
+    ↓
+Response
+```
+
+---
+
+## Generator Interface
+
+### Integration with Auth Hook
+
+```erlang
+#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"cookie@1.0">>
+            }
+        }
+    }
+}
+```
+
+### Generator Functions
+
+**generate/3:**
+- Creates or retrieves secret
+- Stores in request under `secret` key
+- Returns normalized request
+
+**finalize/3:**
+- Adds Set-Cookie to response
+- Appends set message to sequence
+- Ensures client receives cookies
+
+---
+
+## Custom Secret Generators
+
+### Configuration
+
+```erlang
+Request = #{
+    <<"generator">> => GeneratorPath
+}
+```
+
+### Generator Types
+
+**Random (default):**
+```erlang
+Opts = #{
+    cookie_default_generator => <<"random">>
+}
+```
+
+**Custom Path:**
+```erlang
+Request = #{
+    <<"generator">> => <<"/custom/secret/generator">>
+}
+```
+
+**Custom Message:**
+```erlang
+Request = #{
+    <<"generator">> => #{
+        <<"device">> => <<"custom-generator@1.0">>,
+        <<"path">> => <<"generate">>
+    }
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Direct commit and verify
+Base = #{ <<"data">> => <<"test">> },
+{ok, Signed} = dev_codec_cookie_auth:commit(Base, #{}, #{}),
+{ok, true} = dev_codec_cookie_auth:verify(Base, Signed, #{}).
+
+%% Use with hb_message
+Msg = #{ <<"key">> => <<"value">> },
+Committed = hb_message:commit(
+    Msg,
+    #{},
+    #{ <<"commitment-device">> => <<"cookie@1.0">> }
+),
+?assert(hb_message:verify(Committed, all, #{})).
+
+%% HTTP cookie workflow
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"cookie@1.0">>
+            }
+        }
+    }
+}),
+{ok, Resp} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}).
+
+%% Transfer cookies between requests
+{ok, Signed1} = dev_codec_cookie_auth:commit(Msg, #{}, #{}),
+{ok, Cookies} = dev_codec_cookie:extract(Signed1, #{}, #{}),
+{ok, Req2} = dev_codec_cookie:store(#{}, Cookies, #{}),
+{ok, Signed2} = dev_codec_cookie_auth:commit(Msg2, Req2, #{}).
+
+%% Extract secrets for inspection
+{ok, Request} = dev_codec_cookie_auth:generate(#{}, #{}, #{}),
+Secrets = maps:get(<<"secret">>, Request).
+
+%% Custom generator
+CustomReq = #{
+    <<"generator">> => <<"/generate-from-user-id">>
+},
+{ok, WithSecret} = dev_codec_cookie_auth:generate(#{}, CustomReq, #{}).
+```
+
+---
+
+## Secret Committer Mapping
+
+### Committer Derivation
+
+```erlang
+Secret = crypto:strong_rand_bytes(64),
+SecretHash = crypto:hash(sha256, Secret),
+Committer = hb_util:encode(SecretHash)
+```
+
+### Cookie Key Format
+
+```
+secret-<base64url-encoded-sha256-hash>
+```
+
+### Example
+
+```erlang
+Secret = <<"my-secret-key">>,
+Hash = crypto:hash(sha256, Secret),
+% Hash = <<123, 45, 67, ...>>
+Encoded = hb_util:encode(Hash),
+% Encoded = <<"e3QtMz...">>
+CookieKey = <<"secret-e3QtMz...">>
+```
+
+---
+
+## HMAC Commitment Details
+
+### Commitment Structure
+
+```erlang
+#{
+    <<"commitment-device">> => <<"cookie@1.0">>,
+    <<"type">> => <<"hmac-sha256">>,
+    <<"committer">> => SecretHash,
+    <<"signature">> => HMACSignature,
+    <<"keyid">> => <<"secret:", SecretHash/binary>>,
+    <<"committed">> => CommittedKeys
+}
+```
+
+### Signature Calculation
+
+```erlang
+SignatureBase = create_signature_base(Message, Commitment),
+HMac = crypto:mac(hmac, sha256, Secret, SignatureBase),
+Signature = hb_util:human_id(HMac)
+```
+
+---
+
+## Error Handling
+
+### Missing Cookie
+
+```erlang
+{error, <<"Necessary cookie not found in request.">>}
+```
+
+### No Secret Found
+
+```erlang
+{error, no_secret}
+```
+
+### Link Loading
+
+Automatically loads linked messages:
+```erlang
+commit(Base, LinkRequest, Opts) when ?IS_LINK(LinkRequest) ->
+    commit(Base, hb_cache:ensure_loaded(LinkRequest, Opts), Opts)
+```
+
+---
+
+## References
+
+- **Cookie Codec** - `dev_codec_cookie.erl`
+- **HTTP Signature Proxy** - `dev_codec_httpsig_proxy.erl`
+- **Key ID Handling** - `dev_codec_httpsig_keyid.erl`
+- **Auth Hook** - `dev_auth_hook.erl`
+
+---
+
+## Notes
+
+1. **Secret Storage:** Secrets stored with hash-based keys
+2. **HMAC Scheme:** Uses SHA-256 for hashing
+3. **Generator Interface:** Full integration with auth hooks
+4. **Custom Generators:** Support for user-defined secret generation
+5. **Cookie Transfer:** Secrets persist across requests
+6. **Multi-Secret:** Can have multiple secrets per user
+7. **Committer ID:** Hash of secret used as committer
+8. **Link Support:** Automatic loading of linked messages
+9. **Finalization:** Adds Set-Cookie to response
+10. **HTTPSig Proxy:** Delegates to httpsig for signing
+11. **Default Generator:** 64-byte random secrets
+12. **Cookie Management:** Uses dev_codec_cookie for storage
+13. **Secret Key Format:** Base64url-encoded
+14. **Signature Format:** Human-readable ID
+15. **Verification:** Reconstructs signature for validation

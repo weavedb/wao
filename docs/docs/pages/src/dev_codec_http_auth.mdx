@@ -1,0 +1,481 @@
+# dev_codec_http_auth.erl - HTTP Basic Authentication with PBKDF2 Key Derivation
+
+## Overview
+
+**Purpose:** Two-step HTTP authentication with PBKDF2-derived secret keys  
+**Module:** `dev_codec_http_auth`  
+**Commitment Device:** `http-auth@1.0`  
+**Auth Scheme:** HTTP Basic Authentication (RFC 7617)  
+**Key Derivation:** PBKDF2 (RFC 8018)
+
+This module implements HTTP Basic authentication as both a commitment device (`message@1.0` interface) and a generator for authentication hooks (`~auth-hook@1.0` interface). It derives cryptographic keys from user credentials using PBKDF2 and uses them for HMAC-SHA256 message signing via `httpsig@1.0`.
+
+## Authentication Flow
+
+```
+Browser → No Auth Header → 401 Unauthorized with WWW-Authenticate
+Browser → Prompts User → Username:Password
+Browser → Resends with Basic Auth Header
+Server → PBKDF2 Key Derivation → HMAC Sign/Verify
+```
+
+## Dependencies
+
+- **HyperBEAM:** `hb_maps`, `hb_crypto`, `hb_cache`, `hb_util`, `hb_opts`
+- **Codecs:** `dev_codec_httpsig_proxy`
+- **Testing:** `eunit`, `hb_test_utils`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Generator Interface (for ~auth-hook@1.0)
+-spec generate(Msg, Req, Opts) -> {ok, Key} | {error, ErrorResponse}.
+
+%% Commitment Interface (for message@1.0)
+-spec commit(Base, Req, Opts) -> {ok, SignedMsg} | {error, Reason}.
+-spec verify(Base, Req, Opts) -> {ok, boolean()} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. generate/3
+
+```erlang
+-spec generate(Msg, Req, Opts) -> {ok, Key} | {error, ErrorResponse}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Key :: binary(),
+        ErrorResponse :: #{
+            <<"status">> => integer(),
+            <<"www-authenticate">> => binary(),
+            <<"details">> => binary()
+        }.
+```
+
+**Description:** Extract authentication information from the HTTP Authorization header and derive a secret key using PBKDF2. Returns 401 if no authorization header is provided, triggering browser authentication prompt.
+
+**PBKDF2 Parameters (configurable in request):**
+- `<<"salt">>` - Salt for PBKDF2 (default: `sha256("constant:ao")`)
+- `<<"iterations">>` - Iteration count (default: 1,200,000)
+- `<<"alg">>` - Hash algorithm (default: `sha256`)
+- `<<"key-length">>` - Output key length in bytes (default: 64)
+
+**Test Code:**
+```erlang
+-module(dev_codec_http_auth_generate_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+generate_with_auth_header_test() ->
+    Credentials = base64:encode(<<"user:password">>),
+    Req = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+    {ok, Key} = dev_codec_http_auth:generate(#{}, Req, #{}),
+    ?assert(is_binary(Key)),
+    ?assert(byte_size(Key) > 0).
+
+generate_without_auth_header_test() ->
+    Req = #{},
+    Result = dev_codec_http_auth:generate(#{}, Req, #{}),
+    ?assertMatch(
+        {error, #{
+            <<"status">> := 401,
+            <<"www-authenticate">> := <<"Basic">>,
+            <<"details">> := _
+        }},
+        Result
+    ).
+
+generate_with_explicit_secret_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Req = #{<<"secret">> => Secret},
+    {ok, Key} = dev_codec_http_auth:generate(#{}, Req, #{}),
+    ?assertEqual(Secret, Key).
+
+generate_raw_credentials_test() ->
+    Credentials = base64:encode(<<"user:password">>),
+    Req = #{
+        <<"authorization">> => <<"Basic ", Credentials/binary>>,
+        <<"raw">> => true
+    },
+    {ok, Raw} = dev_codec_http_auth:generate(#{}, Req, #{}),
+    ?assertEqual(<<"user:password">>, Raw).
+
+generate_custom_parameters_test() ->
+    Credentials = base64:encode(<<"user:password">>),
+    Req = #{
+        <<"authorization">> => <<"Basic ", Credentials/binary>>,
+        <<"iterations">> => 100000,
+        <<"key-length">> => 32,
+        <<"alg">> => <<"sha512">>
+    },
+    {ok, Key} = dev_codec_http_auth:generate(#{}, Req, #{}),
+    ?assert(is_binary(Key)).
+
+generate_unrecognized_auth_scheme_test() ->
+    Req = #{<<"authorization">> => <<"Bearer token123">>},
+    Result = dev_codec_http_auth:generate(#{}, Req, #{}),
+    ?assertMatch(
+        {error, #{<<"status">> := 400, <<"details">> := _}},
+        Result
+    ).
+```
+
+---
+
+### 2. commit/3
+
+```erlang
+-spec commit(Base, Req, Opts) -> {ok, SignedMsg} | {error, Reason}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        SignedMsg :: map(),
+        Reason :: term().
+```
+
+**Description:** Generate or extract a secret key and commit the message using HMAC-SHA256 via the `httpsig@1.0` commitment mechanism.
+
+**Test Code:**
+```erlang
+-module(dev_codec_http_auth_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+commit_with_basic_auth_test() ->
+    Credentials = base64:encode(<<"user:password">>),
+    Base = #{<<"data">> => <<"test">>},
+    Req = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+    {ok, Signed} = dev_codec_http_auth:commit(Base, Req, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    Commitments = maps:get(<<"commitments">>, Signed),
+    ?assert(maps:is_key(<<"http-auth@1.0">>, Commitments)).
+
+commit_with_secret_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{<<"data">> => <<"test">>},
+    Req = #{<<"secret">> => Secret},
+    {ok, Signed} = dev_codec_http_auth:commit(Base, Req, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)).
+
+commit_no_auth_error_test() ->
+    Base = #{<<"data">> => <<"test">>},
+    Req = #{},
+    Result = dev_codec_http_auth:commit(Base, Req, #{}),
+    ?assertMatch({error, _}, Result).
+```
+
+---
+
+### 3. verify/3
+
+```erlang
+-spec verify(Base, Req, Opts) -> {ok, boolean()} | {error, Reason}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Reason :: term().
+```
+
+**Description:** Verify a message commitment by deriving the key from the Authorization header and checking the HMAC signature.
+
+**Test Code:**
+```erlang
+-module(dev_codec_http_auth_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+verify_valid_signature_test() ->
+    Credentials = base64:encode(<<"user:password">>),
+    Base = #{<<"data">> => <<"test">>},
+    Req = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+    {ok, Signed} = dev_codec_http_auth:commit(Base, Req, #{}),
+    % Verify with same credentials
+    VerifyReq = Req#{<<"commitments">> => maps:get(<<"commitments">>, Signed)},
+    {ok, IsValid} = dev_codec_http_auth:verify(Base, VerifyReq, #{}),
+    ?assert(IsValid).
+
+verify_wrong_credentials_test() ->
+    Credentials1 = base64:encode(<<"user:password">>),
+    Credentials2 = base64:encode(<<"user:wrongpass">>),
+    Base = #{<<"data">> => <<"test">>},
+    Req1 = #{<<"authorization">> => <<"Basic ", Credentials1/binary>>},
+    {ok, Signed} = dev_codec_http_auth:commit(Base, Req1, #{}),
+    % Verify with different credentials
+    Req2 = #{
+        <<"authorization">> => <<"Basic ", Credentials2/binary>>,
+        <<"commitments">> => maps:get(<<"commitments">>, Signed)
+    },
+    {ok, IsValid} = dev_codec_http_auth:verify(Base, Req2, #{}),
+    ?assertNot(IsValid).
+
+verify_tampered_message_test() ->
+    Credentials = base64:encode(<<"user:password">>),
+    Base = #{<<"data">> => <<"test">>},
+    Req = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+    {ok, Signed} = dev_codec_http_auth:commit(Base, Req, #{}),
+    % Tamper with base message
+    TamperedBase = Base#{<<"data">> => <<"modified">>},
+    VerifyReq = Req#{<<"commitments">> => maps:get(<<"commitments">>, Signed)},
+    {ok, IsValid} = dev_codec_http_auth:verify(TamperedBase, VerifyReq, #{}),
+    ?assertNot(IsValid).
+
+verify_with_explicit_secret_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_http_auth:commit(Base, #{<<"secret">> => Secret}, #{}),
+    VerifyReq = #{
+        <<"secret">> => Secret,
+        <<"commitments">> => maps:get(<<"commitments">>, Signed)
+    },
+    {ok, IsValid} = dev_codec_http_auth:verify(Base, VerifyReq, #{}),
+    ?assert(IsValid).
+```
+
+---
+
+## Internal Functions
+
+### derive_key/3
+
+```erlang
+-spec derive_key(Credentials, Req, Opts) -> {ok, EncodedKey} | {error, ErrorResponse}
+    when
+        Credentials :: binary(),
+        Req :: map(),
+        Opts :: map(),
+        EncodedKey :: binary().
+```
+
+**Description:** Derive a cryptographic key from credentials using PBKDF2 with configurable parameters.
+
+**PBKDF2 Algorithm:**
+```
+DerivedKey = PBKDF2(Algorithm, Password, Salt, Iterations, KeyLength)
+EncodedKey = Base64Url(DerivedKey)
+```
+
+**Default Parameters:**
+- **Algorithm:** SHA-256
+- **Salt:** SHA-256("constant:ao") = Hashed constant for reproducibility
+- **Iterations:** 1,200,000 (2× OWASP 2023 recommendation of 600,000)
+- **Key Length:** 64 bytes
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic authentication flow
+Credentials = base64:encode(<<"username:password">>),
+Base = #{<<"message">> => <<"data">>},
+Req = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+
+% Commit (sign) the message
+{ok, Signed} = dev_codec_http_auth:commit(Base, Req, #{}),
+
+% Verify the signature
+VerifyReq = Req#{<<"commitments">> => maps:get(<<"commitments">>, Signed)},
+{ok, true} = dev_codec_http_auth:verify(Base, VerifyReq, #{}).
+
+%% Use with hb_message
+Signed = hb_message:commit(
+    Base,
+    #{},
+    #{
+        <<"authorization">> => <<"Basic ", Credentials/binary>>,
+        <<"commitment-device">> => <<"http-auth@1.0">>
+    }
+),
+IsValid = hb_message:verify(Signed, VerifyReq, #{}).
+
+%% Custom PBKDF2 parameters
+CustomReq = #{
+    <<"authorization">> => <<"Basic ", Credentials/binary>>,
+    <<"salt">> => <<"custom-salt">>,
+    <<"iterations">> => 500000,
+    <<"alg">> => <<"sha512">>,
+    <<"key-length">> => 32
+},
+{ok, CustomKey} = dev_codec_http_auth:generate(Base, CustomReq, #{}).
+
+%% Get raw credentials without derivation
+RawReq = #{
+    <<"authorization">> => <<"Basic ", Credentials/binary>>,
+    <<"raw">> => true
+},
+{ok, <<"username:password">>} = dev_codec_http_auth:generate(Base, RawReq, #{}).
+
+%% Handle 401 unauthorized
+case dev_codec_http_auth:generate(Base, #{}, #{}) of
+    {error, #{<<"status">> := 401} = Error} ->
+        % Return 401 response with WWW-Authenticate header
+        % Browser will prompt for credentials
+        Error;
+    {ok, Key} ->
+        % Proceed with authentication
+        ok
+end.
+```
+
+---
+
+## PBKDF2 Configuration
+
+### Default Configuration
+```erlang
+-define(DEFAULT_SALT, <<"constant:ao">>).
+
+% Effective defaults:
+#{
+    <<"salt">> => crypto:hash(sha256, <<"constant:ao">>),
+    <<"iterations">> => 1_200_000,
+    <<"alg">> => sha256,
+    <<"key-length">> => 64
+}
+```
+
+### Security Rationale
+
+**Iteration Count (1,200,000):**
+- 2× OWASP 2023 recommendation (600,000)
+- ~5-10 key derivations per second on modern hardware
+- Balances security with usability
+
+**Salt Design:**
+- Public constant for reproducibility across nodes
+- Hashed for additional entropy (RFC 8018, Section 4.1)
+- Default: `SHA-256("constant:ao")`
+- Customizable per request for different keyspaces
+
+**Key Length (64 bytes):**
+- Sufficient for HMAC-SHA256 security
+- Matches typical secret key sizes
+
+---
+
+## HTTP Authentication Flow
+
+### 1. Initial Request (No Auth)
+```http
+GET /protected HTTP/1.1
+Host: example.com
+
+→ 401 Unauthorized
+WWW-Authenticate: Basic
+```
+
+### 2. Browser Prompts User
+```
+┌─────────────────────────┐
+│ Authentication Required │
+│                         │
+│ Username: [________]    │
+│ Password: [________]    │
+│                         │
+│  [Cancel]  [Login]      │
+└─────────────────────────┘
+```
+
+### 3. Authenticated Request
+```http
+GET /protected HTTP/1.1
+Host: example.com
+Authorization: Basic dXNlcjpwYXNzd29yZA==
+
+→ 200 OK (with signed message)
+```
+
+---
+
+## Performance
+
+### PBKDF2 Benchmark
+```erlang
+% Default parameters (1.2M iterations, SHA-256, 32-byte key)
+benchmark_pbkdf2_test() ->
+    Key = crypto:strong_rand_bytes(32),
+    Derivations = 
+        hb_test_utils:benchmark(
+            fun() ->
+                hb_crypto:pbkdf2(sha256, Key, <<"salt">>, 1_200_000, 32)
+            end
+        ),
+    % Typical result: ~5-10 derivations/second
+    hb_test_utils:benchmark_print(
+        <<"Derived">>,
+        <<"keys (1.2m iterations each)">>,
+        Derivations
+    ).
+```
+
+**Expected Performance:**
+- ~5-10 key derivations per second
+- ~100-200ms per derivation
+- Intentionally slow to prevent brute-force attacks
+
+---
+
+## Error Responses
+
+### 401 Unauthorized
+```erlang
+{error, #{
+    <<"status">> => 401,
+    <<"www-authenticate">> => <<"Basic">>,
+    <<"details">> => <<"No authorization header provided.">>
+}}
+```
+
+### 400 Bad Request
+```erlang
+{error, #{
+    <<"status">> => 400,
+    <<"details">> => <<"Unrecognized authorization header: Bearer token123">>
+}}
+```
+
+### 500 Internal Server Error
+```erlang
+{error, #{
+    <<"status">> => 500,
+    <<"details">> => <<"Failed to derive key.">>
+}}
+```
+
+---
+
+## References
+
+- **RFC 7617** - HTTP Basic Authentication
+- **RFC 8018** - PKCS #5: Password-Based Cryptography (PBKDF2)
+- **OWASP** - Password Storage Cheat Sheet
+- **HTTPSig Proxy** - `dev_codec_httpsig_proxy.erl`
+- **Crypto** - `hb_crypto.erl`
+
+---
+
+## Notes
+
+1. **Password Security:** Never log or store plain credentials
+2. **PBKDF2 Purpose:** Slow key derivation prevents brute-force attacks
+3. **Salt Consistency:** Default salt ensures cross-node compatibility
+4. **Custom Salts:** Use for separate keyspaces or applications
+5. **Iteration Tuning:** Higher iterations = more security but slower
+6. **Algorithm Choice:** SHA-256 is default, SHA-512 available
+7. **Key Length:** 64 bytes default, customizable per requirement
+8. **Browser Integration:** 401 response triggers native auth prompt
+9. **Stateless:** No server-side session storage required
+10. **Proxy Pattern:** Uses `httpsig_proxy` for actual signing/verification
+11. **Raw Mode:** `<<"raw">> => true` returns credentials without derivation
+12. **Link Support:** Automatically resolves linked messages via cache
+13. **Reproducibility:** Same credentials always produce same key (with same salt)
+14. **Security Trade-off:** Slower derivation improves security against attacks

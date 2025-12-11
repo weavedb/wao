@@ -1,0 +1,422 @@
+# hb_util.erl - Core Utility Functions
+
+## Overview
+
+**Purpose:** Collection of utility functions for HyperBEAM development  
+**Module:** `hb_util`  
+**Pattern:** Stateless helper functions for type coercion, encoding, data manipulation
+
+This module provides a comprehensive set of utility functions including type coercion, ID encoding/decoding, deep data structure manipulation, list operations, statistical functions, and various helper utilities used throughout the HyperBEAM codebase.
+
+## Dependencies
+
+- **External:** `b64fast` (base64 encoding)
+- **HyperBEAM:** `hb_opts`, `hb_maps`, `hb_ao`, `hb_path`, `hb_message`, `hb_features`, `hb_ao_device`, `hb_structured_fields`
+- **Erlang/OTP:** `crypto`, `base64`, `string`, `lists`, `maps`
+
+---
+
+## Function Categories
+
+### Type Coercion
+```erlang
+int/1, float/1, atom/1, bin/1, list/1, map/1
+```
+
+### ID Operations  
+```erlang
+id/1, id/2, native_id/1, human_id/1, encode/1, decode/1, to_hex/1
+```
+
+### Deep Data Access
+```erlang
+deep_merge/3, deep_set/4, deep_get/3, deep_get/4, find_value/2-4
+```
+
+### List Operations
+```erlang
+unique/1, list_with/2, list_without/2, list_replace/3
+to_sorted_list/1-2, to_sorted_keys/1-2
+```
+
+### Math & Statistics
+```erlang
+ceil_int/2, floor_int/2, count/2, mean/1, stddev/1, variance/1, weighted_random/1
+```
+
+### Utilities
+```erlang
+ok/1-2, until/1-3, maybe_throw/2, remove_common/2, to_lower/1
+```
+
+---
+
+## Public Functions (Selected Key Functions)
+
+### 1. int/1, float/1, atom/1, bin/1, list/1, map/1
+
+```erlang
+-spec int(binary() | list() | integer()) -> integer().
+-spec float(binary() | list() | float() | integer()) -> float().
+-spec atom(binary() | list() | atom()) -> atom().
+-spec bin(atom() | integer() | float() | list() | binary()) -> binary().
+-spec list(binary() | list() | atom()) -> list().
+-spec map(list() | map()) -> map().
+```
+
+**Description:** Type coercion functions for converting between common Erlang types.
+
+**Test Code:**
+```erlang
+-module(hb_util_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+int_test() ->
+    ?assertEqual(42, hb_util:int(<<"42">>)),
+    ?assertEqual(42, hb_util:int("42")),
+    ?assertEqual(42, hb_util:int(42)).
+
+float_test() ->
+    ?assertEqual(3.14, hb_util:float(<<"3.14">>)),
+    ?assertEqual(42.0, hb_util:float(42)).
+
+bin_test() ->
+    ?assertEqual(<<"test">>, hb_util:bin(test)),
+    ?assertEqual(<<"42">>, hb_util:bin(42)),
+    ?assertEqual(<<"hello">>, hb_util:bin("hello")).
+
+map_test() ->
+    ?assertEqual(#{a => 1}, hb_util:map([{a, 1}])),
+    ?assertEqual(#{a => 1}, hb_util:map(#{a => 1})).
+```
+
+---
+
+### 2. encode/1, decode/1, safe_encode/1, safe_decode/1
+
+```erlang
+-spec encode(binary()) -> binary().
+-spec decode(binary()) -> binary().
+-spec safe_encode(term()) -> binary().
+-spec safe_decode(binary()) -> {ok, binary()} | {error, invalid}.
+```
+
+**Description:** URL-safe base64 encoding/decoding for IDs and binary data. Safe versions handle errors gracefully.
+
+**Test Code:**
+```erlang
+-module(hb_util_encode_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_decode_test() ->
+    Original = crypto:strong_rand_bytes(32),
+    Encoded = hb_util:encode(Original),
+    ?assertEqual(43, byte_size(Encoded)),
+    Decoded = hb_util:decode(Encoded),
+    ?assertEqual(Original, Decoded).
+
+safe_decode_test() ->
+    Valid = hb_util:encode(<<"test">>),
+    ?assertMatch({ok, _}, hb_util:safe_decode(Valid)),
+    ?assertEqual({error, invalid}, hb_util:safe_decode(<<"invalid!@#">>)).
+```
+
+---
+
+### 3. id/1, id/2, native_id/1, human_id/1
+
+```erlang
+-spec id(Item) -> binary()
+    when Item :: map() | binary() | #tx{}.
+-spec id(Item, Type) -> binary()
+    when Item :: map() | binary() | #tx{}, Type :: signed | unsigned.
+-spec native_id(binary() | {term(), term()}) -> binary().
+-spec human_id(binary() | {term(), term()}) -> binary().
+```
+
+**Description:** ID conversion between native (32-byte) and human-readable (43-byte base64) formats.
+
+**Test Code:**
+```erlang
+-module(hb_util_id_test).
+-include_lib("eunit/include/eunit.hrl").
+
+human_id_test() ->
+    NativeID = crypto:strong_rand_bytes(32),
+    HumanID = hb_util:human_id(NativeID),
+    ?assertEqual(43, byte_size(HumanID)),
+    ?assertEqual(NativeID, hb_util:native_id(HumanID)).
+
+id_passthrough_test() ->
+    % Already human-readable
+    ID = hb_util:encode(crypto:strong_rand_bytes(32)),
+    ?assertEqual(ID, hb_util:id(ID)).
+```
+
+---
+
+### 4. deep_merge/3, deep_set/4, deep_get/3-4
+
+```erlang
+-spec deep_merge(map(), map(), Opts) -> map().
+-spec deep_set(Path, Value, Map, Opts) -> map().
+-spec deep_get(Path, Map, Opts) -> term().
+-spec deep_get(Path, Map, Default, Opts) -> term().
+```
+
+**Description:** Deep operations on nested map structures with path-based access.
+
+**Test Code:**
+```erlang
+-module(hb_util_deep_test).
+-include_lib("eunit/include/eunit.hrl").
+
+deep_set_test() ->
+    Map = #{},
+    Updated = hb_util:deep_set([<<"a">>, <<"b">>, <<"c">>], 123, Map, #{}),
+    ?assertEqual(123, hb_util:deep_get([<<"a">>, <<"b">>, <<"c">>], Updated, #{})).
+
+deep_merge_test() ->
+    Map1 = #{<<"a">> => #{<<"b">> => 1}},
+    Map2 = #{<<"a">> => #{<<"c">> => 2}},
+    Merged = hb_util:deep_merge(Map1, Map2, #{}),
+    ?assertEqual(#{<<"a">> => #{<<"b">> => 1, <<"c">> => 2}}, Merged).
+```
+
+---
+
+### 5. unique/1, list_with/2, list_without/2
+
+```erlang
+-spec unique(list()) -> list().
+-spec list_with(list(), list()) -> list().
+-spec list_without(list(), list()) -> list().
+```
+
+**Description:** List manipulation utilities maintaining order and uniqueness.
+
+**Test Code:**
+```erlang
+-module(hb_util_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+unique_test() ->
+    ?assertEqual([1,2,3], hb_util:unique([1,2,2,3,1,3])).
+
+list_with_test() ->
+    ?assertEqual([1,3], hb_util:list_with([1,2,3], [1,3,4])).
+
+list_without_test() ->
+    ?assertEqual([2], hb_util:list_without([1,3], [1,2,3])).
+```
+
+---
+
+### 6. to_sorted_list/1-2, to_sorted_keys/1-2
+
+```erlang
+-spec to_sorted_list(map() | list()) -> list().
+-spec to_sorted_list(map() | list(), Opts) -> list().
+-spec to_sorted_keys(map() | list()) -> list().
+-spec to_sorted_keys(map() | list(), Opts) -> list().
+```
+
+**Description:** Deterministic sorting of maps and key-value lists.
+
+**Test Code:**
+```erlang
+-module(hb_util_sort_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_sorted_list_test() ->
+    Map = #{b => 2, a => 1, c => 3},
+    ?assertEqual([{a,1},{b,2},{c,3}], hb_util:to_sorted_list(Map)).
+
+to_sorted_keys_test() ->
+    Map = #{z => 1, a => 2, m => 3},
+    ?assertEqual([a,m,z], hb_util:to_sorted_keys(Map)).
+```
+
+---
+
+### 7. mean/1, stddev/1, variance/1, weighted_random/1
+
+```erlang
+-spec mean(list()) -> float().
+-spec stddev(list()) -> float().
+-spec variance(list()) -> float().
+-spec weighted_random([{term(), number()}]) -> term().
+```
+
+**Description:** Statistical functions and weighted random selection.
+
+**Test Code:**
+```erlang
+-module(hb_util_stats_test).
+-include_lib("eunit/include/eunit.hrl").
+
+mean_test() ->
+    ?assertEqual(3.0, hb_util:mean([1,2,3,4,5])).
+
+stddev_test() ->
+    StdDev = hb_util:stddev([1,2,3,4,5]),
+    ?assert(is_float(StdDev)),
+    ?assert(StdDev > 1.0).
+
+weighted_random_test() ->
+    Items = [{a, 10}, {b, 5}, {c, 1}],
+    Result = hb_util:weighted_random(Items),
+    ?assert(lists:member(Result, [a,b,c])).
+```
+
+---
+
+### 8. until/1-3
+
+```erlang
+-spec until(fun(() -> boolean())) -> integer().
+-spec until(fun(() -> boolean()), integer()) -> integer().
+-spec until(fun(() -> boolean()), fun(), integer()) -> integer().
+```
+
+**Description:** Wait for condition to be true, optionally executing function between checks. Returns iteration count.
+
+**Test Code:**
+```erlang
+-module(hb_util_until_test).
+-include_lib("eunit/include/eunit.hrl").
+
+until_basic_test() ->
+    Ref = make_ref(),
+    spawn(fun() -> 
+        timer:sleep(100),
+        put(Ref, true)
+    end),
+    
+    Count = hb_util:until(fun() -> get(Ref) == true end),
+    ?assert(Count > 0).
+
+until_with_fun_test() ->
+    Counter = spawn(fun() -> counter_loop(0) end),
+    
+    Count = hb_util:until(
+        fun() -> get_count(Counter) >= 5 end,
+        fun() -> 
+            Counter ! increment,
+            timer:sleep(10),
+            1
+        end,
+        0
+    ),
+    ?assert(Count >= 5).
+```
+
+---
+
+### 9. human_int/1
+
+```erlang
+-spec human_int(integer() | float()) -> string().
+```
+
+**Description:** Format integer with comma separators for readability.
+
+**Test Code:**
+```erlang
+-module(hb_util_human_test).
+-include_lib("eunit/include/eunit.hrl").
+
+human_int_test() ->
+    ?assertEqual("1,234", hb_util:human_int(1234)),
+    ?assertEqual("1,234,567", hb_util:human_int(1234567)),
+    ?assertEqual("100", hb_util:human_int(100)).
+```
+
+---
+
+### 10. ceil_int/2, floor_int/2
+
+```erlang
+-spec ceil_int(integer(), integer()) -> integer().
+-spec floor_int(integer(), integer()) -> integer().
+```
+
+**Description:** Round integers to nearest multiple. `ceil_int` always rounds up, `floor_int` rounds down.
+
+**Test Code:**
+```erlang
+-module(hb_util_round_test).
+-include_lib("eunit/include/eunit.hrl").
+
+ceil_int_test() ->
+    ?assertEqual(10, hb_util:ceil_int(7, 5)),
+    ?assertEqual(10, hb_util:ceil_int(5, 5)).
+
+floor_int_test() ->
+    ?assertEqual(5, hb_util:floor_int(7, 5)),
+    ?assertEqual(5, hb_util:floor_int(5, 5)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Type conversion from HTTP input
+handle_param(BinValue) ->
+    IntValue = hb_util:int(BinValue),
+    process(IntValue).
+
+%% ID handling
+get_message_id(Msg) ->
+    NativeID = hb_message:id(Msg),
+    HumanID = hb_util:human_id(NativeID).
+
+%% Deep data manipulation
+update_nested(State, Path, Value) ->
+    hb_util:deep_set(Path, Value, State, #{}).
+
+%% List operations
+get_unique_items(Lists) ->
+    AllItems = lists:flatten(Lists),
+    hb_util:unique(AllItems).
+
+%% Statistics
+analyze_performance(Samples) ->
+    #{
+        mean => hb_util:mean(Samples),
+        stddev => hb_util:stddev(Samples)
+    }.
+
+%% Wait for condition
+wait_for_ready(System) ->
+    hb_util:until(
+        fun() -> is_ready(System) end,
+        fun() -> timer:sleep(100), 1 end,
+        0
+    ).
+```
+
+---
+
+## References
+
+- **b64fast** - Fast base64 encoding library
+- **hb_ao** - AO message utilities
+- **hb_maps** - Map operations
+- **hb_path** - Path handling
+
+---
+
+## Notes
+
+1. **Type Safety**: Coercion functions assume valid input
+2. **ID Formats**: 32-byte native, 43-byte base64 human
+3. **Deep Operations**: Support nested map access
+4. **List Order**: Most functions preserve order
+5. **Statistics**: Standard mathematical definitions
+6. **Base64**: URL-safe variant used throughout
+7. **Atom Safety**: `atom/1` requires existing atoms
+8. **Error Strategy**: Many functions support `error_strategy` option
+9. **Performance**: Most operations O(N) or better
+10. **Pure Functions**: All functions are stateless

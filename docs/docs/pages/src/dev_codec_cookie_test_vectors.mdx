@@ -1,0 +1,424 @@
+# dev_codec_cookie_test_vectors.erl - Cookie Codec Test Vectors
+
+## Overview
+
+**Purpose:** Comprehensive test suite for cookie parsing and encoding correctness  
+**Module:** `dev_codec_cookie_test_vectors`  
+**Test Type:** Property-based equivalence testing  
+**Coverage:** Cookie parsing, serialization, attributes, flags
+
+This module provides a battery of test vectors for validating the `dev_codec_cookie` codec implementation. It uses equivalence classes to test that various input formats all produce the same normalized output, ensuring robust parsing and encoding.
+
+## Dependencies
+
+- **Testing:** `eunit`
+- **Codecs:** `dev_codec_cookie`
+- **HyperBEAM:** `hb_maps`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Test Utilities
+-spec test_data() -> TestDataMap.
+-spec assert_set(TestSetName, Function) -> ok.
+-spec to_string(CookieMsg) -> SetCookieStrings.
+-spec from_string(String) -> CookieMsg.
+```
+
+---
+
+## Test Utility Functions
+
+### 1. test_data/0
+
+```erlang
+-spec test_data() -> TestDataMap
+    when
+        TestDataMap :: #{
+            TestSetName => {[Input], ExpectedOutput}
+        }.
+```
+
+**Description:** Returns a map of test sets where each entry contains a list of equivalent inputs and their expected normalized output. All inputs should produce the same output when processed.
+
+**Test Sets Included:**
+- `from_string_raw_value` - Simple key-value cookie parsing
+- `from_string_attributes` - Cookie attributes parsing
+- `from_string_flags` - Cookie flags parsing
+- `to_string_raw_value` - Cookie serialization with raw values
+- `to_string_attributes` - Cookie serialization with attributes
+- `to_string_flags` - Cookie serialization with flags
+- And many more...
+
+**Test Code:**
+```erlang
+-module(test_data_structure_test).
+-include_lib("eunit/include/eunit.hrl").
+
+test_data_structure_test() ->
+    TestData = dev_codec_cookie_test_vectors:test_data(),
+    ?assert(is_map(TestData)),
+    ?assert(maps:size(TestData) > 0),
+    % Each test set should have inputs and expected output
+    maps:foreach(
+        fun(_Name, {Inputs, Expected}) ->
+            ?assert(is_list(Inputs)),
+            ?assert(length(Inputs) > 0),
+            ?assert(Expected =/= undefined)
+        end,
+        TestData
+    ).
+
+test_data_keys_test() ->
+    TestData = dev_codec_cookie_test_vectors:test_data(),
+    ?assert(maps:is_key(from_string_raw_value, TestData)),
+    ?assert(maps:is_key(from_string_attributes, TestData)),
+    ?assert(maps:is_key(to_string_raw_value, TestData)).
+```
+
+---
+
+### 2. assert_set/2
+
+```erlang
+-spec assert_set(TestSetName, Function) -> ok
+    when
+        TestSetName :: atom(),
+        Function :: fun((Input) -> Output),
+        Input :: term(),
+        Output :: term().
+```
+
+**Description:** Assert that when the given function is applied to all inputs in a test set, they all produce the expected output. This implements equivalence class testing.
+
+**Test Code:**
+```erlang
+-module(assert_set_test).
+-include_lib("eunit/include/eunit.hrl").
+
+assert_set_equivalence_test() ->
+    % Test that multiple equivalent cookie formats parse to same result
+    dev_codec_cookie_test_vectors:assert_set(
+        from_string_raw_value,
+        fun dev_codec_cookie_test_vectors:from_string/1
+    ).
+
+assert_set_serialization_test() ->
+    % Test that multiple equivalent structures serialize to same format
+    dev_codec_cookie_test_vectors:assert_set(
+        to_string_raw_value,
+        fun dev_codec_cookie_test_vectors:to_string/1
+    ).
+```
+
+---
+
+### 3. to_string/1
+
+```erlang
+-spec to_string(CookieMsg) -> SetCookieStrings
+    when
+        CookieMsg :: map(),
+        SetCookieStrings :: [binary()].
+```
+
+**Description:** Convert a cookie message to a list of `Set-Cookie` header strings. Used for testing serialization.
+
+**Test Code:**
+```erlang
+-module(to_string_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_string_simple_test() ->
+    CookieMsg = #{<<"k1">> => <<"v1">>},
+    Result = dev_codec_cookie_test_vectors:to_string(CookieMsg),
+    ?assert(is_list(Result)),
+    ?assertEqual([<<"k1=\"v1\"">>], Result).
+
+to_string_with_attributes_test() ->
+    CookieMsg = #{
+        <<"k1">> => #{
+            <<"value">> => <<"v1">>,
+            <<"attributes">> => #{<<"Path">> => <<"/">>}
+        }
+    },
+    Result = dev_codec_cookie_test_vectors:to_string(CookieMsg),
+    ?assert(is_list(Result)),
+    ?assert(length(Result) > 0).
+
+to_string_empty_test() ->
+    CookieMsg = #{},
+    Result = dev_codec_cookie_test_vectors:to_string(CookieMsg),
+    ?assertEqual([], Result).
+```
+
+---
+
+### 4. from_string/1
+
+```erlang
+-spec from_string(String) -> CookieMsg
+    when
+        String :: binary() | [binary()],
+        CookieMsg :: map().
+```
+
+**Description:** Parse a `Set-Cookie` header string (or list of strings) into a cookie message map. Used for testing deserialization.
+
+**Test Code:**
+```erlang
+-module(from_string_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_string_simple_test() ->
+    String = <<"k1=v1">>,
+    Result = dev_codec_cookie_test_vectors:from_string(String),
+    ?assertEqual(#{<<"k1">> => <<"v1">>}, Result).
+
+from_string_quoted_test() ->
+    String = <<"k1=\"v1\"">>,
+    Result = dev_codec_cookie_test_vectors:from_string(String),
+    ?assertEqual(#{<<"k1">> => <<"v1">>}, Result).
+
+from_string_with_attributes_test() ->
+    String = <<"k1=v1; Path=/">>,
+    Result = dev_codec_cookie_test_vectors:from_string(String),
+    Expected = #{
+        <<"k1">> => #{
+            <<"value">> => <<"v1">>,
+            <<"attributes">> => #{<<"Path">> => <<"/">>}
+        }
+    },
+    ?assertEqual(Expected, Result).
+
+from_string_with_flags_test() ->
+    String = <<"k1=v1; Secure; HttpOnly">>,
+    Result = dev_codec_cookie_test_vectors:from_string(String),
+    ?assertMatch(
+        #{<<"k1">> := #{
+            <<"value">> := <<"v1">>,
+            <<"flags">> := Flags
+        }} when is_list(Flags),
+        Result
+    ).
+```
+
+---
+
+## Test Vector Categories
+
+### 1. Raw Value Tests
+```erlang
+from_string_raw_value =>
+    {
+        % All these inputs should parse to the same output
+        [<<"k1=v1">>, <<"k1=\"v1\"">>],
+        #{<<"k1">> => <<"v1">>}
+    }
+
+to_string_raw_value =>
+    {
+        % All these should serialize to the same output
+        [
+            #{<<"k1">> => <<"v1">>},
+            #{<<"k1">> => #{<<"value">> => <<"v1">>}},
+            #{<<"k1">> => #{
+                <<"value">> => <<"v1">>,
+                <<"attributes">> => #{},
+                <<"flags">> => []
+            }}
+        ],
+        [<<"k1=\"v1\"">>]
+    }
+```
+
+### 2. Attribute Tests
+```erlang
+from_string_attributes =>
+    {
+        [<<"k1=v1; k2=v2">>, <<"k1=\"v1\"; k2=\"v2\"">>],
+        #{
+            <<"k1">> => #{
+                <<"value">> => <<"v1">>,
+                <<"attributes">> => #{<<"k2">> => <<"v2">>}
+            }
+        }
+    }
+```
+
+### 3. Flag Tests
+```erlang
+from_string_flags =>
+    {
+        [<<"k1=v1; k2=v2; f1; f2">>, <<"k1=\"v1\"; k2=\"v2\"; f1; f2">>],
+        #{
+            <<"k1">> => #{
+                <<"value">> => <<"v1">>,
+                <<"attributes">> => #{<<"k2">> => <<"v2">>},
+                <<"flags">> => [<<"f1">>, <<"f2">>]
+            }
+        }
+    }
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Test a specific conversion
+TestSet = from_string_raw_value,
+dev_codec_cookie_test_vectors:assert_set(
+    TestSet,
+    fun dev_codec_cookie_test_vectors:from_string/1
+).
+
+%% Convert cookie to string for inspection
+Cookie = #{<<"session">> => <<"abc123">>},
+Strings = dev_codec_cookie_test_vectors:to_string(Cookie).
+% Returns: [<<"session=\"abc123\"">>]
+
+%% Parse cookie string
+String = <<"session=abc123; Path=/; Secure">>,
+Cookie = dev_codec_cookie_test_vectors:from_string(String).
+% Returns: #{
+%   <<"session">> => #{
+%     <<"value">> => <<"abc123">>,
+%     <<"attributes">> => #{<<"Path">> => <<"/">>},
+%     <<"flags">> => [<<"Secure">>]
+%   }
+% }
+
+%% Run all test sets
+TestData = dev_codec_cookie_test_vectors:test_data(),
+maps:foreach(
+    fun(Name, _) ->
+        dev_codec_cookie_test_vectors:assert_set(
+            Name,
+            fun dev_codec_cookie_test_vectors:from_string/1
+        )
+    end,
+    TestData
+).
+```
+
+---
+
+## Test Data Structure
+
+### Test Set Format
+```erlang
+TestSetName => {
+    [Input1, Input2, Input3, ...],  % Equivalent inputs
+    ExpectedOutput                   % Normalized output
+}
+```
+
+### Cookie Message Structure
+```erlang
+#{
+    <<"key">> => <<"value">>  % Simple form
+}
+
+% OR
+
+#{
+    <<"key">> => #{
+        <<"value">> => <<"value">>,
+        <<"attributes">> => #{
+            <<"Path">> => <<"/">>,
+            <<"Domain">> => <<".example.com">>,
+            <<"Max-Age">> => <<"3600">>
+        },
+        <<"flags">> => [
+            <<"Secure">>,
+            <<"HttpOnly">>,
+            <<"SameSite">>
+        ]
+    }
+}
+```
+
+---
+
+## Equivalence Classes
+
+The test vectors use equivalence classes to ensure robust parsing:
+
+**Example 1: Quoted vs Unquoted**
+```erlang
+<<"k1=v1">> ≡ <<"k1=\"v1\"">>
+% Both parse to: #{<<"k1">> => <<"v1">>}
+```
+
+**Example 2: Explicit vs Implicit Structure**
+```erlang
+#{<<"k1">> => <<"v1">>} ≡ 
+#{<<"k1">> => #{<<"value">> => <<"v1">>}} ≡
+#{<<"k1">> => #{
+    <<"value">> => <<"v1">>,
+    <<"attributes">> => #{},
+    <<"flags">> => []
+}}
+% All serialize to: [<<"k1=\"v1\"">>]
+```
+
+**Example 3: Attribute Order**
+```erlang
+<<"k1=v1; a=1; b=2">> ≡ <<"k1=\"v1\"; b=2; a=1">>
+% Both parse to same normalized structure
+```
+
+---
+
+## Testing Strategy
+
+### 1. Parsing Tests
+Test that various input formats parse to the same normalized structure:
+```erlang
+assert_set(from_string_raw_value, fun from_string/1)
+```
+
+### 2. Serialization Tests
+Test that various cookie structures serialize to the same output:
+```erlang
+assert_set(to_string_raw_value, fun to_string/1)
+```
+
+### 3. Round-trip Tests
+Test that parse → serialize → parse produces identical results:
+```erlang
+Cookie1 = from_string(<<"k1=v1">>),
+String = to_string(Cookie1),
+Cookie2 = from_string(String),
+?assertEqual(Cookie1, Cookie2).
+```
+
+---
+
+## References
+
+- **Cookie Codec** - `dev_codec_cookie.erl`
+- **HTTP Standards** - RFC 6265 (HTTP State Management Mechanism)
+- **EUnit Testing** - Erlang unit testing framework
+- **HyperBEAM** - `hb_maps.erl`
+
+---
+
+## Notes
+
+1. **Equivalence Testing:** Uses equivalence classes to test parsing robustness
+2. **Normalization:** All equivalent inputs normalize to same structure
+3. **Quote Handling:** Handles both quoted and unquoted cookie values
+4. **Attribute Support:** Tests various cookie attributes (Path, Domain, etc.)
+5. **Flag Support:** Tests boolean flags (Secure, HttpOnly, SameSite)
+6. **Multiple Formats:** Supports various cookie header formats
+7. **Idempotency:** Serialization → Parsing → Serialization is idempotent
+8. **Edge Cases:** Includes tests for empty cookies, special characters
+9. **Coverage:** Comprehensive test coverage of cookie codec functionality
+10. **Debugging Aid:** Provides utilities for manual cookie testing
+11. **Test Data Map:** Centralized test data for easy maintenance
+12. **Extensible:** Easy to add new test vectors for new scenarios

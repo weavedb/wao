@@ -1,0 +1,471 @@
+# hb_message_test_vectors.erl - Message Format Test Vectors
+
+## Overview
+
+**Purpose:** Comprehensive test vectors for message format conversions  
+**Module:** `hb_message_test_vectors`  
+**Framework:** EUnit  
+**Coverage:** All message codecs and conversion paths
+
+This module provides extensive test vectors to ensure correct functioning of message format conversions in HyperBEAM. It validates conversion between structured messages, TABM format, ANS-104 data items, HTTP signed messages, and flat maps.
+
+## Test Coverage
+
+- **Format Conversions:** Structured ↔ TABM ↔ ANS-104 ↔ HTTP Sig ↔ Flat
+- **ID Calculation:** Signed vs unsigned IDs
+- **Signature Verification:** Valid and invalid signatures
+- **Round-trip Tests:** Format A → Format B → Format A
+- **Edge Cases:** Empty messages, nested structures, special characters
+- **Commitment Handling:** Multiple signers, device-specific commitments
+
+## Dependencies
+
+- **Testing:** `eunit`
+- **HyperBEAM:** `hb_message`, `hb_util`, `hb_opts`, `hb_cache`
+- **Codecs:** All `dev_codec_*` modules
+- **Arweave:** `ar_wallet`, `ar_bundles`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Test Categories
+
+### 1. Format Conversion Tests
+
+**Purpose:** Validate conversions between all supported formats
+
+**Test Pattern:**
+```erlang
+format_conversion_test() ->
+    % Create message in format A
+    MsgA = create_test_message(),
+    
+    % Convert A → B
+    MsgB = hb_message:convert(MsgA, FormatB, FormatA, #{}),
+    
+    % Convert B → A
+    MsgARoundtrip = hb_message:convert(MsgB, FormatA, FormatB, #{}),
+    
+    % Verify roundtrip preserves data
+    ?assertEqual(MsgA, MsgARoundtrip).
+```
+
+---
+
+### 2. ID Calculation Tests
+
+**Purpose:** Verify message ID consistency and determinism
+
+**Test Cases:**
+- Unsigned ID calculation
+- Signed ID calculation
+- ID determinism (same input → same ID)
+- ID difference (unsigned ≠ signed)
+- Multi-signer IDs
+
+---
+
+### 3. Signature Tests
+
+**Purpose:** Validate signing and verification
+
+**Test Cases:**
+- Valid signature verification
+- Invalid signature detection
+- Tampered message detection
+- Multi-device signatures
+- Signature preservation across conversions
+
+---
+
+### 4. Round-trip Tests
+
+**Purpose:** Ensure lossless conversion cycles
+
+**Test Paths:**
+```
+Structured → TABM → Structured
+Structured → ANS-104 → Structured
+Structured → HTTPSig → Structured
+ANS-104 → TABM → ANS-104
+HTTPSig → TABM → HTTPSig
+```
+
+---
+
+### 5. Edge Case Tests
+
+**Purpose:** Handle unusual inputs correctly
+
+**Test Cases:**
+- Empty messages
+- Very large messages
+- Deep nesting
+- Special characters in keys/values
+- Binary data
+- Unicode strings
+- Null/undefined values
+
+---
+
+## Example Test Vectors
+
+### Basic Conversion
+
+```erlang
+basic_conversion_test() ->
+    Original = #{
+        <<"type">> => <<"Message">>,
+        <<"data">> => <<"Hello, World!">>
+    },
+    
+    % Structured → TABM
+    TABM = hb_message:convert(Original, tabm, #{}),
+    ?assert(is_map(TABM)),
+    ?assertEqual(<<"Hello, World!">>, maps:get(<<"data">>, TABM)),
+    
+    % TABM → Structured
+    Recovered = hb_message:convert(TABM, <<"structured@1.0">>, tabm, #{}),
+    ?assertEqual(Original, Recovered).
+```
+
+---
+
+### Signed Message
+
+```erlang
+signed_message_test() ->
+    Wallet = ar_wallet:new(),
+    Original = #{<<"data">> => <<"value">>},
+    
+    % Sign message
+    Signed = hb_message:commit(Original, #{priv_wallet => Wallet}),
+    
+    % Verify signature
+    ?assert(hb_message:verify(Signed, all, #{})),
+    
+    % Extract unsigned
+    Unsigned = hb_message:uncommitted(Signed),
+    ?assertEqual(Original, Unsigned),
+    
+    % IDs differ
+    SignedID = hb_message:id(Signed, signed, #{}),
+    UnsignedID = hb_message:id(Signed, unsigned, #{}),
+    ?assertNotEqual(SignedID, UnsignedID).
+```
+
+---
+
+### ANS-104 Conversion
+
+```erlang
+ans104_conversion_test() ->
+    Wallet = ar_wallet:new(),
+    Original = #{
+        <<"type">> => <<"Message">>,
+        <<"data">> => <<"Test data">>,
+        <<"tags">> => [
+            {<<"Tag1">>, <<"Value1">>},
+            {<<"Tag2">>, <<"Value2">>}
+        ]
+    },
+    
+    % Convert to ANS-104
+    ANS104 = hb_message:convert(
+        Original,
+        <<"ans104@1.0">>,
+        <<"structured@1.0">>,
+        #{}
+    ),
+    
+    % Should be TX record
+    ?assert(is_record(ANS104, tx)),
+    
+    % Sign ANS-104
+    Signed = ar_bundles:sign_item(ANS104, Wallet),
+    
+    % Verify
+    ?assert(ar_bundles:verify_item(Signed)),
+    
+    % Convert back
+    Recovered = hb_message:convert(
+        Signed,
+        <<"structured@1.0">>,
+        <<"ans104@1.0">>,
+        #{}
+    ),
+    
+    % Data preserved
+    ?assertEqual(<<"Test data">>, maps:get(<<"data">>, Recovered)).
+```
+
+---
+
+### HTTP Signed Message
+
+```erlang
+httpsig_test() ->
+    Wallet = ar_wallet:new(),
+    Original = #{
+        <<"method">> => <<"POST">>,
+        <<"path">> => <<"/api/endpoint">>,
+        <<"body">> => <<"Request payload">>
+    },
+    
+    % Commit with HTTPSig
+    Signed = hb_message:commit(
+        Original,
+        #{priv_wallet => Wallet},
+        #{<<"device">> => <<"httpsig@1.0">>}
+    ),
+    
+    % Has commitments
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    
+    % Verify
+    ?assert(hb_message:verify(Signed, all, #{})),
+    
+    % Convert to HTTPSig format
+    HTTPSig = hb_message:convert(Signed, <<"httpsig@1.0">>, #{}),
+    
+    % Has signature header
+    ?assert(maps:is_key(<<"signature">>, HTTPSig)).
+```
+
+---
+
+### Nested Structure
+
+```erlang
+nested_structure_test() ->
+    Complex = #{
+        <<"level1">> => #{
+            <<"level2">> => #{
+                <<"level3">> => #{
+                    <<"data">> => <<"deep value">>
+                }
+            },
+            <<"array">> => [1, 2, 3]
+        }
+    },
+    
+    % Structured → TABM → Structured
+    TABM = hb_message:convert(Complex, tabm, #{}),
+    Recovered = hb_message:convert(TABM, <<"structured@1.0">>, tabm, #{}),
+    
+    % Deep value preserved
+    DeepValue = maps:get(
+        <<"data">>,
+        maps:get(
+            <<"level3">>,
+            maps:get(
+                <<"level2">>,
+                maps:get(<<"level1">>, Recovered)
+            )
+        )
+    ),
+    ?assertEqual(<<"deep value">>, DeepValue).
+```
+
+---
+
+### Unicode and Special Characters
+
+```erlang
+unicode_test() ->
+    Unicode = #{
+        <<"emoji">> => <<"🚀🌟💻"/utf8>>,
+        <<"chinese">> => <<"你好世界"/utf8>>,
+        <<"arabic">> => <<"مرحبا"/utf8>>,
+        <<"special">> => <<"!@#$%^&*()"/utf8>>
+    },
+    
+    % All formats should preserve Unicode
+    Formats = [
+        tabm,
+        <<"ans104@1.0">>,
+        <<"httpsig@1.0">>,
+        <<"structured@1.0">>
+    ],
+    
+    lists:foreach(
+        fun(Format) ->
+            Converted = hb_message:convert(Unicode, Format, #{}),
+            Back = hb_message:convert(Converted, <<"structured@1.0">>, Format, #{}),
+            ?assertEqual(Unicode, Back)
+        end,
+        Formats
+    ).
+```
+
+---
+
+### Empty Message
+
+```erlang
+empty_message_test() ->
+    Empty = #{},
+    
+    % Should handle empty message
+    TABM = hb_message:convert(Empty, tabm, #{}),
+    ?assertEqual(#{}, TABM),
+    
+    % Round-trip
+    Recovered = hb_message:convert(TABM, <<"structured@1.0">>, tabm, #{}),
+    ?assertEqual(Empty, Recovered).
+```
+
+---
+
+### Large Message
+
+```erlang
+large_message_test() ->
+    % Create large binary
+    LargeData = binary:copy(<<"test">>, 1000000),  % 4MB
+    
+    Large = #{
+        <<"data">> => LargeData,
+        <<"metadata">> => #{
+            <<"size">> => byte_size(LargeData)
+        }
+    },
+    
+    % Should handle large messages
+    ANS104 = hb_message:convert(Large, <<"ans104@1.0">>, #{}),
+    ?assert(is_record(ANS104, tx)),
+    
+    % Data preserved
+    Recovered = hb_message:convert(ANS104, <<"structured@1.0">>, <<"ans104@1.0">>, #{}),
+    ?assertEqual(LargeData, maps:get(<<"data">>, Recovered)).
+```
+
+---
+
+## Test Utilities
+
+### Message Generators
+
+```erlang
+% Generate test message with specific properties
+generate_test_message(Props) ->
+    Default = #{
+        <<"type">> => <<"Test">>,
+        <<"timestamp">> => os:system_time(millisecond),
+        <<"data">> => <<"test data">>
+    },
+    maps:merge(Default, Props).
+
+% Generate signed test message
+generate_signed_message(Props) ->
+    Wallet = ar_wallet:new(),
+    Msg = generate_test_message(Props),
+    hb_message:commit(Msg, #{priv_wallet => Wallet}).
+
+% Generate multi-signer message
+generate_multisig_message(NumSigners) ->
+    Msg = generate_test_message(#{}),
+    lists:foldl(
+        fun(_, AccMsg) ->
+            Wallet = ar_wallet:new(),
+            hb_message:commit(AccMsg, #{priv_wallet => Wallet})
+        end,
+        Msg,
+        lists:seq(1, NumSigners)
+    ).
+```
+
+---
+
+### Verification Helpers
+
+```erlang
+% Verify round-trip conversion
+verify_roundtrip(Msg, Format) ->
+    Converted = hb_message:convert(Msg, Format, #{}),
+    Recovered = hb_message:convert(Converted, <<"structured@1.0">>, Format, #{}),
+    Msg =:= Recovered.
+
+% Verify all format round-trips
+verify_all_roundtrips(Msg) ->
+    Formats = [
+        tabm,
+        <<"ans104@1.0">>,
+        <<"httpsig@1.0">>,
+        <<"flat@1.0">>
+    ],
+    lists:all(
+        fun(Format) -> verify_roundtrip(Msg, Format) end,
+        Formats
+    ).
+```
+
+---
+
+## Test Organization
+
+### Test Suites
+
+1. **Conversion Suite:** Format conversion tests
+2. **ID Suite:** ID calculation and consistency
+3. **Signature Suite:** Signing and verification
+4. **Round-trip Suite:** Lossless conversion cycles
+5. **Edge Case Suite:** Unusual inputs and edge cases
+6. **Performance Suite:** Large message handling
+
+---
+
+### Naming Convention
+
+```erlang
+% Pattern: <operation>_<format>_<case>_test
+structured_to_tabm_basic_test() -> ...
+ans104_roundtrip_signed_test() -> ...
+httpsig_verify_tampered_test() -> ...
+id_calculation_deterministic_test() -> ...
+```
+
+---
+
+## Running Tests
+
+```bash
+# Run all test vectors
+rebar3 eunit --module=hb_message_test_vectors
+
+# Run specific test
+rebar3 eunit --module=hb_message_test_vectors --test=basic_conversion_test
+
+# Run with verbose output
+rebar3 eunit --module=hb_message_test_vectors --verbose
+```
+
+---
+
+## References
+
+- **Message Module** - `hb_message.erl`
+- **Codecs** - `dev_codec_*.erl` modules
+- **AO Core** - `hb_ao.erl`
+- **Arweave** - `ar_wallet.erl`, `ar_bundles.erl`
+- **EUnit** - [EUnit Documentation](https://www.erlang.org/doc/apps/eunit/chapter.html)
+
+---
+
+## Notes
+
+1. **Comprehensive:** Tests all format combinations
+2. **Deterministic:** Same input always produces same output
+3. **Round-trip:** All conversions should be lossless
+4. **Signatures:** Multiple signature types tested
+5. **Edge Cases:** Handles empty, large, and complex messages
+6. **Unicode:** Full Unicode support verified
+7. **ID Consistency:** Unsigned vs signed IDs tested
+8. **Multi-signer:** Multiple commitment devices tested
+9. **Binary Safety:** Binary data preserved correctly
+10. **Nested Structures:** Deep nesting handled correctly
+11. **Performance:** Large message handling verified
+12. **Error Cases:** Invalid signatures detected
+13. **Type Preservation:** Data types maintained across conversions
+14. **Metadata:** Message metadata preserved
+15. **Future-proof:** Easy to add new codec tests

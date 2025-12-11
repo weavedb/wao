@@ -1,0 +1,410 @@
+# hb_message.erl - Message Format Conversion & Manipulation
+
+## Overview
+
+**Purpose:** Message format conversion and manipulation adapter  
+**Module:** `hb_message`  
+**Core Format:** TABM (Type Annotated Binary Messages)  
+**Pattern:** Any format → TABM → Any format
+
+This module acts as an adapter between different message formats in HyperBEAM, providing conversion between AO-Core structured messages, Arweave transactions, ANS-104 data items, HTTP Signed Messages, and flat maps. Unless implementing a new codec, use `hb_ao` interfaces instead of this module directly.
+
+## Supported Formats
+
+- **Structured Messages:** Richly typed AO-Core messages (`structured@1.0`)
+- **TABM:** Type Annotated Binary Messages (internal format)
+- **ANS-104:** Arweave data items (`ans104@1.0`)
+- **HTTP Signed:** HTTP signature messages (`httpsig@1.0`)
+- **Flat Maps:** Simple key-value maps (`flat@1.0`)
+
+## TABM Format
+
+**Definition:** Deep Erlang maps containing only binaries or other TABMs
+
+**Benefits:**
+- Simple computational model (O(1) map access)
+- Binary literals only (no types)
+- Easy format conversion
+- Efficient operations
+
+## Conversion Flow
+
+```
+Input Formats → TABM → Output Formats
+
+Arweave TX/ANS-104 → dev_codec_ans104:from → TABM
+HTTP Signed → dev_codec_httpsig:from → TABM
+Flat Maps → dev_codec_flat:from → TABM
+Structured → dev_codec_structured:from → TABM
+
+TABM → dev_codec_ans104:to → Arweave TX/ANS-104
+TABM → dev_codec_httpsig:to → HTTP Signed
+TABM → dev_codec_structured:to → Structured
+TABM → dev_codec_flat:to → Flat Maps
+```
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_util`, `hb_maps`, `hb_opts`, `hb_cache`, `hb_private`
+- **Codecs:** `dev_codec_*` modules
+- **Arweave:** `ar_wallet`, `ar_bundles`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Message ID
+-spec id(Msg) -> ID.
+-spec id(Msg, Committers) -> ID.
+-spec id(Msg, Committers, Opts) -> ID.
+
+%% Format Conversion
+-spec convert(Msg, TargetFormat, Opts) -> ConvertedMsg.
+-spec convert(Msg, TargetFormat, SourceFormat, Opts) -> ConvertedMsg.
+
+%% Commitment Management
+-spec uncommitted(Msg) -> UncommittedMsg.
+-spec uncommitted(Msg, Opts) -> UncommittedMsg.
+-spec committed(Msg, Key, Opts) -> CommittedValue.
+-spec commit(Msg, Wallet) -> SignedMsg.
+-spec commit(Msg, Wallet, Opts) -> SignedMsg.
+
+%% Verification
+-spec verify(Msg) -> boolean().
+-spec verify(Msg, Committers) -> boolean().
+-spec verify(Msg, Committers, Opts) -> boolean().
+
+%% Commitment Queries
+-spec signers(Msg, Opts) -> [Address].
+-spec commitment(Msg, Key) -> Value | undefined.
+-spec commitments(Msg, Committers, Opts) -> CommittedMsg.
+
+%% Message Manipulation
+-spec with_only_committers(Msg, Committers) -> FilteredMsg.
+-spec with_only_committed(Msg, Opts) -> OnlyCommittedMsg.
+-spec without_unless_signed(Keys, Msg, Opts) -> FilteredMsg.
+-spec with_commitments(Keys, Msg, Opts) -> MsgWithCommitments.
+-spec without_commitments(Keys, Msg, Opts) -> MsgWithoutCommitments.
+
+%% Utilities
+-spec type(Msg) -> structured | ans104 | httpsig | flat.
+-spec minimize(Msg) -> MinimizedMsg.
+-spec diff(Msg1, Msg2, Opts) -> Diff.
+-spec match(Pattern, Msg) -> boolean().
+-spec print(Msg) -> ok.
+```
+
+---
+
+## Key Public Functions
+
+### 1. id/1, id/2, id/3
+
+```erlang
+-spec id(Msg, Committers, Opts) -> ID
+    when
+        Msg :: map(),
+        Committers :: none | uncommitted | all | signed | [Device],
+        Opts :: map(),
+        ID :: binary().
+```
+
+**Description:** Calculate message ID based on commitment spec. ID changes based on which parts are committed (signed).
+
+**Committer Options:**
+- `none` / `uncommitted` / `unsigned` - ID of raw message (no signatures)
+- `all` / `signed` - ID including all signatures
+- `[Device1, Device2]` - ID with specific commitment devices
+
+**Test Code:**
+```erlang
+-module(hb_message_id_test).
+-include_lib("eunit/include/eunit.hrl").
+
+unsigned_id_test() ->
+    Msg = #{<<"data">> => <<"value">>},
+    UnsignedID = hb_message:id(Msg, unsigned, #{}),
+    ?assert(is_binary(UnsignedID)),
+    ?assertEqual(43, byte_size(UnsignedID)).  % Base64url encoded
+
+signed_id_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"value">>},
+    Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}),
+    SignedID = hb_message:id(Signed, signed, #{}),
+    UnsignedID = hb_message:id(Signed, unsigned, #{}),
+    ?assertNotEqual(SignedID, UnsignedID).
+
+deterministic_id_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    ID1 = hb_message:id(Msg),
+    ID2 = hb_message:id(Msg),
+    ?assertEqual(ID1, ID2).
+```
+
+---
+
+### 2. convert/3, convert/4
+
+```erlang
+-spec convert(Msg, TargetFormat, SourceFormat, Opts) -> ConvertedMsg
+    when
+        Msg :: term(),
+        TargetFormat :: binary() | tabm,
+        SourceFormat :: binary() | tabm,
+        Opts :: map(),
+        ConvertedMsg :: term().
+```
+
+**Description:** Convert message between formats via TABM intermediate representation.
+
+**Common Formats:**
+- `<<"structured@1.0">>` - AO-Core structured messages
+- `<<"ans104@1.0">>` - ANS-104 data items
+- `<<"httpsig@1.0">>` - HTTP signed messages
+- `<<"flat@1.0">>` - Flat key-value maps
+- `tabm` - TABM format (internal)
+
+**Test Code:**
+```erlang
+-module(hb_message_convert_test).
+-include_lib("eunit/include/eunit.hrl").
+
+structured_to_tabm_test() ->
+    Structured = #{<<"key">> => <<"value">>, <<"nested">> => #{<<"data">> => 123}},
+    TABM = hb_message:convert(Structured, tabm, <<"structured@1.0">>, #{}),
+    ?assert(is_map(TABM)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, TABM)).
+
+tabm_to_structured_test() ->
+    TABM = #{<<"key">> => <<"value">>},
+    Structured = hb_message:convert(TABM, <<"structured@1.0">>, tabm, #{}),
+    ?assert(is_map(Structured)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, Structured)).
+
+ans104_roundtrip_test() ->
+    Original = #{<<"data">> => <<"test">>},
+    ANS104 = hb_message:convert(Original, <<"ans104@1.0">>, #{}),
+    BackToStructured = hb_message:convert(ANS104, <<"structured@1.0">>, <<"ans104@1.0">>, #{}),
+    ?assertEqual(<<"test">>, maps:get(<<"data">>, BackToStructured)).
+```
+
+---
+
+### 3. commit/2, commit/3
+
+```erlang
+-spec commit(Msg, Wallet, Opts) -> SignedMsg
+    when
+        Msg :: map(),
+        Wallet :: {PrivKey, PubKey} | #{priv_wallet => {PrivKey, PubKey}},
+        Opts :: map(),
+        SignedMsg :: map().
+```
+
+**Description:** Sign a message using provided wallet. Adds cryptographic commitments to message.
+
+**Test Code:**
+```erlang
+-module(hb_message_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+
+commit_message_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"value">>},
+    Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    ?assert(hb_message:verify(Signed, all, #{})).
+
+commit_with_device_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"value">>},
+    Opts = #{<<"device">> => <<"ans104@1.0">>},
+    Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}, Opts),
+    ?assert(hb_message:verify(Signed)).
+```
+
+---
+
+### 4. verify/1, verify/2, verify/3
+
+```erlang
+-spec verify(Msg, Committers, Opts) -> boolean()
+    when
+        Msg :: map(),
+        Committers :: all | [Device],
+        Opts :: map().
+```
+
+**Description:** Verify cryptographic commitments in message.
+
+**Test Code:**
+```erlang
+-module(hb_message_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+
+verify_signed_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = hb_message:commit(#{<<"data">> => <<"value">>}, #{priv_wallet => Wallet}),
+    ?assert(hb_message:verify(Msg, all, #{})).
+
+verify_unsigned_test() ->
+    Msg = #{<<"data">> => <<"value">>},
+    ?assertNot(hb_message:verify(Msg, all, #{})).
+
+verify_tampered_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"value">>}, #{priv_wallet => Wallet}),
+    Tampered = Signed#{<<"data">> => <<"modified">>},
+    ?assertNot(hb_message:verify(Tampered, all, #{})).
+```
+
+---
+
+### 5. uncommitted/1, uncommitted/2
+
+```erlang
+-spec uncommitted(Msg, Opts) -> UncommittedMsg
+    when
+        Msg :: map(),
+        Opts :: map(),
+        UncommittedMsg :: map().
+```
+
+**Description:** Extract uncommitted (unsigned) portion of message, removing commitments.
+
+**Test Code:**
+```erlang
+-module(hb_message_uncommitted_test).
+-include_lib("eunit/include/eunit.hrl").
+
+uncommitted_removes_sigs_test() ->
+    Wallet = ar_wallet:new(),
+    Original = #{<<"data">> => <<"value">>},
+    Signed = hb_message:commit(Original, #{priv_wallet => Wallet}),
+    Uncommitted = hb_message:uncommitted(Signed),
+    ?assertNot(maps:is_key(<<"commitments">>, Uncommitted)),
+    ?assertEqual(<<"value">>, maps:get(<<"data">>, Uncommitted)).
+```
+
+---
+
+## Commitment System
+
+### Commitment Structure
+
+```erlang
+#{
+    <<"data">> => <<"value">>,
+    <<"commitments">> => #{
+        <<"Device1">> => #{
+            <<"signature">> => Signature,
+            <<"public-key">> => PublicKey,
+            <<"commitment">> => SignedData
+        }
+    }
+}
+```
+
+---
+
+### Commitment Devices
+
+**Common Devices:**
+- `<<"httpsig@1.0">>` - HTTP signatures
+- `<<"ans104@1.0">>` - ANS-104 signatures
+- Custom devices can add commitments
+
+---
+
+## Common Patterns
+
+```erlang
+%% Convert to TABM for processing
+TABM = hb_message:convert(Msg, tabm, #{}),
+
+%% Convert between formats
+ANS104 = hb_message:convert(Structured, <<"ans104@1.0">>, #{}),
+
+%% Sign message
+Wallet = ar_wallet:new(),
+Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}),
+
+%% Verify signature
+IsValid = hb_message:verify(Signed, all, #{}),
+
+%% Get message ID
+UnsignedID = hb_message:id(Msg, unsigned, #{}),
+SignedID = hb_message:id(Msg, signed, #{}),
+
+%% Extract unsigned portion
+Original = hb_message:uncommitted(SignedMsg),
+
+%% Get signers
+Signers = hb_message:signers(SignedMsg, #{}),
+
+%% Filter to committed keys only
+Committed = hb_message:with_only_committed(Msg, #{}),
+
+%% Check message type
+Type = hb_message:type(Msg),  % structured | ans104 | httpsig | flat
+
+%% Minimize message (remove defaults)
+Minimal = hb_message:minimize(Msg),
+
+%% Print for debugging
+hb_message:print(Msg).
+```
+
+---
+
+## Message Type Detection
+
+```erlang
+type(Msg) ->
+    case {is_record(Msg, tx), is_map(Msg)} of
+        {true, _} -> ans104;
+        {_, true} ->
+            case maps:is_key(<<"commitments">>, Msg) of
+                true -> httpsig;
+                false ->
+                    case has_type_annotations(Msg) of
+                        true -> structured;
+                        false -> flat
+                    end
+            end;
+        _ -> unknown
+    end.
+```
+
+---
+
+## References
+
+- **Codecs** - `dev_codec_*.erl` modules
+- **AO Core** - `hb_ao.erl`
+- **Cache** - `hb_cache.erl`
+- **Test Vectors** - `hb_message_test_vectors.erl`
+- **Arweave** - `ar_wallet.erl`, `ar_bundles.erl`
+
+---
+
+## Notes
+
+1. **TABM Central:** All conversions go through TABM format
+2. **Codec System:** Each format has codec module (`dev_codec_*`)
+3. **ID Calculation:** Depends on commitment specification
+4. **Signature Support:** Multiple commitment devices per message
+5. **Priv Preservation:** Private data preserved across conversions
+6. **Two-Phase Convert:** Input→TABM, TABM→Output
+7. **Verification:** Check all or specific commitment devices
+8. **Uncommitted:** Extract original data without signatures
+9. **Type Detection:** Automatic format detection
+10. **Minimize:** Remove default/unnecessary fields
+11. **Test Vectors:** Comprehensive tests in separate module
+12. **Use hb_ao:** Prefer `hb_ao` for normal message operations
+13. **Low-level API:** Direct use rare, mainly for codec authors
+14. **Format Agnostic:** Works with any registered codec
+15. **Commitment Devices:** Extensible signature system

@@ -1,0 +1,538 @@
+# dev_codec_httpsig_proxy.erl - HTTP Signature HMAC Proxy Functions
+
+## Overview
+
+**Purpose:** Proxy functions for HMAC commitments with custom device names  
+**Module:** `dev_codec_httpsig_proxy`  
+**Pattern:** Derive Secret → Sign with httpsig@1.0 → Relabel Device  
+**Used By:** `cookie@1.0`, `http-auth@1.0`
+
+This utility module provides proxy functions for calling the `httpsig@1.0` codec's HMAC commitment functions with secret keys while changing the `commitment-device` label. It enables other devices to leverage HTTPSig's HMAC signing infrastructure while maintaining their own device identities.
+
+## Standard Pattern
+
+1. Device verifies user request / derives secret key
+2. Device commits message with user's secret using `secret:[hash]` scheme
+3. Commitment modified to reference different `commitment-device`
+4. Verification uses `httpsig@1.0` codec under-the-hood
+
+## Dependencies
+
+- **HyperBEAM:** `hb_message`, `hb_maps`, `hb_util`
+- **Codecs:** `dev_codec_httpsig` (indirect via hb_message)
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Proxy Commitment Functions
+-spec commit(Device, Secret, Base, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Secret, Base, Req, Opts) -> {ok, boolean()}.
+```
+
+---
+
+## Public Functions
+
+### 1. commit/5
+
+```erlang
+-spec commit(Device, Secret, Base, Req, Opts) -> {ok, SignedMsg}
+    when
+        Device :: binary(),
+        Secret :: binary(),
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        SignedMsg :: map().
+```
+
+**Description:** Commit to a message with a given secret key, using HMAC-SHA256 via `httpsig@1.0`, then relabel the `commitment-device` to the specified device.
+
+**Process:**
+1. Extract existing commitments from base message
+2. If commitments exist, use only committed portions
+3. Sign with `httpsig@1.0` using HMAC-SHA256 and secret scheme
+4. Extract the new commitment
+5. Change `commitment-device` to specified device
+6. Return message with relabeled commitment
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_proxy_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+commit_basic_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{<<"data">> => <<"test">>},
+    Device = <<"custom-device@1.0">>,
+    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+        Device,
+        Secret,
+        Base,
+        #{},
+        #{}
+    ),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    Commitments = maps:get(<<"commitments">>, Signed),
+    [CommID] = maps:keys(Commitments),
+    Commitment = maps:get(CommID, Commitments),
+    ?assertEqual(Device, maps:get(<<"commitment-device">>, Commitment)).
+
+commit_preserves_data_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{<<"key">> => <<"value">>, <<"num">> => <<"123">>},
+    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+        <<"test@1.0">>,
+        Secret,
+        Base,
+        #{},
+        #{}
+    ),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, Signed)),
+    ?assertEqual(<<"123">>, maps:get(<<"num">>, Signed)).
+
+commit_with_existing_commitments_test() ->
+    Secret1 = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Secret2 = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{<<"data">> => <<"test">>},
+    % First commitment
+    {ok, Signed1} = dev_codec_httpsig_proxy:commit(
+        <<"device1@1.0">>,
+        Secret1,
+        Base,
+        #{},
+        #{}
+    ),
+    % Second commitment (should handle existing commitment)
+    {ok, Signed2} = dev_codec_httpsig_proxy:commit(
+        <<"device2@1.0">>,
+        Secret2,
+        Signed1,
+        #{},
+        #{}
+    ),
+    Commitments = maps:get(<<"commitments">>, Signed2),
+    ?assertEqual(2, maps:size(Commitments)).
+
+commit_uses_secret_scheme_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+        <<"device@1.0">>,
+        Secret,
+        Base,
+        #{},
+        #{}
+    ),
+    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
+    ?assertEqual(<<"hmac-sha256">>, maps:get(<<"type">>, Commitment)),
+    KeyID = maps:get(<<"keyid">>, Commitment),
+    ?assert(binary:match(KeyID, <<"secret:">>) =/= nomatch).
+```
+
+---
+
+### 2. verify/4
+
+```erlang
+-spec verify(Secret, Base, Req, Opts) -> {ok, boolean()}
+    when
+        Secret :: binary(),
+        Base :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Verify a message commitment by using the `httpsig@1.0` HMAC commitment scheme with the provided secret.
+
+**Process:**
+1. Create proxy request with `httpsig@1.0` as commitment device
+2. Add secret to request
+3. Use `hb_message:verify/3` to validate HMAC
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_proxy_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+verify_valid_signature_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{<<"data">> => <<"test">>},
+    Device = <<"custom@1.0">>,
+    % Commit
+    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+        Device,
+        Secret,
+        Base,
+        #{},
+        #{}
+    ),
+    % Verify
+    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
+    {ok, IsValid} = dev_codec_httpsig_proxy:verify(
+        Secret,
+        Base,
+        Commitment,
+        #{}
+    ),
+    ?assert(IsValid).
+
+verify_wrong_secret_test() ->
+    Secret1 = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Secret2 = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{<<"data">> => <<"test">>},
+    % Commit with Secret1
+    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+        <<"device@1.0">>,
+        Secret1,
+        Base,
+        #{},
+        #{}
+    ),
+    % Verify with Secret2 (wrong)
+    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
+    {ok, IsValid} = dev_codec_httpsig_proxy:verify(
+        Secret2,
+        Base,
+        Commitment,
+        #{}
+    ),
+    ?assertNot(IsValid).
+
+verify_tampered_message_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Original = #{<<"data">> => <<"test">>},
+    % Commit
+    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+        <<"device@1.0">>,
+        Secret,
+        Original,
+        #{},
+        #{}
+    ),
+    % Tamper
+    Tampered = Original#{<<"data">> => <<"modified">>},
+    % Verify
+    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
+    {ok, IsValid} = dev_codec_httpsig_proxy:verify(
+        Secret,
+        Tampered,
+        Commitment,
+        #{}
+    ),
+    ?assertNot(IsValid).
+
+verify_roundtrip_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>
+    },
+    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+        <<"test@1.0">>,
+        Secret,
+        Base,
+        #{},
+        #{}
+    ),
+    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
+    {ok, true} = dev_codec_httpsig_proxy:verify(
+        Secret,
+        Base,
+        Commitment,
+        #{}
+    ).
+```
+
+---
+
+## Internal Processing
+
+### Commitment Isolation
+
+When existing commitments are present:
+```erlang
+ExistingComms = maps:get(<<"commitments">>, Base, #{}),
+OnlyCommittedBase =
+    case map_size(ExistingComms) of
+        0 -> Base;
+        _ ->
+            hb_message:uncommitted(
+                hb_message:with_only_committed(Base, Opts),
+                Opts
+            )
+    end
+```
+
+This ensures that only committed portions are signed when adding new commitments.
+
+---
+
+### Device Relabeling
+
+After HTTPSig commitment:
+```erlang
+ModCommittedMsg =
+    CommittedMsg#{
+        <<"commitments">> =>
+            ExistingComms#{
+                CommitmentID =>
+                    Commitment#{
+                        <<"commitment-device">> => Device
+                    }
+            }
+    }
+```
+
+The commitment-device is changed from `httpsig@1.0` to the custom device.
+
+---
+
+## Common Patterns
+
+```erlang
+%% Cookie-based authentication commit
+Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+Base = #{<<"user-data">> => <<"sensitive">>},
+{ok, Signed} = dev_codec_httpsig_proxy:commit(
+    <<"cookie@1.0">>,
+    Secret,
+    Base,
+    #{},
+    #{}
+).
+% Commitment device will be "cookie@1.0", not "httpsig@1.0"
+
+%% HTTP Basic auth commit
+DerivedSecret = derive_from_password(Username, Password),
+Base = #{<<"action">> => <<"transfer">>},
+{ok, Signed} = dev_codec_httpsig_proxy:commit(
+    <<"http-auth@1.0">>,
+    DerivedSecret,
+    Base,
+    #{},
+    #{}
+).
+
+%% Verify with same secret
+[CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
+{ok, true} = dev_codec_httpsig_proxy:verify(
+    Secret,
+    Base,
+    Commitment,
+    #{}
+).
+
+%% Stack multiple device commitments
+{ok, WithCookie} = dev_codec_httpsig_proxy:commit(
+    <<"cookie@1.0">>,
+    CookieSecret,
+    Base,
+    #{},
+    #{}
+),
+{ok, WithAuth} = dev_codec_httpsig_proxy:commit(
+    <<"http-auth@1.0">>,
+    AuthSecret,
+    WithCookie,
+    #{},
+    #{}
+).
+% Result has two commitments with different devices
+```
+
+---
+
+## Use Cases
+
+### 1. Cookie Authentication (`cookie@1.0`)
+
+```erlang
+% Generate or retrieve cookie secret
+{ok, Secret} = generate_cookie_secret(Request),
+
+% Commit with cookie device
+{ok, SignedMsg} = dev_codec_httpsig_proxy:commit(
+    <<"cookie@1.0">>,
+    Secret,
+    BaseMsg,
+    Request,
+    Opts
+),
+
+% Store secret in cookie
+{ok, WithCookie} = store_secret_in_cookie(Secret, SignedMsg).
+```
+
+### 2. HTTP Basic Auth (`http-auth@1.0`)
+
+```erlang
+% Derive secret from credentials
+{ok, DerivedKey} = pbkdf2(Username, Password, Salt, Iterations),
+
+% Commit with HTTP auth device
+{ok, SignedMsg} = dev_codec_httpsig_proxy:commit(
+    <<"http-auth@1.0">>,
+    DerivedKey,
+    BaseMsg,
+    Request,
+    Opts
+).
+```
+
+### 3. Custom Authentication Device
+
+```erlang
+% Custom device implementation
+-module(my_custom_auth).
+
+commit(Base, Req, Opts) ->
+    % Derive or retrieve secret
+    {ok, Secret} = my_secret_derivation(Req),
+    % Use proxy to commit
+    dev_codec_httpsig_proxy:commit(
+        <<"my-auth@1.0">>,
+        Secret,
+        Base,
+        Req,
+        Opts
+    ).
+
+verify(Base, Req, Opts) ->
+    % Retrieve secret
+    {ok, Secret} = my_secret_retrieval(Req),
+    % Use proxy to verify
+    dev_codec_httpsig_proxy:verify(Secret, Base, Req, Opts).
+```
+
+---
+
+## Commitment Structure
+
+### Before Relabeling
+```erlang
+#{
+    <<"commitment-device">> => <<"httpsig@1.0">>,
+    <<"type">> => <<"hmac-sha256">>,
+    <<"scheme">> => <<"secret">>,
+    <<"keyid">> => <<"secret:abc123...">>,
+    <<"signature">> => <<"hmac_value">>,
+    <<"committed">> => [<<"key1">>, <<"key2">>]
+}
+```
+
+### After Relabeling
+```erlang
+#{
+    <<"commitment-device">> => <<"cookie@1.0">>,  % Changed!
+    <<"type">> => <<"hmac-sha256">>,
+    <<"scheme">> => <<"secret">>,
+    <<"keyid">> => <<"secret:abc123...">>,
+    <<"signature">> => <<"hmac_value">>,
+    <<"committed">> => [<<"key1">>, <<"key2">>]
+}
+```
+
+Only the `commitment-device` field changes.
+
+---
+
+## Proxy Request Structure
+
+### Commit Request
+```erlang
+Req#{
+    <<"commitment-device">> => <<"httpsig@1.0">>,
+    <<"type">> => <<"hmac-sha256">>,
+    <<"scheme">> => <<"secret">>,
+    <<"secret">> => Secret
+}
+```
+
+### Verify Request
+```erlang
+RawReq#{
+    <<"commitment-device">> => <<"httpsig@1.0">>,
+    <<"path">> => <<"verify">>,
+    <<"secret">> => Secret
+}
+```
+
+---
+
+## Integration with hb_message
+
+The module uses `hb_message` functions for the actual cryptographic operations:
+
+```erlang
+% Commit
+CommittedMsg = hb_message:commit(OnlyCommittedBase, Opts, ProxyReq),
+
+% Get commitment
+{ok, CommitmentID, Commitment} = 
+    hb_message:commitment(Filter, CommittedMsg, Opts),
+
+% Verify
+{ok, IsValid} = hb_message:verify(Base, ProxyRequest, Opts).
+```
+
+---
+
+## Error Handling
+
+The module doesn't add additional error handling beyond what `hb_message` provides. Errors from the underlying HTTPSig commitment will propagate up.
+
+**Potential Errors:**
+- Invalid secret format
+- Commitment verification failure
+- Missing required fields in request
+
+---
+
+## Security Considerations
+
+1. **Secret Handling:** Secrets should be derived securely (PBKDF2, etc.)
+2. **Transport:** Secrets transmitted in request should be over secure channel
+3. **Storage:** Never log or persist raw secrets
+4. **Validation:** Always verify commitments before trusting message content
+5. **Scope:** Each device should use unique secrets (no secret reuse)
+
+---
+
+## References
+
+- **HTTPSig Module** - `dev_codec_httpsig.erl`
+- **Cookie Auth** - `dev_codec_cookie_auth.erl`
+- **HTTP Auth** - `dev_codec_http_auth.erl`
+- **Message System** - `hb_message.erl`
+- **KeyID Module** - `dev_codec_httpsig_keyid.erl`
+
+---
+
+## Notes
+
+1. **Proxy Pattern:** Enables code reuse while maintaining device identity
+2. **HMAC Only:** Only works with HMAC-SHA256, not RSA-PSS
+3. **Secret Scheme:** Always uses `secret:` keyid scheme
+4. **Device Relabeling:** Core function is changing commitment-device label
+5. **Commitment Preservation:** Maintains existing commitments when adding new ones
+6. **Isolated Signing:** Only committed portions signed when commitments exist
+7. **Verification Path:** Sets `path = verify` in proxy request
+8. **No Additional Crypto:** All cryptography delegated to httpsig@1.0
+9. **Lightweight:** Minimal wrapper around hb_message functions
+10. **Extensible:** Easy pattern for new authentication devices
+11. **Stack-Friendly:** Supports multiple commitments on same message
+12. **Used By:** Currently used by cookie and HTTP auth devices
+13. **Future-Proof:** Pattern works for any secret-based auth scheme

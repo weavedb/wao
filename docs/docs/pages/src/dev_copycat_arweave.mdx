@@ -1,0 +1,514 @@
+# dev_copycat_arweave.erl - Arweave Block Indexing Engine
+
+## Overview
+
+**Purpose:** Fetch block data from Arweave nodes for replication  
+**Module:** `dev_copycat_arweave`  
+**Device:** `~copycat@1.0` (engine)  
+**Direction:** Reverse chronological (newest → oldest)  
+**Integration:** Uses `~arweave@2.9-pre` device
+
+This engine fetches block data from an Arweave node working in reverse chronological order by default, retrieving blocks from the latest known block towards the Genesis block. It avoids retrieving blocks already present in the cache using `~arweave@2.9-pre`'s built-in caching mechanism.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_util`, `hb_maps`
+- **Devices:** `~arweave@2.9-pre`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+-spec arweave(Base, Request, Opts) -> {ok, FinalHeight} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### arweave/3
+
+```erlang
+-spec arweave(Base, Request, Opts) -> {ok, FinalHeight}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        FinalHeight :: integer().
+```
+
+**Description:** Fetch blocks from an Arweave node between a given range, or from the latest known block towards the Genesis block if no range is provided.
+
+**Request Parameters:**
+- `<<"from">>` - Starting block height (optional, defaults to current)
+- `<<"to">>` - Target block height (optional, defaults to 0 - Genesis)
+
+**Behavior:**
+- Fetches blocks sequentially in reverse (from → to)
+- Skips blocks already in cache (via `~arweave@2.9-pre` caching)
+- Continues until reaching target height
+
+**Test Code:**
+```erlang
+-module(dev_copycat_arweave_test).
+-include_lib("eunit/include/eunit.hrl").
+
+arweave_specific_range_test() ->
+    Request = #{
+        <<"from">> => 100,
+        <<"to">> => 90
+    },
+    {ok, FinalHeight} = dev_copycat_arweave:arweave(#{}, Request, #{}),
+    ?assertEqual(90, FinalHeight).
+
+arweave_from_current_test() ->
+    % Start from latest block
+    Request = #{<<"to">> => 1000},
+    Result = dev_copycat_arweave:arweave(#{}, Request, #{}),
+    ?assertMatch({ok, 1000}, Result).
+
+arweave_to_genesis_test() ->
+    % Default behavior: from current to Genesis
+    Request = #{},
+    Result = dev_copycat_arweave:arweave(#{}, Request, #{}),
+    ?assertMatch({ok, 0}, Result).
+
+arweave_range_iteration_test() ->
+    Request = #{
+        <<"from">> => 105,
+        <<"to">> => 100
+    },
+    {ok, FinalHeight} = dev_copycat_arweave:arweave(#{}, Request, #{}),
+    ?assertEqual(100, FinalHeight).
+```
+
+---
+
+## Internal Functions
+
+### parse_range/2
+
+```erlang
+-spec parse_range(Request, Opts) -> {From, To}
+    when
+        Request :: map(),
+        Opts :: map(),
+        From :: integer(),
+        To :: integer().
+```
+
+**Description:** Parse the height range from the request. If `from` not specified, queries current block height from Arweave device.
+
+**Default Values:**
+- `from`: Current Arweave block height
+- `to`: 0 (Genesis block)
+
+**Process:**
+```erlang
+From = case hb_maps:find(<<"from">>, Request, Opts) of
+    {ok, Height} -> Height;
+    error ->
+        {ok, LatestHeight} =
+            hb_ao:resolve(
+                <<"~arweave@2.9-pre/current/height">>,
+                Opts
+            ),
+        LatestHeight
+end,
+To = hb_maps:get(<<"to">>, Request, 0, Opts)
+```
+
+---
+
+### fetch_blocks/4
+
+```erlang
+-spec fetch_blocks(Req, Current, Target, Opts) -> {ok, FinalHeight}
+    when
+        Req :: map(),
+        Current :: integer(),
+        Target :: integer(),
+        Opts :: map(),
+        FinalHeight :: integer().
+```
+
+**Description:** Recursively fetch blocks from Current height down to Target height. Uses `~arweave@2.9-pre/block={Height}` for retrieval.
+
+**Termination:** When `Current =:= Target`, returns `{ok, Current}`.
+
+**Recursion:**
+```erlang
+fetch_blocks(Req, Current, Current, _Opts) ->
+    % Reached target
+    {ok, Current};
+fetch_blocks(Req, Current, To, Opts) ->
+    % Fetch current block
+    BlockRes = hb_ao:resolve(
+        <<"~arweave@2.9-pre/block=", (hb_util:bin(Current))/binary>>,
+        Opts
+    ),
+    process_block(BlockRes, Req, Current, To, Opts),
+    % Continue with next block (decrement)
+    fetch_blocks(Req, Current - 1, To, Opts).
+```
+
+---
+
+### process_block/5
+
+```erlang
+-spec process_block(BlockRes, Req, Current, To, Opts) -> ok
+    when
+        BlockRes :: {ok, Block} | {error, not_found},
+        Block :: map(),
+        Req :: map(),
+        Current :: integer(),
+        To :: integer(),
+        Opts :: map().
+```
+
+**Description:** Process a block fetch result, emitting appropriate events for cached or not-found blocks.
+
+**Events:**
+- `{arweave_block_cached, {height, Height}}` - Block successfully cached
+- `{arweave_block_not_found, {height, Height}}` - Block not found at height
+
+**Implementation:**
+```erlang
+process_block(BlockRes, _Req, Current, To, _Opts) ->
+    case BlockRes of
+        {ok, _} ->
+            ?event(copycat_short,
+                {arweave_block_cached,
+                    {height, Current},
+                    {target, To}
+                });
+        {error, not_found} ->
+            ?event(copycat_short,
+                {arweave_block_not_found,
+                    {height, Current},
+                    {target, To}
+                })
+    end.
+```
+
+---
+
+## Block Fetching Process
+
+### Fetch Flow
+
+```
+1. Parse Range (from, to)
+   ↓
+2. Fetch Block at Current Height
+   ↓
+3. Process Block (cache or log not-found)
+   ↓
+4. Decrement Height (Current - 1)
+   ↓
+5. Repeat until Current = Target
+   ↓
+6. Return Final Height
+```
+
+### Cache Integration
+
+```erlang
+% Resolve block via Arweave device
+hb_ao:resolve(
+    <<"~arweave@2.9-pre/block=", (hb_util:bin(Height))/binary>>,
+    Opts
+)
+```
+
+The `~arweave@2.9-pre` device handles:
+- Network fetching
+- Block parsing
+- Cache storage
+- Duplicate avoidance
+
+---
+
+## Common Patterns
+
+```erlang
+%% Fetch last 100 blocks
+{ok, _} = dev_copycat_arweave:arweave(
+    #{},
+    #{
+        <<"from">> => CurrentHeight,
+        <<"to">> => CurrentHeight - 100
+    },
+    #{}
+).
+
+%% Fetch from specific height to Genesis
+dev_copycat_arweave:arweave(
+    #{},
+    #{<<"from">> => 1000000},
+    #{}
+).
+
+%% Fetch all blocks (from current)
+dev_copycat_arweave:arweave(#{}, #{}, #{}).
+
+%% Fill gap in block range
+dev_copycat_arweave:arweave(
+    #{},
+    #{
+        <<"from">> => GapEnd,
+        <<"to">> => GapStart
+    },
+    #{}
+).
+
+%% Get current height first, then fetch range
+{ok, CurrentHeight} = hb_ao:resolve(
+    <<"~arweave@2.9-pre/current/height">>,
+    #{}
+),
+dev_copycat_arweave:arweave(
+    #{},
+    #{
+        <<"from">> => CurrentHeight,
+        <<"to">> => CurrentHeight - 500
+    },
+    #{}
+).
+
+%% Via copycat device
+dev_copycat:arweave(
+    #{},
+    #{<<"from">> => 100000, <<"to">> => 99000},
+    #{}
+).
+```
+
+---
+
+## Event Monitoring
+
+### Events Emitted
+
+```erlang
+% Indexing completed
+?event(copycat_arweave,
+    {arweave_block_indexing_completed,
+        {reached_target, Height},
+        {initial_request, Request}
+    }
+)
+
+% Block cached successfully  
+?event(copycat_short,
+    {arweave_block_cached,
+        {height, Current},
+        {target, To}
+    }
+)
+
+% Block not found
+?event(copycat_short,
+    {arweave_block_not_found,
+        {height, Current},
+        {target, To}
+    }
+)
+```
+
+### Event Categories
+- `copycat_arweave` - Completion events
+- `copycat_short` - Per-block progress events
+
+---
+
+## Performance Characteristics
+
+### Sequential Fetching
+- One block per iteration
+- Reverse chronological order
+- No parallelization
+
+### Network Efficiency
+- Skips cached blocks (via Arweave device)
+- Direct node queries (no gateway dependency)
+- Single block per request
+
+### Memory Usage
+- Minimal: Processes one block at a time
+- Recursion: Tail-call optimized
+
+---
+
+## Use Cases
+
+### 1. Complete Node Sync
+```erlang
+% Start from latest, go to Genesis
+dev_copycat_arweave:arweave(#{}, #{}, #{}).
+```
+
+### 2. Recent Block Indexing
+```erlang
+% Last 1000 blocks
+{ok, Current} = hb_ao:resolve(
+    <<"~arweave@2.9-pre/current/height">>,
+    #{}
+),
+dev_copycat_arweave:arweave(
+    #{},
+    #{
+        <<"from">> => Current,
+        <<"to">> => Current - 1000
+    },
+    #{}
+).
+```
+
+### 3. Gap Filling
+```erlang
+% Fill missing range
+dev_copycat_arweave:arweave(
+    #{},
+    #{<<"from">> => 100050, <<"to">> => 100000},
+    #{}
+).
+```
+
+### 4. Historical Data Retrieval
+```erlang
+% Fetch specific historical range
+dev_copycat_arweave:arweave(
+    #{},
+    #{<<"from">> => 500000, <<"to">> => 490000},
+    #{}
+).
+```
+
+### 5. Continuous Sync
+```erlang
+% Run periodically to stay synced
+% (Could use dev_cron for automation)
+dev_copycat_arweave:arweave(
+    #{},
+    #{<<"to">> => LastSyncedHeight + 1},
+    #{}
+).
+```
+
+---
+
+## Error Handling
+
+### Block Not Found
+- Emits `arweave_block_not_found` event
+- Continues to next block
+- Does not halt indexing
+
+### Network Errors
+- Handled by `~arweave@2.9-pre` device
+- May retry or fail depending on configuration
+
+### Invalid Heights
+- Negative heights: Process until reaching 0
+- Non-existent heights: Emit not-found events
+
+---
+
+## Integration Points
+
+### Arweave Device
+
+**Current Height Query:**
+```erlang
+{ok, Height} = hb_ao:resolve(
+    <<"~arweave@2.9-pre/current/height">>,
+    Opts
+)
+```
+
+**Block Fetch:**
+```erlang
+{ok, Block} = hb_ao:resolve(
+    <<"~arweave@2.9-pre/block=", HeightBinary/binary>>,
+    Opts
+)
+```
+
+### Cache System
+Blocks are automatically cached via the Arweave device's internal caching mechanism.
+
+---
+
+## Optimization Strategies
+
+### Skip Cached Blocks
+The `~arweave@2.9-pre` device checks cache before fetching, so already-indexed blocks are skipped efficiently.
+
+### Batch Processing
+While this engine fetches one block at a time, you could run multiple instances in parallel for different ranges:
+
+```erlang
+% Parallel ranges (run in separate processes)
+spawn(fun() -> 
+    dev_copycat_arweave:arweave(#{}, #{<<"from">> => 10000, <<"to">> => 9000}, #{})
+end),
+spawn(fun() -> 
+    dev_copycat_arweave:arweave(#{}, #{<<"from">> => 9000, <<"to">> => 8000}, #{})
+end).
+```
+
+---
+
+## Comparison with GraphQL Engine
+
+### Arweave Engine Advantages
+- Complete data availability
+- No gateway dependency
+- Reliable for historical data
+- Works with any Arweave node
+
+### Arweave Engine Disadvantages
+- Slower than GraphQL for filtered queries
+- Sequential block fetching
+- Network-intensive for large ranges
+
+### When to Use
+- Complete node synchronization
+- Historical block indexing
+- Gap filling in block ranges
+- Direct node access preferred
+- Complete data required
+
+---
+
+## References
+
+- **Copycat Device** - `dev_copycat.erl`
+- **Arweave Device** - `~arweave@2.9-pre`
+- **AO Core** - `hb_ao.erl`
+- **Utilities** - `hb_util.erl`, `hb_maps.erl`
+
+---
+
+## Notes
+
+1. **Reverse Order:** Fetches newest blocks first
+2. **Cache-Aware:** Skips existing blocks via Arweave device
+3. **Recursive:** Tail-call optimized recursion
+4. **Sequential:** One block at a time for reliability
+5. **Event-Driven:** Emits progress events
+6. **No Parallelization:** Simple, reliable, sequential approach
+7. **Genesis Default:** Defaults to fetching to Genesis block
+8. **Height-Based:** Works with block heights, not hashes
+9. **Device Integration:** Leverages existing Arweave device
+10. **Gap-Friendly:** Can fill specific ranges
+11. **Progress Tracking:** Events show current progress
+12. **Completion Detection:** Clear termination condition
+13. **Error Tolerant:** Continues on not-found blocks
+14. **Network Direct:** Queries nodes directly
+15. **Simple API:** Single function with range parameters

@@ -1,0 +1,493 @@
+# hb_json.erl - JSON Encoding/Decoding Wrapper
+
+## Overview
+
+**Purpose:** Abstract JSON library for encoding and decoding  
+**Module:** `hb_json`  
+**Underlying Library:** Erlang/OTP `json` module  
+**Pattern:** Erlang term ↔ JSON binary
+
+This module provides a thin abstraction layer over Erlang's JSON library, allowing HyperBEAM to encode Erlang terms to JSON strings and decode JSON strings back to Erlang terms. The abstraction enables easy switching of underlying JSON implementations if needed in the future.
+
+## Design Philosophy
+
+- **Simplicity:** Minimal wrapper with no additional complexity
+- **Abstraction:** Hide implementation details from rest of codebase
+- **Future-Proof:** Easy to swap underlying library without changing call sites
+- **Performance:** Direct passthrough to underlying library
+
+## Dependencies
+
+- **Erlang/OTP:** `json` module (standard library)
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Encoding
+-spec encode(Term) -> JSONBinary.
+
+%% Decoding
+-spec decode(JSONBinary) -> Term.
+-spec decode(JSONBinary, Opts) -> Term.
+```
+
+---
+
+## Public Functions
+
+### 1. encode/1
+
+```erlang
+-spec encode(Term) -> JSONBinary
+    when
+        Term :: term(),
+        JSONBinary :: binary().
+```
+
+**Description:** Encode an Erlang term to JSON binary string. Converts maps, lists, binaries, numbers, and atoms to their JSON equivalents.
+
+**Implementation:**
+```erlang
+encode(Term) ->
+    iolist_to_binary(json:encode(Term)).
+```
+
+**Supported Types:**
+- `binary()` → JSON string
+- `integer()` → JSON number
+- `float()` → JSON number
+- `true` | `false` → JSON boolean
+- `null` → JSON null
+- `[]` | `list()` → JSON array
+- `#{}` | `map()` → JSON object
+
+**Test Code:**
+```erlang
+-module(hb_json_encode_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_simple_map_test() ->
+    Term = #{<<"key">> => <<"value">>},
+    JSON = hb_json:encode(Term),
+    ?assertEqual(<<"{\"key\":\"value\"}">>, JSON).
+
+encode_nested_map_test() ->
+    Term = #{
+        <<"outer">> => #{
+            <<"inner">> => <<"value">>
+        }
+    },
+    JSON = hb_json:encode(Term),
+    ?assert(is_binary(JSON)),
+    ?assert(binary:match(JSON, <<"outer">>) =/= nomatch),
+    ?assert(binary:match(JSON, <<"inner">>) =/= nomatch).
+
+encode_list_test() ->
+    Term = [1, 2, 3],
+    JSON = hb_json:encode(Term),
+    ?assertEqual(<<"[1,2,3]">>, JSON).
+
+encode_mixed_types_test() ->
+    Term = #{
+        <<"string">> => <<"hello">>,
+        <<"number">> => 42,
+        <<"float">> => 3.14,
+        <<"bool">> => true,
+        <<"null">> => null,
+        <<"array">> => [1, 2, 3],
+        <<"object">> => #{<<"nested">> => <<"value">>}
+    },
+    JSON = hb_json:encode(Term),
+    ?assert(is_binary(JSON)),
+    ?assert(byte_size(JSON) > 0).
+
+encode_empty_map_test() ->
+    Term = #{},
+    JSON = hb_json:encode(Term),
+    ?assertEqual(<<"{}">>), JSON).
+
+encode_empty_list_test() ->
+    Term = [],
+    JSON = hb_json:encode(Term),
+    ?assertEqual(<<"[]">>, JSON).
+```
+
+---
+
+### 2. decode/1, decode/2
+
+```erlang
+-spec decode(JSONBinary) -> Term
+    when
+        JSONBinary :: binary(),
+        Term :: term().
+
+-spec decode(JSONBinary, Opts) -> Term
+    when
+        JSONBinary :: binary(),
+        Opts :: map(),
+        Term :: term().
+```
+
+**Description:** Decode JSON binary string to Erlang term. Two-arity version accepts options but currently ignores them (for API compatibility).
+
+**Implementation:**
+```erlang
+decode(Bin) -> json:decode(Bin).
+decode(Bin, _Opts) -> decode(Bin).
+```
+
+**JSON to Erlang Mapping:**
+- JSON string → `binary()`
+- JSON number → `integer()` or `float()`
+- JSON boolean → `true` | `false`
+- JSON null → `null`
+- JSON array → `list()`
+- JSON object → `map()`
+
+**Test Code:**
+```erlang
+-module(hb_json_decode_test).
+-include_lib("eunit/include/eunit.hrl").
+
+decode_simple_object_test() ->
+    JSON = <<"{\"key\":\"value\"}">>,
+    Term = hb_json:decode(JSON),
+    ?assertEqual(#{<<"key">> => <<"value">>}, Term).
+
+decode_nested_object_test() ->
+    JSON = <<"{\"outer\":{\"inner\":\"value\"}}">>,
+    Term = hb_json:decode(JSON),
+    Expected = #{<<"outer">> => #{<<"inner">> => <<"value">>}},
+    ?assertEqual(Expected, Term).
+
+decode_array_test() ->
+    JSON = <<"[1,2,3]">>,
+    Term = hb_json:decode(JSON),
+    ?assertEqual([1, 2, 3], Term).
+
+decode_mixed_types_test() ->
+    JSON = <<"{\"str\":\"hello\",\"num\":42,\"float\":3.14,\"bool\":true,\"null\":null}">>,
+    Term = hb_json:decode(JSON),
+    ?assertEqual(<<"hello">>, maps:get(<<"str">>, Term)),
+    ?assertEqual(42, maps:get(<<"num">>, Term)),
+    ?assertEqual(3.14, maps:get(<<"float">>, Term)),
+    ?assertEqual(true, maps:get(<<"bool">>, Term)),
+    ?assertEqual(null, maps:get(<<"null">>, Term)).
+
+decode_with_opts_test() ->
+    JSON = <<"{\"key\":\"value\"}">>,
+    Term = hb_json:decode(JSON, #{}),
+    ?assertEqual(#{<<"key">> => <<"value">>}, Term).
+
+decode_empty_object_test() ->
+    JSON = <<"{}">>,
+    Term = hb_json:decode(JSON),
+    ?assertEqual(#{}, Term).
+
+decode_empty_array_test() ->
+    JSON = <<"[]">>,
+    Term = hb_json:decode(JSON),
+    ?assertEqual([], Term).
+
+roundtrip_test() ->
+    Original = #{
+        <<"key">> => <<"value">>,
+        <<"nested">> => #{
+            <<"array">> => [1, 2, 3]
+        }
+    },
+    JSON = hb_json:encode(Original),
+    Decoded = hb_json:decode(JSON),
+    ?assertEqual(Original, Decoded).
+```
+
+---
+
+## Type Mappings
+
+### Erlang to JSON (Encoding)
+
+| Erlang Type | JSON Type | Example |
+|-------------|-----------|---------|
+| `binary()` | String | `<<"hello">>` → `"hello"` |
+| `integer()` | Number | `42` → `42` |
+| `float()` | Number | `3.14` → `3.14` |
+| `true` | Boolean | `true` → `true` |
+| `false` | Boolean | `false` → `false` |
+| `null` | Null | `null` → `null` |
+| `[]` | Array | `[]` → `[]` |
+| `[1,2,3]` | Array | `[1,2,3]` → `[1,2,3]` |
+| `#{}` | Object | `#{}` → `{}` |
+| `#{<<"k">>=><<"v">>}` | Object | `#{<<"k">>=><<"v">>}` → `{"k":"v"}` |
+
+---
+
+### JSON to Erlang (Decoding)
+
+| JSON Type | Erlang Type | Example |
+|-----------|-------------|---------|
+| String | `binary()` | `"hello"` → `<<"hello">>` |
+| Number (integer) | `integer()` | `42` → `42` |
+| Number (float) | `float()` | `3.14` → `3.14` |
+| Boolean true | `true` | `true` → `true` |
+| Boolean false | `false` | `false` → `false` |
+| Null | `null` | `null` → `null` |
+| Array | `list()` | `[1,2,3]` → `[1,2,3]` |
+| Object | `map()` | `{"k":"v"}` → `#{<<"k">>=><<"v">>}` |
+
+---
+
+## Common Patterns
+
+```erlang
+%% Encode simple map to JSON
+Message = #{<<"type">> => <<"request">>, <<"id">> => 123},
+JSON = hb_json:encode(Message).
+% Result: <<"{\"type\":\"request\",\"id\":123}">>
+
+%% Decode JSON to map
+JSON = <<"{\"status\":\"ok\",\"data\":[1,2,3]}">>,
+Term = hb_json:decode(JSON).
+% Result: #{<<"status">> => <<"ok">>, <<"data">> => [1,2,3]}
+
+%% Encode nested structures
+Complex = #{
+    <<"user">> => #{
+        <<"name">> => <<"Alice">>,
+        <<"age">> => 30,
+        <<"tags">> => [<<"admin">>, <<"active">>]
+    }
+},
+JSON = hb_json:encode(Complex).
+
+%% Decode with options (currently ignored)
+Term = hb_json:decode(JSON, #{some_option => value}).
+
+%% Roundtrip conversion
+Original = #{<<"key">> => <<"value">>},
+JSON = hb_json:encode(Original),
+Recovered = hb_json:decode(JSON),
+Original = Recovered.  % true
+
+%% Encode list of maps
+Data = [
+    #{<<"id">> => 1, <<"name">> => <<"Alice">>},
+    #{<<"id">> => 2, <<"name">> => <<"Bob">>}
+],
+JSON = hb_json:encode(Data).
+
+%% Handle special values
+Special = #{
+    <<"null_value">> => null,
+    <<"true_value">> => true,
+    <<"false_value">> => false,
+    <<"empty_object">> => #{},
+    <<"empty_array">> => []
+},
+JSON = hb_json:encode(Special).
+```
+
+---
+
+## Error Handling
+
+### Invalid JSON
+
+```erlang
+% Malformed JSON string
+JSON = <<"{invalid json}">>,
+try
+    hb_json:decode(JSON)
+catch
+    error:Reason ->
+        % Handle JSON parse error
+        io:format("Invalid JSON: ~p~n", [Reason])
+end.
+```
+
+### Unsupported Types (Encoding)
+
+```erlang
+% Atoms (other than true/false/null) need conversion
+Term = #{key => value},  % Atom keys
+% May need to convert to binary keys first:
+SafeTerm = #{<<"key">> => <<"value">>},
+JSON = hb_json:encode(SafeTerm).
+```
+
+---
+
+## Performance Considerations
+
+1. **Direct Passthrough:** Minimal overhead, direct call to underlying library
+2. **Binary Output:** `iolist_to_binary/1` ensures binary result
+3. **No Options Processing:** `decode/2` ignores options (no overhead)
+4. **Native Implementation:** Uses Erlang/OTP's optimized JSON module
+
+---
+
+## Migration Path
+
+If switching from `json` to another library (e.g., `jsx`, `jiffy`):
+
+```erlang
+% Current implementation
+encode(Term) ->
+    iolist_to_binary(json:encode(Term)).
+
+% Example migration to jsx
+encode(Term) ->
+    jsx:encode(Term).
+
+% Example migration to jiffy
+encode(Term) ->
+    jiffy:encode(Term).
+```
+
+**Benefits of Abstraction:**
+- Single point of change
+- No modifications needed in calling code
+- Easy A/B testing of libraries
+- Consistent API across codebase
+
+---
+
+## API Compatibility
+
+### Options Parameter
+
+The `decode/2` function accepts an `Opts` parameter for API consistency with other HyperBEAM modules, but currently ignores it:
+
+```erlang
+decode(Bin, _Opts) -> decode(Bin).
+```
+
+**Future Extensions:** Could support options like:
+- Label parsing strategies
+- Number precision handling
+- String encoding options
+- Custom decoders
+
+---
+
+## Usage in HyperBEAM
+
+### HTTP Responses
+
+```erlang
+% Encode message for JSON response
+Message = #{<<"status">> => <<"ok">>, <<"data">> => Data},
+JSON = hb_json:encode(Message),
+hb_http:reply(Req, 200, #{<<"content-type">> => <<"application/json">>}, JSON).
+```
+
+### Message Serialization
+
+```erlang
+% Structured message to JSON
+StructuredMsg = #{<<"device">> => <<"test@1.0">>, <<"path">> => <<"/test">>},
+JSON = hb_json:encode(StructuredMsg).
+```
+
+### Configuration Storage
+
+```erlang
+% Save configuration as JSON
+Config = #{port => 8734, store => <<"rocksdb">>},
+ConfigJSON = hb_json:encode(Config),
+file:write_file("config.json", ConfigJSON).
+```
+
+---
+
+## Testing Patterns
+
+```erlang
+%% Property-based testing pattern
+property_roundtrip_test() ->
+    % Any valid Erlang term that can be JSON-encoded
+    Terms = [
+        #{},
+        #{<<"k">> => <<"v">>},
+        [1, 2, 3],
+        <<"string">>,
+        42,
+        3.14,
+        true,
+        false,
+        null
+    ],
+    lists:foreach(
+        fun(Term) ->
+            JSON = hb_json:encode(Term),
+            Decoded = hb_json:decode(JSON),
+            ?assertEqual(Term, Decoded)
+        end,
+        Terms
+    ).
+
+%% Error handling test
+invalid_json_test() ->
+    ?assertError(_, hb_json:decode(<<"{invalid">>)).
+
+%% Unicode handling test
+unicode_test() ->
+    Unicode = #{<<"emoji">> => <<"🚀"/utf8>>},
+    JSON = hb_json:encode(Unicode),
+    Decoded = hb_json:decode(JSON),
+    ?assertEqual(Unicode, Decoded).
+```
+
+---
+
+## Differences from Jiffy's ejson
+
+**Historical Note:** This module was created to replace Jiffy's `ejson` format, which used `{[{Key, Value}]}` tuples for objects. The current implementation uses native Erlang maps, providing better ergonomics and performance.
+
+### Old ejson Format (Jiffy)
+
+```erlang
+% Jiffy ejson format
+Term = {[{<<"key">>, <<"value">>}]},
+JSON = jiffy:encode(Term).
+```
+
+### Current Format
+
+```erlang
+% Native map format
+Term = #{<<"key">> => <<"value">>},
+JSON = hb_json:encode(Term).
+```
+
+---
+
+## References
+
+- **Erlang JSON** - [Erlang/OTP json module](https://www.erlang.org/doc/man/json.html)
+- **HTTP Module** - `hb_http.erl`
+- **Message Format** - `hb_message.erl`
+- **Structured Codec** - `dev_codec_structured.erl`
+
+---
+
+## Notes
+
+1. **Simple Wrapper:** Minimal abstraction over `json` module
+2. **Binary Output:** Always returns binaries, not iolists
+3. **Options Ignored:** `decode/2` accepts but ignores options
+4. **No ejson:** Uses native maps, not tuple-based format
+5. **Standard Library:** No external dependencies
+6. **Future-Proof:** Easy to swap underlying implementation
+7. **Performance:** Direct passthrough, minimal overhead
+8. **Type Safe:** Uses Erlang's native JSON support
+9. **Unicode:** Full Unicode support via binary strings
+10. **Roundtrip Safe:** Encode/decode cycles preserve data
+11. **No Atoms:** JSON keys always decoded as binaries
+12. **Numbers:** Integers and floats preserved accurately
+13. **Booleans:** `true`/`false` atoms mapped correctly
+14. **Null:** `null` atom for JSON null values
+15. **Consistent API:** Matches patterns from other HyperBEAM modules

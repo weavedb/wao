@@ -1,0 +1,572 @@
+# dev_codec_ans104.erl - ANS-104 Data Item Codec
+
+## Overview
+
+**Purpose:** Transform between Arweave ANS-104 TX records and TABM messages  
+**Module:** `dev_codec_ans104`  
+**Format:** `ans104@1.0`  
+**Content Type:** `application/ans104`
+
+This codec manages bidirectional transformations between Arweave's ANS-104 data item format (TX records) and HyperBEAM's TABM (Type Annotated Binary Messages) format. It handles signing, verification, serialization, and maintains tag ordering and case preservation through the conversion process.
+
+## Core Capabilities
+
+- **Bidirectional Conversion:** TABM ↔ ANS-104 TX records
+- **Signing:** RSA-PSS and unsigned SHA-256 commitments
+- **Verification:** Signature validation
+- **Serialization:** Binary encoding/decoding
+- **Tag Preservation:** Maintains original tag names and order
+- **Nested Bundles:** Recursive handling of bundled messages
+
+## Dependencies
+
+- **HyperBEAM:** `hb_message`, `hb_maps`, `hb_opts`, `hb_util`, `hb_private`, `hb_cache`, `hb_ao`, `hb_link`
+- **Arweave:** `ar_bundles`, `ar_wallet`
+- **Codecs:** `dev_codec_ans104_from`, `dev_codec_ans104_to`, `dev_codec_httpsig_keyid`, `dev_codec_structured`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Content Type
+-spec content_type(Opts) -> {ok, ContentType}.
+
+%% Serialization
+-spec serialize(Msg, Req, Opts) -> {ok, Binary}.
+-spec deserialize(Binary, Req, Opts) -> {ok, TABM}.
+
+%% Commitment Operations
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Msg, Req, Opts) -> {ok, boolean()}.
+
+%% Format Conversion
+-spec to(TABM, Req, Opts) -> {ok, TX}.
+-spec from(TX, Req, Opts) -> {ok, TABM}.
+```
+
+---
+
+## Public Functions
+
+### 1. content_type/1
+
+```erlang
+-spec content_type(Opts) -> {ok, ContentType}
+    when
+        Opts :: map(),
+        ContentType :: binary().
+```
+
+**Description:** Return the MIME content type for ANS-104 format.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_content_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+content_type_test() ->
+    {ok, ContentType} = dev_codec_ans104:content_type(#{}),
+    ?assertEqual(<<"application/ans104">>, ContentType).
+```
+
+---
+
+### 2. serialize/3
+
+```erlang
+-spec serialize(Msg, Req, Opts) -> {ok, Binary}
+    when
+        Msg :: map() | #tx{},
+        Req :: map(),
+        Opts :: map(),
+        Binary :: binary().
+```
+
+**Description:** Serialize a message or TX record to binary ANS-104 format. If given a map, converts to TX first.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_serialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+serialize_message_test() ->
+    Msg = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>
+    },
+    {ok, Binary} = dev_codec_ans104:serialize(Msg, #{}, #{}),
+    ?assert(is_binary(Binary)),
+    ?assert(byte_size(Binary) > 0).
+
+serialize_tx_record_test() ->
+    TX = #tx{
+        format = ans104,
+        tags = [{<<"tag">>, <<"value">>}],
+        data = <<"test">>
+    },
+    {ok, Binary} = dev_codec_ans104:serialize(TX, #{}, #{}),
+    ?assert(is_binary(Binary)).
+
+serialize_roundtrip_test() ->
+    Original = #{
+        <<"test">> => <<"data">>,
+        <<"nested">> => #{ <<"key">> => <<"value">> }
+    },
+    {ok, Serialized} = dev_codec_ans104:serialize(Original, #{}, #{}),
+    {ok, Deserialized} = dev_codec_ans104:deserialize(Serialized, #{}, #{}),
+    ?assert(hb_message:match(Original, 
+                             hb_message:uncommitted(Deserialized, #{}),
+                             only_present,
+                             #{})).
+```
+
+---
+
+### 3. deserialize/3
+
+```erlang
+-spec deserialize(Binary, Req, Opts) -> {ok, TABM}
+    when
+        Binary :: binary() | map() | #tx{},
+        Req :: map(),
+        Opts :: map(),
+        TABM :: map().
+```
+
+**Description:** Deserialize ANS-104 binary data to TABM format. Accepts binaries, maps with `body` key, or TX records.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_deserialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+deserialize_binary_test() ->
+    TX = ar_bundles:sign_item(
+        #tx{ tags = [{<<"key">>, <<"value">>}], data = <<"test">> },
+        ar_wallet:new()
+    ),
+    Binary = ar_bundles:serialize(TX),
+    {ok, TABM} = dev_codec_ans104:deserialize(Binary, #{}, #{}),
+    ?assert(is_map(TABM)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, TABM)).
+
+deserialize_with_body_test() ->
+    TX = ar_bundles:sign_item(#tx{ data = <<"test">> }, ar_wallet:new()),
+    Binary = ar_bundles:serialize(TX),
+    Msg = #{ <<"body">> => Binary },
+    {ok, TABM} = dev_codec_ans104:deserialize(Msg, #{}, #{}),
+    ?assert(is_map(TABM)).
+
+deserialize_tx_record_test() ->
+    TX = ar_bundles:sign_item(
+        #tx{ tags = [{<<"tag">>, <<"val">>}] },
+        ar_wallet:new()
+    ),
+    {ok, TABM} = dev_codec_ans104:deserialize(TX, #{}, #{}),
+    ?assert(is_map(TABM)),
+    ?assert(maps:is_key(<<"commitments">>, TABM)).
+```
+
+---
+
+### 4. commit/3
+
+```erlang
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        SignedMsg :: map().
+```
+
+**Description:** Sign a message using ANS-104 format with the wallet specified in options. Supports multiple commitment types.
+
+**Commitment Types:**
+- `<<"rsa-pss-sha256">>` or `<<"signed">>` - RSA-PSS signature
+- `<<"unsigned-sha256">>` or `<<"unsigned">>` - Unsigned SHA-256 commitment
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+
+commit_rsa_pss_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{ <<"key">> => <<"value">> },
+    Req = #{ <<"type">> => <<"rsa-pss-sha256">> },
+    Opts = #{ priv_wallet => Wallet },
+    {ok, Signed} = dev_codec_ans104:commit(Msg, Req, Opts),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    ?assert(hb_message:verify(Signed, all, Opts)).
+
+commit_unsigned_test() ->
+    Msg = #{ <<"key">> => <<"value">> },
+    Req = #{ <<"type">> => <<"unsigned-sha256">> },
+    {ok, Committed} = dev_codec_ans104:commit(Msg, Req, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Committed)),
+    Commitments = maps:get(<<"commitments">>, Committed),
+    [Commitment] = maps:values(Commitments),
+    ?assertEqual(<<"unsigned-sha256">>, maps:get(<<"type">>, Commitment)).
+
+commit_signed_shorthand_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{ <<"test">> => <<"data">> },
+    Req = #{ <<"type">> => <<"signed">> },  % Shorthand
+    Opts = #{ priv_wallet => Wallet },
+    {ok, Signed} = dev_codec_ans104:commit(Msg, Req, Opts),
+    ?assert(hb_message:verify(Signed, all, Opts)).
+```
+
+---
+
+### 5. verify/3
+
+```erlang
+-spec verify(Msg, Req, Opts) -> {ok, boolean()}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Verify ANS-104 commitment in a message. Filters to only committed keys before verification.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+
+verify_valid_signature_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = hb_message:commit(
+        #{ <<"key">> => <<"value">> },
+        #{ priv_wallet => Wallet },
+        #{ <<"commitment-device">> => <<"ans104@1.0">> }
+    ),
+    {ok, IsValid} = dev_codec_ans104:verify(Msg, #{}, #{}),
+    ?assertEqual(true, IsValid).
+
+verify_invalid_signature_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(
+        #{ <<"key">> => <<"value">> },
+        #{ priv_wallet => Wallet },
+        #{ <<"commitment-device">> => <<"ans104@1.0">> }
+    ),
+    % Tamper with message
+    Tampered = Signed#{ <<"key">> => <<"modified">> },
+    {ok, IsValid} = dev_codec_ans104:verify(Tampered, #{}, #{}),
+    ?assertEqual(false, IsValid).
+```
+
+---
+
+### 6. to/3
+
+```erlang
+-spec to(TABM, Req, Opts) -> {ok, TX}
+    when
+        TABM :: map() | binary() | #tx{},
+        Req :: map(),
+        Opts :: map(),
+        TX :: #tx{}.
+```
+
+**Description:** Convert a TABM message to ANS-104 TX record format. Handles tag generation, data encoding, and commitment preservation.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_to_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_simple_message_test() ->
+    Msg = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>
+    },
+    {ok, TX} = dev_codec_ans104:to(Msg, #{}, #{}),
+    ?assert(is_record(TX, tx)),
+    ?assertEqual(ans104, TX#tx.format),
+    ?assert(is_list(TX#tx.tags)).
+
+to_with_target_test() ->
+    TargetID = crypto:strong_rand_bytes(32),
+    EncodedTarget = hb_util:encode(TargetID),
+    Msg = hb_message:commit(
+        #{ <<"target">> => EncodedTarget },
+        #{ priv_wallet => ar_wallet:new() },
+        <<"ans104@1.0">>
+    ),
+    {ok, TX} = dev_codec_ans104:to(Msg, #{}, #{}),
+    ?assertEqual(TargetID, TX#tx.target).
+
+to_binary_test() ->
+    Binary = <<"raw binary data">>,
+    {ok, TX} = dev_codec_ans104:to(Binary, #{}, #{}),
+    ?assert(is_record(TX, tx)),
+    ?assertEqual(Binary, TX#tx.data),
+    % Should have ao-type:binary tag
+    ?assert(lists:member({<<"ao-type">>, <<"binary">>}, TX#tx.tags)).
+```
+
+---
+
+### 7. from/3
+
+```erlang
+-spec from(TX, Req, Opts) -> {ok, TABM}
+    when
+        TX :: #tx{} | binary(),
+        Req :: map(),
+        Opts :: map(),
+        TABM :: map().
+```
+
+**Description:** Convert an ANS-104 TX record to TABM message format. Extracts fields, tags, data, and reconstructs commitments.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_from_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_simple_tx_test() ->
+    TX = #tx{
+        format = ans104,
+        tags = [{<<"key">>, <<"value">>}],
+        data = <<"test data">>
+    },
+    {ok, TABM} = dev_codec_ans104:from(TX, #{}, #{}),
+    ?assert(is_map(TABM)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, TABM)),
+    ?assertEqual(<<"test data">>, maps:get(<<"data">>, TABM)).
+
+from_signed_tx_test() ->
+    Wallet = ar_wallet:new(),
+    TX = ar_bundles:sign_item(
+        #tx{ tags = [{<<"tag">>, <<"val">>}], data = <<"data">> },
+        Wallet
+    ),
+    {ok, TABM} = dev_codec_ans104:from(TX, #{}, #{}),
+    ?assert(maps:is_key(<<"commitments">>, TABM)),
+    Commitments = maps:get(<<"commitments">>, TABM),
+    ?assert(map_size(Commitments) > 0).
+
+from_binary_type_test() ->
+    Binary = <<"just binary">>,
+    TX = #tx{
+        tags = [{<<"ao-type">>, <<"binary">>}],
+        data = Binary
+    },
+    {ok, Result} = dev_codec_ans104:from(TX, #{}, #{}),
+    % Should return just the binary
+    ?assertEqual(Binary, Result).
+```
+
+---
+
+## Conversion Flow
+
+### TABM → ANS-104 (to/3)
+
+```
+1. Load bundle if requested (bundle=true)
+2. Extract signature info from commitments
+3. Calculate data field:
+   - Large values (>3KB) → nested TX
+   - Maps → recursive conversion
+   - Binaries → direct inclusion
+4. Generate tags from committed keys
+5. Apply ao-data-key if needed
+6. Reset IDs and normalize
+```
+
+### ANS-104 → TABM (from/3)
+
+```
+1. Deserialize if binary
+2. Extract fields (target, anchor)
+3. Parse and deduplicate tags
+4. Process data:
+   - Maps → recursive conversion
+   - Binaries → direct inclusion
+5. Determine committed keys
+6. Build base message
+7. Add commitments if signed
+```
+
+---
+
+## Tag Handling
+
+### Case Preservation
+
+Original tag names are preserved through:
+1. Storage in `original-tags` commitment field
+2. Reconstruction during conversion
+3. Support for duplicate tag names
+
+### Deduplication
+
+Duplicate tags converted to structured-field lists:
+```erlang
+[{<<"key">>, <<"val1">>}, {<<"key">>, <<"val2">>}]
+% Becomes:
+#{<<"key">> => <<"\"val1\", \"val2\"">>}  % Structured-field format
+```
+
+### Metadata Tags
+
+Excluded from committed keys:
+- `<<"bundle-format">>`
+- `<<"bundle-version">>`
+- `<<"bundle-map">>`
+- `<<"ao-data-key">>`
+
+---
+
+## Special Fields
+
+### Target Field
+
+**TX Record Field:**
+- Used when value is valid 32-byte ID
+- Committed via `field-target` in commitment
+
+**Tag Format:**
+- Used for non-ID values
+- Included in tags list
+
+### Data Key
+
+**ao-data-key Tag:**
+- Specifies which key holds inline data
+- Default: `<<"data">>`
+- Alternative: `<<"body">>` (if data unset and body present)
+
+### Anchor Field
+
+**field-anchor:**
+- Stored in commitment
+- Represents transaction chain anchor
+
+---
+
+## Common Patterns
+
+```erlang
+%% Convert message to ANS-104
+Msg = #{ <<"key">> => <<"value">> },
+{ok, TX} = dev_codec_ans104:to(Msg, #{}, #{}),
+Binary = ar_bundles:serialize(TX).
+
+%% Convert ANS-104 to message
+{ok, TABM} = dev_codec_ans104:from(TX, #{}, #{}),
+Value = maps:get(<<"key">>, TABM).
+
+%% Sign with ANS-104
+Wallet = ar_wallet:new(),
+Signed = hb_message:commit(
+    Msg,
+    #{ priv_wallet => Wallet },
+    #{ <<"commitment-device">> => <<"ans104@1.0">> }
+).
+
+%% Verify ANS-104 signature
+{ok, IsValid} = dev_codec_ans104:verify(Signed, #{}, #{}).
+
+%% Serialize and deserialize
+{ok, Binary} = dev_codec_ans104:serialize(Msg, #{}, #{}),
+{ok, Restored} = dev_codec_ans104:deserialize(Binary, #{}, #{}).
+
+%% Handle bundles
+BundledMsg = #{
+    <<"item1">> => #{ <<"data">> => <<"value1">> },
+    <<"item2">> => #{ <<"data">> => <<"value2">> }
+},
+{ok, BundleTX} = dev_codec_ans104:to(
+    BundledMsg,
+    #{ <<"bundle">> => true },
+    #{ store => Store }
+).
+
+%% Convert between formats
+Structured = hb_message:convert(TX, <<"structured@1.0">>, <<"ans104@1.0">>, #{}),
+BackToANS104 = hb_message:convert(Structured, <<"ans104@1.0">>, <<"structured@1.0">>, #{}).
+```
+
+---
+
+## Commitment Structure
+
+### Signed Commitment
+
+```erlang
+#{
+    <<"commitments">> => #{
+        SignedID => #{
+            <<"commitment-device">> => <<"ans104@1.0">>,
+            <<"committer">> => Address,
+            <<"committed">> => CommittedKeys,
+            <<"signature">> => Base64Signature,
+            <<"keyid">> => <<"publickey:", Base64PublicKey/binary>>,
+            <<"type">> => <<"rsa-pss-sha256">>,
+            <<"bundle">> => BooleanBinary,
+            <<"original-tags">> => OriginalTagMap,
+            <<"field-target">> => EncodedTarget,
+            <<"field-anchor">> => Anchor
+        }
+    }
+}
+```
+
+### Unsigned Commitment
+
+```erlang
+#{
+    <<"commitments">> => #{
+        UnsignedID => #{
+            <<"commitment-device">> => <<"ans104@1.0">>,
+            <<"committed">> => CommittedKeys,
+            <<"type">> => <<"unsigned-sha256">>,
+            <<"bundle">> => BooleanBinary,
+            <<"original-tags">> => OriginalTagMap,
+            <<"field-target">> => EncodedTarget,
+            <<"field-anchor">> => Anchor
+        }
+    }
+}
+```
+
+---
+
+## References
+
+- **ANS-104 Spec** - Arweave bundled transactions
+- **Arweave Bundles** - `ar_bundles.erl`
+- **From Codec** - `dev_codec_ans104_from.erl`
+- **To Codec** - `dev_codec_ans104_to.erl`
+- **Message System** - `hb_message.erl`
+
+---
+
+## Notes
+
+1. **Bidirectional:** Full round-trip conversion support
+2. **Tag Preservation:** Maintains original tag names and order
+3. **Case Sensitivity:** Preserves tag name capitalization
+4. **Deduplication:** Handles duplicate tag names
+5. **Bundle Support:** Recursive handling of nested items
+6. **Target Handling:** Supports both field and tag formats
+7. **Commitment Types:** RSA-PSS and unsigned SHA-256
+8. **Binary Support:** Direct binary data with ao-type tag
+9. **Data Limits:** 128 tags max, 1KB keys, 3KB values
+10. **Large Values:** Auto-nesting for oversized data
+11. **ao-data-key:** Configurable inline data key
+12. **Field Priority:** Data > Tags > Fields precedence
+13. **Verification:** Full signature validation
+14. **Serialization:** Compatible with ar_bundles
+15. **Format Detection:** Automatic format handling

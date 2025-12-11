@@ -1,0 +1,595 @@
+# dev_codec_json.erl - JSON Codec for HyperBEAM Messages
+
+## Overview
+
+**Purpose:** JSON serialization and deserialization for HyperBEAM messages  
+**Module:** `dev_codec_json`  
+**Format:** `json@1.0`  
+**Content-Type:** `application/json`  
+**Pattern:** TABM ↔ JSON with native typing
+
+This module provides a simple JSON codec for HyperBEAM's message format. It converts messages between TABM format and JSON strings while preserving rich typing (numbers, lists) but encoding atoms as strings. The codec uses `httpsig@1.0` for signing and verification.
+
+## Type Handling
+
+### Preserved Types
+- **Numbers:** Integers and floats
+- **Lists:** Arrays
+- **Strings:** Binaries
+- **Maps:** Objects
+- **Booleans:** true/false
+
+### Encoded Types
+- **Atoms:** Converted to strings with `ao-types` annotation
+
+## Dependencies
+
+- **Erlang/OTP:** `json` (OTP 27+)
+- **HyperBEAM:** `hb_message`, `hb_util`, `hb_maps`, `hb_cache`, `hb_private`, `hb_json`, `hb_ao`
+- **Codecs:** `dev_codec_httpsig`, `dev_codec_structured`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Codec Interface
+-spec to(Msg, Req, Opts) -> {ok, JSON}.
+-spec from(JSON, Req, Opts) -> {ok, TABM}.
+
+%% Commitment Interface
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Msg, Req, Opts) -> {ok, boolean()}.
+-spec committed(Msg, Req, Opts) -> CommittedKeys.
+
+%% Serialization Utilities
+-spec serialize(Base, Msg, Opts) -> {ok, Response}.
+-spec deserialize(Base, Req, Opts) -> {ok, TABM}.
+
+%% Content Type
+-spec content_type(Opts) -> {ok, ContentType}.
+```
+
+---
+
+## Public Functions
+
+### 1. to/3
+
+```erlang
+-spec to(Msg, Req, Opts) -> {ok, JSON}
+    when
+        Msg :: map() | binary(),
+        Req :: map(),
+        Opts :: map(),
+        JSON :: binary().
+```
+
+**Description:** Encode a message to a JSON string. Converts TABM to structured format, optionally loads linked items if in bundle mode, and encodes with native JSON typing.
+
+**Process:**
+1. Convert TABM to structured message
+2. If `bundle` mode, load all linked items
+3. Convert to JSON-compatible structure (encode atoms)
+4. Serialize to JSON string
+
+**Test Code:**
+```erlang
+-module(dev_codec_json_to_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_simple_message_test() ->
+    Msg = #{
+        <<"key">> => <<"value">>,
+        <<"number">> => <<"123">>
+    },
+    {ok, JSON} = dev_codec_json:to(Msg, #{}, #{}),
+    ?assert(is_binary(JSON)),
+    ?assert(byte_size(JSON) > 0).
+
+to_binary_passthrough_test() ->
+    Binary = <<"test">>,
+    {ok, JSON} = dev_codec_json:to(Binary, #{}, #{}),
+    ?assert(is_binary(JSON)).
+
+to_with_types_test() ->
+    Msg = #{
+        <<"text">> => <<"hello">>,
+        <<"count">> => 42,
+        <<"items">> => [1, 2, 3],
+        <<"nested">> => #{<<"key">> => <<"val">>}
+    },
+    {ok, JSON} = dev_codec_json:to(Msg, #{}, #{}),
+    Decoded = json:decode(JSON),
+    ?assertEqual(<<"hello">>, maps:get(<<"text">>, Decoded)),
+    ?assertEqual(42, maps:get(<<"count">>, Decoded)).
+
+to_with_bundle_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    {ok, JSON} = dev_codec_json:to(Msg, #{<<"bundle">> => true}, #{}),
+    ?assert(is_binary(JSON)).
+```
+
+---
+
+### 2. from/3
+
+```erlang
+-spec from(JSON, Req, Opts) -> {ok, TABM}
+    when
+        JSON :: binary() | map(),
+        Req :: map(),
+        Opts :: map(),
+        TABM :: map().
+```
+
+**Description:** Decode a JSON string to a message. Parses JSON, converts to structured format, then to TABM for full normalization.
+
+**Process:**
+1. Decode JSON string
+2. Convert to structured message (restores type annotations)
+3. Convert to TABM
+
+**Test Code:**
+```erlang
+-module(dev_codec_json_from_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_simple_json_test() ->
+    JSON = <<"{\"key\":\"value\",\"num\":123}">>,
+    {ok, TABM} = dev_codec_json:from(JSON, #{}, #{}),
+    ?assert(is_map(TABM)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, TABM)).
+
+from_map_passthrough_test() ->
+    Map = #{<<"key">> => <<"value">>},
+    {ok, Result} = dev_codec_json:from(Map, #{}, #{}),
+    ?assertEqual(Map, Result).
+
+from_with_types_test() ->
+    JSON = <<"{\"text\":\"hello\",\"count\":42,\"list\":[1,2,3]}">>,
+    {ok, TABM} = dev_codec_json:from(JSON, #{}, #{}),
+    ?assert(is_map(TABM)).
+
+from_with_atom_annotation_test() ->
+    JSON = <<"""
+    {
+        "store-module": "hb_store_fs",
+        "ao-types": "store-module=\"atom\""
+    }
+    """>>,
+    {ok, TABM} = dev_codec_json:from(JSON, #{}, #{}),
+    % Atom should be restored
+    ?assertEqual(hb_store_fs, maps:get(<<"store-module">>, TABM)).
+```
+
+---
+
+### 3. commit/3
+
+```erlang
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        SignedMsg :: map().
+```
+
+**Description:** Sign a message using HTTPSig commitment. Delegates to `dev_codec_httpsig:commit/3`.
+
+**Test Code:**
+```erlang
+-module(dev_codec_json_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+commit_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"test">>},
+    Req = #{<<"type">> => <<"rsa-pss-sha512">>},
+    Opts = #{priv_wallet => Wallet},
+    {ok, Signed} = dev_codec_json:commit(Msg, Req, Opts),
+    ?assert(maps:is_key(<<"commitments">>, Signed)).
+```
+
+---
+
+### 4. verify/3
+
+```erlang
+-spec verify(Msg, Req, Opts) -> {ok, boolean()}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Verify message signature using HTTPSig verification. Delegates to `dev_codec_httpsig:verify/3`.
+
+**Test Code:**
+```erlang
+-module(dev_codec_json_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+verify_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_json:commit(
+        Msg,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
+    {ok, IsValid} = dev_codec_json:verify(Msg, Commitment, #{}),
+    ?assert(IsValid).
+```
+
+---
+
+### 5. committed/3
+
+```erlang
+-spec committed(Msg, Req, Opts) -> CommittedKeys
+    when
+        Msg :: map() | binary(),
+        Req :: map(),
+        Opts :: map(),
+        CommittedKeys :: [binary()].
+```
+
+**Description:** Get list of committed keys from a message. If binary, decodes first. Returns keys committed by all signers.
+
+**Test Code:**
+```erlang
+-module(dev_codec_json_committed_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+committed_from_binary_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_json:commit(
+        Msg,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    {ok, JSON} = dev_codec_json:to(Signed, #{}, #{}),
+    CommittedKeys = dev_codec_json:committed(JSON, #{}, #{}),
+    ?assert(is_list(CommittedKeys)).
+
+committed_from_map_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    CommittedKeys = dev_codec_json:committed(Msg, #{}, #{}),
+    ?assert(is_list(CommittedKeys)).
+```
+
+---
+
+### 6. serialize/3
+
+```erlang
+-spec serialize(Base, Msg, Opts) -> {ok, Response}
+    when
+        Base :: map(),
+        Msg :: map(),
+        Opts :: map(),
+        Response :: #{
+            <<"content-type">> => binary(),
+            <<"body">> => binary()
+        }.
+```
+
+**Description:** Serialize a message to JSON with appropriate content-type header.
+
+**Test Code:**
+```erlang
+-module(dev_codec_json_serialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+serialize_test() ->
+    Base = #{<<"key">> => <<"value">>},
+    Msg = #{},
+    {ok, Response} = dev_codec_json:serialize(Base, Msg, #{}),
+    ?assertEqual(<<"application/json">>, maps:get(<<"content-type">>, Response)),
+    ?assert(maps:is_key(<<"body">>, Response)),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(is_binary(Body)).
+
+serialize_complex_test() ->
+    Base = #{
+        <<"text">> => <<"hello">>,
+        <<"number">> => 42,
+        <<"list">> => [1, 2, 3]
+    },
+    {ok, Response} = dev_codec_json:serialize(Base, #{}, #{}),
+    Body = maps:get(<<"body">>, Response),
+    Decoded = json:decode(Body),
+    ?assert(is_map(Decoded)).
+```
+
+---
+
+### 7. deserialize/3
+
+```erlang
+-spec deserialize(Base, Req, Opts) -> {ok, TABM} | {error, ErrorResponse}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        TABM :: map(),
+        ErrorResponse :: #{
+            <<"status">> => integer(),
+            <<"body">> => binary()
+        }.
+```
+
+**Description:** Deserialize JSON from a specific path in the base message. Defaults to `body` field if no target specified.
+
+**Test Code:**
+```erlang
+-module(dev_codec_json_deserialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+deserialize_from_body_test() ->
+    JSON = <<"{\"key\":\"value\"}">>,
+    Base = #{<<"body">> => JSON},
+    {ok, TABM} = dev_codec_json:deserialize(Base, #{}, #{}),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, TABM)).
+
+deserialize_from_custom_target_test() ->
+    JSON = <<"{\"data\":\"test\"}">>,
+    Base = #{<<"payload">> => JSON},
+    Req = #{<<"target">> => <<"payload">>},
+    {ok, TABM} = dev_codec_json:deserialize(Base, Req, #{}),
+    ?assertEqual(<<"test">>, maps:get(<<"data">>, TABM)).
+
+deserialize_not_found_test() ->
+    Base = #{<<"other">> => <<"data">>},
+    Req = #{<<"target">> => <<"missing">>},
+    Result = dev_codec_json:deserialize(Base, Req, #{}),
+    ?assertMatch({error, #{<<"status">> := 404}}, Result).
+```
+
+---
+
+### 8. content_type/1
+
+```erlang
+-spec content_type(Opts) -> {ok, ContentType}
+    when
+        Opts :: map(),
+        ContentType :: binary().
+```
+
+**Description:** Return the content type for the JSON codec.
+
+**Test Code:**
+```erlang
+-module(content_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+content_type_test() ->
+    {ok, CT} = dev_codec_json:content_type(#{}),
+    ?assertEqual(<<"application/json">>, CT).
+```
+
+---
+
+## Type Encoding
+
+### Atoms to Strings
+
+Atoms cannot be represented natively in JSON, so they're encoded as strings with type annotations:
+
+```erlang
+% Input TABM
+#{
+    <<"module">> => my_module,        % Atom
+    <<"name">> => <<"test">>          % Binary
+}
+
+% Encoded JSON
+{
+    "module": "my_module",
+    "ao-types": "module=\"atom\""
+}
+```
+
+### Type Preservation
+
+```erlang
+% Input
+#{
+    <<"text">> => <<"hello">>,
+    <<"number">> => 42,
+    <<"float">> => 3.14,
+    <<"list">> => [1, 2, 3],
+    <<"map">> => #{<<"nested">> => true}
+}
+
+% JSON (native types preserved)
+{
+    "text": "hello",
+    "number": 42,
+    "float": 3.14,
+    "list": [1, 2, 3],
+    "map": {"nested": true}
+}
+```
+
+---
+
+## Bundle Mode
+
+When `<<"bundle">> => true` in request:
+
+```erlang
+{ok, JSON} = dev_codec_json:to(
+    Msg,
+    #{<<"bundle">> => true},
+    #{}
+).
+```
+
+**Effect:** Loads all linked items in the message before encoding, creating a complete self-contained JSON representation.
+
+---
+
+## Common Patterns
+
+```erlang
+%% Encode message to JSON
+Msg = #{
+    <<"name">> => <<"Alice">>,
+    <<"age">> => 30,
+    <<"items">> => [<<"a">>, <<"b">>, <<"c">>]
+},
+{ok, JSON} = dev_codec_json:to(Msg, #{}, #{}).
+% Returns: "{\"name\":\"Alice\",\"age\":30,\"items\":[\"a\",\"b\",\"c\"]}"
+
+%% Decode JSON to message
+JSON = <<"{\"key\":\"value\",\"num\":123}">>,
+{ok, TABM} = dev_codec_json:from(JSON, #{}, #{}).
+% Returns: #{<<"key">> => <<"value">>, <<"num">> => <<"123">>}
+
+%% Sign and serialize
+Wallet = ar_wallet:new(),
+{ok, Signed} = dev_codec_json:commit(
+    Msg,
+    #{<<"type">> => <<"rsa-pss-sha512">>},
+    #{priv_wallet => Wallet}
+),
+{ok, Response} = dev_codec_json:serialize(Signed, #{}, #{}).
+% Returns: #{
+%   <<"content-type">> => <<"application/json">>,
+%   <<"body">> => <<"{...}">>
+% }
+
+%% Use with hb_message:convert
+Structured = #{<<"data">> => <<"test">>},
+JSON = hb_message:convert(Structured, <<"json@1.0">>, #{}).
+
+%% Bundle mode (load all linked items)
+{ok, JSON} = dev_codec_json:to(
+    MsgWithLinks,
+    #{<<"bundle">> => true},
+    #{}
+).
+
+%% Deserialize from custom path
+Base = #{
+    <<"custom-field">> => <<"{\"result\":\"success\"}">>
+},
+{ok, TABM} = dev_codec_json:deserialize(
+    Base,
+    #{<<"target">> => <<"custom-field">>},
+    #{}
+).
+
+%% Handle atom types
+Msg = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"my-store">>
+},
+{ok, JSON} = dev_codec_json:to(Msg, #{}, #{}).
+% Atom encoded with ao-types annotation
+
+Decoded = hb_message:convert(JSON, <<"structured@1.0">>, <<"json@1.0">>, #{}).
+% Atom restored from annotation
+```
+
+---
+
+## Integration with Structured Codec
+
+The JSON codec relies heavily on `dev_codec_structured`:
+
+```erlang
+% Encoding process
+TABM → Structured → JSON-compatible → JSON string
+
+% Decoding process
+JSON string → Parsed JSON → Structured → TABM
+```
+
+**Key Point:** The structured codec handles type annotations (`ao-types`), while JSON codec handles serialization.
+
+---
+
+## Error Handling
+
+### Deserialization Errors
+
+```erlang
+{error, #{
+    <<"status">> => 404,
+    <<"body">> => <<"JSON payload not found in the base message. Searched for: target">>
+}}
+```
+
+Returned when the target field doesn't exist in the base message.
+
+---
+
+## Content Type
+
+Always returns:
+```erlang
+{ok, <<"application/json">>}
+```
+
+Used in HTTP responses to set proper Content-Type header.
+
+---
+
+## Private Data Handling
+
+The `to/3` function resets private data before encoding:
+
+```erlang
+hb_message:convert(
+    hb_private:reset(Msg),
+    <<"structured@1.0">>,
+    tabm,
+    Opts
+)
+```
+
+This ensures private/internal fields are not leaked in JSON output.
+
+---
+
+## References
+
+- **JSON Standard** - RFC 8259
+- **OTP JSON** - Erlang/OTP `json` module (OTP 27+)
+- **HTTPSig Module** - `dev_codec_httpsig.erl`
+- **Structured Codec** - `dev_codec_structured.erl`
+- **HyperBEAM JSON** - `hb_json.erl`
+- **Type System** - `ao-types` annotations
+
+---
+
+## Notes
+
+1. **Native Types:** Preserves JSON native types (numbers, arrays, objects)
+2. **Atom Encoding:** Atoms converted to strings with type annotations
+3. **HTTPSig Delegation:** Uses httpsig codec for signing/verification
+4. **Bundle Support:** Can load all linked items before encoding
+5. **Round-trip Safe:** Full normalization through structured codec
+6. **Private Reset:** Clears private data before encoding
+7. **OTP 27+:** Requires modern OTP with native JSON support
+8. **Content-Type:** Always `application/json`
+9. **Target Flexibility:** Can deserialize from any message field
+10. **Error Responses:** HTTP-style error responses with status codes
+11. **Type Annotations:** Uses `ao-types` for non-JSON types
+12. **Cache Integration:** Supports bundle mode with cache loading
+13. **Structured Bridge:** Leverages structured codec for type handling
+14. **Committed Keys:** Exposes committed keys for verification
+15. **Simple API:** Minimal functions for encode/decode/sign/verify

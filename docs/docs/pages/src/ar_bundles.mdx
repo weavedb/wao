@@ -1,0 +1,977 @@
+# ar_bundles.erl - Arweave Data Items & Bundles (ANS-104)
+
+## Overview
+
+**Purpose:** Create, sign, verify, serialize, and deserialize Arweave data items and bundles  
+**Module:** `ar_bundles`  
+**Format:** ANS-104 (Arweave Name Service #104)  
+**Bundle Version:** 2.0.0
+
+This module implements the ANS-104 specification for bundled data transactions, enabling multiple data items to be packaged together efficiently. Bundles can contain nested structures (maps/lists) and support recursive bundling.
+
+## Dependencies
+
+- **Erlang/OTP:** `crypto`
+- **Arweave:** `ar_wallet`, `hb_util`, `hb_json`, `hb_maps`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Item Identification & Properties
+-spec signer(Item) -> Address | undefined.
+-spec is_signed(Item) -> boolean().
+-spec id(Item) -> ID.
+-spec id(Item, Type) -> ID | not_signed.
+-spec type(Item) -> bundle | list | binary.
+
+%% Bundle Navigation
+-spec hd(Item) -> FirstItem | undefined.
+-spec map(Item) -> Map.
+-spec member(Key, Item) -> boolean().
+-spec find(Key, Item) -> Item | not_found.
+
+%% Item Creation & Signing
+-spec new_item(Target, Anchor, Tags, Data) -> UnsignedItem.
+-spec sign_item(Item, Wallet) -> SignedItem.
+-spec verify_item(Item) -> boolean().
+
+%% Tag Encoding
+-spec encode_tags(Tags) -> Binary.
+-spec decode_tags(Binary) -> {Tags, Rest}.
+
+%% Serialization
+-spec serialize(Item) -> Binary.
+-spec serialize(Item, Format) -> Binary.
+-spec deserialize(Binary) -> Item.
+-spec deserialize(Binary, Format) -> Item.
+
+%% Manifest Operations
+-spec manifest(Item) -> ManifestMap.
+-spec manifest_item(Item) -> ManifestEntry.
+-spec parse_manifest(Binary) -> ParsedManifest.
+
+%% Utilities
+-spec normalize(Item) -> NormalizedItem.
+-spec reset_ids(Item) -> ItemWithNewIDs.
+-spec data_item_signature_data(Item) -> SignatureData.
+-spec print(Item) -> ok.
+-spec format(Item) -> FormattedString.
+```
+
+---
+
+## Public Functions
+
+### 1. signer/1
+
+```erlang
+-spec signer(Item) -> Address | undefined
+    when
+        Item :: #tx{},
+        Address :: binary().
+```
+
+**Description:** Return the address of the signer of an item. Address is SHA-256 hash of the owner (public key).
+
+**Test Code:**
+```erlang
+-module(ar_bundles_signer_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+signer_signed_item_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    SignedItem = ar_bundles:sign_item(Item, {Priv, Pub}),
+    Signer = ar_bundles:signer(SignedItem),
+    ?assert(is_binary(Signer)),
+    ?assertEqual(32, byte_size(Signer)),
+    ?assertEqual(crypto:hash(sha256, element(2, Pub)), Signer).
+
+signer_unsigned_item_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    ?assertEqual(undefined, ar_bundles:signer(Item)).
+```
+
+---
+
+### 2. is_signed/1
+
+```erlang
+-spec is_signed(Item) -> boolean()
+    when
+        Item :: #tx{}.
+```
+
+**Description:** Check if an item has been signed.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_is_signed_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+is_signed_unsigned_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    ?assertEqual(false, ar_bundles:is_signed(Item)).
+
+is_signed_signed_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    SignedItem = ar_bundles:sign_item(Item, W),
+    ?assertEqual(true, ar_bundles:is_signed(SignedItem)).
+```
+
+---
+
+### 3. id/1, id/2
+
+```erlang
+-spec id(Item) -> ID
+    when
+        Item :: #tx{} | list() | map(),
+        ID :: binary().
+
+-spec id(Item, Type) -> ID | not_signed
+    when
+        Item :: #tx{} | list() | map(),
+        Type :: signed | unsigned,
+        ID :: binary().
+```
+
+**Description:** Return the ID of an item. Default returns unsigned ID. For signed ID on unsigned items, returns `not_signed`.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_id_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+id_unsigned_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    UnsignedID = ar_bundles:id(Item),
+    ?assert(is_binary(UnsignedID)),
+    ?assertEqual(UnsignedID, ar_bundles:id(Item, unsigned)).
+
+id_signed_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    SignedItem = ar_bundles:sign_item(Item, W),
+    SignedID = ar_bundles:id(SignedItem, signed),
+    UnsignedID = ar_bundles:id(SignedItem, unsigned),
+    ?assert(is_binary(SignedID)),
+    ?assert(is_binary(UnsignedID)),
+    ?assertNotEqual(SignedID, UnsignedID).
+
+id_not_signed_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    ?assertEqual(not_signed, ar_bundles:id(Item, signed)).
+
+id_deterministic_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    ID1 = ar_bundles:id(Item, unsigned),
+    ID2 = ar_bundles:id(Item, unsigned),
+    ?assertEqual(ID1, ID2).
+```
+
+---
+
+### 4. reset_ids/1
+
+```erlang
+-spec reset_ids(Item) -> ItemWithNewIDs
+    when
+        Item :: #tx{},
+        ItemWithNewIDs :: #tx{}.
+```
+
+**Description:** Recalculate and reset both signed and unsigned IDs for an item.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_reset_ids_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+reset_ids_test() ->
+    Item = #tx{format = ans104, data = <<"data">>},
+    ItemWithIDs = ar_bundles:reset_ids(Item),
+    ?assert(is_binary(ItemWithIDs#tx.unsigned_id)),
+    ?assert(ItemWithIDs#tx.unsigned_id =/= <<>>).
+```
+
+---
+
+### 5. type/1
+
+```erlang
+-spec type(Item) -> bundle | list | binary
+    when
+        Item :: #tx{}.
+```
+
+**Description:** Determine the type of data contained in an item.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_type_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+type_binary_test() ->
+    Item = #tx{data = <<"binary data">>},
+    ?assertEqual(binary, ar_bundles:type(Item)).
+
+type_list_test() ->
+    Item = #tx{data = [#tx{data = <<"item1">>}]},
+    ?assertEqual(list, ar_bundles:type(Item)).
+
+type_bundle_test() ->
+    Item = #tx{data = #{<<"1">> => #tx{data = <<"item1">>}}},
+    ?assertEqual(bundle, ar_bundles:type(Item)).
+```
+
+---
+
+### 6. hd/1
+
+```erlang
+-spec hd(Item) -> FirstItem | undefined
+    when
+        Item :: #tx{} | map(),
+        FirstItem :: #tx{}.
+```
+
+**Description:** Return the first item in a bundle-map or bundle-list.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_hd_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+hd_map_test() ->
+    First = #tx{data = <<"first">>},
+    Item = #tx{data = #{<<"1">> => First, <<"2">> => #tx{data = <<"second">>}}},
+    ?assertEqual(First, ar_bundles:hd(Item)).
+
+hd_list_test() ->
+    First = #tx{data = <<"first">>},
+    Item = #tx{data = [First, #tx{data = <<"second">>}]},
+    ?assertEqual(First, ar_bundles:hd(Item)).
+
+hd_binary_test() ->
+    Item1 = #tx{format = ans104, data = <<"item1">>},
+    Bundle = ar_bundles:serialize([Item1]),
+    BundleItem = #tx{data = Bundle},
+    HeadItem = ar_bundles:hd(BundleItem),
+    ?assertEqual(<<"item1">>, HeadItem#tx.data).
+```
+
+---
+
+### 7. map/1
+
+```erlang
+-spec map(Item) -> Map
+    when
+        Item :: #tx{},
+        Map :: map().
+```
+
+**Description:** Convert an item containing a map or list into an Erlang map. Lists are converted to maps with numeric string keys.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_map_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+map_already_map_test() ->
+    MapData = #{<<"key1">> => #tx{data = <<"val1">>}},
+    Item = #tx{data = MapData},
+    ?assertEqual(MapData, ar_bundles:map(Item)).
+
+map_from_list_test() ->
+    Item1 = #tx{data = <<"item1">>},
+    Item2 = #tx{data = <<"item2">>},
+    Item = #tx{data = [Item1, Item2]},
+    Result = ar_bundles:map(Item),
+    ?assert(is_map(Result)),
+    ?assertEqual(2, maps:size(Result)),
+    ?assertEqual(Item1, maps:get(<<"1">>, Result)),
+    ?assertEqual(Item2, maps:get(<<"2">>, Result)).
+```
+
+---
+
+### 8. member/2
+
+```erlang
+-spec member(Key, Item) -> boolean()
+    when
+        Key :: binary(),
+        Item :: #tx{} | map() | list().
+```
+
+**Description:** Check if an item exists in a bundle by its key (for maps) or ID (deep search).
+
+**Test Code:**
+```erlang
+-module(ar_bundles_member_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+member_basic_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:sign_item(#tx{data = <<"data">>}, W),
+    ?assertEqual(true, ar_bundles:member(Item#tx.id, Item)),
+    ?assertEqual(true, ar_bundles:member(ar_bundles:id(Item, unsigned), Item)),
+    ?assertEqual(false, ar_bundles:member(crypto:strong_rand_bytes(32), Item)).
+
+member_deep_test() ->
+    W = ar_wallet:new(),
+    Inner = ar_bundles:sign_item(#tx{data = <<"inner">>}, W),
+    Outer = ar_bundles:sign_item(#tx{data = #{<<"key1">> => Inner}}, W),
+    ?assertEqual(true, ar_bundles:member(<<"key1">>, Outer)),
+    ?assertEqual(true, ar_bundles:member(Inner#tx.id, Outer)),
+    ?assertEqual(true, ar_bundles:member(Outer#tx.id, Outer)).
+```
+
+---
+
+### 9. find/2
+
+```erlang
+-spec find(Key, Item) -> FoundItem | not_found
+    when
+        Key :: binary(),
+        Item :: #tx{} | map() | list(),
+        FoundItem :: #tx{}.
+```
+
+**Description:** Find an item in a bundle-map/list by key or ID (deep recursive search).
+
+**Test Code:**
+```erlang
+-module(ar_bundles_find_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+find_by_key_test() ->
+    Inner = #tx{data = <<"inner">>},
+    Outer = #tx{data = #{<<"mykey">> => Inner}},
+    ?assertEqual(Inner, ar_bundles:find(<<"mykey">>, Outer)).
+
+find_by_id_test() ->
+    W = ar_wallet:new(),
+    Inner = ar_bundles:sign_item(#tx{data = <<"inner">>}, W),
+    Outer = #tx{data = #{<<"key">> => Inner}},
+    ?assertEqual(Inner, ar_bundles:find(Inner#tx.id, Outer)).
+
+find_not_found_test() ->
+    Item = #tx{data = #{<<"key">> => #tx{data = <<"val">>}}},
+    ?assertEqual(not_found, ar_bundles:find(<<"nonexistent">>, Item)).
+```
+
+---
+
+### 10. new_item/4
+
+```erlang
+-spec new_item(Target, Anchor, Tags, Data) -> UnsignedItem
+    when
+        Target :: binary(),
+        Anchor :: binary(),
+        Tags :: [{binary(), binary()}],
+        Data :: binary() | map() | list(),
+        UnsignedItem :: #tx{}.
+```
+
+**Description:** Create a new unsigned ANS-104 data item with target, anchor (last_tx), tags, and data.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_new_item_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+new_item_basic_test() ->
+    Target = crypto:strong_rand_bytes(32),
+    Anchor = crypto:strong_rand_bytes(32),
+    Tags = [{<<"tag1">>, <<"value1">>}],
+    Data = <<"test data">>,
+    Item = ar_bundles:new_item(Target, Anchor, Tags, Data),
+    ?assertEqual(ans104, Item#tx.format),
+    ?assertEqual(Target, Item#tx.target),
+    ?assertEqual(Anchor, Item#tx.anchor),
+    ?assertEqual(Tags, Item#tx.tags),
+    ?assertEqual(Data, Item#tx.data),
+    ?assertEqual(byte_size(Data), Item#tx.data_size).
+
+new_item_empty_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<>>),
+    ?assertEqual(ans104, Item#tx.format),
+    ?assertEqual(0, Item#tx.data_size).
+```
+
+---
+
+### 11. sign_item/2
+
+```erlang
+-spec sign_item(Item, Wallet) -> SignedItem
+    when
+        Item :: #tx{},
+        Wallet :: {PrivateKey, PublicKey},
+        SignedItem :: #tx{}.
+```
+
+**Description:** Sign a data item with a wallet. Supports RSA-4096, ECDSA (secp256k1), and EdDSA (ed25519).
+
+**Test Code:**
+```erlang
+-module(ar_bundles_sign_item_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+sign_item_rsa_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    SignedItem = ar_bundles:sign_item(Item, W),
+    ?assert(ar_bundles:is_signed(SignedItem)),
+    ?assert(is_binary(SignedItem#tx.signature)),
+    ?assert(is_binary(SignedItem#tx.owner)),
+    ?assertEqual(true, ar_bundles:verify_item(SignedItem)).
+
+sign_item_with_tags_test() ->
+    W = ar_wallet:new(),
+    Tags = [{<<"key1">>, <<"val1">>}, {<<"key2">>, <<"val2">>}],
+    Item = ar_bundles:new_item(<<>>, <<>>, Tags, <<"tagged">>),
+    SignedItem = ar_bundles:sign_item(Item, W),
+    ?assertEqual(Tags, SignedItem#tx.tags),
+    ?assertEqual(true, ar_bundles:verify_item(SignedItem)).
+
+sign_item_twice_same_unsigned_id_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    Signed1 = ar_bundles:sign_item(Item, W),
+    Signed2 = ar_bundles:sign_item(Signed1, W),
+    ?assertEqual(ar_bundles:id(Signed1, unsigned), 
+                 ar_bundles:id(Signed2, unsigned)).
+```
+
+---
+
+### 12. verify_item/1
+
+```erlang
+-spec verify_item(Item) -> boolean()
+    when
+        Item :: #tx{}.
+```
+
+**Description:** Verify the signature of a signed data item.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_verify_item_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+verify_valid_item_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [], <<"data">>), 
+        W
+    ),
+    ?assertEqual(true, ar_bundles:verify_item(Item)).
+
+verify_unsigned_item_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    ?assertEqual(false, ar_bundles:verify_item(Item)).
+
+verify_tampered_signature_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [], <<"data">>), 
+        W
+    ),
+    <<First:8, Rest/binary>> = Item#tx.signature,
+    TamperedItem = Item#tx{signature = <<(First bxor 1), Rest/binary>>},
+    ?assertEqual(false, ar_bundles:verify_item(TamperedItem)).
+```
+
+---
+
+### 13. encode_tags/1
+
+```erlang
+-spec encode_tags(Tags) -> Binary
+    when
+        Tags :: [{binary(), binary()}],
+        Binary :: binary().
+```
+
+**Description:** Encode tags into ANS-104 binary format. Each tag is encoded as: `name_length:64/little, value_length:64/little, name, value`.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_encode_tags_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_empty_tags_test() ->
+    ?assertEqual(<<>>, ar_bundles:encode_tags([])).
+
+encode_single_tag_test() ->
+    Tags = [{<<"key">>, <<"value">>}],
+    Encoded = ar_bundles:encode_tags(Tags),
+    ?assert(is_binary(Encoded)),
+    ?assert(byte_size(Encoded) > 0).
+
+encode_multiple_tags_test() ->
+    Tags = [{<<"k1">>, <<"v1">>}, {<<"k2">>, <<"v2">>}],
+    Encoded = ar_bundles:encode_tags(Tags),
+    ?assert(is_binary(Encoded)).
+
+encode_zero_length_value_test() ->
+    Tags = [{<<"key">>, <<>>}],
+    Encoded = ar_bundles:encode_tags(Tags),
+    ?assert(is_binary(Encoded)).
+```
+
+---
+
+### 14. decode_tags/1
+
+```erlang
+-spec decode_tags(Binary) -> {Tags, Rest}
+    when
+        Binary :: binary(),
+        Tags :: [{binary(), binary()}],
+        Rest :: binary().
+```
+
+**Description:** Decode tags from ANS-104 binary format. Returns decoded tags and remaining binary.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_decode_tags_test).
+-include_lib("eunit/include/eunit.hrl").
+
+decode_tags_roundtrip_test() ->
+    Tags = [{<<"tag1">>, <<"value1">>}, {<<"tag2">>, <<"value2">>}],
+    Encoded = ar_bundles:encode_tags(Tags),
+    Wrapped = <<
+        (length(Tags)):64/little,
+        (byte_size(Encoded)):64/little,
+        Encoded/binary
+    >>,
+    {Decoded, <<>>} = ar_bundles:decode_tags(Wrapped),
+    ?assertEqual(Tags, Decoded).
+
+decode_empty_tags_test() ->
+    Wrapped = <<0:64/little, 0:64/little>>,
+    {Decoded, <<>>} = ar_bundles:decode_tags(Wrapped),
+    ?assertEqual([], Decoded).
+```
+
+---
+
+### 15. serialize/1, serialize/2
+
+```erlang
+-spec serialize(Item) -> Binary
+    when
+        Item :: #tx{} | [#tx{}] | map(),
+        Binary :: binary().
+
+-spec serialize(Item, Format) -> Binary
+    when
+        Item :: #tx{} | [#tx{}] | map(),
+        Format :: binary | list,
+        Binary :: binary().
+```
+
+**Description:** Serialize a data item or bundle into ANS-104 binary format. Supports recursive bundles.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_serialize_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+serialize_single_item_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+        W
+    ),
+    Serialized = ar_bundles:serialize(Item),
+    ?assert(is_binary(Serialized)),
+    ?assert(byte_size(Serialized) > 0).
+
+serialize_empty_bundle_test() ->
+    Bundle = ar_bundles:serialize([]),
+    ?assert(is_binary(Bundle)).
+
+serialize_list_test() ->
+    Item1 = ar_bundles:new_item(<<>>, <<>>, [], <<"data1">>),
+    Item2 = ar_bundles:new_item(<<>>, <<>>, [], <<"data2">>),
+    Bundle = ar_bundles:serialize([Item1, Item2]),
+    ?assert(is_binary(Bundle)).
+
+serialize_map_test() ->
+    Item = #tx{
+        format = ans104,
+        data = #{<<"key">> => #tx{data = <<"value">>}}
+    },
+    Serialized = ar_bundles:serialize(Item),
+    ?assert(is_binary(Serialized)).
+```
+
+---
+
+### 16. deserialize/1, deserialize/2
+
+```erlang
+-spec deserialize(Binary) -> Item
+    when
+        Binary :: binary(),
+        Item :: #tx{}.
+
+-spec deserialize(Binary, Format) -> Item
+    when
+        Binary :: binary(),
+        Format :: binary | list,
+        Item :: #tx{}.
+```
+
+**Description:** Deserialize ANS-104 binary data into a data item or bundle. Automatically detects bundle format.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_deserialize_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+deserialize_roundtrip_test() ->
+    W = ar_wallet:new(),
+    Original = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+        W
+    ),
+    Serialized = ar_bundles:serialize(Original),
+    Deserialized = ar_bundles:deserialize(Serialized),
+    ?assertEqual(Original#tx.data, Deserialized#tx.data),
+    ?assertEqual(Original#tx.id, Deserialized#tx.id),
+    ?assertEqual(true, ar_bundles:verify_item(Deserialized)).
+
+deserialize_bundle_test() ->
+    Item1 = ar_bundles:new_item(<<>>, <<>>, [], <<"item1">>),
+    Item2 = ar_bundles:new_item(<<>>, <<>>, [], <<"item2">>),
+    Bundle = ar_bundles:serialize([Item1, Item2]),
+    Deserialized = ar_bundles:deserialize(Bundle),
+    ?assert(is_map(Deserialized#tx.data)),
+    ?assertEqual(<<"item1">>, (maps:get(<<"1">>, Deserialized#tx.data))#tx.data),
+    ?assertEqual(<<"item2">>, (maps:get(<<"2">>, Deserialized#tx.data))#tx.data).
+
+deserialize_with_tags_test() ->
+    Tags = [{<<"tag1">>, <<"value1">>}],
+    Item = ar_bundles:new_item(<<>>, <<>>, Tags, <<"data">>),
+    Serialized = ar_bundles:serialize(Item),
+    Deserialized = ar_bundles:deserialize(Serialized),
+    ?assertEqual(Tags, Deserialized#tx.tags).
+```
+
+---
+
+### 17. data_item_signature_data/1
+
+```erlang
+-spec data_item_signature_data(Item) -> SignatureData
+    when
+        Item :: #tx{},
+        SignatureData :: binary().
+```
+
+**Description:** Generate the signature data for an ANS-104 data item. This is the data that gets signed.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_signature_data_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+signature_data_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    SigData = ar_bundles:data_item_signature_data(Item),
+    ?assert(is_binary(SigData)),
+    ?assert(byte_size(SigData) > 0).
+
+signature_data_deterministic_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    SigData1 = ar_bundles:data_item_signature_data(Item),
+    SigData2 = ar_bundles:data_item_signature_data(Item),
+    ?assertEqual(SigData1, SigData2).
+```
+
+---
+
+### 18. normalize/1
+
+```erlang
+-spec normalize(Item) -> NormalizedItem
+    when
+        Item :: #tx{} | map() | list(),
+        NormalizedItem :: #tx{}.
+```
+
+**Description:** Normalize an item by setting format to ANS-104, calculating IDs, and preparing for signing/serialization.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+normalize_basic_test() ->
+    Item = #tx{data = <<"data">>},
+    Normalized = ar_bundles:normalize(Item),
+    ?assertEqual(ans104, Normalized#tx.format),
+    ?assert(is_binary(Normalized#tx.unsigned_id)).
+
+normalize_with_tags_test() ->
+    Tags = [{<<"key">>, <<"value">>}],
+    Item = #tx{tags = Tags, data = <<"data">>},
+    Normalized = ar_bundles:normalize(Item),
+    ?assertEqual(Tags, Normalized#tx.tags),
+    ?assertEqual(ans104, Normalized#tx.format).
+
+normalize_map_test() ->
+    Map = #{<<"key">> => <<"value">>},
+    Normalized = ar_bundles:normalize(Map),
+    ?assert(is_record(Normalized, tx)),
+    ?assertEqual(ans104, Normalized#tx.format).
+```
+
+---
+
+### 19. manifest/1
+
+```erlang
+-spec manifest(Item) -> ManifestMap
+    when
+        Item :: #tx{},
+        ManifestMap :: map().
+```
+
+**Description:** Generate a manifest (index) of all items in a bundle, mapping paths to IDs and sizes.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_manifest_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+manifest_simple_bundle_test() ->
+    W = ar_wallet:new(),
+    Item1 = ar_bundles:sign_item(#tx{data = <<"data1">>}, W),
+    Bundle = #tx{data = #{<<"file1">> => Item1}},
+    Manifest = ar_bundles:manifest(Bundle),
+    ?assert(is_map(Manifest)),
+    ?assert(maps:is_key(<<"file1">>, Manifest)).
+```
+
+---
+
+### 20. print/1, format/1, format/2, format/3
+
+```erlang
+-spec print(Item) -> ok.
+-spec format(Item) -> FormattedString.
+-spec format(Item, Indent) -> FormattedString.
+-spec format(Item, Indent, Opts) -> FormattedString.
+```
+
+**Description:** Format and print data items for debugging. Shows IDs, signatures, tags, and nested structure.
+
+**Test Code:**
+```erlang
+-module(ar_bundles_format_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+format_test() ->
+    W = ar_wallet:new(),
+    Item = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [{<<"tag">>, <<"val">>}], <<"data">>),
+        W
+    ),
+    Formatted = ar_bundles:format(Item),
+    ?assert(is_list(Formatted)),
+    ?assert(length(Formatted) > 0).
+
+print_test() ->
+    Item = ar_bundles:new_item(<<>>, <<>>, [], <<"data">>),
+    ?assertEqual(ok, ar_bundles:print(Item)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create, sign, and serialize a data item
+W = ar_wallet:new(),
+Item = ar_bundles:new_item(
+    <<>>,                               % Target (empty for no target)
+    <<>>,                               % Anchor (empty for no anchor)
+    [{<<"Content-Type">>, <<"text/plain">>}],  % Tags
+    <<"Hello, Arweave!">>               % Data
+),
+SignedItem = ar_bundles:sign_item(Item, W),
+Binary = ar_bundles:serialize(SignedItem).
+
+%% Deserialize and verify
+Deserialized = ar_bundles:deserialize(Binary),
+true = ar_bundles:verify_item(Deserialized),
+Signer = ar_bundles:signer(Deserialized).
+
+%% Create a bundle with multiple items
+Item1 = ar_bundles:sign_item(
+    ar_bundles:new_item(<<>>, <<>>, [], <<"Item 1">>), W
+),
+Item2 = ar_bundles:sign_item(
+    ar_bundles:new_item(<<>>, <<>>, [], <<"Item 2">>), W
+),
+Bundle = ar_bundles:serialize([Item1, Item2]),
+BundleItem = ar_bundles:deserialize(Bundle).
+
+%% Navigate bundle
+FirstItem = ar_bundles:hd(BundleItem),
+MapData = ar_bundles:map(BundleItem),
+Item1Data = (maps:get(<<"1">>, MapData))#tx.data.
+
+%% Recursive bundles (bundles within bundles)
+InnerBundle = ar_bundles:sign_item(
+    #tx{data = [Item1, Item2]}, W
+),
+OuterBundle = ar_bundles:sign_item(
+    #tx{data = #{<<"inner">> => InnerBundle}}, W
+),
+Serialized = ar_bundles:serialize(OuterBundle).
+
+%% Search in bundles
+true = ar_bundles:member(Item1#tx.id, BundleItem),
+FoundItem = ar_bundles:find(Item1#tx.id, BundleItem).
+```
+
+---
+
+## ANS-104 Binary Format
+
+### Data Item Structure
+```
++------------------+
+| Signature Type   | 2 bytes (little-endian)
++------------------+
+| Signature        | Variable (512 bytes for RSA-4096)
++------------------+
+| Owner            | Variable (512 bytes for RSA-4096)
++------------------+
+| Target Present   | 1 byte (0 or 1)
++------------------+
+| Target           | 32 bytes (if present)
++------------------+
+| Anchor Present   | 1 byte (0 or 1)
++------------------+
+| Anchor           | 32 bytes (if present)
++------------------+
+| Tags Count       | 8 bytes (little-endian)
++------------------+
+| Tags Bytes       | 8 bytes (little-endian)
++------------------+
+| Tags             | Variable (encoded tags)
++------------------+
+| Data             | Variable
++------------------+
+```
+
+### Bundle Structure
+```
++------------------+
+| Items Count      | 32 bytes (little-endian)
++------------------+
+| Item 1 Size      | 32 bytes (little-endian)
++------------------+
+| Item 2 Size      | 32 bytes (little-endian)
++------------------+
+| ...              |
++------------------+
+| Item 1 Data      | Variable
++------------------+
+| Item 2 Data      | Variable
++------------------+
+| ...              |
++------------------+
+```
+
+### Signature Types
+| Value | Type | Public Key Size | Signature Size |
+|-------|------|----------------|----------------|
+| 1 | RSA-4096 | 512 bytes | 512 bytes |
+| 2 | EdDSA (ed25519) | 32 bytes | 64 bytes |
+| 3 | ECDSA (secp256k1) | 65 bytes | 64 bytes |
+
+---
+
+## ID Calculation
+
+### Unsigned ID
+SHA-256 hash of the signature data (before signing):
+```erlang
+UnsignedID = crypto:hash(sha256, data_item_signature_data(Item))
+```
+
+### Signed ID
+SHA-256 hash of the signature:
+```erlang
+SignedID = crypto:hash(sha256, Item#tx.signature)
+```
+
+---
+
+## Bundle Tags
+
+Bundles automatically include these tags:
+
+**Binary Format (default):**
+- `bundle-format: binary`
+- `bundle-version: 2.0.0`
+
+**List Format:**
+- `map-format: list`
+
+---
+
+## References
+
+- **ANS-104 Specification** - Bundled Data Transactions
+- **Arweave Yellow Paper** - Transaction structure
+- **ar_wallet.erl** - Wallet and signing functions
+- **HyperBEAM** - Bundle processing in AO
+
+---
+
+## Notes
+
+1. **Recursive Bundles**: Bundles can contain other bundles to arbitrary depth
+2. **Format Detection**: `deserialize/1` automatically detects bundle vs single item
+3. **ID Persistence**: Unsigned IDs remain constant even after signing
+4. **Map Keys**: List items are automatically assigned numeric string keys (`<<"1">>`, `<<"2">>`, etc.)
+5. **Tag Encoding**: Zero-length tag values are supported and preserved
+6. **Verification**: Always verify items after deserialization for security

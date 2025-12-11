@@ -1,0 +1,541 @@
+# dev_codec_ans104_from.erl - ANS-104 to TABM Decoder
+
+## Overview
+
+**Purpose:** Decode ANS-104 data items to TABM format  
+**Module:** `dev_codec_ans104_from`  
+**Pattern:** TX Record → Structured Components → TABM Message
+
+This library provides specialized functions for converting ANS-104 data items (Arweave TX records) into TABM (Type Annotated Binary Messages) format. It handles field extraction, tag parsing, data transformation, commitment calculation, and base message construction with proper precedence rules.
+
+## Core Responsibilities
+
+- **Field Extraction:** Parse TX record fields (target, anchor)
+- **Tag Processing:** Normalize and deduplicate tags
+- **Data Transformation:** Convert data field to TABM structure
+- **Commitment Calculation:** Determine committed keys
+- **Base Message Construction:** Build final TABM with commitments
+- **Tag Preservation:** Maintain original tag names and order
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_util`, `hb_escape`, `hb_structured_fields`
+- **Codecs:** `dev_codec_structured`, `dev_codec_ans104` (circular)
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Component Extraction
+-spec fields(Item, Opts) -> FieldsMap.
+-spec tags(Item, Opts) -> TagsMap.
+-spec data(Item, Req, Tags, Opts) -> DataMap.
+
+%% Commitment Processing
+-spec committed(Item, Fields, Tags, Data, Opts) -> CommittedKeys.
+-spec base(CommittedKeys, Fields, Tags, Data, Opts) -> BaseMessage.
+
+%% Commitment Construction
+-spec with_commitments(Item, Tags, Base, CommittedKeys, Opts) -> MessageWithCommitments.
+```
+
+---
+
+## Public Functions
+
+### 1. fields/2
+
+```erlang
+-spec fields(Item, Opts) -> FieldsMap
+    when
+        Item :: #tx{},
+        Opts :: map(),
+        FieldsMap :: map().
+```
+
+**Description:** Extract TX record fields that should be included in the base message. Currently only handles the `target` field if it differs from the default.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_from_fields_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+fields_with_target_test() ->
+    Target = crypto:strong_rand_bytes(32),
+    Item = #tx{ target = Target },
+    Fields = dev_codec_ans104_from:fields(Item, #{}),
+    ?assert(maps:is_key(<<"target">>, Fields)),
+    ?assertEqual(hb_util:encode(Target), maps:get(<<"target">>, Fields)).
+
+fields_without_target_test() ->
+    Item = #tx{ target = ?DEFAULT_TARGET },
+    Fields = dev_codec_ans104_from:fields(Item, #{}),
+    ?assertEqual(#{}, Fields).
+
+fields_default_anchor_test() ->
+    Item = #tx{ anchor = ?DEFAULT_LAST_TX },
+    Fields = dev_codec_ans104_from:fields(Item, #{}),
+    % Anchor not included in fields, stored in commitment
+    ?assertEqual(#{}, Fields).
+```
+
+---
+
+### 2. tags/2
+
+```erlang
+-spec tags(Item, Opts) -> TagsMap
+    when
+        Item :: #tx{},
+        Opts :: map(),
+        TagsMap :: map().
+```
+
+**Description:** Parse and normalize tags from the TX record. Handles deduplication, key normalization, and ao-types encoding. Duplicate tags are converted to structured-field lists.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_from_tags_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+tags_simple_test() ->
+    Item = #tx{
+        tags = [
+            {<<"Key1">>, <<"value1">>},
+            {<<"Key2">>, <<"value2">>}
+        ]
+    },
+    Tags = dev_codec_ans104_from:tags(Item, #{}),
+    ?assertEqual(<<"value1">>, maps:get(<<"key1">>, Tags)),
+    ?assertEqual(<<"value2">>, maps:get(<<"key2">>, Tags)).
+
+tags_duplicate_test() ->
+    Item = #tx{
+        tags = [
+            {<<"Key">>, <<"value1">>},
+            {<<"key">>, <<"value2">>},
+            {<<"KEY">>, <<"value3">>}
+        ]
+    },
+    Tags = dev_codec_ans104_from:tags(Item, #{}),
+    % Duplicates converted to structured-field list
+    Value = maps:get(<<"key">>, Tags),
+    ?assert(is_binary(Value)),
+    % Should contain all values in structured-field format
+    ?assert(binary:match(Value, <<"value1">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"value2">>) =/= nomatch).
+
+tags_with_ao_types_test() ->
+    Item = #tx{
+        tags = [
+            {<<"ao-types">>, <<"key1:number,key2:string">>},
+            {<<"key1">>, <<"123">>},
+            {<<"key2">>, <<"text">>}
+        ]
+    },
+    Tags = dev_codec_ans104_from:tags(Item, #{}),
+    ?assert(maps:is_key(<<"ao-types">>, Tags)),
+    ?assertEqual(<<"123">>, maps:get(<<"key1">>, Tags)).
+```
+
+---
+
+### 3. data/4
+
+```erlang
+-spec data(Item, Req, Tags, Opts) -> DataMap
+    when
+        Item :: #tx{},
+        Req :: map(),
+        Tags :: map(),
+        Opts :: map(),
+        DataMap :: map().
+```
+
+**Description:** Transform the data field of the TX record into TABM structure. Handles empty data, nested bundles, and custom data keys specified by `ao-data-key` tag.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_from_data_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+data_empty_test() ->
+    Item = #tx{ data = ?DEFAULT_DATA },
+    Data = dev_codec_ans104_from:data(Item, #{}, #{}, #{}),
+    ?assertEqual(#{}, Data).
+
+data_binary_test() ->
+    Item = #tx{ data = <<"test data">> },
+    Data = dev_codec_ans104_from:data(Item, #{}, #{}, #{}),
+    ?assertEqual(<<"test data">>, maps:get(<<"data">>, Data)).
+
+data_with_custom_key_test() ->
+    Item = #tx{ data = <<"body content">> },
+    Tags = #{ <<"ao-data-key">> => <<"body">> },
+    Data = dev_codec_ans104_from:data(Item, #{}, Tags, #{}),
+    ?assertEqual(<<"body content">>, maps:get(<<"body">>, Data)),
+    ?assertNot(maps:is_key(<<"data">>, Data)).
+
+data_nested_map_test() ->
+    InnerTX = #tx{ data = <<"inner">> },
+    Item = #tx{ data = #{ <<"key">> => InnerTX } },
+    Data = dev_codec_ans104_from:data(Item, #{}, #{}, #{}),
+    ?assert(is_map(Data)),
+    InnerData = maps:get(<<"key">>, Data),
+    ?assert(is_map(InnerData)).
+```
+
+---
+
+### 4. committed/5
+
+```erlang
+-spec committed(Item, Fields, Tags, Data, Opts) -> CommittedKeys
+    when
+        Item :: #tx{},
+        Fields :: map(),
+        Tags :: map(),
+        Data :: map(),
+        Opts :: map(),
+        CommittedKeys :: [binary()].
+```
+
+**Description:** Calculate the list of committed keys for an item based on its components. Returns unique, sorted list of keys that were signed.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_from_committed_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+committed_simple_test() ->
+    Item = #tx{
+        tags = [{<<"tag1">>, <<"val1">>}, {<<"tag2">>, <<"val2">>}],
+        data = <<"data">>
+    },
+    Fields = #{},
+    Tags = #{ <<"tag1">> => <<"val1">>, <<"tag2">> => <<"val2">> },
+    Data = #{ <<"data">> => <<"data">> },
+    Committed = dev_codec_ans104_from:committed(Item, Fields, Tags, Data, #{}),
+    ?assert(lists:member(<<"data">>, Committed)),
+    ?assert(lists:member(<<"tag1">>, Committed)),
+    ?assert(lists:member(<<"tag2">>, Committed)).
+
+committed_with_target_test() ->
+    Target = crypto:strong_rand_bytes(32),
+    Item = #tx{
+        target = Target,
+        tags = [{<<"key">>, <<"val">>}]
+    },
+    Fields = #{ <<"target">> => hb_util:encode(Target) },
+    Tags = #{ <<"key">> => <<"val">> },
+    Data = #{},
+    Committed = dev_codec_ans104_from:committed(Item, Fields, Tags, Data, #{}),
+    ?assert(lists:member(<<"target">>, Committed)),
+    ?assert(lists:member(<<"key">>, Committed)).
+
+committed_excludes_metadata_test() ->
+    Item = #tx{
+        tags = [
+            {<<"key">>, <<"val">>},
+            {<<"bundle-format">>, <<"binary">>},
+            {<<"ao-data-key">>, <<"body">>}
+        ]
+    },
+    Fields = #{},
+    Tags = #{ 
+        <<"key">> => <<"val">>,
+        <<"bundle-format">> => <<"binary">>,
+        <<"ao-data-key">> => <<"body">>
+    },
+    Data = #{},
+    Committed = dev_codec_ans104_from:committed(Item, Fields, Tags, Data, #{}),
+    ?assert(lists:member(<<"key">>, Committed)),
+    % Metadata tags excluded
+    ?assertNot(lists:member(<<"bundle-format">>, Committed)),
+    ?assertNot(lists:member(<<"ao-data-key">>, Committed)).
+```
+
+---
+
+### 5. base/5
+
+```erlang
+-spec base(CommittedKeys, Fields, Tags, Data, Opts) -> BaseMessage
+    when
+        CommittedKeys :: [binary()],
+        Fields :: map(),
+        Tags :: map(),
+        Data :: map(),
+        Opts :: map(),
+        BaseMessage :: map().
+```
+
+**Description:** Construct the base message from committed keys with precedence: Data > Fields > Tags. Throws error if committed key not found.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_from_base_test).
+-include_lib("eunit/include/eunit.hrl").
+
+base_simple_test() ->
+    CommittedKeys = [<<"key1">>, <<"key2">>],
+    Fields = #{},
+    Tags = #{ <<"key1">> => <<"val1">>, <<"key2">> => <<"val2">> },
+    Data = #{},
+    Base = dev_codec_ans104_from:base(CommittedKeys, Fields, Tags, Data, #{}),
+    ?assertEqual(<<"val1">>, maps:get(<<"key1">>, Base)),
+    ?assertEqual(<<"val2">>, maps:get(<<"key2">>, Base)).
+
+base_precedence_test() ->
+    CommittedKeys = [<<"key">>],
+    Fields = #{ <<"key">> => <<"from-field">> },
+    Tags = #{ <<"key">> => <<"from-tag">> },
+    Data = #{ <<"key">> => <<"from-data">> },
+    % Data takes precedence
+    Base = dev_codec_ans104_from:base(CommittedKeys, Fields, Tags, Data, #{}),
+    ?assertEqual(<<"from-data">>, maps:get(<<"key">>, Base)).
+
+base_missing_key_test() ->
+    CommittedKeys = [<<"missing">>],
+    Fields = #{},
+    Tags = #{ <<"other">> => <<"val">> },
+    Data = #{},
+    % Should throw error for missing key
+    ?assertError({missing_key, <<"missing">>},
+                dev_codec_ans104_from:base(CommittedKeys, Fields, Tags, Data, #{})).
+```
+
+---
+
+### 6. with_commitments/5
+
+```erlang
+-spec with_commitments(Item, Tags, Base, CommittedKeys, Opts) -> MessageWithCommitments
+    when
+        Item :: #tx{},
+        Tags :: map(),
+        Base :: map(),
+        CommittedKeys :: [binary()],
+        Opts :: map(),
+        MessageWithCommitments :: map().
+```
+
+**Description:** Add commitment information to base message. Creates signed commitment if TX has signature, unsigned commitment if tags are non-normalized, or returns base unchanged for normalized unsigned items.
+
+**Test Code:**
+```erlang
+-module(dev_codec_ans104_from_commitments_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+with_signed_commitment_test() ->
+    Wallet = ar_wallet:new(),
+    Item = ar_bundles:sign_item(
+        #tx{ tags = [{<<"key">>, <<"val">>}], data = <<"test">> },
+        Wallet
+    ),
+    Tags = #{ <<"key">> => <<"val">> },
+    Base = #{ <<"key">> => <<"val">>, <<"data">> => <<"test">> },
+    CommittedKeys = [<<"key">>, <<"data">>],
+    Result = dev_codec_ans104_from:with_commitments(Item, Tags, Base, CommittedKeys, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Result)),
+    Commitments = maps:get(<<"commitments">>, Result),
+    [Commitment] = maps:values(Commitments),
+    ?assertEqual(<<"rsa-pss-sha256">>, maps:get(<<"type">>, Commitment)),
+    ?assert(maps:is_key(<<"signature">>, Commitment)),
+    ?assert(maps:is_key(<<"committer">>, Commitment)).
+
+with_unsigned_commitment_test() ->
+    Item = #tx{
+        tags = [{<<"Test-Tag">>, <<"value">>}],  % Non-normalized case
+        data = <<"test">>
+    },
+    Tags = #{ <<"test-tag">> => <<"value">> },
+    Base = #{ <<"test-tag">> => <<"value">>, <<"data">> => <<"test">> },
+    CommittedKeys = [<<"test-tag">>, <<"data">>],
+    Result = dev_codec_ans104_from:with_commitments(Item, Tags, Base, CommittedKeys, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Result)),
+    Commitments = maps:get(<<"commitments">>, Result),
+    [Commitment] = maps:values(Commitments),
+    ?assertEqual(<<"unsigned-sha256">>, maps:get(<<"type">>, Commitment)),
+    ?assert(maps:is_key(<<"original-tags">>, Commitment)).
+
+without_commitment_test() ->
+    Item = #tx{
+        tags = [{<<"key">>, <<"val">>}],  % Normalized
+        data = <<"test">>
+    },
+    Tags = #{ <<"key">> => <<"val">> },
+    Base = #{ <<"key">> => <<"val">>, <<"data">> => <<"test">> },
+    CommittedKeys = [<<"key">>, <<"data">>],
+    Result = dev_codec_ans104_from:with_commitments(Item, Tags, Base, CommittedKeys, #{}),
+    % No commitments for normalized unsigned items
+    ?assertNot(maps:is_key(<<"commitments">>, Result)),
+    ?assertEqual(Base, Result).
+```
+
+---
+
+## Conversion Process
+
+### Complete Flow
+
+```
+1. Extract fields (target if non-default)
+2. Parse and normalize tags
+3. Transform data field
+4. Calculate committed keys
+5. Construct base message
+6. Add commitments if needed
+```
+
+### Precedence Rules
+
+When building base message:
+```
+Data > Fields > Tags
+
+Example:
+- Data has <<"key">> => <<"A">>
+- Fields has <<"key">> => <<"B">>
+- Tags has <<"key">> => <<"C">>
+Result: Base gets <<"key">> => <<"A">>
+```
+
+---
+
+## Tag Processing
+
+### Normalization
+
+```erlang
+% Input tags
+[{<<"Test-Tag">>, <<"value">>}, {<<"OTHER">>, <<"val">>}]
+
+% Normalized
+#{
+    <<"test-tag">> => <<"value">>,
+    <<"other">> => <<"val">>
+}
+```
+
+### Deduplication
+
+```erlang
+% Input tags
+[{<<"Key">>, <<"A">>}, {<<"key">>, <<"B">>}, {<<"KEY">>, <<"C">>}]
+
+% Deduplicated with structured-field list
+#{
+    <<"key">> => <<"\"A\", \"B\", \"C\"">>
+}
+```
+
+### Metadata Exclusion
+
+Excluded from committed keys:
+- `<<"bundle-format">>`
+- `<<"bundle-version">>`
+- `<<"bundle-map">>`
+- `<<"ao-data-key">>`
+
+---
+
+## Commitment Types
+
+### Signed Commitment
+
+Created when TX has signature:
+```erlang
+#{
+    <<"commitment-device">> => <<"ans104@1.0">>,
+    <<"committer">> => Address,
+    <<"committed">> => [<<"key1">>, <<"key2">>],
+    <<"signature">> => Base64Signature,
+    <<"keyid">> => <<"publickey:", PublicKey/binary>>,
+    <<"type">> => <<"rsa-pss-sha256">>,
+    <<"bundle">> => <<"true">> | <<"false">>,
+    <<"original-tags">> => TagsMap,  % If non-normalized
+    <<"field-target">> => EncodedTarget,  % If present
+    <<"field-anchor">> => Anchor  % If non-default
+}
+```
+
+### Unsigned Commitment
+
+Created when tags non-normalized:
+```erlang
+#{
+    <<"commitment-device">> => <<"ans104@1.0">>,
+    <<"committed">> => [<<"key1">>, <<"key2">>],
+    <<"type">> => <<"unsigned-sha256">>,
+    <<"bundle">> => <<"true">> | <<"false">>,
+    <<"original-tags">> => TagsMap,
+    <<"field-target">> => EncodedTarget,
+    <<"field-anchor">> => Anchor
+}
+```
+
+### No Commitment
+
+Normalized, unsigned items have no commitment.
+
+---
+
+## Original Tags Preservation
+
+### When Stored
+
+Original tags stored when:
+- Tag names have mixed case
+- Tag names differ from normalized form
+
+### Storage Format
+
+```erlang
+#{
+    <<"1">> => #{
+        <<"name">> => <<"Test-Tag">>,
+        <<"value">> => <<"value1">>
+    },
+    <<"2">> => #{
+        <<"name">> => <<"OTHER">>,
+        <<"value">> => <<"value2">>
+    }
+}
+```
+
+---
+
+## References
+
+- **Main Codec** - `dev_codec_ans104.erl`
+- **To Encoder** - `dev_codec_ans104_to.erl`
+- **Structured Codec** - `dev_codec_structured.erl`
+- **Arweave Bundles** - `ar_bundles.erl`
+
+---
+
+## Notes
+
+1. **Field Extraction:** Only non-default fields included
+2. **Tag Normalization:** All keys lowercased
+3. **Deduplication:** Structured-field lists for duplicates
+4. **Precedence:** Data > Fields > Tags
+5. **Metadata Exclusion:** Bundle/AO tags not committed
+6. **Commitment Logic:** Signed > Non-normalized > None
+7. **Original Tags:** Preserved for round-trip conversion
+8. **Target Handling:** Field or tag based on format
+9. **Anchor Storage:** In commitment, not fields
+10. **Bundle Detection:** From bundle-format tag
+11. **ao-data-key:** Custom data field name support
+12. **Recursive Conversion:** Nested bundles handled
+13. **Empty Data:** Returns empty map
+14. **Map Data:** Recursive TX conversion
+15. **Error Handling:** Throws on missing committed keys

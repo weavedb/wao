@@ -1,0 +1,448 @@
+# hb_format.erl - Debugging & Pretty-Printing Utilities
+
+## Overview
+
+**Purpose:** Text formatting, debugging output, and human-readable representations  
+**Module:** `hb_format`  
+**Pattern:** Pretty-printing with intelligent truncation and indentation  
+**Scope:** Development and debugging infrastructure
+
+This module provides comprehensive formatting capabilities for HyperBEAM's logging and diagnostic systems. It handles message pretty-printing, stack trace formatting, binary data representation, and human-readable output for cryptographic identifiers.
+
+## Key Capabilities
+
+- **Message Formatting**: Pretty-print complex nested messages
+- **Stack Traces**: Format Erlang stack traces with filtering
+- **Binary Handling**: Human-readable binary data representation
+- **ID Shortening**: Compress long cryptographic IDs
+- **Indentation**: Automatic indentation for nested structures
+- **Truncation**: Intelligent truncation of large messages
+
+## Dependencies
+
+- **HyperBEAM:** `hb_util`, `hb_opts`, `hb_ao`, `hb_maps`, `hb_private`, `hb_link`, `dev_message`
+- **Arweave:** `ar_bundles`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Core Formatting
+-spec term(X) -> FormattedString.
+-spec term(X, Opts) -> FormattedString.
+-spec term(X, Opts, Indent) -> FormattedString.
+
+%% Message Formatting
+-spec message(Msg) -> FormattedString.
+-spec message(Msg, Opts) -> FormattedString.
+-spec message(Msg, Opts, Indent) -> FormattedString.
+
+%% Debug Printing
+-spec print(X) -> X.
+-spec print(X, Mod, Func, Line) -> X.
+-spec print(X, Mod, Func, Line, Opts) -> X.
+
+%% Binary Formatting
+-spec binary(Bin) -> FormattedString.
+
+%% Stack Traces
+-spec trace(Trace) -> FormattedString.
+-spec trace_short(Trace) -> ShortString.
+-spec trace_short() -> ShortString.
+
+%% Utilities
+-spec short_id(ID) -> ShortID.
+-spec indent(Format, Args, Indent) -> IndentedString.
+-spec remove_noise(String) -> CleanedString.
+```
+
+---
+
+## Core Functions
+
+### 1. term/1, term/2, term/3
+
+```erlang
+-spec term(X) -> FormattedString
+    when
+        X :: term(),
+        FormattedString :: string().
+```
+
+**Description:** Convert any Erlang term to a formatted string for debugging. Handles special cases for wallets, messages, tuples, lists, and binaries.
+
+**Test Code:**
+```erlang
+-module(hb_format_term_test).
+-include_lib("eunit/include/eunit.hrl").
+
+term_binary_test() ->
+    Formatted = hb_format:term(<<"hello world">>),
+    ?assert(is_list(Formatted)),
+    ?assert(length(Formatted) > 0).
+
+term_map_test() ->
+    Map = #{<<"key">> => <<"value">>, <<"num">> => 42},
+    Formatted = hb_format:term(Map),
+    ?assert(is_list(Formatted)),
+    ?assert(string:str(Formatted, "key") > 0).
+
+term_list_test() ->
+    List = [1, 2, 3, 4, 5],
+    Formatted = hb_format:term(List),
+    ?assert(is_list(Formatted)).
+
+term_tuple_test() ->
+    Tuple = {ok, <<"result">>, 123},
+    Formatted = hb_format:term(Tuple),
+    ?assert(is_list(Formatted)).
+
+term_with_indent_test() ->
+    Map = #{<<"nested">> => #{<<"deep">> => <<"value">>}},
+    Formatted = hb_format:term(Map, #{}, 2),
+    ?assert(string:str(Formatted, "  ") > 0).
+```
+
+---
+
+### 2. message/1, message/2, message/3
+
+```erlang
+-spec message(Msg) -> FormattedString
+    when
+        Msg :: map(),
+        FormattedString :: string().
+```
+
+**Description:** Format HyperBEAM messages with metadata headers, sorted keys, and intelligent truncation. Displays IDs, committers, device, path, and key-value pairs.
+
+**Features:**
+- Metadata header with IDs and committers
+- Priority keys (device, path) shown first
+- Sorted remaining keys
+- Truncation after N keys (default 20)
+- Short ID formatting (first..last)
+- Nested message handling
+
+**Test Code:**
+```erlang
+-module(hb_format_message_test).
+-include_lib("eunit/include/eunit.hrl").
+
+message_basic_test() ->
+    Msg = #{
+        <<"device">> => <<"test@1.0">>,
+        <<"path">> => <<"/test">>,
+        <<"data">> => <<"value">>
+    },
+    Formatted = hb_format:message(Msg),
+    ?assert(is_list(Formatted)),
+    ?assert(string:str(Formatted, "test@1.0") > 0).
+
+message_with_id_test() ->
+    Msg = #{
+        <<"id">> => <<1:256>>,
+        <<"data">> => <<"test">>
+    },
+    Formatted = hb_format:message(Msg),
+    ?assert(is_list(Formatted)).
+
+message_truncation_test() ->
+    % Create message with many keys
+    Msg = maps:from_list([
+        {<<"key", (integer_to_binary(N))/binary>>, N} 
+        || N <- lists:seq(1, 50)
+    ]),
+    Formatted = hb_format:message(Msg, #{debug_print_truncate => 10}),
+    ?assert(string:str(Formatted, "additional keys") > 0).
+```
+
+---
+
+### 3. print/1, print/5
+
+```erlang
+-spec print(X) -> X.
+-spec print(X, Mod, Func, Line, Opts) -> X.
+```
+
+**Description:** Print to standard error with timestamp, server ID, and location information. Returns value unchanged (allows inline usage).
+
+**Test Code:**
+```erlang
+-module(hb_format_print_test).
+-include_lib("eunit/include/eunit.hrl").
+
+print_returns_value_test() ->
+    Value = <<"test">>,
+    Result = hb_format:print(Value),
+    ?assertEqual(Value, Result).
+
+print_inline_usage_test() ->
+    % Can be used inline
+    Result = case hb_format:print({step, 1}) of
+        {step, N} -> N * 2
+    end,
+    ?assertEqual(2, Result).
+
+print_with_location_test() ->
+    Value = {test, data},
+    Result = hb_format:print(Value, test_module, test_func, 42, #{}),
+    ?assertEqual(Value, Result).
+```
+
+---
+
+### 4. binary/1
+
+```erlang
+-spec binary(Bin) -> FormattedString
+    when
+        Bin :: binary(),
+        FormattedString :: string().
+```
+
+**Description:** Format binary data as human-readable string or truncated hex representation.
+
+**Test Code:**
+```erlang
+-module(hb_format_binary_test).
+-include_lib("eunit/include/eunit.hrl").
+
+binary_readable_test() ->
+    Bin = <<"hello world">>,
+    Formatted = hb_format:binary(Bin),
+    ?assertEqual("hello world", Formatted).
+
+binary_large_test() ->
+    Bin = <<1:8, 2:8, 3:8, 4:8>>,
+    Formatted = hb_format:binary(Bin),
+    ?assert(is_list(Formatted)).
+
+binary_empty_test() ->
+    Formatted = hb_format:binary(<<>>),
+    ?assertEqual("", Formatted).
+```
+
+---
+
+### 5. short_id/1
+
+```erlang
+-spec short_id(ID) -> ShortID
+    when
+        ID :: binary(),
+        ShortID :: binary() | undefined.
+```
+
+**Description:** Shorten cryptographic IDs to readable format. 43-byte IDs become "first..last" (5 + 2 + 5 = 12 bytes).
+
+**Test Code:**
+```erlang
+-module(hb_format_short_id_test).
+-include_lib("eunit/include/eunit.hrl").
+
+short_id_43_bytes_test() ->
+    ID = <<"abcdefghijklmnopqrstuvwxyz1234567890ABCDEFG">>,  % 43 bytes
+    Short = hb_format:short_id(ID),
+    ?assertEqual(<<"abcde..CDEFG">>, Short).
+
+short_id_32_bytes_test() ->
+    ID = <<1:256>>,  % 32 bytes
+    Short = hb_format:short_id(ID),
+    ?assert(is_binary(Short)),
+    ?assertEqual(12, byte_size(Short)).
+
+short_id_short_input_test() ->
+    ID = <<"short">>,
+    Short = hb_format:short_id(ID),
+    ?assertEqual(ID, Short).
+
+short_id_hashpath_test() ->
+    Hashpath = <<"/", (hb_util:human_id(<<1:256>>))/binary>>,
+    Short = hb_format:short_id(Hashpath),
+    ?assert(binary:match(Short, <<"/">>) =/= nomatch).
+```
+
+---
+
+### 6. trace/1, trace_short/0, trace_short/1
+
+```erlang
+-spec trace(Stacktrace) -> FormattedTrace
+    when
+        Stacktrace :: list(),
+        FormattedTrace :: string().
+```
+
+**Description:** Format Erlang stack traces with optional filtering by module prefixes.
+
+**Test Code:**
+```erlang
+-module(hb_format_trace_test).
+-include_lib("eunit/include/eunit.hrl").
+
+trace_basic_test() ->
+    try
+        error(test_error)
+    catch
+        _:_:Stacktrace ->
+            Formatted = hb_format:trace(Stacktrace),
+            ?assert(is_list(Formatted)),
+            ?assert(length(Formatted) > 0)
+    end.
+
+trace_short_test() ->
+    Short = hb_format:trace_short(),
+    ?assert(is_list(Short)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Debug print with automatic return
+Value = hb_format:print({operation, data}),
+% Prints to stderr, returns {operation, data}
+
+%% Format complex message
+Msg = #{
+    <<"device">> => <<"test@1.0">>,
+    <<"data">> => #{<<"nested">> => <<"value">>}
+},
+io:format("~s~n", [hb_format:message(Msg)]).
+
+%% Shorten long IDs
+LongID = hb_util:human_id(<<1:256>>),
+ShortID = hb_format:short_id(LongID),
+% "AAAAA..AAAAB"
+
+%% Format with indentation
+Formatted = hb_format:term(ComplexData, #{}, 2),
+% Indented 2 levels
+
+%% Clean up strings
+Cleaned = hb_format:remove_noise(" \n hello \t "),
+% "hello"
+
+%% Inline debug printing
+Result = 
+    case hb_format:print({step, calculate()}) of
+        {step, Val} -> Val * 2
+    end.
+```
+
+---
+
+## Message Formatting Details
+
+### Metadata Header
+
+```erlang
+Message [#P: abc..xyz, *U: def..uvw, Comm.: ghi..rst] {
+    device => test@1.0
+    path => /test
+    ...
+}
+```
+
+**Metadata Fields:**
+- `#P` - Hashpath
+- `*U` - Unsigned ID
+- `*S` - Signed ID (if different from unsigned)
+- `Comm.` - Single committer
+- `Comms.` - Multiple committers
+
+### Key Ordering
+
+1. **Priority Keys** (shown first):
+   - `device`
+   - `path`
+   - `commitments`
+
+2. **Sorted Keys** (alphabetically)
+
+3. **Footer Keys** (shown last):
+   - Private keys
+   - Truncation notice
+
+### Truncation
+
+```erlang
+% Default: 20 keys
+Opts = #{debug_print_truncate => 20}.
+
+% Show all keys
+Opts = #{debug_print_truncate => infinity}.
+
+% Custom limit
+Opts = #{debug_print_truncate => 50}.
+```
+
+---
+
+## Indentation System
+
+```erlang
+% Manual indentation
+hb_format:indent("~s", ["text"], #{}, 2).
+% "        text" (4 spaces per level)
+
+% Automatic in nested structures
+hb_format:term(
+    #{<<"a">> => #{<<"b">> => <<"c">>}},
+    #{},
+    0
+).
+% Message {
+%     a => Message {
+%         b => c
+%     }
+% }
+```
+
+---
+
+## Debug Options
+
+```erlang
+Opts = #{
+    debug_print_truncate => 20,        % Max keys
+    debug_ids => false,                % Calculate IDs
+    debug_committers => true,          % Show committers
+    debug_print_fail_mode => quiet,    % Error handling
+    stack_print_prefixes => [hb_, dev_] % Filter traces
+}.
+```
+
+---
+
+## References
+
+- **HyperBEAM Logging** - `hb_event.erl`
+- **Message System** - `dev_message.erl`
+- **Private Data** - `hb_private.erl`
+- **Utilities** - `hb_util.erl`
+
+---
+
+## Notes
+
+1. **Inline Usage**: `print/X` returns value unchanged
+2. **Noise Removal**: Strips spaces, tabs, newlines, commas
+3. **Wallet Formatting**: Automatically shows as address
+4. **TX Records**: Pretty-prints ANS-104 data items
+5. **Private Data**: Automatically reset before formatting
+6. **Truncation**: Default 20 keys, configurable
+7. **Short IDs**: 43-byte IDs compressed to 12 bytes
+8. **Hashpaths**: Special handling for `/ID/key` format
+9. **Metadata**: Conditionally calculated based on options
+10. **Stack Traces**: Filterable by module prefix
+11. **Error Handling**: Graceful degradation on format failures
+12. **Indentation**: 4 spaces per level
+13. **Binary Detection**: Checks if binary is human-readable
+14. **Time Tracking**: Prints time since last call
+15. **Process ID**: Shows current process in output

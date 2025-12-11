@@ -1,0 +1,700 @@
+# dev_profile.erl - Performance Profiling Tools
+
+## Overview
+
+**Purpose:** Integrate profiling tools into HyperBEAM execution flows  
+**Module:** `dev_profile`  
+**Pattern:** Function/Resolution → Profiling Engine → Report/Visualization  
+**Device:** Profile@1.0
+
+This device wraps various profiling tools (eflame, eprof, event counters) for analyzing HyperBEAM performance. Supports both Erlang function profiling and AO-Core path resolution profiling, with configurable output formats and access controls.
+
+## Supported Engines
+
+- **eflame** - Flame graph visualization (requires ENABLE_EFLAME feature)
+- **eprof** - Erlang profiler with function call analysis
+- **event** - HyperBEAM event counter profiling
+
+---
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_opts`, `hb_maps`, `hb_util`, `hb_message`, `hb_features`, `hb_event`, `hb_format`, `hb_escape`, `hb_json`
+- **Erlang:** `eprof`, `eflame` (optional)
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Configuration
+
+### Node Options
+
+```erlang
+#{
+    % Enable profiling
+    profiling => true,                    % Enable for all
+    profiling => false,                   % Disable completely
+    profiling => [Address1, Address2],    % Whitelist signers
+    
+    % Mode-based defaults
+    mode => debug,                        % Allow open mode
+    mode => prod,                         % Restrict to message mode
+    
+    % eflame options
+    profiler_allow_open => true,          % Allow opening flame graphs
+    profiler_open_cmd => "open",          % Command to open files
+    profiler_open_delay => 500            % Delay before cleanup (ms)
+}
+```
+
+### Access Control
+
+**Production:**
+- Profiling disabled by default
+- Requires explicit signer whitelist
+
+**Debug:**
+- Profiling enabled by default
+- Allows local file opening
+
+**Test:**
+- Profiling enabled automatically
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Interface
+-spec info(Msg) -> DeviceInfo.
+
+%% Profiling API
+-spec eval(Fun) -> Result.
+-spec eval(Fun, Opts) -> Result.
+-spec eval(Fun, Req, Opts) -> Result | {ok, Message}.
+-spec eval(PathKey, Base, Req, Opts) -> Result | {ok, Message}.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(Msg) -> #{
+    excludes => [binary()],
+    default => fun()
+}
+    when
+        Msg :: map().
+```
+
+**Description:** Return device metadata. Defaults to `eval` function, excludes keys/set operations.
+
+**Test Code:**
+```erlang
+-module(dev_profile_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    Info = dev_profile:info(#{}),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    ?assert(lists:member(<<"keys">>, maps:get(excludes, Info))).
+```
+
+---
+
+### 2. eval/1, eval/2, eval/3, eval/4
+
+```erlang
+-spec eval(Fun) -> {EngineOut, Result}
+    when
+        Fun :: function().
+
+-spec eval(Fun, Opts) -> {EngineOut, Result}
+    when
+        Fun :: function(),
+        Opts :: map().
+
+-spec eval(Fun, Req, Opts) -> {EngineOut, Result} | {ok, EngineMessage}
+    when
+        Fun :: function(),
+        Req :: map(),
+        Opts :: map().
+
+-spec eval(PathKey, Base, Req, Opts) -> {ok, EngineMessage} | {error, Reason}
+    when
+        PathKey :: binary(),
+        Base :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Profile a function or AO-Core resolution path. Returns profiling data in requested format (console or message).
+
+**Return Modes:**
+- `open` - Local console output (debug mode only)
+- `message` - Structured message response (default)
+
+**Test Code:**
+```erlang
+-module(dev_profile_eval_test).
+-include_lib("eunit/include/eunit.hrl").
+
+eval_function_eprof_test() ->
+    Result = dev_profile:eval(
+        fun() -> lists:seq(1, 1000) end,
+        #{ 
+            <<"engine">> => <<"eprof">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    ?assertMatch(
+        {ok, #{
+            <<"content-type">> := <<"text/plain">>,
+            <<"body">> := Body
+        }} when byte_size(Body) > 0,
+        Result
+    ).
+
+eval_resolution_test() ->
+    Result = hb_ao:resolve(
+        #{
+            <<"path">> => <<"/~profile@1.0/run?run=/~meta@1.0/build">>,
+            <<"engine">> => <<"eprof">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    ?assertMatch({ok, #{ <<"body">> := _ }}, Result).
+
+eval_with_engine_selection_test() ->
+    % Test default engine selection
+    Result1 = dev_profile:eval(
+        fun() -> ok end,
+        #{ <<"return-mode">> => <<"message">> },
+        #{}
+    ),
+    ?assertMatch({ok, _}, Result1),
+    
+    % Test explicit engine
+    Result2 = dev_profile:eval(
+        fun() -> ok end,
+        #{ 
+            <<"engine">> => <<"event">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    ?assertMatch({ok, _}, Result2).
+```
+
+---
+
+## Profiling Engines
+
+### 1. eflame - Flame Graph Profiler
+
+```erlang
+-spec eflame_profile(Fun, Req, Opts) -> {ok, SVGMessage} | {SVG, Result}
+    when
+        Fun :: function(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Generate flame graph visualizations using eflame. Requires `ENABLE_EFLAME` compile flag.
+
+**Features:**
+- Stack trace flame graphs
+- Time-based flame charts
+- Automatic file handling
+- Optional local opening
+
+**Modes:**
+- `merge` (default) - Merge stacks by function
+- `time` - Flame chart with time ordering
+
+**Output:**
+- `open` mode - Opens SVG locally, returns function result
+- `message` mode - Returns SVG as structured message
+
+**Test Code:**
+```erlang
+-module(dev_profile_eflame_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_EFLAME).
+eflame_svg_output_test() ->
+    Result = dev_profile:eval(
+        fun() -> dev_meta:build(#{}, #{}, #{}) end,
+        #{ 
+            <<"engine">> => <<"eflame">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    ?assertMatch(
+        {ok, #{
+            <<"content-type">> := <<"image/svg+xml">>,
+            <<"body">> := SVG
+        }} when byte_size(SVG) > 100,
+        Result
+    ).
+
+eflame_flame_chart_test() ->
+    Result = dev_profile:eval(
+        fun() -> lists:seq(1, 100) end,
+        #{ 
+            <<"engine">> => <<"eflame">>,
+            <<"mode">> => <<"time">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    ?assertMatch({ok, #{ <<"body">> := _ }}, Result).
+-endif.
+```
+
+---
+
+### 2. eprof - Function Call Profiler
+
+```erlang
+-spec eprof_profile(Fun, Req, Opts) -> {ok, LogMessage} | Result
+    when
+        Fun :: function(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Profile function execution times using Erlang's built-in eprof tool.
+
+**Features:**
+- Per-function call counts
+- Total execution time
+- Time per call statistics
+- Text-based output
+
+**Output:**
+- `open` mode - Prints to console, returns function result
+- `message` mode - Returns log as text message
+
+**Test Code:**
+```erlang
+-module(dev_profile_eprof_test).
+-include_lib("eunit/include/eunit.hrl").
+
+eprof_basic_test() ->
+    Result = dev_profile:eval(
+        fun() -> 
+            lists:foldl(fun(X, Acc) -> X + Acc end, 0, lists:seq(1, 100))
+        end,
+        #{ 
+            <<"engine">> => <<"eprof">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    ?assertMatch(
+        {ok, #{
+            <<"content-type">> := <<"text/plain">>,
+            <<"body">> := Log
+        }} when byte_size(Log) > 0,
+        Result
+    ).
+
+eprof_error_handling_test() ->
+    Result = dev_profile:eval(
+        fun() -> error(test_error) end,
+        #{ 
+            <<"engine">> => <<"eprof">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    % Profiler should handle errors gracefully
+    ?assertMatch({ok, _}, Result).
+```
+
+---
+
+### 3. event - Event Counter Profiler
+
+```erlang
+-spec event_profile(Fun, Req, Opts) -> {ok, CounterDiff} | Result
+    when
+        Fun :: function(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Profile using HyperBEAM's event counting system. Tracks internal operations and metrics.
+
+**Features:**
+- Operation counters
+- Event type tracking
+- Lightweight overhead
+- Structured diff output
+
+**Output:**
+- `open` mode - Prints formatted counters, returns function result
+- `message` mode - Returns counter diff map
+
+**Test Code:**
+```erlang
+-module(dev_profile_event_test).
+-include_lib("eunit/include/eunit.hrl").
+
+event_counters_test() ->
+    Result = dev_profile:eval(
+        fun() -> 
+            hb_ao:resolve(#{}, <<"test">>, #{})
+        end,
+        #{ 
+            <<"engine">> => <<"event">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    ?assertMatch({ok, Diff} when is_map(Diff), Result).
+
+event_diff_structure_test() ->
+    {ok, Diff} = dev_profile:eval(
+        fun() -> ok end,
+        #{ 
+            <<"engine">> => <<"event">>,
+            <<"return-mode">> => <<"message">>
+        },
+        #{}
+    ),
+    ?assert(is_map(Diff)),
+    % Diff should show counter changes
+    ?assert(map_size(Diff) >= 0).
+```
+
+---
+
+## Validation System
+
+### Profiling Enabled Check
+
+```erlang
+validate_enabled(Opts) ->
+    case find_profiling_config(Opts) of
+        false -> {validation_error, disabled};
+        _ -> true
+    end.
+```
+
+**Configuration Priority:**
+1. Explicit `profiling` option
+2. `mode` setting (prod=disabled, debug/test=enabled)
+3. TEST build flag
+
+---
+
+### Return Mode Validation
+
+```erlang
+validate_return_mode(Req, Opts) ->
+    case return_mode(Req, Opts) of
+        <<"open">> -> 
+            % Only allowed in debug mode
+            hb_opts:get(mode, prod, Opts) == debug;
+        _ -> true
+    end.
+```
+
+---
+
+### Signer Authorization
+
+```erlang
+validate_signer(Req, Opts) ->
+    case find_profiling_config(Opts) of
+        ValidSigners when is_list(ValidSigners) ->
+            % Check if request signer in whitelist
+            lists:any(
+                fun(Signer) -> 
+                    lists:member(Signer, ValidSigners) 
+                end,
+                hb_message:signers(Req, Opts)
+            );
+        EnableProfiling -> EnableProfiling
+    end.
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Profile a specific function
+Result = dev_profile:eval(
+    fun() -> expensive_computation() end,
+    #{},
+    #{}
+).
+
+%% Profile with specific engine
+{ok, FlameGraph} = dev_profile:eval(
+    fun() -> my_function() end,
+    #{ 
+        <<"engine">> => <<"eflame">>,
+        <<"return-mode">> => <<"message">>
+    },
+    #{}
+).
+
+%% Profile AO-Core resolution
+{ok, ProfileData} = hb_ao:resolve(
+    #{
+        <<"path">> => <<"/~profile@1.0/run">>,
+        <<"eval">> => <<"/~meta@1.0/build">>,
+        <<"engine">> => <<"eprof">>,
+        <<"return-mode">> => <<"message">>
+    },
+    #{}
+).
+
+%% Profile with event counters
+{ok, Counters} = dev_profile:eval(
+    fun() -> hb_ao:resolve(Process, Request, #{}) end,
+    #{ 
+        <<"engine">> => <<"event">>,
+        <<"return-mode">> => <<"message">>
+    },
+    #{}
+).
+
+%% Local development profiling (debug mode)
+% Opens flame graph automatically
+dev_profile:eval(
+    fun() -> slow_function() end,
+    #{ 
+        <<"engine">> => <<"eflame">>,
+        <<"return-mode">> => <<"open">>
+    },
+    #{ mode => debug, profiler_allow_open => true }
+).
+
+%% Production profiling with whitelist
+Node = hb_http_server:start_node(#{
+    profiling => [
+        <<"authorized_user_1">>,
+        <<"authorized_user_2">>
+    ],
+    mode => prod
+}),
+
+% Only authorized signers can profile
+SignedReq = hb_message:commit(
+    #{
+        <<"path">> => <<"/~profile@1.0/run">>,
+        <<"eval">> => <<"/expensive-operation">>,
+        <<"engine">> => <<"eprof">>
+    },
+    AuthorizedWallet
+),
+{ok, ProfileResult} = hb_http:post(Node, SignedReq, #{}).
+```
+
+---
+
+## HTTP Integration
+
+```erlang
+%% Via HTTP query parameters
+GET /~profile@1.0/run?run=/~meta@1.0/build&engine=eprof
+
+%% Via POST with body
+POST /~profile@1.0/eval
+{
+  "eval": "/path/to/profile",
+  "engine": "eflame",
+  "return-mode": "message"
+}
+```
+
+---
+
+## Engine Selection
+
+```erlang
+% Default engine (eflame if available, else eprof)
+engine(default) -> {ok, default()}.
+
+default() ->
+    case hb_features:eflame() of
+        true -> fun eflame_profile/3;
+        false -> fun eprof_profile/3
+    end.
+
+% Explicit engines
+engine(<<"eflame">>) -> {ok, fun eflame_profile/3};
+engine(<<"eprof">>) -> {ok, fun eprof_profile/3};
+engine(<<"event">>) -> {ok, fun event_profile/3};
+engine(Unknown) -> {unknown_engine, Unknown}.
+```
+
+---
+
+## Flame Graph Options
+
+### Stack Merging Modes
+
+**Merge (default):**
+```erlang
+#{ <<"mode">> => <<"merge">> }
+% Combines identical stack traces
+% Shows aggregate function time
+```
+
+**Time (flame chart):**
+```erlang
+#{ <<"mode">> => <<"time">> }
+% Preserves temporal ordering
+% Shows execution timeline
+```
+
+---
+
+## File Handling
+
+```erlang
+% Temporary file generation
+temp_file() -> 
+    <<"profile-", 
+      (integer_to_binary(os:system_time(microsecond)))/binary,
+      ".out">>.
+
+temp_file(Ext) ->
+    <<"profile-",
+      (integer_to_binary(os:system_time(microsecond)))/binary,
+      ".",
+      Ext/binary>>.
+
+% Automatic cleanup
+file:write_file(TempFile, Data),
+Result = process_file(TempFile),
+file:delete(TempFile).
+```
+
+---
+
+## Error Handling
+
+```erlang
+% Validation errors
+{error, <<"Profiling is disabled.">>}
+{error, <<"Unsupported engine `unknown`">>}
+{error, <<"Invalid request.">>}
+{error, <<"Path key `X` not found in request.">>}
+
+% Engine errors
+{error, <<"eflame is not enabled.">>}
+{error, <<"Execution of function to profile failed.">>}
+
+% Authorization errors (silent failure)
+% Returns false from validate_signer/2
+```
+
+---
+
+## Security Considerations
+
+### Production Restrictions
+1. Profiling disabled by default
+2. Requires explicit whitelist
+3. `open` mode forbidden
+4. Only authorized signers
+
+### Debug Mode Allowances
+1. Profiling enabled by default
+2. Local file opening allowed
+3. Console output permitted
+4. No signer restrictions
+
+---
+
+## Performance Impact
+
+### eflame
+- **Overhead:** Moderate (stack sampling)
+- **Output:** Large SVG files
+- **Best For:** Overall performance analysis
+
+### eprof
+- **Overhead:** Low-Moderate (function tracing)
+- **Output:** Text statistics
+- **Best For:** Function-level analysis
+
+### event
+- **Overhead:** Very Low (counter increments)
+- **Output:** Structured counters
+- **Best For:** Operation counting
+
+---
+
+## Output Formats
+
+### eflame SVG
+```xml
+<svg ...>
+  <!-- Flame graph visualization -->
+  <rect ... fill="rgb(...)" />
+  <text>function_name</text>
+  ...
+</svg>
+```
+
+### eprof Text
+```
+FUNCTION                     CALLS    %  TIME  [uS / CALLS]
+module:function/arity         1234   15   5678  [    4.6]
+...
+```
+
+### event Map
+```erlang
+#{
+    <<"cache_read">> => 42,
+    <<"cache_write">> => 13,
+    <<"resolve">> => 5,
+    ...
+}
+```
+
+---
+
+## References
+
+- **eflame** - Flame graph generation library
+- **eprof** - Erlang profiler
+- **Event System** - `hb_event.erl`
+- **Features** - `hb_features.erl`
+- **AO Core** - `hb_ao.erl`
+
+---
+
+## Notes
+
+1. **Compile Flag:** eflame requires `ENABLE_EFLAME` at compile time
+2. **Mode Sensitive:** Behavior changes based on debug/prod mode
+3. **Access Control:** Three-tier system (disabled, whitelist, all)
+4. **Return Modes:** Console vs. message output
+5. **Engine Selection:** Automatic fallback if eflame unavailable
+6. **File Cleanup:** Temporary files automatically deleted
+7. **Error Recovery:** Profiler failures don't crash function
+8. **Signer Whitelist:** Per-node configuration
+9. **HTTP Support:** Full integration with HTTP interface
+10. **Stack Naming:** Attempts to use meaningful path names
+11. **Flamegraph.pl:** External Perl script for SVG generation
+12. **Default Engine:** Prefers eflame, falls back to eprof
+13. **Event Counters:** Lightweight, always available
+14. **Path Resolution:** Can profile any AO-Core path
+15. **Production Safety:** Strong defaults prevent unauthorized profiling

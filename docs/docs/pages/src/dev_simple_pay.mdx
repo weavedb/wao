@@ -1,0 +1,409 @@
+# dev_simple_pay.erl - Simple Payment Device
+
+## Overview
+
+**Purpose:** Provide per-request pricing, charging, and balance management for HyperBEAM nodes  
+**Module:** `dev_simple_pay`  
+**Device Name:** `simple-pay@1.0`  
+**Role:** Acts as both a pricing device and ledger device for p4
+
+This device allows node operators to specify prices for requests and charge users accordingly. It supports per-route pricing, per-message pricing, and maintains a ledger of user balances. The device integrates with p4's payment processing pipeline.
+
+## Pricing Rules
+
+1. **Operator Requests:** Cost is 0 (free)
+2. **Route-Matched Requests:** Uses explicit price from `router_opts/offered` routes
+3. **Generic Requests:** Price = (message count × `simple_pay_price`) + apply subrequest price
+4. **Apply Subrequests:** Recursively priced; two initiating apply messages excluded from count
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_opts`, `hb_maps`, `hb_util`, `hb_message`, `hb_singleton`, `hb_http_server`
+- **Arweave:** `ar_wallet`
+- **Router:** `dev_router`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Pricing
+-spec estimate(Base, EstimateReq, NodeMsg) -> {ok, Price}.
+
+%% Charging
+-spec charge(Base, RawReq, NodeMsg) -> {ok, boolean()} | {error, Reason}.
+
+%% Balance Management
+-spec balance(Base, RawReq, NodeMsg) -> {ok, Balance}.
+-spec topup(Base, Req, NodeMsg) -> {ok, NewBalance} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. estimate/3
+
+```erlang
+-spec estimate(Base, EstimateReq, NodeMsg) -> {ok, Price}
+    when
+        Base :: map(),
+        EstimateReq :: map(),
+        NodeMsg :: map(),
+        Price :: non_neg_integer().
+```
+
+**Description:** Estimate the cost of a request using the pricing rules. Returns 0 for operator requests, route-specific prices for matched routes, or calculates price from message count and apply subrequest costs for generic requests.
+
+**Test Code:**
+```erlang
+-module(dev_simple_pay_estimate_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+estimate_operator_request_test() ->
+    Wallet = ar_wallet:new(),
+    Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+    NodeMsg = #{
+        operator => Address,
+        simple_pay_price => 10
+    },
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/test">>},
+        #{ priv_wallet => Wallet }
+    ),
+    {ok, Price} = dev_simple_pay:estimate(
+        #{},
+        #{ <<"request">> => Req },
+        NodeMsg
+    ),
+    ?assertEqual(0, Price).
+
+estimate_generic_request_test() ->
+    ClientWallet = ar_wallet:new(),
+    OperatorWallet = ar_wallet:new(),
+    OperatorAddress = hb_util:human_id(ar_wallet:to_address(OperatorWallet)),
+    NodeMsg = #{
+        operator => OperatorAddress,
+        simple_pay_price => 10
+    },
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/test">>},
+        #{ priv_wallet => ClientWallet }
+    ),
+    {ok, Price} = dev_simple_pay:estimate(
+        #{},
+        #{ <<"request">> => Req },
+        NodeMsg
+    ),
+    ?assert(Price > 0).
+```
+
+---
+
+### 2. charge/3
+
+```erlang
+-spec charge(Base, RawReq, NodeMsg) -> {ok, boolean()} | {error, Reason}
+    when
+        Base :: map(),
+        RawReq :: map(),
+        NodeMsg :: map(),
+        Reason :: map().
+```
+
+**Description:** Charge a user for a request by deducting the specified quantity from their balance. Returns `{ok, true}` on successful charge, `{ok, false}` if no signers, or `{error, ...}` with HTTP 402 status if insufficient funds or HTTP 400 for multiple signers.
+
+**Error Responses:**
+- `402` - Insufficient funds (includes balance details)
+- `400` - Multiple signers in charge request
+
+**Test Code:**
+```erlang
+-module(dev_simple_pay_charge_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+charge_sufficient_funds_test() ->
+    ClientWallet = ar_wallet:new(),
+    ClientAddress = hb_util:human_id(ar_wallet:to_address(ClientWallet)),
+    NodeMsg = #{
+        simple_pay_ledger => #{ ClientAddress => 100 },
+        simple_pay_price => 10
+    },
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/test">>},
+        #{ priv_wallet => ClientWallet }
+    ),
+    RawReq = #{
+        <<"request">> => Req,
+        <<"quantity">> => 20
+    },
+    {ok, Result} = dev_simple_pay:charge(#{}, RawReq, NodeMsg),
+    ?assertEqual(true, Result).
+
+charge_insufficient_funds_test() ->
+    ClientWallet = ar_wallet:new(),
+    ClientAddress = hb_util:human_id(ar_wallet:to_address(ClientWallet)),
+    NodeMsg = #{
+        simple_pay_ledger => #{ ClientAddress => 10 },
+        simple_pay_price => 10
+    },
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/test">>},
+        #{ priv_wallet => ClientWallet }
+    ),
+    RawReq = #{
+        <<"request">> => Req,
+        <<"quantity">> => 100
+    },
+    Result = dev_simple_pay:charge(#{}, RawReq, NodeMsg),
+    ?assertMatch({error, #{ <<"status">> := 402 }}, Result).
+```
+
+---
+
+### 3. balance/3
+
+```erlang
+-spec balance(Base, RawReq, NodeMsg) -> {ok, Balance}
+    when
+        Base :: map(),
+        RawReq :: map(),
+        NodeMsg :: map(),
+        Balance :: integer().
+```
+
+**Description:** Get the balance of a user from the ledger. The target user is determined from the request signer or the `target` key in the request.
+
+**Test Code:**
+```erlang
+-module(dev_simple_pay_balance_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+get_balance_test() ->
+    ClientWallet = ar_wallet:new(),
+    ClientAddress = hb_util:human_id(ar_wallet:to_address(ClientWallet)),
+    NodeMsg = #{
+        simple_pay_ledger => #{ ClientAddress => 500 }
+    },
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/balance">>},
+        #{ priv_wallet => ClientWallet }
+    ),
+    {ok, Balance} = dev_simple_pay:balance(#{}, Req, NodeMsg),
+    ?assertEqual(500, Balance).
+
+get_balance_new_user_test() ->
+    ClientWallet = ar_wallet:new(),
+    NodeMsg = #{
+        simple_pay_ledger => #{}
+    },
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/balance">>},
+        #{ priv_wallet => ClientWallet }
+    ),
+    {ok, Balance} = dev_simple_pay:balance(#{}, Req, NodeMsg),
+    ?assertEqual(0, Balance).
+```
+
+---
+
+### 4. topup/3
+
+```erlang
+-spec topup(Base, Req, NodeMsg) -> {ok, NewBalance} | {error, Reason}
+    when
+        Base :: map(),
+        Req :: map(),
+        NodeMsg :: map(),
+        NewBalance :: integer(),
+        Reason :: binary().
+```
+
+**Description:** Top up a user's balance. Only the operator can perform this action. Requires `amount` and `recipient` keys in the request.
+
+**Required Request Keys:**
+- `amount` - Amount to add to balance
+- `recipient` - Address of user to credit
+
+**Test Code:**
+```erlang
+-module(dev_simple_pay_topup_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+topup_as_operator_test() ->
+    OperatorWallet = ar_wallet:new(),
+    OperatorAddress = hb_util:human_id(ar_wallet:to_address(OperatorWallet)),
+    ClientWallet = ar_wallet:new(),
+    ClientAddress = hb_util:human_id(ar_wallet:to_address(ClientWallet)),
+    NodeMsg = #{
+        operator => OperatorAddress,
+        simple_pay_ledger => #{ ClientAddress => 100 }
+    },
+    Req = hb_message:commit(
+        #{
+            <<"path">> => <<"/topup">>,
+            <<"amount">> => 200,
+            <<"recipient">> => ClientAddress
+        },
+        #{ priv_wallet => OperatorWallet }
+    ),
+    {ok, NewBalance} = dev_simple_pay:topup(#{}, Req, NodeMsg),
+    ?assertEqual(300, NewBalance).
+
+topup_unauthorized_test() ->
+    OperatorWallet = ar_wallet:new(),
+    OperatorAddress = hb_util:human_id(ar_wallet:to_address(OperatorWallet)),
+    ClientWallet = ar_wallet:new(),
+    ClientAddress = hb_util:human_id(ar_wallet:to_address(ClientWallet)),
+    NodeMsg = #{
+        operator => OperatorAddress,
+        simple_pay_ledger => #{}
+    },
+    Req = hb_message:commit(
+        #{
+            <<"path">> => <<"/topup">>,
+            <<"amount">> => 100,
+            <<"recipient">> => ClientAddress
+        },
+        #{ priv_wallet => ClientWallet }
+    ),
+    Result = dev_simple_pay:topup(#{}, Req, NodeMsg),
+    ?assertMatch({error, <<"Unauthorized">>}, Result).
+```
+
+---
+
+## Configuration
+
+### Node Message Options
+
+```erlang
+NodeMsg = #{
+    %% Ledger storing user balances (address => balance)
+    simple_pay_ledger => #{
+        <<"user-address-1">> => 1000,
+        <<"user-address-2">> => 500
+    },
+    
+    %% Price per message for generic requests
+    simple_pay_price => 10,
+    
+    %% Operator address (free requests)
+    operator => <<"operator-address">>,
+    
+    %% Router options for route-specific pricing
+    router_opts => #{
+        <<"offered">> => [
+            #{
+                <<"template">> => <<"/premium/*">>,
+                <<"price">> => 100
+            }
+        ]
+    }
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Set up a payment-enabled node
+Wallet = ar_wallet:new(),
+Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+NodeOpts = #{
+    simple_pay_ledger => #{},
+    simple_pay_price => 10,
+    operator => Address,
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>
+        }
+    }
+},
+Node = hb_http_server:start_node(NodeOpts).
+
+%% Check balance via HTTP
+{ok, Balance} = hb_http:get(
+    Node,
+    hb_message:commit(
+        #{<<"path">> => <<"/~simple-pay@1.0/balance">>},
+        #{ priv_wallet => ClientWallet }
+    ),
+    #{}
+).
+
+%% Top up user balance (as operator)
+{ok, NewBalance} = hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~simple-pay@1.0/topup">>,
+            <<"amount">> => 1000,
+            <<"recipient">> => ClientAddress
+        },
+        #{ priv_wallet => OperatorWallet }
+    ),
+    #{}
+).
+
+%% Requests are automatically charged through p4
+{ok, Response} = hb_http:post(
+    Node,
+    hb_message:commit(
+        #{<<"path">> => <<"/some-endpoint">>},
+        #{ priv_wallet => ClientWallet }
+    ),
+    #{}
+).
+```
+
+---
+
+## Integration with p4
+
+The device integrates with p4 (payment processing) as both:
+
+1. **Pricing Device:** Called during `estimate` to determine request cost
+2. **Ledger Device:** Called during `charge` to deduct from user balance
+
+```erlang
+%% p4 integration configuration
+ProcessorMsg = #{
+    <<"device">> => <<"p4@1.0">>,
+    <<"ledger-device">> => <<"simple-pay@1.0">>,
+    <<"pricing-device">> => <<"simple-pay@1.0">>
+}
+```
+
+---
+
+## References
+
+- **p4 Device** - Payment processing device
+- **Router** - `dev_router.erl` for route matching
+- **HTTP Server** - `hb_http_server.erl`
+- **Message Handling** - `hb_message.erl`
+
+---
+
+## Notes
+
+1. **Operator Exemption:** Operator requests are always free
+2. **Apply Pricing:** Nested apply requests are recursively priced
+3. **Balance Normalization:** User addresses are normalized via `hb_util:human_id/1`
+4. **Ledger Persistence:** Ledger updates use `hb_http_server:set_opts/2`
+5. **Route Matching:** Uses `dev_router:match/3` for route-specific pricing
+6. **Message Counting:** Price based on singleton message count
+7. **Signer Validation:** Charge requires exactly one signer
+8. **HTTP Status Codes:** 402 for insufficient funds, 400 for invalid requests
+9. **Topup Delay:** Brief 100ms wait after topup for ledger update
+10. **Negative Balances:** Charges are applied even if resulting balance is negative (returns error)

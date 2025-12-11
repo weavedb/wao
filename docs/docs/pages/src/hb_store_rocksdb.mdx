@@ -1,0 +1,945 @@
+# hb_store_rocksdb.erl - RocksDB Persistent Storage
+
+## Overview
+
+**Purpose:** High-performance embedded key-value storage using RocksDB  
+**Module:** `hb_store_rocksdb`  
+**Behavior:** `gen_server`, `hb_store`  
+**Pattern:** Process wrapper with type-encoded values
+
+This module provides a gen_server wrapper over RocksDB storage, replicating the functionality of the filesystem store module. Values are encoded with prefixes to distinguish between raw data, links, and groups, enabling hierarchical data organization with automatic folder management.
+
+## Dependencies
+
+- **External:** `rocksdb` (Erlang RocksDB bindings)
+- **HyperBEAM:** `hb_store`, `hb_path`
+- **Erlang/OTP:** `gen_server`, `filename`, `filelib`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Configuration
+-spec enabled() -> boolean().
+
+%% Lifecycle Management
+-spec start(Opts) -> {ok, Pid} | {error, Reason}.
+-spec start_link(Opts) -> {ok, Pid} | ignore.
+-spec stop(Opts) -> ok.
+-spec reset(Opts) -> ok.
+-spec scope(Opts) -> local.
+
+%% Core Store Operations
+-spec read(Opts, Key) -> {ok, Value} | not_found | {error, Reason}.
+-spec write(Opts, Key, Value) -> ok | {error, Reason}.
+-spec list(Opts, Path) -> {ok, [Key]} | {error, Reason}.
+-spec type(Opts, Key) -> composite | simple | not_found.
+
+%% Hierarchical Structure
+-spec make_link(Opts, Existing, New) -> ok.
+-spec make_group(Opts, Key) -> ok | {error, already_added}.
+
+%% Path Operations
+-spec path(Opts, Path) -> binary().
+-spec add_path(Opts, Path1, Path2) -> binary().
+-spec resolve(Opts, Path) -> binary().
+
+%% Utilities
+-spec list() -> [{Key, Value}].
+```
+
+---
+
+## Public Functions
+
+### 1. enabled/0
+
+```erlang
+-spec enabled() -> boolean().
+```
+
+**Description:** Check if RocksDB support is compiled in. Returns `true` if the `ENABLE_ROCKSDB` macro is defined, `false` otherwise.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_enabled_test).
+-include_lib("eunit/include/eunit.hrl").
+
+enabled_test() ->
+    % Result depends on compile-time flag
+    Result = hb_store_rocksdb:enabled(),
+    ?assert(is_boolean(Result)).
+```
+
+---
+
+### 2. start/1, start_link/1
+
+```erlang
+-spec start(Opts) -> {ok, Pid} | {error, Reason}
+    when
+        Opts :: #{ <<"store-module">> := hb_store_rocksdb, <<"name">> := binary() },
+        Pid :: pid(),
+        Reason :: term().
+
+-spec start_link(Opts) -> {ok, Pid} | ignore | {error, Reason}
+    when
+        Opts :: map() | [map()],
+        Pid :: pid(),
+        Reason :: term().
+```
+
+**Description:** Start the RocksDB gen_server. Creates database directory if needed and opens RocksDB instance. Only available when `ENABLE_ROCKSDB` is defined.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+start_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-start">>
+    },
+    {ok, Pid} = hb_store_rocksdb:start_link(Opts),
+    ?assert(is_pid(Pid)),
+    ?assert(is_process_alive(Pid)),
+    hb_store_rocksdb:stop(Opts).
+
+start_multiple_times_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-multi">>
+    },
+    {ok, Pid1} = hb_store_rocksdb:start_link(Opts),
+    
+    % Second start should return already_started
+    {error, {already_started, Pid2}} = hb_store_rocksdb:start_link(Opts),
+    ?assertEqual(Pid1, Pid2),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 3. stop/1
+
+```erlang
+-spec stop(Opts) -> ok
+    when
+        Opts :: map().
+```
+
+**Description:** Stop the RocksDB gen_server and close the database.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_stop_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+stop_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-stop">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    ?assertEqual(ok, hb_store_rocksdb:stop(Opts)).
+-endif.
+```
+
+---
+
+### 4. reset/1
+
+```erlang
+-spec reset(Opts) -> ok
+    when
+        Opts :: map().
+```
+
+**Description:** Clear all data from the database. Deletes all key-value pairs.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_reset_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+reset_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-reset">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"test_key">>, <<"test_value">>),
+    ?assertMatch({ok, _}, hb_store_rocksdb:read(Opts, <<"test_key">>)),
+    
+    hb_store_rocksdb:reset(Opts),
+    ?assertEqual(not_found, hb_store_rocksdb:read(Opts, <<"test_key">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 5. scope/1
+
+```erlang
+-spec scope(Opts) -> local
+    when
+        Opts :: map().
+```
+
+**Description:** Return the scope of the store. RocksDB is always local storage.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_scope_test).
+-include_lib("eunit/include/eunit.hrl").
+
+scope_test() ->
+    ?assertEqual(local, hb_store_rocksdb:scope(#{})).
+```
+
+---
+
+### 6. write/3
+
+```erlang
+-spec write(Opts, Key, Value) -> ok | {error, Reason}
+    when
+        Opts :: map(),
+        Key :: binary() | list(),
+        Value :: binary(),
+        Reason :: term().
+```
+
+**Description:** Write a key-value pair to RocksDB. Automatically creates parent directories/groups. Encodes value as raw type.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_write_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+write_basic_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-write">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    ?assertEqual(ok, hb_store_rocksdb:write(Opts, <<"key">>, <<"value">>)),
+    ?assertMatch({ok, <<"value">>}, hb_store_rocksdb:read(Opts, <<"key">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+
+write_auto_creates_folders_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-folders">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"messages/key1">>, <<"val1">>),
+    hb_store_rocksdb:write(Opts, <<"messages/key2">>, <<"val2">>),
+    
+    {ok, Items} = hb_store_rocksdb:list(Opts, <<"messages">>),
+    ?assertEqual([<<"key1">>, <<"key2">>], lists:sort(Items)),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 7. read/2
+
+```erlang
+-spec read(Opts, Key) -> {ok, Value} | not_found | {error, Reason}
+    when
+        Opts :: map(),
+        Key :: binary() | list(),
+        Value :: binary(),
+        Reason :: term().
+```
+
+**Description:** Read a value from RocksDB. Automatically resolves links by following the chain to raw data. Returns `not_found` if key doesn't exist or points to a group.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+read_basic_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-read">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"test_key">>, <<"test_value">>),
+    {ok, Value} = hb_store_rocksdb:read(Opts, <<"test_key">>),
+    ?assertEqual(<<"test_value">>, Value),
+    
+    hb_store_rocksdb:stop(Opts).
+
+read_not_found_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-read-nf">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    ?assertEqual(not_found, hb_store_rocksdb:read(Opts, <<"nonexistent">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+
+read_follows_links_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-read-link">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"test_key2">>, <<"value_under_linked_key">>),
+    hb_store_rocksdb:make_link(Opts, <<"test_key2">>, <<"test_key">>),
+    {ok, Value} = hb_store_rocksdb:read(Opts, <<"test_key">>),
+    ?assertEqual(<<"value_under_linked_key">>, Value),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 8. list/2
+
+```erlang
+-spec list(Opts, Path) -> {ok, [Key]} | {error, Reason}
+    when
+        Opts :: map(),
+        Path :: binary(),
+        Key :: binary(),
+        Reason :: term().
+```
+
+**Description:** List all immediate children under a path. Returns basenames only (not full paths). Automatically resolves links to groups.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+list_basic_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-list">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"messages/key1">>, <<"val1">>),
+    hb_store_rocksdb:write(Opts, <<"messages/key2">>, <<"val2">>),
+    hb_store_rocksdb:write(Opts, <<"other_path/key3">>, <<"val3">>),
+    
+    {ok, Items} = hb_store_rocksdb:list(Opts, <<"messages">>),
+    ?assertEqual([<<"key1">>, <<"key2">>], lists:sort(Items)),
+    
+    hb_store_rocksdb:stop(Opts).
+
+list_empty_database_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-list-empty">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    ?assertEqual({error, not_found}, hb_store_rocksdb:list(Opts, <<"process/slot">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+
+list_nested_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-list-nest">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"messages/ids/item1">>, <<"1">>),
+    hb_store_rocksdb:write(Opts, <<"messages/ids/item2">>, <<"2">>),
+    
+    {ok, TopLevel} = hb_store_rocksdb:list(Opts, <<"messages">>),
+    ?assertEqual([<<"ids">>], TopLevel),
+    
+    {ok, Nested} = hb_store_rocksdb:list(Opts, <<"messages/ids">>),
+    ?assertEqual([<<"item1">>, <<"item2">>], lists:sort(Nested)),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 9. type/2
+
+```erlang
+-spec type(Opts, Key) -> composite | simple | not_found
+    when
+        Opts :: map(),
+        Key :: binary().
+```
+
+**Description:** Determine the type of entry at a key. Returns `composite` for groups, `simple` for raw data, `not_found` if key doesn't exist. Automatically follows links.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+type_simple_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-type-simple">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"simple_item">>, <<"test">>),
+    ?assertEqual(simple, hb_store_rocksdb:type(Opts, <<"simple_item">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+
+type_composite_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-type-comp">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:make_group(Opts, <<"messages_folder">>),
+    ?assertEqual(composite, hb_store_rocksdb:type(Opts, <<"messages_folder">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+
+type_not_found_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-type-nf">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    ?assertEqual(not_found, hb_store_rocksdb:type(Opts, <<"random_key">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+
+type_resolves_links_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-type-link">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"messages/key1">>, <<"val1">>),
+    hb_store_rocksdb:write(Opts, <<"messages/key2">>, <<"val2">>),
+    
+    hb_store_rocksdb:make_link(Opts, <<"messages">>, <<"CompositeKey">>),
+    hb_store_rocksdb:make_link(Opts, <<"messages/key2">>, <<"SimpleKey">>),
+    
+    ?assertEqual(composite, hb_store_rocksdb:type(Opts, <<"CompositeKey">>)),
+    ?assertEqual(simple, hb_store_rocksdb:type(Opts, <<"SimpleKey">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 10. make_group/2
+
+```erlang
+-spec make_group(Opts, Key) -> ok | {error, already_added}
+    when
+        Opts :: map(),
+        Key :: binary().
+```
+
+**Description:** Create a group (directory-like structure) at the specified path. Automatically creates parent directories. Returns `{error, already_added}` if group already exists.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_make_group_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+make_group_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-mkgroup">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    ?assertEqual(ok, hb_store_rocksdb:make_group(Opts, <<"messages">>)),
+    ?assertEqual({ok, []}, hb_store_rocksdb:list(Opts, <<"messages">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+
+make_group_preserves_contents_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-mkgroup-keep">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"messages/id">>, <<"1">>),
+    hb_store_rocksdb:write(Opts, <<"messages/commitments">>, <<"2">>),
+    
+    ?assertEqual(ok, hb_store_rocksdb:make_group(Opts, <<"messages">>)),
+    ?assertEqual(
+        {ok, [<<"commitments">>, <<"id">>]},
+        hb_store_rocksdb:list(Opts, <<"messages">>)
+    ),
+    
+    hb_store_rocksdb:stop(Opts).
+
+make_nested_groups_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-mkgroup-nest">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:make_group(Opts, <<"messages/ids/items">>),
+    
+    ?assertEqual({ok, [<<"ids">>]}, hb_store_rocksdb:list(Opts, <<"messages">>)),
+    ?assertEqual({ok, [<<"items">>]}, hb_store_rocksdb:list(Opts, <<"messages/ids">>)),
+    ?assertEqual({ok, []}, hb_store_rocksdb:list(Opts, <<"messages/ids/items">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 11. make_link/3
+
+```erlang
+-spec make_link(Opts, Existing, New) -> ok
+    when
+        Opts :: map(),
+        Existing :: binary(),
+        New :: binary().
+```
+
+**Description:** Create a symbolic link from New to Existing. If New already exists, does nothing. Returns `ok` if New and Existing are identical.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_make_link_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+make_link_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-mklink">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"key1">>, <<"test_value">>),
+    hb_store_rocksdb:make_link(Opts, <<"key1">>, <<"key2">>),
+    
+    {ok, Value} = hb_store_rocksdb:read(Opts, <<"key2">>),
+    ?assertEqual(<<"test_value">>, Value),
+    
+    hb_store_rocksdb:stop(Opts).
+
+make_link_same_key_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-mklink-same">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:make_link(Opts, <<"key1">>, <<"key1">>),
+    ?assertEqual(not_found, hb_store_rocksdb:read(Opts, <<"key1">>)),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 12. resolve/2
+
+```erlang
+-spec resolve(Opts, Path) -> binary()
+    when
+        Opts :: map(),
+        Path :: binary() | list().
+```
+
+**Description:** Resolve a path by following links in all path segments except the final one. Returns the fully resolved path.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+resolve_basic_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-resolve">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"top_level/level1/item3">>, <<"1">>),
+    
+    Resolved = hb_store_rocksdb:resolve(Opts, <<"top_level/level1/item3">>),
+    ?assertEqual(<<"top_level/level1/item3">>, Resolved),
+    
+    hb_store_rocksdb:stop(Opts).
+
+resolve_with_links_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-resolve-link">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"data/the_data_item">>, <<"the_data">>),
+    hb_store_rocksdb:make_link(Opts, <<"data/the_data_item">>, <<"top_level/level1/item">>),
+    
+    Resolved = hb_store_rocksdb:resolve(Opts, <<"top_level/level1/item">>),
+    ?assertEqual(<<"data/the_data_item">>, Resolved),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+### 13. path/2
+
+```erlang
+-spec path(Opts, Path) -> binary()
+    when
+        Opts :: map(),
+        Path :: binary() | list().
+```
+
+**Description:** Convert path to canonical form using `hb_store:path/1`.
+
+---
+
+### 14. add_path/3
+
+```erlang
+-spec add_path(Opts, Path1, Path2) -> binary()
+    when
+        Opts :: map(),
+        Path1 :: binary(),
+        Path2 :: binary().
+```
+
+**Description:** Concatenate two paths together (simple concatenation, no "/" added).
+
+---
+
+### 15. list/0
+
+```erlang
+-spec list() -> [{Key, Value}]
+    when
+        Key :: binary(),
+        Value :: term().
+```
+
+**Description:** List all key-value pairs in the database. For debugging/testing only - performs full database traversal.
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_list_all_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-ifdef(ENABLE_ROCKSDB).
+list_all_test() ->
+    Opts = #{
+        <<"store-module">> => hb_store_rocksdb,
+        <<"name">> => <<"cache-TEST/rocksdb-list-all">>
+    },
+    {ok, _} = hb_store_rocksdb:start_link(Opts),
+    
+    hb_store_rocksdb:write(Opts, <<"key1">>, <<"val1">>),
+    hb_store_rocksdb:write(Opts, <<"key2">>, <<"val2">>),
+    
+    AllItems = hb_store_rocksdb:list(),
+    ?assert(length(AllItems) >= 2),
+    
+    hb_store_rocksdb:stop(Opts).
+-endif.
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Initialize RocksDB store
+Opts = #{
+    <<"store-module">> => hb_store_rocksdb,
+    <<"name">> => <<"cache-mainnet/rocksdb">>
+},
+{ok, _Pid} = hb_store_rocksdb:start_link(Opts).
+
+%% Basic write and read
+hb_store_rocksdb:write(Opts, <<"key">>, <<"value">>),
+{ok, Value} = hb_store_rocksdb:read(Opts, <<"key">>).
+
+%% Hierarchical data with automatic folder creation
+hb_store_rocksdb:write(Opts, <<"messages/msg1">>, <<"data1">>),
+hb_store_rocksdb:write(Opts, <<"messages/msg2">>, <<"data2">>),
+{ok, Children} = hb_store_rocksdb:list(Opts, <<"messages">>).
+
+%% Explicit group creation
+hb_store_rocksdb:make_group(Opts, <<"users">>),
+hb_store_rocksdb:write(Opts, <<"users/alice">>, <<"Alice's data">>),
+{ok, Users} = hb_store_rocksdb:list(Opts, <<"users">>).
+
+%% Symbolic links for data deduplication
+hb_store_rocksdb:write(Opts, <<"data/hash123">>, <<"actual_data">>),
+hb_store_rocksdb:make_link(Opts, <<"data/hash123">>, <<"messages/msg1/body">>),
+{ok, Data} = hb_store_rocksdb:read(Opts, <<"messages/msg1/body">>).
+
+%% Deep nested structures
+hb_store_rocksdb:write(Opts, <<"root/level1/level2/item">>, <<"value">>),
+{ok, Level1Children} = hb_store_rocksdb:list(Opts, <<"root/level1">>),
+?assertEqual([<<"level2">>], Level1Children).
+
+%% Type checking before operations
+case hb_store_rocksdb:type(Opts, <<"path">>) of
+    composite -> 
+        {ok, Children} = hb_store_rocksdb:list(Opts, <<"path">>);
+    simple -> 
+        {ok, Value} = hb_store_rocksdb:read(Opts, <<"path">>);
+    not_found -> 
+        not_found
+end.
+
+%% Cleanup
+hb_store_rocksdb:stop(Opts).
+```
+
+---
+
+## Value Encoding
+
+### Encoding Scheme
+
+Values are prefixed to distinguish types:
+
+```erlang
+% Raw data (prefix: <<0>>)
+encode_value(raw, <<"data">>) -> <<0, "data">>.
+
+% Link (prefix: <<1>>)
+encode_value(link, <<"target/path">>) -> <<1, "target/path">>.
+
+% Group (prefix: <<2>>, followed by erlang:term_to_binary)
+encode_value(group, Sets) -> <<2, (term_to_binary(Sets))/binary>>.
+```
+
+### Decoding
+
+```erlang
+decode_value(<<0, Data/binary>>) -> {raw, Data}.
+decode_value(<<1, Link/binary>>) -> {link, Link}.
+decode_value(<<2, Encoded/binary>>) -> {group, binary_to_term(Encoded)}.
+```
+
+---
+
+## Group Management
+
+### Group Structure
+
+Groups store a set of child names:
+```erlang
+% Writing "messages/key1" creates:
+Key: <<"messages">>
+Value: encode_value(group, sets:from_list([<<"key1">>]))
+
+% Adding "messages/key2" updates:
+Key: <<"messages">>
+Value: encode_value(group, sets:from_list([<<"key1">>, <<"key2">>]))
+```
+
+### Automatic Folder Creation
+
+```erlang
+% Writing to nested path:
+write(Opts, <<"a/b/c/item">>, <<"value">>)
+
+% Automatically creates:
+<<"a">> → group([<<"b">>])
+<<"a/b">> → group([<<"c">>])
+<<"a/b/c">> → group([<<"item">>])
+<<"a/b/c/item">> → raw(<<"value">>)
+```
+
+---
+
+## Link Resolution
+
+### Read with Link Resolution
+
+```erlang
+% Store contains:
+<<"link">> → link(<<"target">>)
+<<"target">> → raw(<<"data">>)
+
+% Read follows chain:
+read(Opts, <<"link">>)
+  → sees link type
+  → recursively reads <<"target">>
+  → returns {ok, <<"data">>}
+```
+
+### Resolve Path Segments
+
+```erlang
+% Store contains:
+<<"dir1">> → link(<<"actual_dir">>)
+<<"actual_dir/file">> → raw(<<"content">>)
+
+% Resolve follows links in path:
+resolve(Opts, <<"dir1/file">>)
+  → resolves <<"dir1">> to <<"actual_dir">>
+  → returns <<"actual_dir/file">>
+```
+
+---
+
+## Gen Server Callbacks
+
+### State Structure
+
+```erlang
+#{
+    db_handle => reference(),  % RocksDB handle
+    dir => string()            % Database directory
+}
+```
+
+### Handle Call Operations
+
+- `{read, Key}` - Read operation
+- `{write, Key, Value}` - Write operation
+- `{make_group, Key}` - Create group
+- `list` - List all items
+- `reset` - Clear database
+
+---
+
+## Configuration
+
+### Compile-Time Flag
+
+RocksDB support must be enabled at compile time:
+```bash
+# Enable RocksDB
+ENABLE_ROCKSDB=1 rebar3 compile
+
+# Module will export actual implementations
+
+# Disable RocksDB (default)
+rebar3 compile
+
+# Module exports stub functions that return ignore
+```
+
+### Database Options
+
+RocksDB opens with default options. Custom options not currently supported.
+
+---
+
+## Performance Considerations
+
+### Write Performance
+
+- Direct writes to RocksDB (no batching)
+- Automatic folder creation has overhead
+- Deep nesting requires multiple writes
+
+### Read Performance
+
+- Link resolution adds overhead
+- Groups require deserialization
+- Prefix scans for listing
+
+### Full Database Scan
+
+`list/0` function is expensive:
+- Iterates entire database
+- Only for debugging/testing
+- Avoid in production
+
+---
+
+## Error Handling
+
+### Database Errors
+
+```erlang
+case hb_store_rocksdb:read(Opts, Key) of
+    {ok, Value} -> process(Value);
+    not_found -> handle_missing();
+    {error, {corruption, Reason}} -> handle_corruption(Reason);
+    {error, Reason} -> handle_error(Reason)
+end.
+```
+
+### Initialization Errors
+
+```erlang
+case hb_store_rocksdb:start_link(Opts) of
+    {ok, Pid} -> {ok, Pid};
+    {error, Reason} -> handle_start_error(Reason);
+    ignore -> % RocksDB not enabled
+        use_alternative_store()
+end.
+```
+
+---
+
+## References
+
+- **RocksDB** - http://rocksdb.org/
+- **erlang-rocksdb** - Erlang bindings for RocksDB
+- **hb_store** - HyperBEAM store interface
+- **gen_server** - OTP generic server behavior
+
+---
+
+## Notes
+
+1. **Compile-Time Flag**: Requires `ENABLE_ROCKSDB` to be defined
+2. **Single Instance**: Registered as `hb_store_rocksdb` module name
+3. **Type Encoding**: Uses prefix bytes to distinguish value types
+4. **Automatic Folders**: Writes create parent directories automatically
+5. **Group Sets**: Groups use Erlang sets for child tracking
+6. **Link Resolution**: Automatic and recursive in read operations
+7. **Path Resolution**: Links resolved in all path segments except final
+8. **No Batching**: Each write is immediate (no transaction batching)
+9. **Directory Persistence**: Creates database directory if needed
+10. **Full Scan**: `list/0` is for debugging only, not production use

@@ -1,0 +1,667 @@
+# hb_private.erl - Private Message State Management
+
+## Overview
+
+**Purpose:** Manage private message elements for non-serialized state and temporary data  
+**Module:** `hb_private`  
+**Pattern:** AO-Core path resolution on private message fields
+
+This module provides utilities for managing the private (`priv`) element of messages. Private fields store state that is excluded from serialization and public APIs, making them useful for caching, temporary data, and internal device state. Private elements can be accessed using AO-Core path resolution.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_util`, `hb_maps`, `hb_opts`, `hb_path`, `hb_store`, `hb_cache`
+- **Erlang/OTP:** None
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Private Field Access
+-spec from_message(Msg) -> PrivMap.
+-spec is_private(Key) -> boolean().
+
+%% Get/Set Operations
+-spec get(Key, Msg, Opts) -> Value.
+-spec get(Key, Msg, Default, Opts) -> Value.
+-spec set(Msg, Key, Value, Opts) -> UpdatedMsg.
+-spec set(Msg, PrivMap, Opts) -> UpdatedMsg.
+-spec set_priv(Msg, PrivMap) -> UpdatedMsg.
+
+%% Merging
+-spec merge(Msg1, Msg2, Opts) -> MergedMsg.
+
+%% Options Management
+-spec opts(Opts) -> PrivateOpts.
+
+%% Privacy Protection
+-spec reset(Term) -> CleanedTerm.
+```
+
+---
+
+## Public Functions
+
+### 1. from_message/1
+
+```erlang
+-spec from_message(Msg) -> PrivMap
+    when
+        Msg :: map(),
+        PrivMap :: map().
+```
+
+**Description:** Extract the private element from a message. Returns empty map if no private data exists. Supports both atom and binary `priv` keys.
+
+**Test Code:**
+```erlang
+-module(hb_private_from_message_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_message_exists_test() ->
+    Msg = #{<<"priv">> => #{<<"key">> => <<"value">>}},
+    Priv = hb_private:from_message(Msg),
+    ?assertEqual(#{<<"key">> => <<"value">>}, Priv).
+
+from_message_missing_test() ->
+    Msg = #{<<"data">> => <<"value">>},
+    Priv = hb_private:from_message(Msg),
+    ?assertEqual(#{}, Priv).
+
+from_message_atom_key_test() ->
+    Msg = #{priv => #{data => <<"value">>}},
+    Priv = hb_private:from_message(Msg),
+    ?assertEqual(#{data => <<"value">>}, Priv).
+
+from_message_non_map_test() ->
+    Priv = hb_private:from_message(<<"binary">>),
+    ?assertEqual(#{}, Priv).
+```
+
+---
+
+### 2. is_private/1
+
+```erlang
+-spec is_private(Key) -> boolean()
+    when
+        Key :: term().
+```
+
+**Description:** Check if a key is a private field specifier (starts with `priv`). Used to filter out private data.
+
+**Test Code:**
+```erlang
+-module(hb_private_is_private_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_private_binary_test() ->
+    ?assert(hb_private:is_private(<<"priv">>)),
+    ?assert(hb_private:is_private(<<"priv-data">>)),
+    ?assert(hb_private:is_private(<<"private">>)),
+    ?assertNot(hb_private:is_private(<<"data">>)),
+    ?assertNot(hb_private:is_private(<<"public">>)).
+
+is_private_atom_test() ->
+    ?assert(hb_private:is_private(priv)),
+    ?assert(hb_private:is_private(private)),
+    ?assertNot(hb_private:is_private(public)).
+
+is_private_non_binary_test() ->
+    ?assertNot(hb_private:is_private(123)),
+    ?assertNot(hb_private:is_private(#{})).
+```
+
+---
+
+### 3. get/3, get/4
+
+```erlang
+-spec get(Key, Msg, Opts) -> Value | not_found
+    when
+        Key :: binary() | list(),
+        Msg :: map(),
+        Opts :: map(),
+        Value :: term().
+
+-spec get(Key, Msg, Default, Opts) -> Value
+    when
+        Key :: binary() | list(),
+        Msg :: map(),
+        Default :: term(),
+        Opts :: map(),
+        Value :: term().
+```
+
+**Description:** Retrieve value from private element using path resolution. Automatically removes `priv` prefix from path if present.
+
+**Test Code:**
+```erlang
+-module(hb_private_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_simple_test() ->
+    Msg = #{<<"priv">> => #{<<"key">> => <<"value">>}},
+    ?assertEqual(<<"value">>, hb_private:get(<<"key">>, Msg, #{})).
+
+get_not_found_test() ->
+    Msg = #{<<"priv">> => #{<<"key">> => <<"value">>}},
+    ?assertEqual(not_found, hb_private:get(<<"missing">>, Msg, #{})).
+
+get_with_default_test() ->
+    Msg = #{<<"priv">> => #{<<"key">> => <<"value">>}},
+    ?assertEqual(<<"default">>, hb_private:get(<<"missing">>, Msg, <<"default">>, #{})).
+
+get_deep_path_test() ->
+    Msg = #{<<"priv">> => #{<<"a">> => #{<<"b">> => #{<<"c">> => 3}}}},
+    ?assertEqual(3, hb_private:get(<<"a/b/c">>, Msg, #{})).
+
+get_removes_priv_prefix_test() ->
+    Msg = #{<<"priv">> => #{<<"key">> => <<"value">>}},
+    % Both should return same result
+    ?assertEqual(<<"value">>, hb_private:get(<<"key">>, Msg, #{})),
+    ?assertEqual(<<"value">>, hb_private:get(<<"priv/key">>, Msg, #{})).
+```
+
+---
+
+### 4. set/3, set/4
+
+```erlang
+-spec set(Msg, Key, Value, Opts) -> UpdatedMsg
+    when
+        Msg :: map(),
+        Key :: binary() | list(),
+        Value :: term(),
+        Opts :: map(),
+        UpdatedMsg :: map().
+
+-spec set(Msg, PrivMap, Opts) -> UpdatedMsg
+    when
+        Msg :: map(),
+        PrivMap :: map(),
+        Opts :: map(),
+        UpdatedMsg :: map().
+```
+
+**Description:** Set values in the private element. The 4-arity version sets a single key-value pair using path resolution. The 3-arity version deep merges a map into the private element.
+
+**Test Code:**
+```erlang
+-module(hb_private_set_test).
+-include_lib("eunit/include/eunit.hrl").
+
+set_simple_test() ->
+    Msg = #{<<"data">> => <<"public">>},
+    Updated = hb_private:set(Msg, <<"key">>, <<"value">>, #{}),
+    ?assertEqual(#{<<"data">> => <<"public">>, <<"priv">> => #{<<"key">> => <<"value">>}}, Updated).
+
+set_overwrites_test() ->
+    Msg = #{<<"priv">> => #{<<"key">> => <<"old">>}},
+    Updated = hb_private:set(Msg, <<"key">>, <<"new">>, #{}),
+    ?assertEqual(<<"new">>, maps:get(<<"key">>, maps:get(<<"priv">>, Updated))).
+
+set_deep_path_test() ->
+    Msg = #{},
+    Updated = hb_private:set(Msg, <<"a/b/c">>, 123, #{}),
+    Priv = hb_private:from_message(Updated),
+    ?assertEqual(123, hb_util:deep_get([<<"a">>, <<"b">>, <<"c">>], Priv, #{})).
+
+set_map_merge_test() ->
+    Msg = #{<<"priv">> => #{<<"existing">> => <<"data">>}},
+    NewPriv = #{<<"new">> => #{<<"nested">> => <<"value">>}},
+    Updated = hb_private:set(Msg, NewPriv, #{}),
+    Priv = hb_private:from_message(Updated),
+    ?assertEqual(<<"data">>, maps:get(<<"existing">>, Priv)),
+    ?assertMatch(#{<<"nested">> := <<"value">>}, maps:get(<<"new">>, Priv)).
+```
+
+---
+
+### 5. set_priv/2
+
+```erlang
+-spec set_priv(Msg, PrivMap) -> UpdatedMsg
+    when
+        Msg :: map(),
+        PrivMap :: map(),
+        UpdatedMsg :: map().
+```
+
+**Description:** Replace the entire private element of a message. Optimized to avoid storing empty maps.
+
+**Test Code:**
+```erlang
+-module(hb_private_set_priv_test).
+-include_lib("eunit/include/eunit.hrl").
+
+set_priv_basic_test() ->
+    Msg = #{<<"data">> => <<"public">>},
+    Priv = #{<<"key">> => <<"value">>},
+    Updated = hb_private:set_priv(Msg, Priv),
+    ?assertEqual(#{<<"data">> => <<"public">>, <<"priv">> => Priv}, Updated).
+
+set_priv_empty_test() ->
+    Msg = #{<<"data">> => <<"public">>},
+    Updated = hb_private:set_priv(Msg, #{}),
+    % Empty priv should not be stored
+    ?assertNot(maps:is_key(<<"priv">>, Updated)).
+
+set_priv_replaces_test() ->
+    Msg = #{<<"priv">> => #{<<"old">> => <<"data">>}},
+    Updated = hb_private:set_priv(Msg, #{<<"new">> => <<"data">>}),
+    Priv = hb_private:from_message(Updated),
+    ?assertNot(maps:is_key(<<"old">>, Priv)),
+    ?assertEqual(<<"data">>, maps:get(<<"new">>, Priv)).
+```
+
+---
+
+### 6. merge/3
+
+```erlang
+-spec merge(Msg1, Msg2, Opts) -> MergedMsg
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        MergedMsg :: map().
+```
+
+**Description:** Merge private elements from two messages. Msg2's private keys override Msg1's. Base message (Msg1) keys are preserved.
+
+**Test Code:**
+```erlang
+-module(hb_private_merge_test).
+-include_lib("eunit/include/eunit.hrl").
+
+merge_basic_test() ->
+    Msg1 = #{<<"data">> => <<"msg1">>, <<"priv">> => #{<<"a">> => 1}},
+    Msg2 = #{<<"priv">> => #{<<"b">> => 2}},
+    Merged = hb_private:merge(Msg1, Msg2, #{}),
+    ?assertEqual(<<"msg1">>, maps:get(<<"data">>, Merged)),
+    Priv = hb_private:from_message(Merged),
+    ?assertEqual(1, maps:get(<<"a">>, Priv)),
+    ?assertEqual(2, maps:get(<<"b">>, Priv)).
+
+merge_override_test() ->
+    Msg1 = #{<<"priv">> => #{<<"key">> => <<"old">>}},
+    Msg2 = #{<<"priv">> => #{<<"key">> => <<"new">>}},
+    Merged = hb_private:merge(Msg1, Msg2, #{}),
+    Priv = hb_private:from_message(Merged),
+    ?assertEqual(<<"new">>, maps:get(<<"key">>, Priv)).
+
+merge_deep_test() ->
+    Msg1 = #{<<"priv">> => #{<<"nested">> => #{<<"a">> => 1, <<"b">> => 2}}},
+    Msg2 = #{<<"priv">> => #{<<"nested">> => #{<<"b">> => 3, <<"c">> => 4}}},
+    Merged = hb_private:merge(Msg1, Msg2, #{}),
+    Priv = hb_private:from_message(Merged),
+    Nested = maps:get(<<"nested">>, Priv),
+    ?assertEqual(1, maps:get(<<"a">>, Nested)),
+    ?assertEqual(3, maps:get(<<"b">>, Nested)),
+    ?assertEqual(4, maps:get(<<"c">>, Nested)).
+```
+
+---
+
+### 7. opts/1
+
+```erlang
+-spec opts(Opts) -> PrivateOpts
+    when
+        Opts :: map(),
+        PrivateOpts :: map().
+```
+
+**Description:** Create options map for private element operations. Adds `priv_store` to store list, disables HashPath tracking, and sets no-cache headers.
+
+**Features:**
+- Combines `priv_store` and `store` settings
+- Sets `hashpath => ignore`
+- Sets `cache_control => [<<"no-cache">>, <<"no-store">>]`
+- Ensures private data isn't inadvertently persisted
+
+**Test Code:**
+```erlang
+-module(hb_private_opts_test).
+-include_lib("eunit/include/eunit.hrl").
+
+opts_basic_test() ->
+    Opts = #{store => [#{name => <<"public">>}]},
+    PrivOpts = hb_private:opts(Opts),
+    ?assertEqual(ignore, maps:get(hashpath, PrivOpts)),
+    ?assertEqual([<<"no-cache">>, <<"no-store">>], maps:get(cache_control, PrivOpts)).
+
+opts_priv_store_test() ->
+    PrivStore = #{name => <<"private">>},
+    Opts = #{
+        priv_store => PrivStore,
+        store => [#{name => <<"public">>}]
+    },
+    PrivOpts = hb_private:opts(Opts),
+    Store = maps:get(store, PrivOpts),
+    ?assertEqual(2, length(Store)),
+    ?assertEqual(PrivStore, lists:nth(1, Store)).
+
+opts_no_priv_store_test() ->
+    Opts = #{store => [#{name => <<"public">>}]},
+    PrivOpts = hb_private:opts(Opts),
+    Store = maps:get(store, PrivOpts),
+    ?assertEqual(1, length(Store)).
+```
+
+---
+
+### 8. reset/1
+
+```erlang
+-spec reset(Term) -> CleanedTerm
+    when
+        Term :: term(),
+        CleanedTerm :: term().
+```
+
+**Description:** Recursively remove all private keys from any Erlang term. Works on maps, lists, and tuples. Ensures private data can never leak through serialization.
+
+**Test Code:**
+```erlang
+-module(hb_private_reset_test).
+-include_lib("eunit/include/eunit.hrl").
+
+reset_map_test() ->
+    Msg = #{
+        <<"data">> => <<"public">>,
+        <<"priv">> => #{<<"secret">> => <<"hidden">>}
+    },
+    Cleaned = hb_private:reset(Msg),
+    ?assertEqual(#{<<"data">> => <<"public">>}, Cleaned).
+
+reset_nested_map_test() ->
+    Msg = #{
+        <<"outer">> => #{
+            <<"inner">> => <<"value">>,
+            <<"priv">> => <<"hidden">>
+        }
+    },
+    Cleaned = hb_private:reset(Msg),
+    ?assertEqual(#{<<"outer">> => #{<<"inner">> => <<"value">>}}, Cleaned).
+
+reset_list_test() ->
+    List = [
+        <<"public">>,
+        #{<<"priv">> => <<"hidden">>},
+        <<"more public">>
+    ],
+    Cleaned = hb_private:reset(List),
+    ?assertEqual([<<"public">>, #{}, <<"more public">>], Cleaned).
+
+reset_list_with_priv_test() ->
+    List = [<<"priv">>, <<"data">>],
+    Cleaned = hb_private:reset(List),
+    ?assertEqual([], Cleaned).
+
+reset_tuple_test() ->
+    Tuple = {<<"data">>, #{<<"priv">> => <<"hidden">>}},
+    Cleaned = hb_private:reset(Tuple),
+    ?assertEqual({<<"data">>, #{}}, Cleaned).
+
+reset_preserves_non_map_test() ->
+    ?assertEqual(<<"binary">>, hb_private:reset(<<"binary">>)),
+    ?assertEqual(123, hb_private:reset(123)),
+    ?assertEqual(atom, hb_private:reset(atom)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Store temporary cache data
+Msg1 = #{<<"device">> => <<"Process@1.0">>},
+CachedState = #{<<"counter">> => 42},
+Msg2 = hb_private:set(Msg1, <<"cache">>, CachedState, #{}),
+
+%% Retrieve cached data
+case hb_private:get(<<"cache">>, Msg2, #{}) of
+    not_found -> compute_state();
+    Cache -> Cache
+end.
+
+%% Deep path storage
+Msg = hb_private:set(#{}, <<"device/state/counter">>, 42, #{}),
+Counter = hb_private:get(<<"device/state/counter">>, Msg, #{}),
+% Counter = 42
+
+%% Merge execution state
+Msg1 = #{<<"priv">> => #{<<"execution">> => #{<<"step">> => 1}}},
+Msg2 = #{<<"priv">> => #{<<"execution">> => #{<<"result">> => <<"ok">>}}},
+Merged = hb_private:merge(Msg1, Msg2, #{}),
+% Priv = #{<<"execution">> => #{<<"step">> => 1, <<"result">> => <<"ok">>}}
+
+%% Clean message for serialization
+DirtyMsg = #{
+    <<"data">> => <<"public">>,
+    <<"priv">> => #{<<"internal">> => <<"state">>}
+},
+CleanMsg = hb_private:reset(DirtyMsg),
+% CleanMsg = #{<<"data">> => <<"public">>}
+
+%% Use private store for device state
+Opts = #{
+    store => [PublicStore],
+    priv_store => [PrivateStore]
+},
+PrivOpts = hb_private:opts(Opts),
+% Reads from both stores, writes to private store only
+{ok, Data} = hb_store:read(maps:get(store, PrivOpts), Key).
+
+%% Check if key is private before processing
+case hb_private:is_private(Key) of
+    true -> skip;
+    false -> process(Key)
+end.
+```
+
+---
+
+## Private Store Configuration
+
+### Store Priority
+
+```erlang
+Opts = #{
+    store => [PublicLMDB, PublicFS],
+    priv_store => [PrivateLMDB]
+},
+
+PrivOpts = hb_private:opts(Opts),
+% Store order: [PrivateLMDB, PublicLMDB, PublicFS]
+% Reads check all stores in order
+% Writes go to first writable store (PrivateLMDB)
+```
+
+### Use Cases
+
+1. **Temporary State:** Data that doesn't need persistence
+2. **Cache Entries:** Computed values that can be regenerated
+3. **Device State:** Internal state for device execution
+4. **Execution Context:** Step-by-step execution tracking
+5. **Debug Information:** Diagnostic data not for public consumption
+
+---
+
+## AO-Core Integration
+
+### Private Path Resolution
+
+```erlang
+% Private elements can be accessed via AO-Core
+Msg = #{
+    <<"data">> => <<"public">>,
+    <<"priv">> => #{
+        <<"device">> => #{
+            <<"state">> => #{
+                <<"counter">> => 42
+            }
+        }
+    }
+},
+
+% Access via hb_private:get
+Counter = hb_private:get(<<"device/state/counter">>, Msg, #{}),
+% Counter = 42
+
+% Note: Direct AO-Core resolution on priv paths is blocked
+{error, _} = hb_ao:resolve(Msg, <<"priv/device/state/counter">>, #{}).
+```
+
+### Private Devices
+
+```erlang
+% Store a private device in the message
+DeviceCode = #{<<"execute">> => fun(Msg, Opts) -> {ok, <<"result">>} end},
+Msg = hb_private:set(#{}, <<"my-device">>, DeviceCode, #{}),
+
+% Use the private device
+Device = hb_private:get(<<"my-device">>, Msg, #{}),
+{ok, Result} = maps:get(<<"execute">>, Device)(Msg, #{}).
+```
+
+---
+
+## HashPath and Caching Behavior
+
+### HashPath Ignore
+
+Private operations set `hashpath => ignore` to prevent tracking:
+
+```erlang
+% Normal message
+Msg1 = #{<<"data">> => <<"public">>},
+Msg2 = #{<<"action">> => <<"update">>},
+{ok, Msg3} = hb_ao:resolve(Msg1, Msg2, #{}),
+% Msg3 has hashpath tracking Msg1 + Msg2
+
+% Private operations
+PrivOpts = hb_private:opts(#{}),
+% hashpath => ignore
+% No hashpath tracking in private operations
+```
+
+### Cache Control
+
+Private operations set `no-cache` and `no-store`:
+
+```erlang
+PrivOpts = hb_private:opts(#{}),
+% cache_control => [<<"no-cache">>, <<"no-store">>]
+
+% This prevents:
+% 1. Cache lookups of intermediate results
+% 2. Cache writes of private computations
+% 3. Accidental persistence of private data
+```
+
+---
+
+## Security Considerations
+
+### Never Store Sensitive Data Persistently
+
+```erlang
+% ❌ BAD - Private wallet in persistent message
+Msg = #{
+    <<"priv">> => #{<<"wallet">> => MyPrivateKey}
+},
+hb_cache:write(Msg, Opts),  % Private key persisted!
+
+% ✓ GOOD - Use only in memory
+Msg = #{
+    <<"priv">> => #{<<"wallet">> => MyPrivateKey}
+},
+% Don't write to cache, use only during execution
+```
+
+### Always Reset Before Serialization
+
+```erlang
+% ❌ BAD - Serializing with private data
+Msg = #{<<"data">> => <<"public">>, <<"priv">> => #{<<"secret">> => <<"key">>}},
+Binary = hb_message:serialize(Msg),  % Secret leaked!
+
+% ✓ GOOD - Clean before serialization
+Msg = #{<<"data">> => <<"public">>, <<"priv">> => #{<<"secret">> => <<"key">>}},
+CleanMsg = hb_private:reset(Msg),
+Binary = hb_message:serialize(CleanMsg),  % Safe
+```
+
+### Check Keys Before Processing
+
+```erlang
+% ✓ GOOD - Filter private keys
+PublicKeys = lists:filter(
+    fun(Key) -> not hb_private:is_private(Key) end,
+    maps:keys(Msg)
+),
+```
+
+---
+
+## Performance Optimization
+
+### Caching Expensive Computations
+
+```erlang
+compute_expensive(Msg, Opts) ->
+    case hb_private:get(<<"cache/result">>, Msg, Opts) of
+        not_found ->
+            % Compute
+            Result = expensive_operation(),
+            % Cache in private
+            UpdatedMsg = hb_private:set(Msg, <<"cache/result">>, Result, Opts),
+            {ok, UpdatedMsg};
+        CachedResult ->
+            % Return cached
+            {ok, Msg}  % Already has cached result
+    end.
+```
+
+### State Persistence Across Calls
+
+```erlang
+% Worker maintains state in private element
+worker_loop(Msg, Opts) ->
+    State = hb_private:get(<<"state">>, Msg, #{counter => 0}, Opts),
+    NewCounter = maps:get(counter, State) + 1,
+    NewState = State#{counter => NewCounter},
+    UpdatedMsg = hb_private:set(Msg, <<"state">>, NewState, Opts),
+    % State preserved in private element
+    worker_loop(UpdatedMsg, Opts).
+```
+
+---
+
+## References
+
+- **AO-Core Protocol** - `hb_ao.erl`
+- **Path Resolution** - `hb_path.erl`
+- **Deep Operations** - `hb_util.erl`
+- **Storage System** - `hb_store.erl`, `hb_cache.erl`
+- **Configuration** - `hb_opts.erl`
+
+---
+
+## Notes
+
+1. **Non-Serialized:** Private elements excluded from message serialization
+2. **Non-Deterministic Safe:** Can store non-deterministic data safely
+3. **Path Resolution:** Supports AO-Core path syntax for access
+4. **Prefix Removal:** Automatically removes `priv/` prefix from paths
+5. **Deep Merge:** `set/3` performs deep merge, not shallow replace
+6. **Empty Optimization:** Empty private maps not stored to reduce memory
+7. **Security:** Always use `reset/1` before serialization to remove secrets
+8. **Caching:** Private operations set no-cache to prevent persistence
+9. **HashPath:** Private operations ignore HashPath tracking
+10. **Store Priority:** Private store checked before public stores

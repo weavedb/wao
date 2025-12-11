@@ -1,0 +1,660 @@
+# dev_json_iface.erl - WASM-HyperBEAM JSON Interface
+
+## Overview
+
+**Purpose:** JSON-based interface for WASM execution to interact with HyperBEAM/AO systems  
+**Module:** `dev_json_iface`  
+**Pattern:** Two-pass execution with JSON serialization/deserialization  
+**Integration:** WASM environment, process execution, message handling
+
+This device provides a bridge between WASM execution environments and HyperBEAM, using JSON as the shared data representation. It handles the conversion of messages and processes to/from JSON format, enabling WASM modules to interact with the AO ecosystem.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_message`, `hb_json`, `hb_util`, `hb_cache`, `hb_private`, `hb_maps`
+- **Device Layer:** `dev_stack`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lifecycle
+-spec init(M1, M2, Opts) -> {ok, Msg}.
+
+%% Computation
+-spec compute(M1, M2, Opts) -> {ok, MsgWithResults}.
+
+%% Message Conversion
+-spec message_to_json_struct(Msg, Opts) -> JSONStruct.
+-spec message_to_json_struct(Msg, Features, Opts) -> JSONStruct.
+-spec json_to_message(JSON, Opts) -> {ok, Message}.
+
+%% Test Helpers
+-spec generate_stack(File) -> Stack.
+-spec generate_stack(File, Mode) -> Stack.
+-spec generate_stack(File, Mode, Opts) -> Stack.
+-spec generate_aos_msg(ProcID, Code) -> Message.
+```
+
+---
+
+## Public Functions
+
+### 1. init/3
+
+```erlang
+-spec init(M1, M2, Opts) -> {ok, Msg}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        Msg :: map().
+```
+
+**Description:** Initialize the JSON interface device by setting the handler function.
+
+**Test Code:**
+```erlang
+-module(dev_json_iface_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_test() ->
+    M1 = #{},
+    {ok, Result} = dev_json_iface:init(M1, #{}, #{}),
+    ?assertEqual(<<"handle">>, maps:get(<<"function">>, Result)).
+```
+
+---
+
+### 2. compute/3
+
+```erlang
+-spec compute(M1, M2, Opts) -> {ok, MsgWithResults}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        MsgWithResults :: map().
+```
+
+**Description:** Execute computation in two passes: prepare WASM environment (pass 1) and read results (pass 2).
+
+**Pass 1: Preparation**
+- Load process and message
+- Convert to JSON format
+- Write to WASM environment
+- Set up function call parameters
+
+**Pass 2: Results**
+- Read output from WASM environment
+- Parse JSON results
+- Extract outbox messages and data
+- Return structured results
+
+**Test Code:**
+```erlang
+-module(dev_json_iface_compute_test).
+-include_lib("eunit/include/eunit.hrl").
+
+compute_pass1_test() ->
+    M1 = #{
+        <<"pass">> => 1,
+        <<"process">> => #{<<"id">> => <<"proc-123">>}
+    },
+    M2 = #{
+        <<"body">> => #{<<"action">> => <<"test">>},
+        <<"block-height">> => 1000
+    },
+    meck:new(hb_cache, [passthrough]),
+    meck:expect(hb_cache, ensure_all_loaded, fun(M, _) -> M end),
+    {ok, Result} = dev_json_iface:compute(M1, M2, #{}),
+    ?assertEqual(<<"handle">>, maps:get(<<"function">>, Result)),
+    ?assert(maps:is_key(<<"parameters">>, Result)),
+    meck:unload(hb_cache).
+
+compute_pass2_test() ->
+    M1 = #{
+        <<"pass">> => 2,
+        <<"process">> => #{<<"id">> => <<"proc-123">>}
+    },
+    M2 = #{
+        <<"results">> => #{
+            <<"output">> => hb_json:encode(#{
+                <<"Data">> => <<"result-data">>,
+                <<"Messages">> => []
+            })
+        }
+    },
+    {ok, Result} = dev_json_iface:compute(M1, M2, #{}),
+    ?assert(maps:is_key(<<"results">>, Result)).
+```
+
+---
+
+### 3. message_to_json_struct/2, message_to_json_struct/3
+
+```erlang
+-spec message_to_json_struct(Msg, Opts) -> JSONStruct
+    when
+        Msg :: map(),
+        Opts :: map(),
+        JSONStruct :: map().
+
+-spec message_to_json_struct(Msg, Features, Opts) -> JSONStruct
+    when
+        Msg :: map(),
+        Features :: [atom()],
+        Opts :: map(),
+        JSONStruct :: map().
+```
+
+**Description:** Convert a HyperBEAM message to JSON-compatible structure.
+
+**Conversion Process:**
+1. Convert message to TABM format
+2. Remove commitments
+3. Extract ID, owner, signature
+4. Prepare tags in JSON format
+5. Extract data, target, anchor
+6. Build JSON structure
+
+**JSON Structure:**
+```erlang
+#{
+    <<"Id">> => MessageID,
+    <<"Owner">> => OwnerAddress,
+    <<"From">> => FromAddress,
+    <<"Target">> => TargetID,
+    <<"Anchor">> => LastTX,
+    <<"Data">> => Data,
+    <<"Tags">> => [#{<<"name">> => Name, <<"value">> => Value}],
+    <<"Signature">> => Signature
+}
+```
+
+**Features:**
+- `owner_as_address` - Use address format for owner (default)
+
+**Test Code:**
+```erlang
+-module(dev_json_iface_message_to_json_test).
+-include_lib("eunit/include/eunit.hrl").
+
+message_to_json_basic_test() ->
+    Msg = #{
+        <<"action">> => <<"test">>,
+        <<"data">> => <<"test-data">>
+    },
+    JSON = dev_json_iface:message_to_json_struct(Msg, #{}),
+    ?assert(is_map(JSON)),
+    ?assert(maps:is_key(<<"Id">>, JSON)),
+    ?assert(maps:is_key(<<"Owner">>, JSON)),
+    ?assert(maps:is_key(<<"Tags">>, JSON)),
+    ?assert(maps:is_key(<<"Data">>, JSON)).
+
+message_to_json_with_signature_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = hb_message:commit(
+        #{<<"data">> => <<"test">>},
+        #{priv_wallet => Wallet}
+    ),
+    JSON = dev_json_iface:message_to_json_struct(Msg, #{}),
+    ?assert(byte_size(maps:get(<<"Signature">>, JSON)) > 0),
+    ?assert(byte_size(maps:get(<<"Owner">>, JSON)) > 0).
+
+message_to_json_with_tags_test() ->
+    Msg = #{
+        <<"action">> => <<"test">>,
+        <<"custom-tag">> => <<"value">>
+    },
+    JSON = dev_json_iface:message_to_json_struct(Msg, #{}),
+    Tags = maps:get(<<"Tags">>, JSON),
+    ?assert(is_list(Tags)),
+    ?assert(length(Tags) > 0).
+
+message_to_json_with_target_test() ->
+    TargetID = <<"target-process-id">>,
+    Msg = #{
+        <<"target">> => TargetID,
+        <<"data">> => <<"test">>
+    },
+    JSON = dev_json_iface:message_to_json_struct(Msg, #{}),
+    ?assertEqual(TargetID, maps:get(<<"Target">>, JSON)).
+```
+
+---
+
+### 4. json_to_message/2
+
+```erlang
+-spec json_to_message(JSON, Opts) -> {ok, Message}
+    when
+        JSON :: binary() | map(),
+        Opts :: map(),
+        Message :: map().
+```
+
+**Description:** Convert JSON response from WASM execution to HyperBEAM message format.
+
+**Input Formats:**
+- Binary JSON string
+- Erlang map (pre-parsed)
+
+**Result Structure:**
+```erlang
+#{
+    <<"outbox">> => [OutboxMessage1, OutboxMessage2, ...],
+    <<"data">> => Data
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_json_iface_json_to_message_test).
+-include_lib("eunit/include/eunit.hrl").
+
+json_to_message_binary_test() ->
+    JSON = hb_json:encode(#{
+        <<"Data">> => <<"result-data">>,
+        <<"Messages">> => []
+    }),
+    {ok, Msg} = dev_json_iface:json_to_message(JSON, #{}),
+    ?assert(is_map(Msg)),
+    ?assert(maps:is_key(<<"outbox">>, Msg)),
+    ?assert(maps:is_key(<<"data">>, Msg)).
+
+json_to_message_with_outbox_test() ->
+    JSON = #{
+        <<"Data">> => <<"result">>,
+        <<"Messages">> => [
+            #{
+                <<"Target">> => <<"target-1">>,
+                <<"Data">> => <<"msg-data">>,
+                <<"Tags">> => []
+            }
+        ]
+    },
+    {ok, Msg} = dev_json_iface:json_to_message(JSON, #{}),
+    Outbox = maps:get(<<"outbox">>, Msg),
+    ?assert(is_map(Outbox)),
+    ?assert(map_size(Outbox) > 0).
+
+json_to_message_error_test() ->
+    JSON = #{<<"Error">> => <<"Execution failed">>},
+    {ok, Msg} = dev_json_iface:json_to_message(JSON, #{}),
+    ?assertEqual(<<"Execution failed">>, maps:get(<<"data">>, Msg)).
+```
+
+---
+
+### 5. generate_stack/1, generate_stack/2, generate_stack/3
+
+```erlang
+-spec generate_stack(File) -> Stack
+    when
+        File :: binary(),
+        Stack :: map().
+
+-spec generate_stack(File, Mode, Opts) -> Stack
+    when
+        File :: binary(),
+        Mode :: binary(),
+        Opts :: map(),
+        Stack :: map().
+```
+
+**Description:** Generate a complete WASM execution stack for testing.
+
+**Stack Composition:**
+- `wasi@1.0` - WASI environment
+- `json-iface@1.0` - JSON interface (this device)
+- `wasm-64@1.0` - 64-bit WASM execution
+- `multipass@1.0` - Multi-pass execution
+
+**Test Code:**
+```erlang
+-module(dev_json_iface_generate_stack_test).
+-include_lib("eunit/include/eunit.hrl").
+
+generate_stack_test() ->
+    Stack = dev_json_iface:generate_stack("test/aos-2-pure-xs.wasm"),
+    ?assert(is_map(Stack)),
+    ?assertEqual(<<"stack@1.0">>, maps:get(<<"device">>, Stack)),
+    ?assert(maps:is_key(<<"process">>, Stack)),
+    ?assert(maps:is_key(<<"device-stack">>, Stack)).
+
+generate_stack_with_mode_test() ->
+    Stack = dev_json_iface:generate_stack(
+        "test/aos-2-pure-xs.wasm",
+        <<"WASM">>
+    ),
+    ?assert(is_map(Stack)).
+```
+
+---
+
+### 6. generate_aos_msg/2, generate_aos_msg/3
+
+```erlang
+-spec generate_aos_msg(ProcID, Code) -> Message
+    when
+        ProcID :: binary(),
+        Code :: binary(),
+        Message :: map().
+```
+
+**Description:** Generate an AOS-style evaluation message for testing.
+
+**Message Structure:**
+```erlang
+#{
+    <<"path">> => <<"compute">>,
+    <<"body">> => #{
+        <<"action">> => <<"Eval">>,
+        <<"data">> => Code,
+        <<"target">> => ProcessID
+    },
+    <<"block-height">> => 1
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_json_iface_generate_aos_msg_test).
+-include_lib("eunit/include/eunit.hrl").
+
+generate_aos_msg_test() ->
+    ProcID = <<"proc-123">>,
+    Code = <<"return 1+1">>,
+    Msg = dev_json_iface:generate_aos_msg(ProcID, Code),
+    ?assert(is_map(Msg)),
+    ?assertEqual(<<"compute">>, maps:get(<<"path">>, Msg)),
+    Body = maps:get(<<"body">>, Msg),
+    ?assertEqual(<<"Eval">>, maps:get(<<"action">>, Body)),
+    ?assertEqual(Code, maps:get(<<"data">>, Body)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create WASM stack for AOS execution
+Stack = dev_json_iface:generate_stack("path/to/aos.wasm"),
+Process = hb_ao:get(<<"process">>, Stack, #{}),
+ProcessID = hb_message:id(Process, all).
+
+%% Execute AOS code
+Code = <<"return 1+1">>,
+Msg = dev_json_iface:generate_aos_msg(ProcessID, Code),
+{ok, Result} = hb_ao:resolve(Stack, Msg, #{}),
+Data = hb_ao:get(<<"results/data">>, Result, #{}).
+
+%% Convert message to JSON for WASM
+HBMessage = #{
+    <<"action">> => <<"test">>,
+    <<"data">> => <<"payload">>
+},
+JSONStruct = dev_json_iface:message_to_json_struct(HBMessage, #{}),
+JSONString = hb_json:encode(JSONStruct).
+
+%% Parse WASM results back to HyperBEAM
+ResultJSON = <<"{\\"Data\\": \\"result\\", \\"Messages\\": []}">>,
+{ok, ResultMsg} = dev_json_iface:json_to_message(ResultJSON, #{}),
+Outbox = maps:get(<<"outbox">>, ResultMsg).
+
+%% Two-pass execution
+% Pass 1: Prepare
+M1 = #{<<"pass">> => 1, <<"process">> => Process},
+M2 = #{<<"body">> => Message},
+{ok, Prepared} = dev_json_iface:compute(M1, M2, #{}),
+
+% Pass 2: Extract results
+M1Updated = Prepared#{<<"pass">> => 2},
+M2Results = #{<<"results">> => #{<<"output">> => WASMOutput}},
+{ok, Final} = dev_json_iface:compute(M1Updated, M2Results, #{}).
+```
+
+---
+
+## JSON-Iface Message Format
+
+### Input to WASM
+
+**Process JSON:**
+```json
+{
+  "Process": {
+    "Id": "process-id",
+    "Owner": "owner-address",
+    "Tags": [{"name": "Type", "value": "Process"}]
+  }
+}
+```
+
+**Message JSON:**
+```json
+{
+  "Id": "message-id",
+  "Owner": "owner-address",
+  "From": "from-address",
+  "Target": "target-id",
+  "Anchor": "last-tx",
+  "Data": "message-data",
+  "Tags": [
+    {"name": "Action", "value": "Eval"},
+    {"name": "Custom", "value": "Value"}
+  ],
+  "Signature": "signature-base64",
+  "Module": "module-tx-id",
+  "Block-Height": 1000
+}
+```
+
+### Output from WASM
+
+**Success Response:**
+```json
+{
+  "Data": "result-data",
+  "Messages": [
+    {
+      "Target": "target-process",
+      "Data": "outbox-message-data",
+      "Tags": [{"name": "Action", "value": "Response"}],
+      "Anchor": ""
+    }
+  ],
+  "patches": []
+}
+```
+
+**Error Response:**
+```json
+{
+  "Error": "Error message describing what went wrong"
+}
+```
+
+---
+
+## Tag Handling
+
+### ANS-104 Tags (Preserved)
+```erlang
+% If message has ANS-104 commitment with original-tags
+Commitment = #{
+    <<"original-tags">> => [
+        {<<"Action">>, <<"Eval">>},
+        {<<"Custom">>, <<"Value">>}
+    ]
+},
+% Original tags are preserved in exact order
+```
+
+### Header-Case Tags (Generated)
+```erlang
+% If no original-tags, convert keys to header-case
+#{
+    <<"action">> => <<"test">>,
+    <<"custom-key">> => <<"value">>
+}
+% Becomes:
+[
+    #{<<"name">> => <<"Action">>, <<"value">> => <<"test">>},
+    #{<<"name">> => <<"Custom-Key">>, <<"value">> => <<"value">>}
+]
+```
+
+---
+
+## Message Denormalization
+
+### Owner Handling
+```erlang
+% Adds owner and signature from primary signer
+Message#{
+    <<"owner">> => HumanReadableAddress,
+    <<"signature">> => Base64Signature,
+    <<"id">> => MessageID
+}
+```
+
+### From-Process Handling
+```erlang
+% Sets From to from-process tag or owner address
+From = hb_ao:get(
+    <<"from-process">>,
+    Message,
+    hb_util:encode(OwnerAddress),
+    Opts
+)
+```
+
+---
+
+## Execution Flow
+
+### Pass 1: Environment Preparation
+```
+1. Load process and message from state
+2. Denormalize message (add owner, ID)
+3. Convert both to JSON structures
+4. Add Module (image) and Block-Height
+5. Encode to JSON strings
+6. Write to WASM environment
+7. Set function = "handle"
+8. Set parameters = [MsgJSON, ProcessJSON]
+```
+
+### Pass 2: Result Extraction
+```
+1. Read output from WASM environment
+2. Parse JSON result
+3. Extract Data, Messages, patches
+4. Convert Messages to outbox format
+5. Add from-process and from-image tags
+6. Return structured result with outbox
+```
+
+---
+
+## Result Post-Processing
+
+### Outbox Message Enhancement
+```erlang
+% Each outbox message gets:
+OutboxMsg#{
+    <<"from-process">> => ProcessID,
+    <<"from-image">> => ModuleID
+}
+```
+
+### Patches Application
+```erlang
+% Patches modify process state
+Patches = [
+    #{<<"key">> => <<"state-key">>, <<"value">> => NewValue}
+]
+```
+
+---
+
+## Environment Abstraction
+
+### Write Function
+```erlang
+% Default: Use JSON strings directly
+Params = [MsgStr, ProcessStr]
+
+% Custom: Use write function
+{ok, MsgPtr} = WriteFn(MsgStr),
+{ok, ProcPtr} = WriteFn(ProcessStr),
+Params = [MsgPtr, ProcPtr]
+```
+
+### Read Function
+```erlang
+% Default: Use output directly
+Output = RawOutput
+
+% Custom: Use read function
+{ok, Output} = ReadFn(RawOutput)
+```
+
+---
+
+## Stack Integration
+
+### Device Stack
+```erlang
+#{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => [
+        <<"wasi@1.0">>,        % WASI environment
+        <<"json-iface@1.0">>,  % This device
+        <<"wasm-64@1.0">>,     % WASM execution
+        <<"multipass@1.0">>    % Multi-pass
+    ],
+    <<"passes">> => 2,
+    <<"stack-keys">> => [<<"init">>, <<"compute">>]
+}
+```
+
+### Pass Management
+- Pass 1: `json-iface@1.0` prepares environment
+- Between passes: `wasm-64@1.0` executes WASM
+- Pass 2: `json-iface@1.0` extracts results
+
+---
+
+## References
+
+- **WASM Device** - `dev_wasm.erl`
+- **WASI Device** - `dev_wasi.erl`
+- **Stack Device** - `dev_stack.erl`
+- **Multipass Device** - `dev_multipass.erl`
+- **Message Handling** - `hb_message.erl`
+- **JSON** - `hb_json.erl`
+
+---
+
+## Notes
+
+1. **Two-Pass:** Requires multipass execution (prep + results)
+2. **JSON Bridge:** Connects WASM and HyperBEAM ecosystems
+3. **AOS Compatible:** Full support for AOS message format
+4. **Tag Preservation:** Maintains original ANS-104 tag order
+5. **Owner Normalization:** Adds owner/signature to messages
+6. **Outbox Enhancement:** Adds from-process/from-image tags
+7. **Error Handling:** Parses Error field from WASM output
+8. **Environment Abstraction:** Supports custom read/write functions
+9. **Process Context:** Passes process definition to WASM
+10. **Block Height:** Includes block height in message context
+11. **Signature Encoding:** Base64-encodes 512-byte signatures
+12. **Target Support:** Handles message targeting
+13. **Anchor Support:** Includes last transaction anchor
+14. **Patches:** Supports state patches from WASM
+15. **Test Helpers:** Comprehensive testing utilities included

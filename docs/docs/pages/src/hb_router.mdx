@@ -1,0 +1,531 @@
+# hb_router.erl - AO Network Service Location
+
+## Overview
+
+**Purpose:** Locate services in the AO network using URL-based routing  
+**Module:** `hb_router`  
+**Pattern:** Simple address-based service discovery
+
+This module provides a lightweight service discovery mechanism for the AO network. It uses URLs to locate services (nodes) via IP addresses or domain names, with support for protocol-agnostic addressing that allows future extensibility.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_opts`, `hb_maps`
+- **Erlang/OTP:** None
+- **Records:** None
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Service Discovery
+-spec find(Type, ID) -> {ok, Node} | {error, Reason}.
+-spec find(Type, ID, Address) -> {ok, Node} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. find/2, find/3
+
+```erlang
+-spec find(Type, ID) -> {ok, Node} | {error, Reason}
+    when
+        Type :: binary(),
+        ID :: binary(),
+        Node :: binary(),
+        Reason :: service_type_not_found.
+
+-spec find(Type, ID, Address) -> {ok, Node} | {error, Reason}
+    when
+        Type :: binary(),
+        ID :: binary(),
+        Address :: binary() | '_',
+        Node :: binary(),
+        Reason :: service_type_not_found.
+```
+
+**Description:** Locate a service node in the AO network by type and optional address. Queries the global `nodes` configuration to find matching services.
+
+**Parameters:**
+- **Type:** Service type (e.g., `<<"scheduler">>`, `<<"compute-unit">>`)
+- **ID:** Service identifier
+- **Address:** Specific address to match, or `'_'` for any address (default)
+
+**Returns:**
+- `{ok, Node}` where Node is the URL/address of the service
+- `{error, service_type_not_found}` if no matching service exists
+
+**Test Code:**
+```erlang
+-module(hb_router_find_test).
+-include_lib("eunit/include/eunit.hrl").
+
+find_basic_test() ->
+    % Configure nodes in global options
+    Opts = #{
+        nodes => #{
+            <<"scheduler">> => #{
+                '_' => <<"https://scheduler.ao.computer">>
+            }
+        }
+    },
+    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
+    
+    Result = hb_router:find(<<"scheduler">>, <<"any-id">>),
+    ?assertMatch({ok, <<"https://scheduler.ao.computer">>}, Result).
+
+find_with_address_test() ->
+    Opts = #{
+        nodes => #{
+            <<"compute-unit">> => #{
+                <<"primary">> => <<"https://cu1.ao.computer">>,
+                <<"backup">> => <<"https://cu2.ao.computer">>
+            }
+        }
+    },
+    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
+    
+    % Find specific address
+    Result1 = hb_router:find(<<"compute-unit">>, <<"task-1">>, <<"primary">>),
+    ?assertMatch({ok, <<"https://cu1.ao.computer">>}, Result1),
+    
+    Result2 = hb_router:find(<<"compute-unit">>, <<"task-1">>, <<"backup">>),
+    ?assertMatch({ok, <<"https://cu2.ao.computer">>}, Result2).
+
+find_any_address_test() ->
+    Opts = #{
+        nodes => #{
+            <<"messenger">> => #{
+                '_' => <<"https://mu.ao.computer">>
+            }
+        }
+    },
+    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
+    
+    % Use wildcard address
+    Result = hb_router:find(<<"messenger">>, <<"msg-123">>, '_'),
+    ?assertMatch({ok, <<"https://mu.ao.computer">>}, Result).
+
+find_not_found_test() ->
+    Opts = #{nodes => #{}},
+    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
+    
+    Result = hb_router:find(<<"nonexistent">>, <<"id">>),
+    ?assertEqual({error, service_type_not_found}, Result).
+
+find_type_exists_address_not_test() ->
+    Opts = #{
+        nodes => #{
+            <<"service">> => #{
+                <<"addr1">> => <<"https://node1.com">>
+            }
+        }
+    },
+    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
+    
+    % Type exists but address doesn't
+    Result = hb_router:find(<<"service">>, <<"id">>, <<"nonexistent">>),
+    ?assertEqual({error, service_type_not_found}, Result).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Find any scheduler
+{ok, SchedulerNode} = hb_router:find(<<"scheduler">>, MyProcessID),
+% Returns first available scheduler URL
+
+%% Find specific compute unit
+{ok, ComputeNode} = hb_router:find(
+    <<"compute-unit">>,
+    TaskID,
+    <<"high-performance">>
+),
+% Returns URL for high-performance compute unit
+
+%% Find messenger unit with wildcard
+{ok, MessengerURL} = hb_router:find(<<"messenger">>, MsgID, '_'),
+% Returns any messenger unit URL
+
+%% Handle service not found
+case hb_router:find(<<"custom-service">>, ID) of
+    {ok, Node} ->
+        connect_to_service(Node);
+    {error, service_type_not_found} ->
+        io:format("Service not configured~n"),
+        use_fallback_service()
+end.
+
+%% Use with options
+Opts = #{
+    nodes => #{
+        <<"scheduler">> => #{
+            '_' => <<"https://scheduler.ao.computer">>
+        },
+        <<"compute-unit">> => #{
+            <<"primary">> => <<"https://cu1.ao.computer">>,
+            <<"secondary">> => <<"https://cu2.ao.computer">>
+        }
+    }
+},
+Result = hb_router:find(<<"scheduler">>, ProcID, '_', Opts).
+```
+
+---
+
+## Configuration
+
+### Node Registry Structure
+
+The nodes configuration is a nested map structure:
+
+```erlang
+#{
+    nodes => #{
+        ServiceType1 => #{
+            Address1 => NodeURL1,
+            Address2 => NodeURL2,
+            '_' => DefaultNodeURL
+        },
+        ServiceType2 => #{
+            '_' => DefaultNodeURL
+        }
+    }
+}
+```
+
+### Configuration Examples
+
+**Basic Configuration:**
+```erlang
+#{
+    nodes => #{
+        <<"scheduler">> => #{
+            '_' => <<"https://scheduler.ao.computer">>
+        }
+    }
+}
+```
+
+**Multi-Node Configuration:**
+```erlang
+#{
+    nodes => #{
+        <<"scheduler">> => #{
+            <<"primary">> => <<"https://sched1.ao.computer">>,
+            <<"backup">> => <<"https://sched2.ao.computer">>,
+            '_' => <<"https://sched-default.ao.computer">>
+        },
+        <<"compute-unit">> => #{
+            <<"fast">> => <<"https://cu-fast.ao.computer">>,
+            <<"cheap">> => <<"https://cu-cheap.ao.computer">>,
+            '_' => <<"https://cu-default.ao.computer">>
+        },
+        <<"messenger">> => #{
+            '_' => <<"https://mu.ao.computer">>
+        }
+    }
+}
+```
+
+**Configuration File (JSON):**
+```json
+{
+  "nodes": {
+    "scheduler": {
+      "_": "https://scheduler.ao.computer"
+    },
+    "compute-unit": {
+      "primary": "https://cu1.ao.computer",
+      "backup": "https://cu2.ao.computer"
+    },
+    "messenger": {
+      "_": "https://mu.ao.computer"
+    }
+  }
+}
+```
+
+### Setting Configuration
+
+**Via Application Environment:**
+```erlang
+application:set_env(hyperbeam, nodes, NodesMap).
+```
+
+**Via Options:**
+```erlang
+Opts = #{nodes => NodesMap},
+Result = hb_router:find(Type, ID, Address, Opts).
+```
+
+**Via Config File:**
+```erlang
+{ok, Config} = hb_opts:load("config.json"),
+% Nodes automatically loaded from config
+```
+
+---
+
+## Service Types
+
+### Common AO Service Types
+
+| Service Type | Description | Typical Address |
+|-------------|-------------|-----------------|
+| `<<"scheduler">>` | Scheduler Units (SU) | `https://scheduler.ao.computer` |
+| `<<"compute-unit">>` | Compute Units (CU) | `https://cu.ao.computer` |
+| `<<"messenger">>` | Messenger Units (MU) | `https://mu.ao.computer` |
+| `<<"gateway">>` | Arweave Gateway | `https://arweave.net` |
+| `<<"bundler">>` | ANS-104 Bundler | `https://up.arweave.net` |
+
+### Custom Service Types
+
+```erlang
+% Define custom services
+Opts = #{
+    nodes => #{
+        <<"oracle">> => #{
+            '_' => <<"https://oracle.mynetwork.com">>
+        },
+        <<"storage">> => #{
+            <<"primary">> => <<"https://storage1.mynetwork.com">>,
+            <<"backup">> => <<"https://storage2.mynetwork.com">>
+        }
+    }
+},
+
+% Use custom services
+{ok, OracleURL} = hb_router:find(<<"oracle">>, RequestID, '_', Opts),
+{ok, StorageURL} = hb_router:find(<<"storage">>, FileID, <<"primary">>, Opts).
+```
+
+---
+
+## Address Resolution
+
+### Wildcard Matching
+
+The `'_'` atom serves as a wildcard/default address:
+
+```erlang
+% Configuration with wildcard
+#{
+    <<"service">> => #{
+        <<"specific">> => <<"https://specific.com">>,
+        '_' => <<"https://default.com">>
+    }
+}
+
+% Lookup with wildcard returns default
+{ok, <<"https://default.com">>} = find(<<"service">>, ID, '_').
+
+% Lookup with specific address
+{ok, <<"https://specific.com">>} = find(<<"service">>, ID, <<"specific">>).
+```
+
+### Address Priority
+
+1. Exact address match (highest priority)
+2. Wildcard `'_'` match (fallback)
+3. Not found (error)
+
+```erlang
+% Configuration
+#{
+    <<"service">> => #{
+        <<"prod">> => <<"https://prod.com">>,
+        '_' => <<"https://default.com">>
+    }
+}
+
+% Resolution order:
+find(<<"service">>, ID, <<"prod">>) → <<"https://prod.com">>
+find(<<"service">>, ID, <<"dev">>) → error (no exact match, no wildcard for "dev")
+find(<<"service">>, ID, '_') → <<"https://default.com">>
+find(<<"service">>, ID) → <<"https://default.com">> (defaults to '_')
+```
+
+---
+
+## Integration Examples
+
+### With HTTP Client
+
+```erlang
+% Find and connect to service
+case hb_router:find(<<"scheduler">>, ProcessID) of
+    {ok, SchedulerURL} ->
+        Request = #{
+            <<"process-id">> => ProcessID,
+            <<"action">> => <<"schedule">>
+        },
+        hb_http:post(SchedulerURL, <<"/schedule">>, Request, #{});
+    {error, service_type_not_found} ->
+        {error, no_scheduler_available}
+end.
+```
+
+### With Compute Units
+
+```erlang
+% Find appropriate compute unit
+WorkloadType = case Task of
+    heavy_computation -> <<"high-performance">>;
+    light_task -> <<"standard">>;
+    _ -> '_'
+end,
+
+case hb_router:find(<<"compute-unit">>, TaskID, WorkloadType) of
+    {ok, CUURL} ->
+        execute_on_cu(CUURL, Task);
+    {error, _} ->
+        % Fallback to any available CU
+        {ok, DefaultCU} = hb_router:find(<<"compute-unit">>, TaskID),
+        execute_on_cu(DefaultCU, Task)
+end.
+```
+
+### Dynamic Service Selection
+
+```erlang
+% Try multiple service types in order
+find_available_service(ID, ServiceTypes) ->
+    find_available_service(ID, ServiceTypes, '_').
+
+find_available_service(_ID, [], _Address) ->
+    {error, no_services_available};
+find_available_service(ID, [Type|Rest], Address) ->
+    case hb_router:find(Type, ID, Address) of
+        {ok, Node} -> {ok, Type, Node};
+        {error, _} -> find_available_service(ID, Rest, Address)
+    end.
+
+% Usage
+ServiceTypes = [<<"scheduler">>, <<"backup-scheduler">>, <<"fallback-scheduler">>],
+case find_available_service(ProcID, ServiceTypes) of
+    {ok, SelectedType, URL} ->
+        io:format("Using ~s at ~s~n", [SelectedType, URL]),
+        connect(URL);
+    {error, no_services_available} ->
+        handle_no_service_error()
+end.
+```
+
+---
+
+## URL Format Support
+
+### Supported URL Schemes
+
+```erlang
+% HTTP
+<<"http://node.ao.computer">>
+
+% HTTPS (recommended)
+<<"https://node.ao.computer">>
+
+% With port
+<<"https://node.ao.computer:8080">>
+
+% With path
+<<"https://node.ao.computer/api/v1">>
+
+% IP addresses
+<<"https://192.168.1.100:8080">>
+
+% localhost
+<<"http://localhost:8421">>
+```
+
+### Future Protocol Support
+
+The URL-based approach allows for future protocol extensions:
+
+```erlang
+% Potential future protocols
+<<"ws://node.ao.computer">>        % WebSocket
+<<"wss://node.ao.computer">>       % Secure WebSocket
+<<"grpc://node.ao.computer">>      % gRPC
+<<"ipfs://QmHash...">>             % IPFS
+<<"ar://transaction-id">>          % Arweave protocol
+```
+
+---
+
+## Error Handling
+
+### Service Type Not Found
+
+```erlang
+case hb_router:find(<<"custom-service">>, ID) of
+    {error, service_type_not_found} ->
+        % Service type not configured
+        io:format("Service not configured. Available types: ~p~n", 
+                  [maps:keys(hb_opts:get(nodes))]),
+        use_default_service();
+    {ok, URL} ->
+        connect_to_service(URL)
+end.
+```
+
+### Fallback Strategies
+
+```erlang
+% Try specific address, then wildcard, then error
+find_with_fallback(Type, ID, Address) ->
+    case hb_router:find(Type, ID, Address) of
+        {ok, URL} -> {ok, URL};
+        {error, _} ->
+            % Try wildcard
+            case hb_router:find(Type, ID, '_') of
+                {ok, DefaultURL} -> {ok, DefaultURL};
+                {error, Reason} -> {error, Reason}
+            end
+    end.
+```
+
+---
+
+## Performance Characteristics
+
+### Lookup Complexity
+
+- **Time:** O(1) - Direct map access
+- **Space:** O(N) where N is number of configured nodes
+- **Overhead:** Minimal - just map lookups
+
+### Caching
+
+Node URLs are stored in application environment, providing:
+- Fast access (no network calls)
+- Persistent across calls
+- Low memory overhead
+
+---
+
+## References
+
+- **Configuration** - `hb_opts.erl`
+- **HTTP Client** - `hb_http.erl`, `hb_client.erl`
+- **AO Services** - Scheduler, Compute Unit, Messenger Unit documentation
+
+---
+
+## Notes
+
+1. **Simple Design:** Intentionally minimal for easy understanding and modification
+2. **URL-Based:** Uses URLs for protocol-agnostic addressing
+3. **Configuration-Driven:** All routing via configuration, no hard-coded URLs
+4. **Wildcard Support:** `'_'` atom serves as catch-all address
+5. **Future-Proof:** URL format allows protocol extensions
+6. **No Caching:** Looks up configuration on every call (negligible overhead)
+7. **Static Configuration:** Runtime node discovery not currently supported
+8. **Error Clarity:** Single error type (`service_type_not_found`) for simplicity
+9. **Integration Ready:** Designed for use with HTTP clients and AO services
+10. **Extensible:** Easy to add new service types via configuration

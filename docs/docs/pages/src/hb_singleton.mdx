@@ -1,0 +1,742 @@
+# hb_singleton.erl - TABM Message Parser
+
+## Overview
+
+**Purpose:** Parse AO-Core HTTP API requests in TABM format into executable message sequences  
+**Module:** `hb_singleton`  
+**Format:** Transform-Apply-Bind-Map (TABM) singleton message syntax
+
+This module translates singleton TABM messages (containing keys and a path field with optional query parameters) into ordered lists of AO-Core messages. TABM provides a URL-like syntax for expressing complex message sequences with inline parameters, device specifications, and nested resolutions.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_util`, `hb_maps`, `hb_path`, `hb_ao`, `hb_escape`
+- **Erlang/OTP:** `cowboy_req`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Parsing
+-spec from(TABMMessage, Opts) -> [AOMessage].
+-spec from_path(Path) -> {ok, PathParts, QueryParams}.
+
+%% Encoding
+-spec to([AOMessage]) -> TABMMessage.
+```
+
+---
+
+## Public Functions
+
+### 1. from/2
+
+```erlang
+-spec from(TABMMessage, Opts) -> [AOMessage]
+    when
+        TABMMessage :: map() | binary(),
+        Opts :: map(),
+        AOMessage :: map().
+```
+
+**Description:** Convert a TABM singleton message into an ordered list of executable AO-Core messages. Supports complex syntax including scoped keys, typed values, nested resolutions, and device specifications.
+
+**Input Formats:**
+- Binary path: `<<"/a/b/c">>`
+- Map with path: `#{<<"path">> => <<"/a/b/c">>, ...}`
+
+**Test Code:**
+```erlang
+-module(hb_singleton_from_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_simple_path_test() ->
+    Req = #{<<"path">> => <<"/a/b/c">>},
+    Msgs = hb_singleton:from(Req, #{}),
+    ?assertEqual(4, length(Msgs)),
+    [Base, Msg1, Msg2, Msg3] = Msgs,
+    ?assert(is_map(Base)),
+    ?assertEqual(<<"a">>, maps:get(<<"path">>, Msg1)),
+    ?assertEqual(<<"b">>, maps:get(<<"path">>, Msg2)),
+    ?assertEqual(<<"c">>, maps:get(<<"path">>, Msg3)).
+
+from_binary_path_test() ->
+    Msgs = hb_singleton:from(<<"/test/path">>, #{}),
+    ?assertEqual(3, length(Msgs)),
+    [_, Msg1, Msg2] = Msgs,
+    ?assertEqual(<<"test">>, maps:get(<<"path">>, Msg1)),
+    ?assertEqual(<<"path">>, maps:get(<<"path">>, Msg2)).
+
+from_id_base_test() ->
+    ID = <<"IYkkrqlZNW_J-4T-5eFApZOMRl5P4VjvrcOXWvIqB1Q">>,
+    Req = #{
+        <<"path">> => <<"/", ID/binary, "/some-other">>,
+        <<"method">> => <<"GET">>
+    },
+    Msgs = hb_singleton:from(Req, #{}),
+    ?assertEqual(2, length(Msgs)),
+    [Base, Msg2] = Msgs,
+    ?assertEqual(Base, ID),
+    ?assertEqual(<<"GET">>, maps:get(<<"method">>, Msg2)),
+    ?assertEqual(<<"some-other">>, maps:get(<<"path">>, Msg2)).
+
+from_global_keys_test() ->
+    Req = #{
+        <<"path">> => <<"/a/b/c">>,
+        <<"test-key">> => <<"test-value">>
+    },
+    Msgs = hb_singleton:from(Req, #{}),
+    ?assertEqual(4, length(Msgs)),
+    [_Base, Msg1, Msg2, Msg3] = Msgs,
+    % Global keys appear in all messages
+    ?assertEqual(<<"test-value">>, maps:get(<<"test-key">>, Msg1)),
+    ?assertEqual(<<"test-value">>, maps:get(<<"test-key">>, Msg2)),
+    ?assertEqual(<<"test-value">>, maps:get(<<"test-key">>, Msg3)).
+```
+
+---
+
+### 2. from_path/1
+
+```erlang
+-spec from_path(Path) -> {ok, PathParts, QueryParams}
+    when
+        Path :: binary(),
+        PathParts :: [binary()],
+        QueryParams :: map().
+```
+
+**Description:** Parse a relative reference into path parts and query parameters. Handles URL-encoded strings and query string parsing.
+
+**Test Code:**
+```erlang
+-module(hb_singleton_from_path_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_path_simple_test() ->
+    {ok, Parts, Query} = hb_singleton:from_path(<<"/a/b/c">>),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Parts),
+    ?assertEqual(#{}, Query).
+
+from_path_with_query_test() ->
+    {ok, Parts, Query} = hb_singleton:from_path(<<"/path?key1=val1&key2=val2">>),
+    ?assertEqual([<<"path">>], Parts),
+    ?assertEqual(<<"val1">>, maps:get(<<"key1">>, Query)),
+    ?assertEqual(<<"val2">>, maps:get(<<"key2">>, Query)).
+
+from_path_encoded_test() ->
+    {ok, Parts, Query} = hb_singleton:from_path(<<"/path?key=hello%20world">>),
+    ?assertEqual([<<"path">>], Parts),
+    ?assertEqual(<<"hello world">>, maps:get(<<"key">>, Query)).
+```
+
+---
+
+### 3. to/1
+
+```erlang
+-spec to([AOMessage]) -> TABMMessage
+    when
+        AOMessage :: map() | binary(),
+        TABMMessage :: map().
+```
+
+**Description:** Convert a list of AO-Core messages into a TABM singleton message. Inverse of `from/2`. Handles scoped keys and typed values.
+
+**Test Code:**
+```erlang
+-module(hb_singleton_to_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_simple_test() ->
+    Messages = [
+        #{},
+        #{<<"path">> => <<"a">>},
+        #{<<"path">> => <<"b">>, <<"key">> => <<"value">>}
+    ],
+    TABM = hb_singleton:to(Messages),
+    ?assertEqual(<<"/a/b">>, maps:get(<<"path">>, TABM)),
+    ?assertEqual(<<"value">>, maps:get(<<"1.key">>, TABM)).
+
+to_with_ids_test() ->
+    ID = <<"test-id-123">>,
+    Messages = [
+        ID,
+        #{<<"path">> => <<"action">>}
+    ],
+    TABM = hb_singleton:to(Messages),
+    ?assertEqual(<<"/test-id-123/action">>, maps:get(<<"path">>, TABM)).
+
+to_with_resolve_test() ->
+    Messages = [
+        #{},
+        #{<<"path">> => <<"a">>, <<"key">> => {resolve, [#{}, #{<<"path">> => <<"x">>}]}}
+    ],
+    TABM = hb_singleton:to(Messages),
+    ?assertMatch(#{<<"1.key+resolve">> := <<"(/x)">>}, TABM).
+```
+
+---
+
+## TABM Syntax Overview
+
+### Path Syntax
+
+```erlang
+% Simple path: /Part1/Part2/.../PartN
+"/a/b/c" → [#{}, #{path => <<"a">>}, #{path => <<"b">>}, #{path => <<"c">>}]
+
+% ID-based path: /ID/Part2/.../PartN
+"/IYkkrq.../msg2" → [<<"IYkkrq...">>, #{path => <<"msg2">>}]
+
+% Root path
+"/" → [#{}]
+```
+
+### Inline Keys
+
+```erlang
+% Key-value pair: Part&Key=Value
+"/a/b&k1=v1" → Msg2 has #{k1 => <<"v1">>}
+
+% Multiple keys: Part&K1=V1&K2=V2
+"/a/b&k1=v1&k2=v2" → Msg2 has #{k1 => <<"v1">>, k2 => <<"v2">>}
+
+% Boolean flag: Part&Key
+"/a/b&flag" → Msg2 has #{flag => true}
+
+% Assumed key: Part=Value
+"/a/b=4" → Msg2 has #{b => <<"4">>}
+```
+
+### Device Specification
+
+```erlang
+% Device routing: Part~Device
+"/a/b~process@1.0" → {as, <<"process@1.0">>, #{path => <<"b">>}}
+
+% Device with keys: Part~D&K1=V1
+"/a/b~device@1.0&key=val" → {as, <<"device@1.0">>, #{path => <<"b">>, key => <<"val">>}}
+```
+
+### Typed Keys
+
+```erlang
+% Integer type: key+int=value
+"2.key+integer=123" → Msg2 has #{key => 123}
+
+% Resolve type: key+res=(/path)
+"2.key+resolve=(/a/b)" → Msg2 has #{key => {resolve, [...]}}
+```
+
+### Nested Resolution
+
+```erlang
+% Subpath in path: (/nested/path)
+"/a/(x/y/z)/c" → Msg2 is {resolve, [...]} for /x/y/z
+
+% Subpath in key: key+res=(/a/b)
+"&key+resolve=(/a/b)" → {key => {resolve, [...]}}
+```
+
+### Scoped Keys
+
+```erlang
+% Global key: applies to all messages
+"key=value" → All messages have #{key => <<"value">>}
+
+% Scoped key: N.key=value (applies to Nth message)
+"2.test-key=value" → Only Msg2 has #{test-key => <<"value">>}
+```
+
+---
+
+## Syntax Examples
+
+### Basic Paths
+
+```erlang
+% Simple path
+"/a/b/c"
+→ [#{}, #{path => <<"a">>}, #{path => <<"b">>}, #{path => <<"c">>}]
+
+% ID as base
+"/IYkkrqlZNW_J-4T-5eFApZOMRl5P4VjvrcOXWvIqB1Q/data"
+→ [<<"IYkkrq...">>, #{path => <<"data">>}]
+
+% Single part
+"/test"
+→ [#{}, #{path => <<"test">>}]
+
+% Root only
+"/"
+→ [#{}]
+```
+
+### Inline Parameters
+
+```erlang
+% Single key-value
+"/path&key=value"
+→ [#{}, #{path => <<"path">>, key => <<"value">>}]
+
+% Multiple keys
+"/path&k1=v1&k2=v2"
+→ [#{}, #{path => <<"path">>, k1 => <<"v1">>, k2 => <<"v2">>}]
+
+% Boolean flag
+"/path&enabled"
+→ [#{}, #{path => <<"path">>, enabled => true}]
+
+% Assumed key name
+"/increment=5"
+→ [#{}, #{path => <<"increment">>, increment => <<"5">>}]
+
+% Mixed
+"/action&enabled&count=10"
+→ [#{}, #{path => <<"action">>, enabled => true, count => <<"10">>}]
+```
+
+### Device Routing
+
+```erlang
+% Simple device
+"/~process@1.0/state"
+→ [#{}, {as, <<"process@1.0">>, #{path => <<"process@1.0">>}}, #{path => <<"state">>}]
+
+% Device with parameters
+"/~process@1.0/execute&action=run"
+→ [#{}, {as, <<"process@1.0">>, ...}, #{path => <<"execute">>, action => <<"run">>}]
+```
+
+### Typed Values
+
+```erlang
+% Integer
+"2.count+integer=42"
+→ Msg2 has #{count => 42}
+
+% Resolve
+"2.data+resolve=(/other/path)"
+→ Msg2 has #{data => {resolve, [#{}, #{path => <<"other">>}, #{path => <<"path">>}]}}
+```
+
+### Nested Resolutions
+
+```erlang
+% Nested in path
+"/a/(x/y)/b"
+→ [#{}, #{path => <<"a">>}, {resolve, [#{}, #{path => <<"x">>}, #{path => <<"y">>}]}, #{path => <<"b">>}]
+
+% Nested in key
+"/path&key=(/sub/path)"
+→ [#{}, #{path => <<"path">>, key => {resolve, [#{}, #{path => <<"sub">>}, #{path => <<"path">>}]}}]
+
+% Deep nesting
+"/a/(b/(c/d))/e"
+→ Nested resolve structures
+```
+
+### Complex Examples
+
+```erlang
+% ID base with typed scoped keys
+"/IYkkrq.../execute&2.count+integer=5&2.enabled"
+→ [<<"IYkkrq...">>, #{path => <<"execute">>}, #{count => 5, enabled => true}]
+
+% Multiple devices
+"/~dev1@1.0/a/~dev2@1.0/b"
+→ Device transitions
+
+% Query parameters
+"/path?global_key=value"
+→ Global key added to all messages
+
+% Everything combined
+"/~process@1.0/execute&action=run&2.data+resolve=(/state/current)?method=POST"
+→ Complex multi-feature request
+```
+
+---
+
+## Parsing Process
+
+### 1. Path Extraction
+
+```erlang
+Input: #{<<"path">> => <<"/a/b">>, <<"key">> => <<"val">>}
+       ↓
+Split path from query: Path = <<"/a/b">>, Query = #{<<"key">> => <<"val">>}
+```
+
+### 2. Path Segmentation
+
+```erlang
+Path: <<"/a/b&k=v/c">>
+     ↓
+Segments: [<<"a">>, <<"b&k=v">>, <<"c">>]
+```
+
+### 3. Part Parsing
+
+```erlang
+Segment: <<"b&k=v">>
+        ↓
+Parse: #{path => <<"b">>, k => <<"v">>}
+```
+
+### 4. Base Normalization
+
+```erlang
+Messages: [Msg1, Msg2, Msg3]
+         ↓
+If Msg1 is ID or {as, ...}: Keep as is
+Else: Prepend empty base: [#{}, Msg1, Msg2, Msg3]
+```
+
+### 5. Key Scoping
+
+```erlang
+Keys: #{<<"2.key">> => <<"val">>, <<"global">> => <<"g">>}
+     ↓
+Apply: Only Msg2 gets key => <<"val">>, all get global => <<"g">>
+```
+
+### 6. Type Application
+
+```erlang
+"2.count+integer" => <<"42">>
+                  ↓
+Msg2: #{count => 42}  % Converted to integer
+```
+
+---
+
+## Query String Parameters
+
+### Format
+
+```erlang
+"/path?key1=value1&key2=value2"
+```
+
+### Parsing
+
+```erlang
+% URL-encoded
+"/path?name=John%20Doe"
+→ #{name => <<"John Doe">>}
+
+% Multiple values (last wins)
+"/path?key=val1&key=val2"
+→ #{key => <<"val2">>}
+
+% Boolean flags
+"/path?flag"
+→ #{flag => true}
+```
+
+### Global Application
+
+Query parameters become global keys applied to all messages:
+
+```erlang
+Input: #{<<"path">> => <<"/a/b?method=POST">>}
+      ↓
+All messages get: #{method => <<"POST">>, ...}
+```
+
+---
+
+## Key Scoping
+
+### Global Keys
+
+```erlang
+% Keys without N. prefix apply to all messages
+#{
+    <<"path">> => <<"/a/b">>,
+    <<"global-key">> => <<"value">>
+}
+→ All messages have global-key => <<"value">>
+```
+
+### Scoped Keys
+
+```erlang
+% N.key applies only to Nth message (0-indexed)
+#{
+    <<"path">> => <<"/a/b/c">>,
+    <<"2.scoped-key">> => <<"value">>
+}
+→ Only Msg2 (third message after base) has scoped-key => <<"value">>
+```
+
+### Mixed Scoping
+
+```erlang
+#{
+    <<"path">> => <<"/a/b">>,
+    <<"global">> => <<"g">>,
+    <<"1.first">> => <<"f">>,
+    <<"2.second">> => <<"s">>
+}
+→ 
+  Base: #{global => <<"g">>}
+  Msg1: #{path => <<"a">>, global => <<"g">>, first => <<"f">>}
+  Msg2: #{path => <<"b">>, global => <<"g">>, second => <<"s">>}
+```
+
+---
+
+## Type Conversion
+
+### Supported Types
+
+```erlang
+% Binary (default)
+"key" => "value" → #{key => <<"value">>}
+
+% Integer
+"key+integer" => "42" → #{key => 42}
+
+% Resolve
+"key+resolve" => "/path" → #{key => {resolve, [...]}}
+```
+
+### Type Syntax
+
+```erlang
+% In query/global keys
+"key+integer=123"
+
+% In scoped keys
+"2.key+integer=456"
+
+% In inline keys
+"/path&key+integer=789"
+
+% In assumed keys
+"/path+integer=999"
+```
+
+### Type Inference
+
+```erlang
+% Explicit type always wins
+"key+integer=123" → 123 (integer)
+
+% No type specified
+"key=123" → <<"123">> (binary)
+```
+
+---
+
+## Device Resolution
+
+### Device Syntax
+
+```erlang
+% Tilde prefix for device
+"~device@1.0"
+
+% With path
+"/~device@1.0/action"
+
+% With parameters
+"/~device@1.0/action&key=val"
+```
+
+### Resolution Pattern
+
+```erlang
+"/~process@1.0/state"
+→ [
+    #{},
+    {as, <<"process@1.0">>, #{path => <<"process@1.0">>}},
+    #{path => <<"state">>}
+]
+
+% Nested devices
+"/~dev1@1.0/a/~dev2@1.0/b"
+→ Multiple {as, ...} transitions
+```
+
+---
+
+## Nested Resolution
+
+### Parentheses Syntax
+
+```erlang
+% In path
+"(/nested/path)"
+
+% In key value
+"key=(/nested/path)"
+
+% With parameters
+"(/path&k=v)"
+```
+
+### Resolution Structure
+
+```erlang
+"(/a/b)"
+→ {resolve, [#{}, #{path => <<"a">>}, #{path => <<"b">>}]}
+
+% Used in message
+"/main/(sub/path)/end"
+→ [
+    #{},
+    #{path => <<"main">>},
+    {resolve, [#{}, #{path => <<"sub">>}, #{path => <<"path">>}]},
+    #{path => <<"end">>}
+]
+```
+
+### Deep Nesting
+
+```erlang
+"(/a/(b/c))"
+→ {resolve, [
+    #{},
+    #{path => <<"a">>},
+    {resolve, [#{}, #{path => <<"b">>}, #{path => <<"c">>}]}
+]}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple API call
+Path = <<"/process/state">>,
+Msgs = hb_singleton:from(#{<<"path">> => Path}, #{}),
+% Execute: Base → process → state
+
+%% With method
+Path = <<"/process/execute?method=POST">>,
+Msgs = hb_singleton:from(#{<<"path">> => Path}, #{}),
+% All messages have method => <<"POST">>
+
+%% ID-based resolution
+ID = <<"IYkkrqlZNW_J-4T-5eFApZOMRl5P4VjvrcOXWvIqB1Q">>,
+Path = <<"/", ID/binary, "/data/current">>,
+Msgs = hb_singleton:from(#{<<"path">> => Path}, #{}),
+% Start from specific ID
+
+%% Inline parameters
+Path = <<"/execute&action=run&count+integer=5">>,
+Msgs = hb_singleton:from(#{<<"path">> => Path}, #{}),
+% Execute with typed parameters
+
+%% Device routing
+Path = <<"/~process@1.0/state">>,
+Msgs = hb_singleton:from(#{<<"path">> => Path}, #{}),
+% Execute as process@1.0 device
+
+%% Nested resolution
+Path = <<"/main/(sub/path)/end">>,
+Msgs = hb_singleton:from(#{<<"path">> => Path}, #{}),
+% Resolve sub-path inline
+
+%% Scoped keys
+Req = #{
+    <<"path">> => <<"/a/b/c">>,
+    <<"1.param">> => <<"only-for-a">>,
+    <<"2.param">> => <<"only-for-b">>
+},
+Msgs = hb_singleton:from(Req, #{}),
+% Different params for different steps
+
+%% Round-trip conversion
+AOMessages = [...],
+TABM = hb_singleton:to(AOMessages),
+Recovered = hb_singleton:from(TABM, #{}),
+% TABM encoding/decoding
+```
+
+---
+
+## HTTP API Integration
+
+### Request Structure
+
+```erlang
+% HTTP GET request
+GET /process/state HTTP/1.1
+
+% Parsed to TABM
+#{
+    <<"path">> => <<"/process/state">>,
+    <<"method">> => <<"GET">>
+}
+
+% Converted to messages
+[#{}, #{path => <<"process">>}, #{path => <<"state">>, method => <<"GET">>}]
+```
+
+### POST with Body
+
+```erlang
+% HTTP POST
+POST /process/execute HTTP/1.1
+Content-Type: application/json
+
+{"action": "run", "count": 5}
+
+% TABM
+#{
+    <<"path">> => <<"/process/execute">>,
+    <<"method">> => <<"POST">>,
+    <<"action">> => <<"run">>,
+    <<"count">> => 5
+}
+```
+
+---
+
+## Performance Considerations
+
+### Parsing Complexity
+
+- **Time:** O(n) where n is path length
+- **Space:** O(m) where m is number of messages
+- **Optimizations:** Single-pass parsing with minimal allocations
+
+### Path Segment Limits
+
+```erlang
+-define(MAX_SEGMENT_LENGTH, 512).
+```
+
+Segments longer than 512 bytes may be rejected for security.
+
+---
+
+## References
+
+- **AO-Core Protocol** - `hb_ao.erl`
+- **Path Utilities** - `hb_path.erl`
+- **HTTP Server** - `hb_http.erl`
+- **Message System** - `hb_message.erl`
+- **URL Encoding** - `hb_escape.erl`
+
+---
+
+## Notes
+
+1. **TABM Format:** Transform-Apply-Bind-Map message encoding
+2. **URL-Like Syntax:** Familiar format for HTTP APIs
+3. **Inline Parameters:** Avoid separate body for simple requests
+4. **Device Routing:** Explicit device specification with `~`
+5. **Nested Resolution:** Parentheses for inline sub-resolutions
+6. **Type Safety:** Explicit type annotations prevent errors
+7. **Scoped Keys:** Fine-grained control over parameter application
+8. **Bidirectional:** Both `from` and `to` conversions supported
+9. **Query Strings:** Standard URL query parameter support
+10. **ID Recognition:** Automatic detection of Arweave IDs as base
