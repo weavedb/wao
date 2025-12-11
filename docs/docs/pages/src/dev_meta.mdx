@@ -1,0 +1,694 @@
+# dev_meta.erl - HyperBEAM Meta Device
+
+## Overview
+
+**Purpose:** Default entry point for all HyperBEAM message processing with node configuration management  
+**Module:** `dev_meta`  
+**Device Name:** `meta@1.0`  
+**Role:** Request preprocessing, routing, and node administration
+
+This device serves as the primary interface for HyperBEAM nodes, handling initialization, configuration management, request/response hooks, and providing system information. It acts as the gateway for all incoming messages before they reach the AO-Core resolver.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_message`, `hb_opts`, `hb_cache`, `hb_singleton`, `hb_util`, `hb_private`, `hb_maps`
+- **HTTP:** `hb_http`, `hb_http_server`
+- **Device:** `hb_ao_device`
+- **Arweave:** `ar_wallet`
+- **Build Info:** `../_build/hb_buildinfo.hrl`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Information
+-spec info(M1) -> DeviceInfo.
+-spec info(Base, Request, NodeMsg) -> {ok, NodeInfo} | {error, Reason}.
+
+%% Build Information
+-spec build(Base, Req, NodeMsg) -> {ok, BuildInfo}.
+
+%% Request Handling
+-spec handle(NodeMsg, Request) -> {ok, Response} | {error, Reason}.
+
+%% Node Management
+-spec adopt_node_message(Request, NodeMsg) -> {ok, NewNodeMsg} | {error, Reason}.
+
+%% Authorization
+-spec is(Role, Request, NodeMsg) -> boolean().
+-spec is_operator(Request, NodeMsg) -> boolean().
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(M1) -> DeviceInfo
+    when
+        M1 :: map(),
+        DeviceInfo :: #{ exports => [binary()] }.
+```
+
+**Description:** Return device information. Exports `info` and `build` functions for public access.
+
+**Test Code:**
+```erlang
+-module(dev_meta_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_exports_test() ->
+    Info = dev_meta:info(#{}),
+    ?assert(maps:is_key(exports, Info)),
+    Exports = maps:get(exports, Info),
+    ?assert(lists:member(<<"info">>, Exports)),
+    ?assert(lists:member(<<"build">>, Exports)).
+```
+
+---
+
+### 2. info/3 - Node Configuration
+
+```erlang
+-spec info(Base, Request, NodeMsg) -> {ok, NodeInfo} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        NodeMsg :: map(),
+        NodeInfo :: map(),
+        Reason :: binary().
+```
+
+**Description:** Get or update node configuration. GET requests return current configuration (with private keys filtered). POST requests update configuration if authorized.
+
+**Authorization:**
+- Node must be initialized
+- Request must be signed by node operator
+- If node is `permanent`, no further updates allowed
+
+**Test Code:**
+```erlang
+-module(dev_meta_info_http_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_node_info_test() ->
+    Node = hb_http_server:start_node(#{
+        test_config_item => <<"test_value">>
+    }),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assertEqual(<<"test_value">>, hb_ao:get(<<"test_config_item">>, Info, #{})).
+
+set_node_info_test() ->
+    Owner = ar_wallet:new(),
+    Node = hb_http_server:start_node(#{
+        priv_wallet => Owner,
+        test_item => <<"old">>
+    }),
+    {ok, _} = hb_http:post(
+        Node,
+        hb_message:commit(
+            #{
+                <<"path">> => <<"/~meta@1.0/info">>,
+                <<"test_item">> => <<"new">>
+            },
+            #{ priv_wallet => Owner }
+        ),
+        #{}
+    ),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assertEqual(<<"new">>, hb_ao:get(<<"test_item">>, Info, #{})).
+
+permanent_node_test() ->
+    Owner = ar_wallet:new(),
+    Node = hb_http_server:start_node(#{ priv_wallet => Owner }),
+    % Set permanent
+    {ok, _} = hb_http:post(
+        Node,
+        hb_message:commit(
+            #{
+                <<"path">> => <<"/~meta@1.0/info">>,
+                initialized => <<"permanent">>
+            },
+            #{ priv_wallet => Owner }
+        ),
+        #{}
+    ),
+    % Try to update again
+    {error, Res} = hb_http:post(
+        Node,
+        hb_message:commit(
+            #{
+                <<"path">> => <<"/~meta@1.0/info">>,
+                <<"test">> => <<"value">>
+            },
+            #{ priv_wallet => Owner }
+        ),
+        #{}
+    ),
+    ?assert(is_binary(Res)).
+```
+
+---
+
+### 3. build/3
+
+```erlang
+-spec build(Base, Req, NodeMsg) -> {ok, BuildInfo}
+    when
+        Base :: map(),
+        Req :: map(),
+        NodeMsg :: map(),
+        BuildInfo :: #{
+            <<"node">> => binary(),
+            <<"version">> => binary(),
+            <<"source">> => binary(),
+            <<"source-short">> => binary(),
+            <<"build-time">> => binary()
+        }.
+```
+
+**Description:** Return build information including version number, git hash, and build timestamp.
+
+**Test Code:**
+```erlang
+-module(dev_meta_build_test).
+-include_lib("eunit/include/eunit.hrl").
+
+build_info_test() ->
+    Node = hb_http_server:start_node(#{}),
+    {ok, NodeName} = hb_http:get(Node, <<"/~meta@1.0/build/node">>, #{}),
+    ?assertEqual(<<"HyperBEAM">>, NodeName),
+    {ok, Version} = hb_http:get(Node, <<"/~meta@1.0/build/version">>, #{}),
+    ?assert(is_binary(Version)),
+    {ok, Source} = hb_http:get(Node, <<"/~meta@1.0/build/source">>, #{}),
+    ?assert(is_binary(Source)),
+    {ok, SourceShort} = hb_http:get(Node, <<"/~meta@1.0/build/source-short">>, #{}),
+    ?assert(is_binary(SourceShort)),
+    {ok, BuildTime} = hb_http:get(Node, <<"/~meta@1.0/build/build-time">>, #{}),
+    ?assert(is_binary(BuildTime)).
+```
+
+---
+
+### 4. handle/2
+
+```erlang
+-spec handle(NodeMsg, Request) -> {ok, Response} | {error, Reason}
+    when
+        NodeMsg :: map(),
+        Request :: term(),
+        Response :: map(),
+        Reason :: term().
+```
+
+**Description:** Main request handler. Normalizes requests, applies hooks, routes to appropriate handlers based on initialization state.
+
+**Request Flow:**
+1. **Normalize**: Convert to singleton format
+2. **Check Init**: If not initialized, only allow `meta@1.0/info`
+3. **Pre-hook**: Apply `on/request` hook if configured
+4. **Resolve**: Route to AO-Core resolver
+5. **Post-hook**: Apply `on/response` hook if configured
+6. **Embed Status**: Add status code to response
+
+**Test Code:**
+```erlang
+-module(dev_meta_handle_test).
+-include_lib("eunit/include/eunit.hrl").
+
+handle_before_init_test() ->
+    NodeMsg = #{ initialized => false },
+    Request = #{ <<"path">> => <<"/~meta@1.0/info">> },
+    {ok, Response} = dev_meta:handle(NodeMsg, Request),
+    ?assert(is_map(Response)).
+
+handle_normal_request_test() ->
+    NodeMsg = #{ initialized => true },
+    Request = #{ <<"path">> => <<"/test">> },
+    Result = dev_meta:handle(NodeMsg, Request),
+    ?assert(is_tuple(Result)).
+```
+
+---
+
+### 5. is_operator/2
+
+```erlang
+-spec is_operator(Request, NodeMsg) -> boolean()
+    when
+        Request :: map(),
+        NodeMsg :: map().
+```
+
+**Description:** Check if request is signed by the node operator. Returns `true` if node is unclaimed or requester is operator.
+
+**Test Code:**
+```erlang
+-module(dev_meta_is_operator_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_operator_unclaimed_test() ->
+    NodeMsg = #{ operator => unclaimed },
+    Request = hb_message:commit(#{}, ar_wallet:new()),
+    ?assert(dev_meta:is_operator(Request, NodeMsg)).
+
+is_operator_authorized_test() ->
+    Owner = ar_wallet:new(),
+    NodeMsg = #{
+        priv_wallet => Owner,
+        operator => hb_util:human_id(ar_wallet:to_address(Owner))
+    },
+    Request = hb_message:commit(#{}, Owner),
+    ?assert(dev_meta:is_operator(Request, NodeMsg)).
+
+is_operator_unauthorized_test() ->
+    Owner = ar_wallet:new(),
+    Other = ar_wallet:new(),
+    NodeMsg = #{
+        priv_wallet => Owner,
+        operator => hb_util:human_id(ar_wallet:to_address(Owner))
+    },
+    Request = hb_message:commit(#{}, Other),
+    ?assertNot(dev_meta:is_operator(Request, NodeMsg)).
+```
+
+---
+
+### 6. is/2, is/3
+
+```erlang
+-spec is(Role, Request, NodeMsg) -> boolean()
+    when
+        Role :: admin | operator | atom(),
+        Request :: map(),
+        NodeMsg :: map().
+```
+
+**Description:** Check if request has specific role. Currently supports `admin` and `operator` roles.
+
+**Roles:**
+- `admin` - Alias for `operator`
+- `operator` - Node operator (can modify configuration)
+
+**Test Code:**
+```erlang
+-module(dev_meta_is_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_admin_test() ->
+    Owner = ar_wallet:new(),
+    NodeMsg = #{ priv_wallet => Owner },
+    Request = hb_message:commit(#{}, Owner),
+    ?assert(dev_meta:is(admin, Request, NodeMsg)).
+
+is_not_admin_test() ->
+    Owner = ar_wallet:new(),
+    Other = ar_wallet:new(),
+    NodeMsg = #{ priv_wallet => Owner },
+    Request = hb_message:commit(#{}, Other),
+    ?assertNot(dev_meta:is(admin, Request, NodeMsg)).
+```
+
+---
+
+### 7. adopt_node_message/2
+
+```erlang
+-spec adopt_node_message(Request, NodeMsg) -> {ok, NewNodeMsg} | {error, Reason}
+    when
+        Request :: map(),
+        NodeMsg :: map(),
+        NewNodeMsg :: map(),
+        Reason :: term().
+```
+
+**Description:** Adopt changes to node configuration. Validates and merges request into node message, preserving critical fields.
+
+**Protected Fields:**
+- `http_server` - HTTP server process ID
+- `node_history` - Configuration change history
+
+**Process:**
+1. Check if node is permanent (error if so)
+2. Extract body from request
+3. Validate required fields present
+4. Merge with existing config
+5. Add to node history
+6. Return updated node message
+
+**Test Code:**
+```erlang
+-module(dev_meta_adopt_test).
+-include_lib("eunit/include/eunit.hrl").
+
+adopt_valid_test() ->
+    NodeMsg = #{ initialized => true },
+    Request = #{ <<"body">> => #{ <<"test">> => <<"value">> } },
+    {ok, NewNodeMsg} = dev_meta:adopt_node_message(Request, NodeMsg),
+    ?assertEqual(<<"value">>, maps:get(<<"test">>, NewNodeMsg)).
+
+adopt_preserves_critical_test() ->
+    NodeMsg = #{
+        initialized => true,
+        http_server => self(),
+        node_history => [1, 2]
+    },
+    Request = #{
+        <<"body">> => #{
+            <<"test">> => <<"value">>,
+            <<"http_server">> => <<"bad">>,
+            <<"node_history">> => []
+        }
+    },
+    {ok, NewNodeMsg} = dev_meta:adopt_node_message(Request, NodeMsg),
+    ?assertEqual(self(), maps:get(http_server, NewNodeMsg)),
+    ?assertEqual(3, length(maps:get(node_history, NewNodeMsg))).
+
+adopt_permanent_error_test() ->
+    NodeMsg = #{ initialized => permanent },
+    Request = #{ <<"body">> => #{ <<"test">> => <<"value">> } },
+    Result = dev_meta:adopt_node_message(Request, NodeMsg),
+    ?assertMatch({error, _}, Result).
+```
+
+---
+
+## Request/Response Hooks
+
+### Hook Configuration
+
+```erlang
+NodeMsg = #{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => #{
+                <<"request">> => fun(Base, Req, Opts) ->
+                    % Process request
+                    {ok, ModifiedReq}
+                end
+            }
+        },
+        <<"response">> => #{
+            <<"device">> => #{
+                <<"response">> => fun(Base, Res, Opts) ->
+                    % Process response
+                    {ok, ModifiedRes}
+                end
+            }
+        }
+    }
+}
+```
+
+### Hook Types
+
+**Request Hook:**
+- Called before AO-Core resolution
+- Can modify request
+- Can halt request by returning `{error, Reason}`
+
+**Response Hook:**
+- Called after AO-Core resolution
+- Can modify response
+- Cannot halt (error is returned)
+
+**Test Code:**
+```erlang
+-module(dev_meta_hooks_test).
+-include_lib("eunit/include/eunit.hrl").
+
+request_hook_test() ->
+    Parent = self(),
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"request">> => #{
+                <<"device">> => #{
+                    <<"request">> => fun(_, Req, _) ->
+                        Parent ! {hook, request},
+                        {ok, Req}
+                    end
+                }
+            }
+        }
+    }),
+    hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    receive {hook, request} -> ok after 100 -> error(timeout) end.
+
+response_hook_test() ->
+    Parent = self(),
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"response">> => #{
+                <<"device">> => #{
+                    <<"response">> => fun(_, Res, _) ->
+                        Parent ! {hook, response},
+                        {ok, Res}
+                    end
+                }
+            }
+        }
+    }),
+    hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    receive {hook, response} -> ok after 100 -> error(timeout) end.
+
+halt_request_test() ->
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"request">> => #{
+                <<"device">> => #{
+                    <<"request">> => fun(_, _, _) ->
+                        {error, <<"Blocked">>}
+                    end
+                }
+            }
+        }
+    }),
+    {error, Res} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assertEqual(<<"Blocked">>, Res).
+
+modify_request_test() ->
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"request">> => #{
+                <<"device">> => #{
+                    <<"request">> => fun(_, #{ <<"body">> := [M|Ms] }, _) ->
+                        {ok, #{
+                            <<"body">> => [M#{ <<"added">> => <<"value">> }|Ms]
+                        }}
+                    end
+                }
+            }
+        }
+    }),
+    {ok, Res} = hb_http:get(Node, <<"/added">>, #{}),
+    ?assertEqual(<<"value">>, Res).
+```
+
+---
+
+## Node Initialization States
+
+### Initialization Values
+
+- `false` - Not initialized (only `/~meta@1.0/info` accessible)
+- `true` - Initialized (all endpoints accessible)
+- `permanent` - Permanently initialized (cannot be changed)
+
+### State Transitions
+
+```
+false → true → permanent
+  ↑      ↓
+  ←------
+  (can revert unless permanent)
+```
+
+---
+
+## Node Claiming
+
+### Unclaimed Node
+
+```erlang
+NodeMsg = #{ operator => unclaimed }
+```
+
+**Behavior:**
+- Anyone can claim by setting `operator` field
+- First claimer becomes operator
+
+### Claiming Process
+
+```erlang
+% Start unclaimed node
+Node = hb_http_server:start_node(#{
+    operator => unclaimed
+}),
+
+% Claim node
+Owner = ar_wallet:new(),
+hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~meta@1.0/info">>,
+            <<"operator">> => hb_util:human_id(ar_wallet:to_address(Owner))
+        },
+        #{ priv_wallet => Owner }
+    ),
+    #{}
+).
+```
+
+---
+
+## Dynamic Keys
+
+The following keys are added dynamically to node info responses:
+
+### Address Keys
+
+```erlang
+#{
+    <<"address">> => NodeAddress,  % From priv_wallet
+    address => NodeAddress          % Atom key version
+}
+```
+
+### Identity Addresses
+
+```erlang
+#{
+    <<"identities">> => #{
+        <<"scheduler-1">> => #{
+            <<"address">> => Address1,
+            % ... other fields
+        }
+    }
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Start node with configuration
+Node = hb_http_server:start_node(#{
+    priv_wallet => hb:wallet(),
+    custom_config => <<"value">>,
+    store => StoreConfig
+}).
+
+%% Get node information
+{ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}).
+
+%% Update node configuration (requires operator signature)
+{ok, _} = hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~meta@1.0/info">>,
+            <<"new_config">> => <<"value">>
+        },
+        #{ priv_wallet => OperatorWallet }
+    ),
+    #{}
+).
+
+%% Get build information
+{ok, Version} = hb_http:get(Node, <<"/~meta@1.0/build/version">>, #{}).
+{ok, GitHash} = hb_http:get(Node, <<"/~meta@1.0/build/source">>, #{}).
+
+%% Set node as permanent
+{ok, _} = hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~meta@1.0/info">>,
+            initialized => <<"permanent">>
+        },
+        #{ priv_wallet => Owner }
+    ),
+    #{}
+).
+
+%% Add request hook
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => #{
+                <<"request">> => fun(_, Req, _) ->
+                    % Validate request
+                    {ok, Req}
+                end
+            }
+        }
+    }
+}).
+
+%% Claim unclaimed node
+Node = hb_http_server:start_node(#{ operator => unclaimed }),
+Owner = ar_wallet:new(),
+hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~meta@1.0/info">>,
+            <<"operator">> => hb_util:human_id(ar_wallet:to_address(Owner))
+        },
+        #{ priv_wallet => Owner }
+    ),
+    #{}
+).
+```
+
+---
+
+## HTTP Extra Options
+
+Additional HTTP response headers can be configured:
+
+```erlang
+NodeMsg = #{
+    http_extra_opts => #{
+        <<"cache-control">> => [<<"no-store">>, <<"no-cache">>],
+        <<"x-custom-header">> => <<"value">>
+    }
+}
+```
+
+---
+
+## References
+
+- **hb_http_server.erl** - HTTP server implementation
+- **hb_http.erl** - HTTP client
+- **hb_ao.erl** - AO-Core resolution
+- **hb_message.erl** - Message operations
+- **hb_singleton.erl** - Singleton request parsing
+- **ar_wallet.erl** - Wallet operations
+
+---
+
+## Notes
+
+1. **Entry Point**: Primary interface for all HyperBEAM requests
+2. **Initialization**: Enforces initialization before allowing access
+3. **Authorization**: Only operator can modify configuration
+4. **Permanent State**: Once permanent, configuration is immutable
+5. **Hook System**: Flexible request/response preprocessing
+6. **Node History**: Tracks all configuration changes
+7. **Protected Fields**: Critical fields cannot be overridden
+8. **Dynamic Keys**: Address fields added at runtime
+9. **Unclaimed Nodes**: First claimer becomes operator
+10. **Build Info**: Version and git information available
+11. **Private Filtering**: Filters out private keys in responses
+12. **Status Embedding**: Automatically adds status codes
+13. **Singleton Support**: Normalizes various request formats
+14. **Event Logging**: Comprehensive event tracking
+15. **HTTP Integration**: Designed for HTTP server operation

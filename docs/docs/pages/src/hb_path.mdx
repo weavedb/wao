@@ -1,0 +1,840 @@
+# hb_path.erl - Message Path and HashPath Management
+
+## Overview
+
+**Purpose:** Manipulate request paths and calculate rolling Merkle HashPaths for message history  
+**Module:** `hb_path`  
+**Pattern:** Path-based routing with cryptographic message history tracking
+
+This module provides utilities for managing two types of paths in HyperBEAM messages: request paths (for routing) and HashPaths (for cryptographic message history). HashPaths create a rolling Merkle list that represents the complete tree of messages applied to generate a given message, enabling verifiable message provenance.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_private`, `hb_maps`, `hb_util`, `hb_crypto`, `hb_cache`, `dev_message`
+- **Erlang/OTP:** None
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% HashPath Generation
+-spec hashpath(Msg1, Opts) -> HashPath.
+-spec hashpath(Msg1, Msg2, Opts) -> HashPath.
+-spec hashpath(Msg1Hashpath, Msg2ID, HashpathAlg, Opts) -> HashPath.
+-spec hashpath_alg(Msg, Opts) -> HashpathFunction.
+
+%% HashPath Verification
+-spec verify_hashpath(Messages, Opts) -> boolean().
+
+%% Request Path Manipulation
+-spec hd(Msg2, Opts) -> FirstPathElement | undefined.
+-spec tl(Msg2, Opts) -> RemainingPath | undefined.
+-spec push_request(Msg, Path) -> UpdatedMsg.
+-spec push_request(Msg, Path, Opts) -> UpdatedMsg.
+-spec queue_request(Msg, Path) -> UpdatedMsg.
+-spec queue_request(Msg, Path, Opts) -> UpdatedMsg.
+-spec pop_request(Msg, Opts) -> {Head, Rest} | undefined.
+
+%% Private Path Storage
+-spec priv_remaining(Msg, Opts) -> RemainingPath | undefined.
+-spec priv_store_remaining(Msg, RemainingPath) -> UpdatedMsg.
+-spec priv_store_remaining(Msg, RemainingPath, Opts) -> UpdatedMsg.
+
+%% Path Utilities
+-spec term_to_path_parts(Path) -> [PathPart].
+-spec term_to_path_parts(Path, Opts) -> [PathPart].
+-spec from_message(Type, Msg, Opts) -> Path | HashPath.
+-spec to_binary(Path) -> Binary.
+-spec normalize(Path) -> NormalizedBinary.
+-spec matches(Key1, Key2) -> boolean().
+-spec regex_matches(Path1, Path2) -> boolean().
+```
+
+---
+
+## Public Functions
+
+### 1. hashpath/2, hashpath/3, hashpath/4
+
+```erlang
+-spec hashpath(Msg1, Opts) -> HashPath
+    when
+        Msg1 :: map() | binary(),
+        Opts :: map(),
+        HashPath :: binary().
+
+-spec hashpath(Msg1, Msg2, Opts) -> HashPath
+    when
+        Msg1 :: map(),
+        Msg2 :: map() | binary(),
+        Opts :: map(),
+        HashPath :: binary().
+
+-spec hashpath(Msg1Hashpath, Msg2ID, HashpathAlg, Opts) -> HashPath
+    when
+        Msg1Hashpath :: binary(),
+        Msg2ID :: binary(),
+        HashpathAlg :: function(),
+        Opts :: map(),
+        HashPath :: binary().
+```
+
+**Description:** Generate HashPaths for message provenance. HashPaths are rolling Merkle lists that cryptographically link messages in execution order, creating a verifiable history tree.
+
+**HashPath Structure:**
+- Single message: `MessageID`
+- Two messages: `Msg1HashPath/Msg2ID`
+- Multiple levels: `Hash(PrevBase, Msg2ID)/Msg3ID`
+
+**Test Code:**
+```erlang
+-module(hb_path_hashpath_test).
+-include_lib("eunit/include/eunit.hrl").
+
+hashpath_basic_test() ->
+    Msg1 = #{priv => #{<<"empty">> => <<"message">>}},
+    Msg2 = #{priv => #{<<"exciting">> => <<"message2">>}},
+    Hashpath = hb_path:hashpath(Msg1, Msg2, #{}),
+    ?assert(is_binary(Hashpath) andalso byte_size(Hashpath) == 87).
+
+hashpath_direct_msg2_test() ->
+    Msg1 = #{<<"base">> => <<"message">>},
+    Msg2 = #{<<"path">> => <<"base">>},
+    Hashpath = hb_path:hashpath(Msg1, Msg2, #{}),
+    [_, KeyName] = hb_path:term_to_path_parts(Hashpath),
+    ?assert(hb_path:matches(KeyName, <<"base">>)).
+
+hashpath_multiple_test() ->
+    Msg1 = #{<<"empty">> => <<"message">>},
+    Msg2 = #{<<"exciting">> => <<"message2">>},
+    Msg3 = #{priv => #{<<"hashpath">> => hb_path:hashpath(Msg1, Msg2, #{})}},
+    Msg4 = #{<<"exciting">> => <<"message4">>},
+    Msg5 = hb_path:hashpath(Msg3, Msg4, #{}),
+    ?assert(is_binary(Msg5)).
+
+hashpath_binary_test() ->
+    Binary = <<"test data">>,
+    Hashpath = hb_path:hashpath(Binary, #{}),
+    ?assert(is_binary(Hashpath)),
+    % Should be human-readable ID (43 bytes)
+    ?assertEqual(43, byte_size(Hashpath)).
+```
+
+---
+
+### 2. hashpath_alg/2
+
+```erlang
+-spec hashpath_alg(Msg, Opts) -> HashpathFunction
+    when
+        Msg :: map(),
+        Opts :: map(),
+        HashpathFunction :: function().
+```
+
+**Description:** Get the HashPath algorithm function for a message. Supports custom algorithms via the `hashpath-alg` field.
+
+**Supported Algorithms:**
+- `sha-256-chain` (default): Standard SHA-256 chaining
+- `accumulate-256`: Accumulator-based hashing
+
+**Test Code:**
+```erlang
+-module(hb_path_hashpath_alg_test).
+-include_lib("eunit/include/eunit.hrl").
+
+hashpath_alg_default_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    Alg = hb_path:hashpath_alg(Msg, #{}),
+    ?assert(is_function(Alg, 2)),
+    % Should return sha256_chain by default
+    Hash = Alg(<<1,2,3>>, <<4,5,6>>),
+    ?assert(is_binary(Hash)).
+
+hashpath_alg_custom_test() ->
+    Msg = #{<<"hashpath-alg">> => <<"accumulate-256">>},
+    Alg = hb_path:hashpath_alg(Msg, #{}),
+    ?assert(is_function(Alg, 2)).
+```
+
+---
+
+### 3. verify_hashpath/2
+
+```erlang
+-spec verify_hashpath(Messages, Opts) -> boolean()
+    when
+        Messages :: [map()],
+        Opts :: map().
+```
+
+**Description:** Verify that a sequence of messages has valid HashPaths. Checks that each message's HashPath correctly follows from previous messages.
+
+**Test Code:**
+```erlang
+-module(hb_path_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+
+verify_hashpath_valid_test() ->
+    Msg1 = #{<<"test">> => <<"initial">>},
+    Msg2 = #{<<"firstapplied">> => <<"msg2">>},
+    Msg3 = #{priv => #{<<"hashpath">> => hb_path:hashpath(Msg1, Msg2, #{})}},
+    Msg4 = #{priv => #{<<"hashpath">> => hb_path:hashpath(Msg2, Msg3, #{})}},
+    ?assert(hb_path:verify_hashpath([Msg1, Msg2, Msg3, Msg4], #{})).
+
+verify_hashpath_invalid_test() ->
+    Msg1 = #{<<"test">> => <<"initial">>},
+    Msg2 = #{<<"firstapplied">> => <<"msg2">>},
+    Msg3 = #{priv => #{<<"hashpath">> => hb_path:hashpath(Msg1, Msg2, #{})}},
+    Msg4 = #{priv => #{<<"hashpath">> => hb_path:hashpath(Msg2, Msg3, #{})}},
+    Msg3Fake = #{priv => #{<<"hashpath">> => hb_path:hashpath(Msg4, Msg2, #{})}},
+    ?assertNot(hb_path:verify_hashpath([Msg1, Msg2, Msg3Fake, Msg4], #{})).
+```
+
+---
+
+### 4. hd/2
+
+```erlang
+-spec hd(Msg2, Opts) -> FirstPathElement | undefined
+    when
+        Msg2 :: map(),
+        Opts :: map(),
+        FirstPathElement :: binary().
+```
+
+**Description:** Extract the first element from a message's request path. Returns `undefined` if path is empty or not present.
+
+**Test Code:**
+```erlang
+-module(hb_path_hd_test).
+-include_lib("eunit/include/eunit.hrl").
+
+hd_basic_test() ->
+    ?assertEqual(<<"a">>, hb_path:hd(#{<<"path">> => [<<"a">>, <<"b">>, <<"c">>]}, #{})).
+
+hd_undefined_test() ->
+    ?assertEqual(undefined, hb_path:hd(#{<<"path">> => undefined}, #{})),
+    ?assertEqual(undefined, hb_path:hd(#{<<"path">> => []}, #{})).
+
+hd_single_test() ->
+    ?assertEqual(<<"test">>, hb_path:hd(#{<<"path">> => <<"test">>}, #{})).
+```
+
+---
+
+### 5. tl/2
+
+```erlang
+-spec tl(Msg2, Opts) -> RemainingPath | undefined
+    when
+        Msg2 :: map() | list(),
+        Opts :: map(),
+        RemainingPath :: map() | list().
+```
+
+**Description:** Return the message or path without its first element. For messages, returns updated message with `path` field modified. For lists, returns remaining list elements.
+
+**Note:** This transformation does NOT update message IDs, making them non-verifiable after execution.
+
+**Test Code:**
+```erlang
+-module(hb_path_tl_test).
+-include_lib("eunit/include/eunit.hrl").
+
+tl_message_test() ->
+    Result = hb_path:tl(#{<<"path">> => [<<"a">>, <<"b">>, <<"c">>]}, #{}),
+    ?assertMatch([<<"b">>, <<"c">>], maps:get(<<"path">>, Result)).
+
+tl_list_test() ->
+    ?assertEqual([<<"b">>, <<"c">>], hb_path:tl([<<"a">>, <<"b">>, <<"c">>], #{})).
+
+tl_empty_test() ->
+    ?assertEqual(undefined, hb_path:tl(#{<<"path">> => []}, #{})),
+    ?assertEqual(undefined, hb_path:tl(#{<<"path">> => <<"a">>}, #{})),
+    ?assertEqual(undefined, hb_path:tl([<<"c">>], #{})).
+```
+
+---
+
+### 6. push_request/2, push_request/3
+
+```erlang
+-spec push_request(Msg, Path) -> UpdatedMsg
+    when
+        Msg :: map(),
+        Path :: binary() | list(),
+        UpdatedMsg :: map().
+
+-spec push_request(Msg, Path, Opts) -> UpdatedMsg
+    when
+        Msg :: map(),
+        Path :: binary() | list(),
+        Opts :: map(),
+        UpdatedMsg :: map().
+```
+
+**Description:** Add path elements to the head (next to execute) of a message's request path. Prepends to existing path.
+
+**Test Code:**
+```erlang
+-module(hb_path_push_test).
+-include_lib("eunit/include/eunit.hrl").
+
+push_request_basic_test() ->
+    Msg = #{<<"path">> => [<<"b">>, <<"c">>]},
+    Updated = hb_path:push_request(Msg, <<"a">>),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], maps:get(<<"path">>, Updated)).
+
+push_request_multiple_test() ->
+    Msg = #{<<"path">> => [<<"c">>]},
+    Updated = hb_path:push_request(Msg, [<<"a">>, <<"b">>]),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], maps:get(<<"path">>, Updated)).
+
+push_request_empty_test() ->
+    Msg = #{},
+    Updated = hb_path:push_request(Msg, <<"a">>),
+    ?assertEqual([<<"a">>], maps:get(<<"path">>, Updated)).
+```
+
+---
+
+### 7. queue_request/2, queue_request/3
+
+```erlang
+-spec queue_request(Msg, Path) -> UpdatedMsg
+    when
+        Msg :: map(),
+        Path :: binary() | list(),
+        UpdatedMsg :: map().
+
+-spec queue_request(Msg, Path, Opts) -> UpdatedMsg
+    when
+        Msg :: map(),
+        Path :: binary() | list(),
+        Opts :: map(),
+        UpdatedMsg :: map().
+```
+
+**Description:** Add path elements to the tail (end) of a message's request path. Appends to existing path.
+
+**Test Code:**
+```erlang
+-module(hb_path_queue_test).
+-include_lib("eunit/include/eunit.hrl").
+
+queue_request_basic_test() ->
+    Msg = #{<<"path">> => [<<"a">>, <<"b">>]},
+    Updated = hb_path:queue_request(Msg, <<"c">>),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], maps:get(<<"path">>, Updated)).
+
+queue_request_multiple_test() ->
+    Msg = #{<<"path">> => [<<"a">>]},
+    Updated = hb_path:queue_request(Msg, [<<"b">>, <<"c">>]),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], maps:get(<<"path">>, Updated)).
+```
+
+---
+
+### 8. pop_request/2
+
+```erlang
+-spec pop_request(Msg, Opts) -> {Head, Rest} | undefined
+    when
+        Msg :: map() | list(),
+        Opts :: map(),
+        Head :: binary(),
+        Rest :: map() | list().
+```
+
+**Description:** Remove and return the first element from a request path along with the remaining path. Returns `undefined` if path is empty.
+
+**Test Code:**
+```erlang
+-module(hb_path_pop_test).
+-include_lib("eunit/include/eunit.hrl").
+
+pop_from_message_test() ->
+    {Head, X2} = hb_path:pop_request(#{<<"path">> => [<<"a">>, <<"b">>, <<"c">>]}, #{}),
+    ?assertEqual(<<"a">>, Head),
+    {H2, X3} = hb_path:pop_request(X2, #{}),
+    ?assertEqual(<<"b">>, H2),
+    {H3, X4} = hb_path:pop_request(X3, #{}),
+    ?assertEqual(<<"c">>, H3),
+    ?assertEqual(undefined, hb_path:pop_request(X4, #{})).
+
+pop_from_list_test() ->
+    {Head, Rest} = hb_path:pop_request([<<"a">>, <<"b">>, <<"c">>], #{}),
+    ?assertEqual(<<"a">>, Head),
+    ?assertEqual([<<"b">>, <<"c">>], Rest).
+```
+
+---
+
+### 9. priv_remaining/2
+
+```erlang
+-spec priv_remaining(Msg, Opts) -> RemainingPath | undefined
+    when
+        Msg :: map(),
+        Opts :: map(),
+        RemainingPath :: list().
+```
+
+**Description:** Get the remaining path from a message's private AO-Core key without using the standard get/set functions. Safe to use inside AO-Core resolve.
+
+**Test Code:**
+```erlang
+-module(hb_path_priv_remaining_test).
+-include_lib("eunit/include/eunit.hrl").
+
+priv_remaining_test() ->
+    Msg = hb_path:priv_store_remaining(#{}, [<<"a">>, <<"b">>]),
+    ?assertEqual([<<"a">>, <<"b">>], hb_path:priv_remaining(Msg, #{})).
+
+priv_remaining_undefined_test() ->
+    ?assertEqual(undefined, hb_path:priv_remaining(#{}, #{})).
+```
+
+---
+
+### 10. priv_store_remaining/2, priv_store_remaining/3
+
+```erlang
+-spec priv_store_remaining(Msg, RemainingPath) -> UpdatedMsg
+    when
+        Msg :: map(),
+        RemainingPath :: list(),
+        UpdatedMsg :: map().
+
+-spec priv_store_remaining(Msg, RemainingPath, Opts) -> UpdatedMsg
+    when
+        Msg :: map(),
+        RemainingPath :: list(),
+        Opts :: map(),
+        UpdatedMsg :: map().
+```
+
+**Description:** Store the remaining path in a message's private AO-Core key. Used for tracking execution state without affecting message serialization.
+
+**Test Code:**
+```erlang
+-module(hb_path_priv_store_test).
+-include_lib("eunit/include/eunit.hrl").
+
+priv_store_remaining_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    Updated = hb_path:priv_store_remaining(Msg, [<<"a">>, <<"b">>]),
+    ?assertEqual([<<"a">>, <<"b">>], hb_path:priv_remaining(Updated, #{})),
+    % Original message data should be preserved
+    ?assertEqual(<<"test">>, maps:get(<<"data">>, Updated)).
+```
+
+---
+
+### 11. term_to_path_parts/1, term_to_path_parts/2
+
+```erlang
+-spec term_to_path_parts(Path) -> [PathPart]
+    when
+        Path :: binary() | list() | atom() | integer(),
+        PathPart :: binary().
+
+-spec term_to_path_parts(Path, Opts) -> [PathPart]
+    when
+        Path :: binary() | list() | atom() | integer(),
+        Opts :: map(),
+        PathPart :: binary().
+```
+
+**Description:** Convert various term types into a list of path parts. Splits on `/` separator and flattens nested lists. Returns `undefined` for empty paths.
+
+**Test Code:**
+```erlang
+-module(hb_path_term_to_path_test).
+-include_lib("eunit/include/eunit.hrl").
+
+term_to_path_binary_test() ->
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], hb_path:term_to_path_parts(<<"a/b/c">>)).
+
+term_to_path_list_test() ->
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], hb_path:term_to_path_parts([<<"a">>, <<"b">>, <<"c">>])),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], hb_path:term_to_path_parts(["a", <<"b">>, <<"c">>])).
+
+term_to_path_nested_test() ->
+    ?assertEqual(
+        [<<"a">>, <<"b">>, <<"b">>, <<"c">>],
+        hb_path:term_to_path_parts([[<<"/a">>, [<<"b">>, <<"//b">>], <<"c">>]]))
+    ).
+
+term_to_path_empty_test() ->
+    ?assertEqual([], hb_path:term_to_path_parts(<<"/">>)),
+    ?assertEqual(undefined, hb_path:term_to_path_parts(<<>>)),
+    ?assertEqual(undefined, hb_path:term_to_path_parts([])).
+
+term_to_path_atom_test() ->
+    ?assertEqual([test], hb_path:term_to_path_parts(test)),
+    ?assertEqual([<<"123">>], hb_path:term_to_path_parts(123)).
+```
+
+---
+
+### 12. from_message/3
+
+```erlang
+-spec from_message(Type, Msg, Opts) -> Path | HashPath
+    when
+        Type :: request | hashpath,
+        Msg :: map(),
+        Opts :: map(),
+        Path :: [binary()],
+        HashPath :: binary().
+```
+
+**Description:** Extract the request path or HashPath from a message. Handles both user-generated messages and processed messages.
+
+**Test Code:**
+```erlang
+-module(hb_path_from_message_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_message_request_test() ->
+    Msg = #{<<"path">> => [<<"a">>, <<"b">>]},
+    ?assertEqual([<<"a">>, <<"b">>], hb_path:from_message(request, Msg, #{})).
+
+from_message_hashpath_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    Hashpath = hb_path:from_message(hashpath, Msg, #{}),
+    ?assert(is_binary(Hashpath)).
+
+from_message_undefined_test() ->
+    ?assertEqual(undefined, hb_path:from_message(request, #{}, #{})).
+```
+
+---
+
+### 13. to_binary/1
+
+```erlang
+-spec to_binary(Path) -> Binary
+    when
+        Path :: binary() | list(),
+        Binary :: binary().
+```
+
+**Description:** Convert any path representation to a clean binary string with `/` separators. Removes extra slashes and empty segments.
+
+**Test Code:**
+```erlang
+-module(hb_path_to_binary_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_binary_list_test() ->
+    ?assertEqual(<<"a/b/c">>, hb_path:to_binary([<<"a">>, <<"b">>, <<"c">>])).
+
+to_binary_binary_test() ->
+    ?assertEqual(<<"a/b/c">>, hb_path:to_binary(<<"a/b/c">>)).
+
+to_binary_mixed_test() ->
+    ?assertEqual(<<"a/b/c">>, hb_path:to_binary(["a", <<"b">>, <<"c">>])).
+
+to_binary_nested_test() ->
+    ?assertEqual(<<"a/b/b/c">>, hb_path:to_binary([<<"a">>, [<<"b">>, <<"//b">>], <<"c">>])).
+```
+
+---
+
+### 14. normalize/1
+
+```erlang
+-spec normalize(Path) -> NormalizedBinary
+    when
+        Path :: binary() | list(),
+        NormalizedBinary :: binary().
+```
+
+**Description:** Normalize a path to binary format with leading slash. Ensures consistent path representation.
+
+**Test Code:**
+```erlang
+-module(hb_path_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_test() ->
+    ?assertEqual(<<"/test">>, hb_path:normalize(<<"test">>)),
+    ?assertEqual(<<"/test">>, hb_path:normalize(<<"/test">>)),
+    ?assertEqual(<<"/a/b">>, hb_path:normalize(<<"a/b">>)).
+```
+
+---
+
+### 15. matches/2
+
+```erlang
+-spec matches(Key1, Key2) -> boolean()
+    when
+        Key1 :: term(),
+        Key2 :: term().
+```
+
+**Description:** Check if two keys match, ignoring case. Normalizes both keys before comparison.
+
+**Test Code:**
+```erlang
+-module(hb_path_matches_test).
+-include_lib("eunit/include/eunit.hrl").
+
+matches_test() ->
+    ?assert(hb_path:matches(<<"test">>, <<"TEST">>)),
+    ?assert(hb_path:matches(<<"a/b">>, <<"A/B">>)),
+    ?assertNot(hb_path:matches(<<"test">>, <<"other">>)).
+```
+
+---
+
+### 16. regex_matches/2
+
+```erlang
+-spec regex_matches(Path1, Path2) -> boolean()
+    when
+        Path1 :: binary() | list(),
+        Path2 :: binary() | list().
+```
+
+**Description:** Check if a path matches a regex pattern. Normalizes paths before matching.
+
+**Test Code:**
+```erlang
+-module(hb_path_regex_test).
+-include_lib("eunit/include/eunit.hrl").
+
+regex_matches_basic_test() ->
+    ?assert(hb_path:regex_matches(<<"a/b/c">>, <<"a/.*/c">>)),
+    ?assertNot(hb_path:regex_matches(<<"a/b/c">>, <<"a/.*/d">>)).
+
+regex_matches_pattern_test() ->
+    ?assert(hb_path:regex_matches(<<"a/abcd/c">>, <<"a/abc.*/c">>)),
+    ?assertNot(hb_path:regex_matches(<<"a/bcd/c">>, <<"a/abc.*/c">>)).
+
+regex_matches_wildcard_test() ->
+    ?assert(hb_path:regex_matches(<<"a/bcd/ignored/c">>, <<"a/.*/c">>)),
+    ?assertNot(hb_path:regex_matches(<<"a/bcd/ignored/c">>, <<"a/.*/d">>)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Generate HashPath for message sequence
+Msg1 = #{<<"device">> => <<"test@1.0">>},
+Msg2 = #{<<"path">> => <<"execute">>},
+Msg3HashPath = hb_path:hashpath(Msg1, Msg2, #{}),
+Msg3 = #{priv => #{<<"hashpath">> => Msg3HashPath}}.
+
+%% Verify message chain
+Messages = [Msg1, Msg2, Msg3, Msg4],
+true = hb_path:verify_hashpath(Messages, #{}).
+
+%% Navigate request path
+Head = hb_path:hd(Msg, #{}),  % Get first element
+Rest = hb_path:tl(Msg, #{}),  % Get remaining path
+{H, R} = hb_path:pop_request(Msg, #{}).  % Get both
+
+%% Build request path
+Msg1 = hb_path:push_request(#{}, <<"first">>),
+Msg2 = hb_path:push_request(Msg1, <<"second">>),
+% Path is now: [<<"second">>, <<"first">>]
+
+Msg3 = hb_path:queue_request(#{}, <<"first">>),
+Msg4 = hb_path:queue_request(Msg3, <<"second">>),
+% Path is now: [<<"first">>, <<"second">>]
+
+%% Store execution state
+Msg = hb_path:priv_store_remaining(BaseMsg, [<<"remaining">>, <<"path">>]),
+Remaining = hb_path:priv_remaining(Msg, #{}).
+
+%% Path conversion
+Parts = hb_path:term_to_path_parts(<<"a/b/c">>),  % [<<"a">>, <<"b">>, <<"c">>]
+Binary = hb_path:to_binary([<<"a">>, <<"b">>, <<"c">>]),  % <<"a/b/c">>
+Normalized = hb_path:normalize(<<"test">>),  % <<"/test">>
+
+%% Path matching
+true = hb_path:matches(<<"Test">>, <<"test">>),
+true = hb_path:regex_matches(<<"a/b/c">>, <<"a/.*/c">>).
+```
+
+---
+
+## HashPath Algorithms
+
+### SHA-256 Chain (Default)
+
+```erlang
+% Algorithm: sha-256-chain
+% Formula: Hash(PrevHashPath, CurrentMsgID)
+
+Msg1HashPath = ID1
+Msg2HashPath = ID1/ID2
+Msg3HashPath = Hash(ID1, ID2)/ID3
+Msg4HashPath = Hash(Hash(ID1, ID2), ID3)/ID4
+```
+
+**Properties:**
+- Rolling hash prevents HashPath tampering
+- Each level includes all previous history
+- Tree structure from nested applications
+
+### Accumulate-256
+
+```erlang
+% Algorithm: accumulate-256
+% Formula: Accumulate(PrevHashPath, CurrentMsgID)
+
+Msg1HashPath = ID1
+Msg2HashPath = Accumulate(ID1, ID2)/ID2
+Msg3HashPath = Accumulate(Accumulate(ID1, ID2), ID3)/ID3
+```
+
+**Properties:**
+- Alternative hashing strategy
+- May have different security properties
+- Custom algorithm support
+
+---
+
+## HashPath Format
+
+### Structure
+
+```
+SingleMessage:
+  "vKk...abc"
+
+TwoMessages:
+  "vKk...abc/wLl...def"
+
+ThreeMessages:
+  "xMm...ghi/yNn...jkl"
+  where xMm...ghi = Hash(vKk...abc, wLl...def)
+
+FourMessages:
+  "zOo...mno/aPp...pqr"
+  where zOo...mno = Hash(xMm...ghi, yNn...jkl)
+```
+
+### Example Flow
+
+```erlang
+% Initial message
+Msg1 = #{<<"device">> => <<"Counter@1.0">>},
+HP1 = hb_path:hashpath(Msg1, #{}),
+% HP1 = "vKk...abc" (43 bytes)
+
+% Apply increment
+Msg2 = #{<<"path">> => <<"increment">>},
+HP2 = hb_path:hashpath(Msg1, Msg2, #{}),
+% HP2 = "vKk...abc/wLl...def" (87 bytes)
+
+% Store result
+Msg3 = #{priv => #{<<"hashpath">> => HP2}},
+
+% Apply another increment
+Msg4 = #{<<"path">> => <<"increment">>},
+HP3 = hb_path:hashpath(Msg3, Msg4, #{}),
+% HP3 = "xMm...ghi/yNn...jkl" (87 bytes)
+% where xMm...ghi = sha256_chain(vKk...abc, wLl...def)
+```
+
+---
+
+## Path Conversion Examples
+
+### Binary to List
+
+```erlang
+<<"a/b/c">> → [<<"a">>, <<"b">>, <<"c">>]
+<<"test">> → [<<"test">>]
+<<"/">> → []
+<<>> → undefined
+```
+
+### List to Binary
+
+```erlang
+[<<"a">>, <<"b">>, <<"c">>] → <<"a/b/c">>
+["a", <<"b">>, <<"c">>] → <<"a/b/c">>
+[<<"a">>, [<<"b">>], <<"c">>] → <<"a/b/c">>
+```
+
+### Nested Lists
+
+```erlang
+[[<<"a">>, [<<"b">>]], <<"c">>] → [<<"a">>, <<"b">>, <<"c">>]
+[<<"/a">>, <<"//b">>] → [<<"a">>, <<"b">>]
+```
+
+### Special Cases
+
+```erlang
+123 → [<<"123">>]
+test → [test]
+{as, <<"Device@1.0">>, Msgs} → [{as, <<"Device@1.0">>, Msgs}]
+```
+
+---
+
+## Request Path Manipulation
+
+### Push vs Queue
+
+```erlang
+% Push - adds to front (next to execute)
+Msg1 = hb_path:push_request(#{}, <<"a">>),  % path: [<<"a">>]
+Msg2 = hb_path:push_request(Msg1, <<"b">>),  % path: [<<"b">>, <<"a">>]
+
+% Queue - adds to back
+Msg3 = hb_path:queue_request(#{}, <<"a">>),  % path: [<<"a">>]
+Msg4 = hb_path:queue_request(Msg3, <<"b">>),  % path: [<<"a">>, <<"b">>]
+```
+
+### Pop Pattern
+
+```erlang
+% Process path elements one by one
+process_path(Msg, Opts) ->
+    case hb_path:pop_request(Msg, Opts) of
+        undefined -> 
+            done;
+        {Head, Rest} ->
+            io:format("Processing: ~p~n", [Head]),
+            process_path(Rest, Opts)
+    end.
+```
+
+---
+
+## References
+
+- **AO-Core Protocol** - `hb_ao.erl`
+- **Message System** - `dev_message.erl`, `hb_message.erl`
+- **Cryptography** - `hb_crypto.erl`
+- **Private Storage** - `hb_private.erl`
+- **Utilities** - `hb_util.erl`, `hb_maps.erl`
+
+---
+
+## Notes
+
+1. **HashPath Tree:** HashPaths create a tree of message history, not just a linear chain
+2. **ID Mixing:** Message IDs include their HashPath, enabling tree structure verification
+3. **Non-Verifiable tl:** The `tl/2` transformation doesn't update IDs, making messages non-verifiable
+4. **Custom Algorithms:** Messages can specify their own HashPath algorithm
+5. **Path Normalization:** Paths are normalized to lowercase binaries for comparison
+6. **Empty Paths:** Empty paths (`<<>>`, `[]`, `<<"/">>`) are handled specially
+7. **Regex Support:** Path matching supports regex patterns for flexible routing
+8. **Private Storage:** Remaining paths stored in private key don't affect serialization
+9. **Case Insensitive:** Path matching is case-insensitive via `matches/2`
+10. **Separator Handling:** Multiple slashes and empty segments are automatically cleaned

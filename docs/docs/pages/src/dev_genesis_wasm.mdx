@@ -1,0 +1,612 @@
+# dev_genesis_wasm.erl - Genesis WASM Compatibility Device
+
+## Overview
+
+**Purpose:** Enable legacy AO processes to run on HyperBEAM infrastructure  
+**Module:** `dev_genesis_wasm`  
+**Pattern:** Delegated compute with automatic server lifecycle management  
+**Integration:** Execution device for legacy AO processes with WASM runtime
+
+This device provides compatibility for existing AO processes from the legacy network by wrapping a genesis-wasm compute server. It automatically manages the server lifecycle, handles checkpoints, and patches outbox messages for seamless integration with HyperBEAM's process model.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_opts`, `hb_util`, `hb_cache`, `hb_features`, `hb_name`
+- **Devices:** `dev_delegated_compute`, `dev_process`, `dev_patch`
+- **Arweave:** `ar_wallet`, `ar_bundles`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lifecycle
+-spec init(Msg, Msg2, Opts) -> {ok, Msg}.
+-spec normalize(Msg, Msg2, Opts) -> {ok, Msg} | {error, ErrorMap}.
+
+%% Computation
+-spec compute(Msg, Msg2, Opts) -> {ok, MsgWithResults} | {error, ErrorMap}.
+
+%% State Management
+-spec snapshot(Msg, Msg2, Opts) -> {ok, SnapshotResponse}.
+-spec import(Msg, Msg2, Opts) -> {ok, ImportedMsg}.
+
+%% Utilities
+-spec latest_checkpoint(ProcessID, Opts) -> {ok, CheckpointMsg} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. init/3
+
+```erlang
+-spec init(Msg, Msg2, Opts) -> {ok, Msg}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map().
+```
+
+**Description:** Initialize the genesis-wasm device. Returns message unchanged.
+
+**Test Code:**
+```erlang
+-module(dev_genesis_wasm_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_test() ->
+    Msg = #{<<"device">> => <<"genesis-wasm@1.0">>},
+    {ok, Result} = dev_genesis_wasm:init(Msg, #{}, #{}),
+    ?assertEqual(Msg, Result).
+```
+
+---
+
+### 2. normalize/3
+
+```erlang
+-spec normalize(Msg, Msg2, Opts) -> {ok, Msg} | {error, ErrorMap}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        ErrorMap :: #{
+            <<"status">> => 500,
+            <<"message">> => binary()
+        }.
+```
+
+**Description:** Normalize device by ensuring genesis-wasm server is running and delegating to `dev_delegated_compute:normalize/3`.
+
+**Server Validation:**
+- Checks if genesis-wasm server is running
+- Returns error if server not available
+- Delegates to delegated_compute for actual normalization
+
+**Test Code:**
+```erlang
+-module(dev_genesis_wasm_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_server_running_test() ->
+    Msg = #{<<"device">> => <<"genesis-wasm@1.0">>},
+    meck:new(dev_genesis_wasm, [passthrough]),
+    meck:expect(dev_genesis_wasm, ensure_started, fun(_) -> true end),
+    meck:new(dev_delegated_compute, [passthrough]),
+    meck:expect(dev_delegated_compute, normalize, fun(M, _, _) -> {ok, M} end),
+    {ok, Result} = dev_genesis_wasm:normalize(Msg, #{}, #{}),
+    ?assertEqual(Msg, Result),
+    meck:unload([dev_genesis_wasm, dev_delegated_compute]).
+
+normalize_server_not_running_test() ->
+    Msg = #{<<"device">> => <<"genesis-wasm@1.0">>},
+    meck:new(dev_genesis_wasm, [passthrough]),
+    meck:expect(dev_genesis_wasm, ensure_started, fun(_) -> false end),
+    {error, Error} = dev_genesis_wasm:normalize(Msg, #{}, #{}),
+    ?assertEqual(500, maps:get(<<"status">>, Error)),
+    meck:unload(dev_genesis_wasm).
+```
+
+---
+
+### 3. compute/3
+
+```erlang
+-spec compute(Msg, Msg2, Opts) -> {ok, MsgWithResults} | {error, ErrorMap}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        MsgWithResults :: map(),
+        ErrorMap :: map().
+```
+
+**Description:** Execute computation using genesis-wasm server. Delegates to `dev_delegated_compute` and patches outbox messages.
+
+**Execution Flow:**
+1. Validate server is running
+2. Delegate to `dev_delegated_compute:compute/3`
+3. Apply `patch@1.0` device to process outbox
+4. Return patched results
+
+**Outbox Patching:**
+- Patches from `/results/outbox`
+- Integrates outbox messages into process state
+- Maintains compatibility with legacy AO processes
+
+**Test Code:**
+```erlang
+-module(dev_genesis_wasm_compute_test).
+-include_lib("eunit/include/eunit.hrl").
+
+compute_success_test() ->
+    Msg = #{<<"device">> => <<"genesis-wasm@1.0">>},
+    Msg2 = #{
+        <<"type">> => <<"Assignment">>,
+        <<"process-id">> => <<"test-proc">>
+    },
+    meck:new(dev_genesis_wasm, [passthrough]),
+    meck:expect(dev_genesis_wasm, ensure_started, fun(_) -> true end),
+    meck:new(dev_delegated_compute, [passthrough]),
+    meck:expect(dev_delegated_compute, compute, fun(M, _, _) -> 
+        {ok, M#{<<"/results">> => #{<<"data">> => <<"test">>}}}
+    end),
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(M, _, _) -> {ok, M} end),
+    {ok, Result} = dev_genesis_wasm:compute(Msg, Msg2, #{}),
+    ?assert(maps:is_key(<<"/results">>, Result)),
+    meck:unload([dev_genesis_wasm, dev_delegated_compute, hb_ao]).
+
+compute_server_not_running_test() ->
+    Msg = #{<<"device">> => <<"genesis-wasm@1.0">>},
+    Msg2 = #{<<"type">> => <<"Assignment">>},
+    meck:new(dev_genesis_wasm, [passthrough]),
+    meck:expect(dev_genesis_wasm, ensure_started, fun(_) -> false end),
+    {error, Error} = dev_genesis_wasm:compute(Msg, Msg2, #{}),
+    ?assertEqual(500, maps:get(<<"status">>, Error)),
+    meck:unload(dev_genesis_wasm).
+```
+
+---
+
+### 4. snapshot/3
+
+```erlang
+-spec snapshot(Msg, Msg2, Opts) -> {ok, SnapshotResponse}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        SnapshotResponse :: map().
+```
+
+**Description:** Create snapshot by delegating to `dev_delegated_compute:snapshot/3`.
+
+**Test Code:**
+```erlang
+-module(dev_genesis_wasm_snapshot_test).
+-include_lib("eunit/include/eunit.hrl").
+
+snapshot_test() ->
+    Msg = #{
+        <<"device">> => <<"genesis-wasm@1.0">>,
+        <<"process-id">> => <<"test-proc">>
+    },
+    meck:new(dev_genesis_wasm, [passthrough]),
+    meck:expect(dev_genesis_wasm, ensure_started, fun(_) -> true end),
+    meck:new(dev_delegated_compute, [passthrough]),
+    meck:expect(dev_delegated_compute, snapshot, fun(_, _, _) -> 
+        {ok, #{<<"type">> => <<"Checkpoint">>}}
+    end),
+    {ok, Result} = dev_genesis_wasm:snapshot(Msg, #{}, #{}),
+    ?assertEqual(<<"Checkpoint">>, maps:get(<<"type">>, Result)),
+    meck:unload([dev_genesis_wasm, dev_delegated_compute]).
+```
+
+---
+
+### 5. import/3
+
+```erlang
+-spec import(Msg, Msg2, Opts) -> {ok, ImportedMsg}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        ImportedMsg :: map().
+```
+
+**Description:** Import latest checkpoint for a process. Fetches most recent checkpoint and loads it into the process state.
+
+**Import Flow:**
+1. Get latest checkpoint via `latest_checkpoint/2`
+2. Set checkpoint in message state
+3. Normalize to load checkpoint
+
+**Test Code:**
+```erlang
+-module(dev_genesis_wasm_import_test).
+-include_lib("eunit/include/eunit.hrl").
+
+import_test() ->
+    ProcessID = <<"test-proc">>,
+    Msg = #{
+        <<"device">> => <<"genesis-wasm@1.0">>,
+        <<"process-id">> => ProcessID
+    },
+    Checkpoint = #{
+        <<"type">> => <<"Checkpoint">>,
+        <<"data">> => <<"checkpoint-data">>
+    },
+    meck:new(dev_genesis_wasm, [passthrough]),
+    meck:expect(dev_genesis_wasm, latest_checkpoint, fun(_, _) -> 
+        {ok, Checkpoint}
+    end),
+    meck:expect(dev_genesis_wasm, normalize, fun(M, _, _) -> {ok, M} end),
+    {ok, Result} = dev_genesis_wasm:import(Msg, #{}, #{}),
+    meck:unload(dev_genesis_wasm).
+```
+
+---
+
+### 6. latest_checkpoint/2
+
+```erlang
+-spec latest_checkpoint(ProcessID, Opts) -> {ok, CheckpointMsg} | {error, Reason}
+    when
+        ProcessID :: binary(),
+        Opts :: map(),
+        CheckpointMsg :: map(),
+        Reason :: term().
+```
+
+**Description:** Fetch the latest checkpoint for a process from Arweave.
+
+**Search Strategy:**
+1. Query Arweave for checkpoint transactions
+2. Filter by process ID and checkpoint type
+3. Return most recent checkpoint
+4. Falls back to empty checkpoint if none found
+
+**Query Tags:**
+- `Type = Checkpoint`
+- `Process = ProcessID`
+
+**Test Code:**
+```erlang
+-module(dev_genesis_wasm_checkpoint_test).
+-include_lib("eunit/include/eunit.hrl").
+
+latest_checkpoint_found_test() ->
+    ProcessID = <<"test-proc">>,
+    CheckpointTX = #tx{
+        tags = [
+            {<<"Type">>, <<"Checkpoint">>},
+            {<<"Process">>, ProcessID}
+        ],
+        data = <<"checkpoint-data">>
+    },
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
+        {ok, [CheckpointTX]}
+    end),
+    {ok, Checkpoint} = dev_genesis_wasm:latest_checkpoint(ProcessID, #{}),
+    ?assertEqual(<<"checkpoint-data">>, maps:get(<<"data">>, Checkpoint)),
+    meck:unload(hb_ao).
+
+latest_checkpoint_not_found_test() ->
+    ProcessID = <<"test-proc">>,
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(_, _, _) -> {ok, []} end),
+    {ok, Checkpoint} = dev_genesis_wasm:latest_checkpoint(ProcessID, #{}),
+    ?assertEqual(#{}, Checkpoint),
+    meck:unload(hb_ao).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Use as process execution device
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"genesis-wasm@1.0">>,
+    <<"process-id">> => ProcessID,
+    <<"module">> => ModuleTXID,
+    <<"scheduler">> => SchedulerAddress
+},
+{ok, Result} = hb_ao:resolve(Process, Message, Opts).
+
+%% Execute assignment
+Msg = #{
+    <<"device">> => <<"genesis-wasm@1.0">>,
+    <<"process-id">> => ProcessID
+},
+Assignment = #{
+    <<"type">> => <<"Assignment">>,
+    <<"process-id">> => ProcessID,
+    <<"slot">> => Slot,
+    <<"action">> => <<"Execute">>
+},
+{ok, Result} = dev_genesis_wasm:compute(Msg, Assignment, Opts),
+Outbox = maps:get(<<"/results/outbox">>, Result, []).
+
+%% Import latest checkpoint
+Msg = #{
+    <<"device">> => <<"genesis-wasm@1.0">>,
+    <<"process-id">> => ProcessID
+},
+{ok, ImportedMsg} = dev_genesis_wasm:import(Msg, #{}, Opts),
+% Process now has latest checkpoint loaded
+
+%% Create checkpoint
+Msg = #{
+    <<"device">> => <<"genesis-wasm@1.0">>,
+    <<"process-id">> => ProcessID
+},
+{ok, Snapshot} = dev_genesis_wasm:snapshot(Msg, #{}, Opts),
+case maps:get(<<"type">>, Snapshot, undefined) of
+    <<"Checkpoint">> ->
+        % Save to Arweave
+        CheckpointData = maps:get(<<"data">>, Snapshot),
+        save_checkpoint(ProcessID, CheckpointData);
+    _ ->
+        % Handle error
+        Error = maps:get(<<"error">>, Snapshot)
+end.
+
+%% Dry-run execution
+DryRun = #{
+    <<"type">> => <<"Message">>,
+    <<"process-id">> => ProcessID,
+    <<"action">> => <<"Test">>
+},
+{ok, Result} = dev_genesis_wasm:compute(Msg, DryRun, Opts),
+Results = maps:get(<<"/results">>, Result).
+```
+
+---
+
+## Server Lifecycle Management
+
+### Automatic Startup
+
+The device automatically starts the genesis-wasm server when:
+1. Server is not running
+2. `hb_features:genesis_wasm()` returns true (compiled with genesis-wasm support)
+3. Server files are available in expected locations
+
+### Server Paths
+
+**Release Mode:**
+```
+{cwd}/genesis-wasm-server/
+```
+
+**Development Mode:**
+```
+{cwd}/_build/genesis_wasm/genesis-wasm-server/
+```
+
+### Launch Script
+```
+genesis-wasm-server/launch-monitored.sh npm --prefix genesis-wasm-server run start
+```
+
+---
+
+## Environment Configuration
+
+### Environment Variables
+
+```erlang
+{
+    "UNIT_MODE" => "hbu",
+    "HB_URL" => "http://localhost:{port}",
+    "PORT" => "{genesis_wasm_port}",
+    "DB_URL" => "{database_url}",
+    "NODE_CONFIG_ENV" => "production",
+    "DEFAULT_LOG_LEVEL" => "{log_level}",
+    "WALLET_FILE" => "{wallet_file}",
+    "CHECKPOINT_CREATION_THROTTLE" => "{throttle}",
+    "DISABLE_CHECKPOINTING" => "{disable}",
+    "CHECKPOINT_DIR" => "{checkpoint_dir}"
+}
+```
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `genesis_wasm_port` | 6363 | Server listen port |
+| `genesis_wasm_db_dir` | `cache-mainnet/genesis-wasm` | Database directory |
+| `genesis_wasm_checkpoints_dir` | `{db_dir}/checkpoints` | Checkpoint storage |
+| `genesis_wasm_log_level` | `debug` | Server log level |
+| `genesis_wasm_wallet_file` | - | Wallet for checkpoints |
+| `genesis_wasm_checkpoint_throttle` | - | Throttle interval |
+| `genesis_wasm_disable_checkpointing` | - | Disable checkpoints |
+
+---
+
+## Checkpoint Management
+
+### Checkpoint Structure
+```erlang
+#{
+    <<"type">> => <<"Checkpoint">>,
+    <<"data">> => Binary,
+    <<"memory-limit">> => <<"1-gb">>,
+    <<"timestamp">> => Timestamp,
+    <<"block-height">> => Height,
+    ...
+}
+```
+
+### Checkpoint Loading
+```erlang
+% Automatic on normalize
+Msg = #{
+    <<"device">> => <<"genesis-wasm@1.0">>,
+    <<"snapshot">> => Checkpoint
+},
+{ok, Normalized} = dev_genesis_wasm:normalize(Msg, #{}, Opts).
+% Checkpoint loaded to server, snapshot key removed
+```
+
+### Checkpoint Creation
+```erlang
+% Via snapshot
+{ok, Snapshot} = dev_genesis_wasm:snapshot(Msg, #{}, Opts).
+
+% Automatic by server
+% (configured via CHECKPOINT_CREATION_THROTTLE)
+```
+
+---
+
+## Outbox Patching
+
+### Patch Process
+```erlang
+% After computation
+{ok, Msg3} = dev_delegated_compute:compute(Msg, Msg2, Opts),
+
+% Patch outbox into process state
+{ok, Msg4} = hb_ao:resolve(
+    Msg3,
+    {as, <<"patch@1.0">>, Msg2#{
+        <<"patch-from">> => <<"/results/outbox">>
+    }},
+    Opts
+).
+```
+
+### Outbox Structure
+```erlang
+#{
+    <<"/results/outbox">> => [
+        #{
+            <<"Target">> => TargetProcess,
+            <<"Data">> => MessageData,
+            <<"Tags">> => Tags,
+            ...
+        }
+    ]
+}
+```
+
+---
+
+## Legacy AO Compatibility
+
+### Supported Features
+- WASM module execution
+- Lua environment (AOS)
+- Message handlers
+- State persistence
+- Checkpoint/restore
+- Outbox messages
+- Multi-message execution
+
+### Process Definition
+```erlang
+#{
+    <<"module">> => ModuleTXID,      % WASM module
+    <<"scheduler">> => SchedulerAddr, % Scheduler address
+    <<"tags">> => [
+        {<<"aos-version">>, Version},
+        {<<"memory-limit">>, <<"1-gb">>}
+    ]
+}
+```
+
+---
+
+## Server Health Monitoring
+
+### Status Check
+```erlang
+is_genesis_wasm_server_running(Opts) ->
+    case httpc:request(
+        get,
+        {"http://localhost:{port}/ping", []},
+        [{timeout, ?STATUS_TIMEOUT}],
+        []
+    ) of
+        {ok, {{_, 200, _}, _, _}} -> true;
+        _ -> false
+    end.
+```
+
+### Process Registration
+```erlang
+% Server process registered as:
+hb_name:lookup(<<"genesis-wasm@1.0">>)
+```
+
+---
+
+## Error Handling
+
+### Server Not Running
+```erlang
+{error, #{
+    <<"status">> => 500,
+    <<"message">> => <<"Genesis-wasm server not running.">>
+}}
+```
+
+### Server Not Compiled
+```erlang
+{error, #{
+    <<"status">> => 500,
+    <<"message">> => 
+        <<"HyperBEAM was not compiled with genesis-wasm@1.0 on this node.">>
+}}
+```
+
+### Computation Errors
+```erlang
+% Delegated to dev_delegated_compute
+{error, ErrorMap}
+```
+
+---
+
+## References
+
+- **Delegated Compute** - `dev_delegated_compute.erl`
+- **Patch Device** - `dev_patch.erl`
+- **Process Device** - `dev_process.erl`
+- **AO Resolution** - `hb_ao.erl`
+- **Features** - `hb_features.erl`
+- **Name Registry** - `hb_name.erl`
+
+---
+
+## Notes
+
+1. **Legacy Compatibility:** Enables existing AO processes to run on HyperBEAM
+2. **Automatic Lifecycle:** Manages server startup/shutdown automatically
+3. **Checkpoint Support:** Full checkpoint save/restore capability
+4. **Outbox Patching:** Automatically integrates outbox messages
+5. **WASM Runtime:** Runs WASM modules with Lua environment
+6. **Server Process:** Launches as external Node.js process
+7. **Health Monitoring:** Checks server status before operations
+8. **Feature Flag:** Requires genesis-wasm feature at compile time
+9. **Database:** Uses SQLite for state persistence
+10. **Environment Config:** Highly configurable via environment variables
+11. **Port Management:** Configurable server port (default 6363)
+12. **Wallet Support:** Optional wallet for checkpoint signing
+13. **Throttling:** Configurable checkpoint creation throttle
+14. **Development Mode:** Special paths for development builds
+15. **Error Recovery:** Graceful degradation when server unavailable
+16. **AOS Support:** Full support for AOS (AO Lua environment)
+17. **Multi-Process:** Can handle multiple processes simultaneously
+18. **State Isolation:** Each process maintains isolated state
+19. **Message Queue:** Handles message ordering and execution
+20. **Dry-Run Support:** Non-state-changing execution for testing

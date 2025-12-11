@@ -1,0 +1,562 @@
+# ar_wallet.erl - Arweave Wallet Management
+
+## Overview
+
+**Purpose:** Wallet creation, key management, signing, and verification for Arweave  
+**Module:** `ar_wallet`  
+**Key Types:** RSA-4096, ECDSA (secp256k1), EdDSA (ed25519)
+
+## Dependencies
+
+- **Erlang/OTP:** `crypto`, `public_key`, `file`, `filelib`
+- **Arweave:** `rsa_pss`, `hb_util`, `hb_json`, `hb_maps`, `hb_keccak`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Wallet Generation
+-spec new() -> {PrivateKey, PublicKey}.
+-spec new(KeyType) -> {PrivateKey, PublicKey}.
+
+%% Signing
+-spec sign(Key, Data) -> Signature.
+-spec sign(Key, Data, DigestType) -> Signature.
+-spec hmac(Data) -> HMAC.
+-spec hmac(Data, DigestType) -> HMAC.
+
+%% Verification
+-spec verify(Key, Data, Signature) -> boolean().
+-spec verify(Key, Data, Signature, DigestType) -> boolean().
+
+%% Key Extraction
+-spec to_pubkey(Wallet) -> PublicKey.
+-spec to_pubkey(Wallet, KeyType) -> PublicKey.
+-spec to_address(Wallet) -> Address.
+-spec to_address(Wallet, KeyType) -> Address.
+
+%% Keyfile Management
+-spec new_keyfile(KeyType, WalletName) -> {PrivateKey, PublicKey}.
+-spec load_keyfile(File) -> {PrivateKey, PublicKey}.
+-spec load_keyfile(File, Opts) -> {PrivateKey, PublicKey}.
+-spec load_key(Address) -> {PrivateKey, PublicKey} | not_found.
+-spec load_key(Address, Opts) -> {PrivateKey, PublicKey} | not_found.
+
+%% Serialization
+-spec to_json(Wallet) -> JSON.
+-spec from_json(JSON) -> {PrivateKey, PublicKey}.
+-spec from_json(JSON, Opts) -> {PrivateKey, PublicKey}.
+```
+
+---
+
+## Public Functions
+
+### 1. new/0
+
+```erlang
+-spec new() -> {PrivateKey, PublicKey}
+    when
+        PrivateKey :: {{KeyType, binary(), binary()}, {KeyType, binary()}},
+        PublicKey :: {KeyType, binary()},
+        KeyType :: {rsa, 65537}.
+```
+
+**Description:** Generate a new RSA-4096 wallet with public exponent 65537.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_new_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+new_default_test() ->
+    {{KeyType, Priv, Pub}, {KeyType, Pub}} = ar_wallet:new(),
+    ?assertEqual({rsa, 65537}, KeyType),
+    ?assert(is_binary(Priv)),
+    ?assert(is_binary(Pub)),
+    ?assertEqual(512, byte_size(Pub)).
+
+new_multiple_wallets_test() ->
+    Wallet1 = ar_wallet:new(),
+    Wallet2 = ar_wallet:new(),
+    Addr1 = ar_wallet:to_address(Wallet1),
+    Addr2 = ar_wallet:to_address(Wallet2),
+    ?assertNot(Addr1 =:= Addr2).
+```
+
+---
+
+### 2. new/1
+
+```erlang
+-spec new(KeyType) -> {PrivateKey, PublicKey}
+    when
+        KeyType :: {rsa, 65537}.
+```
+
+**Description:** Generate wallet with RSA-4096 and specified public exponent. Currently only supports `{rsa, 65537}`.
+
+**Note:** For ECDSA and EdDSA wallets, use `new_keyfile/2` instead.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_new1_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+new_rsa_test() ->
+    {{KeyType, Priv, Pub}, {KeyType, Pub}} = ar_wallet:new({rsa, 65537}),
+    ?assertEqual({rsa, 65537}, KeyType),
+    ?assert(is_binary(Priv)),
+    ?assert(is_binary(Pub)),
+    ?assertEqual(512, byte_size(Pub)).
+```
+
+---
+
+### 3. sign/2
+
+```erlang
+-spec sign(Key, Data) -> Signature
+    when
+        Key :: {PrivateKey, PublicKey} | PrivateKey,
+        Data :: binary(),
+        Signature :: binary().
+```
+
+**Description:** Sign data using RSA-PSS with SHA-256 (default).
+
+**Test Code:**
+```erlang
+-module(ar_wallet_sign2_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+sign_default_test() ->
+    Wallet = ar_wallet:new(),
+    Data = <<"Test message">>,
+    Signature = ar_wallet:sign(Wallet, Data),
+    ?assert(is_binary(Signature)),
+    ?assertEqual(512, byte_size(Signature)).
+
+sign_empty_data_test() ->
+    {PrivWallet, PubWallet} = ar_wallet:new(),
+    Data = <<>>,
+    Signature = ar_wallet:sign(PrivWallet, Data),
+    ?assert(ar_wallet:verify(PubWallet, Data, Signature)).
+```
+
+---
+
+### 4. sign/3
+
+```erlang
+-spec sign(Key, Data, DigestType) -> Signature
+    when
+        Key :: {PrivateKey, PublicKey} | PrivateKey,
+        Data :: binary(),
+        DigestType :: sha256 | sha384 | sha512,
+        Signature :: binary().
+```
+
+**Description:** Sign data with specified hash algorithm.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_sign3_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+sign_sha256_test() ->
+    Wallet = ar_wallet:new(),
+    Data = <<"SHA-256 test">>,
+    Sig = ar_wallet:sign(Wallet, Data, sha256),
+    ?assert(is_binary(Sig)),
+    ?assertEqual(512, byte_size(Sig)).
+
+sign_sha384_test() ->
+    Wallet = ar_wallet:new(),
+    Data = <<"SHA-384 test">>,
+    Sig = ar_wallet:sign(Wallet, Data, sha384),
+    ?assert(is_binary(Sig)),
+    ?assertEqual(512, byte_size(Sig)).
+
+sign_sha512_test() ->
+    Wallet = ar_wallet:new(),
+    Data = <<"SHA-512 test">>,
+    Sig = ar_wallet:sign(Wallet, Data, sha512),
+    ?assert(is_binary(Sig)).
+
+sign_large_data_test() ->
+    {PrivWallet, PubWallet} = ar_wallet:new(),
+    Data = binary:copy(<<"A">>, 1024 * 1024),
+    Signature = ar_wallet:sign(PrivWallet, Data, sha256),
+    ?assert(ar_wallet:verify(PubWallet, Data, Signature, sha256)).
+```
+
+---
+
+### 5. verify/3
+
+```erlang
+-spec verify(Key, Data, Signature) -> boolean()
+    when
+        Key :: PublicKey,
+        Data :: binary(),
+        Signature :: binary().
+```
+
+**Description:** Verify signature using SHA-256 (default).
+
+**Test Code:**
+```erlang
+-module(ar_wallet_verify3_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+verify_default_test() ->
+    {PrivWallet, PubWallet} = ar_wallet:new(),
+    Data = <<"Verify test">>,
+    Signature = ar_wallet:sign(PrivWallet, Data),
+    ?assertEqual(true, ar_wallet:verify(PubWallet, Data, Signature)).
+```
+
+---
+
+### 6. verify/4
+
+```erlang
+-spec verify(Key, Data, Signature, DigestType) -> boolean()
+    when
+        Key :: PublicKey,
+        Data :: binary(),
+        Signature :: binary(),
+        DigestType :: sha256 | sha384 | sha512.
+```
+
+**Description:** Verify signature with specified hash algorithm.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_verify4_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+verify_sha256_test() ->
+    {PrivWallet, PubWallet} = ar_wallet:new(),
+    Data = <<"SHA-256 verify">>,
+    Sig = ar_wallet:sign(PrivWallet, Data, sha256),
+    ?assertEqual(true, ar_wallet:verify(PubWallet, Data, Sig, sha256)).
+
+verify_sha384_test() ->
+    {PrivWallet, PubWallet} = ar_wallet:new(),
+    Data = <<"SHA-384 verify">>,
+    Sig = ar_wallet:sign(PrivWallet, Data, sha384),
+    ?assertEqual(true, ar_wallet:verify(PubWallet, Data, Sig, sha384)).
+
+verify_invalid_signature_test() ->
+    {PrivWallet, PubWallet} = ar_wallet:new(),
+    Data = <<"Test">>,
+    Signature = ar_wallet:sign(PrivWallet, Data, sha256),
+    <<First:8, Rest/binary>> = Signature,
+    Tampered = <<(First bxor 1), Rest/binary>>,
+    ?assertEqual(false, ar_wallet:verify(PubWallet, Data, Tampered, sha256)).
+
+verify_wrong_message_test() ->
+    {PrivWallet, PubWallet} = ar_wallet:new(),
+    Signature = ar_wallet:sign(PrivWallet, <<"A">>, sha256),
+    ?assertEqual(false, ar_wallet:verify(PubWallet, <<"B">>, Signature, sha256)).
+
+verify_wrong_key_test() ->
+    {PrivWallet1, _} = ar_wallet:new(),
+    {_, PubWallet2} = ar_wallet:new(),
+    Data = <<"Wrong key">>,
+    Sig = ar_wallet:sign(PrivWallet1, Data, sha256),
+    ?assertEqual(false, ar_wallet:verify(PubWallet2, Data, Sig, sha256)).
+```
+
+---
+
+### 7. hmac/1
+
+```erlang
+-spec hmac(Data) -> HMAC
+    when
+        Data :: binary(),
+        HMAC :: binary().
+```
+
+**Description:** Generate HMAC with SHA-256 using "ar" as key.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_hmac1_test).
+-include_lib("eunit/include/eunit.hrl").
+
+hmac_default_test() ->
+    Data = <<"HMAC test">>,
+    HMAC = ar_wallet:hmac(Data),
+    ?assert(is_binary(HMAC)),
+    ?assertEqual(32, byte_size(HMAC)).
+
+hmac_deterministic_test() ->
+    Data = <<"Deterministic">>,
+    HMAC1 = ar_wallet:hmac(Data),
+    HMAC2 = ar_wallet:hmac(Data),
+    ?assertEqual(HMAC1, HMAC2).
+```
+
+---
+
+### 8. hmac/2
+
+```erlang
+-spec hmac(Data, DigestType) -> HMAC
+    when
+        Data :: binary(),
+        DigestType :: sha256 | sha384 | sha512,
+        HMAC :: binary().
+```
+
+**Description:** Generate HMAC with specified hash algorithm.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_hmac2_test).
+-include_lib("eunit/include/eunit.hrl").
+
+hmac_sha256_test() ->
+    Data = <<"HMAC SHA-256">>,
+    HMAC = ar_wallet:hmac(Data, sha256),
+    ?assertEqual(32, byte_size(HMAC)).
+
+hmac_sha384_test() ->
+    Data = <<"HMAC SHA-384">>,
+    HMAC = ar_wallet:hmac(Data, sha384),
+    ?assertEqual(48, byte_size(HMAC)).
+
+hmac_sha512_test() ->
+    Data = <<"HMAC SHA-512">>,
+    HMAC = ar_wallet:hmac(Data, sha512),
+    ?assertEqual(64, byte_size(HMAC)).
+```
+
+---
+
+### 9. to_pubkey/1
+
+```erlang
+-spec to_pubkey(Wallet) -> PublicKey
+    when
+        Wallet :: {PrivateKey, PublicKey} | PublicKey,
+        PublicKey :: binary().
+```
+
+**Description:** Extract public key from wallet.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_to_pubkey1_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+to_pubkey_test() ->
+    {{_, _, Pub}, _} = Wallet = ar_wallet:new(),
+    ExtractedPub = ar_wallet:to_pubkey(Wallet),
+    ?assertEqual(Pub, ExtractedPub).
+```
+
+---
+
+### 10. to_address/1
+
+```erlang
+-spec to_address(Wallet) -> Address
+    when
+        Wallet :: {PrivateKey, PublicKey} | PublicKey,
+        Address :: binary().
+```
+
+**Description:** Generate address from wallet. RSA uses SHA-256 hash (32 bytes), ECDSA uses Keccak-256 (20 bytes for Ethereum compatibility).
+
+**Test Code:**
+```erlang
+-module(ar_wallet_to_address1_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+to_address_rsa_test() ->
+    Wallet = ar_wallet:new({rsa, 65537}),
+    Address = ar_wallet:to_address(Wallet),
+    ?assert(is_binary(Address)),
+    ?assertEqual(32, byte_size(Address)).
+
+to_address_deterministic_test() ->
+    Wallet = ar_wallet:new(),
+    Addr1 = ar_wallet:to_address(Wallet),
+    Addr2 = ar_wallet:to_address(Wallet),
+    ?assertEqual(Addr1, Addr2).
+```
+
+---
+
+### 11. new_keyfile/2
+
+```erlang
+-spec new_keyfile(KeyType, WalletName) -> {PrivateKey, PublicKey}
+    when
+        KeyType :: {rsa, 65537} | {ecdsa, secp256k1},
+        WalletName :: binary() | string().
+```
+
+**Description:** Generate new wallet and save to keyfile. Supports RSA and ECDSA key types. Returns wallet and creates `[wallet_dir]/[name]_[address].json` file.
+
+**Note:** EdDSA support is incomplete in the current implementation (calls unsupported `new/1`).
+
+**Test Code:**
+```erlang
+-module(ar_wallet_new_keyfile_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+new_keyfile_rsa_test() ->
+    {{KeyType, Priv, Pub}, {KeyType, Pub}} = 
+        ar_wallet:new_keyfile({rsa, 65537}, <<"test_rsa">>),
+    ?assertEqual({rsa, 65537}, KeyType),
+    ?assert(is_binary(Priv)),
+    ?assertEqual(512, byte_size(Pub)).
+
+new_keyfile_ecdsa_test() ->
+    {{KeyType, Priv, Pub}, {KeyType, Pub}} = 
+        ar_wallet:new_keyfile({ecdsa, secp256k1}, <<"test_ecdsa">>),
+    ?assertEqual({ecdsa, secp256k1}, KeyType),
+    ?assert(is_binary(Priv)),
+    ?assertEqual(33, byte_size(Pub)).
+
+%% EdDSA test removed - implementation calls new/1 which doesn't support eddsa
+%% See ar_wallet.erl line 106: new(KeyType) fails for {eddsa, ed25519}
+```
+
+---
+
+### 12. to_json/1
+
+```erlang
+-spec to_json(Wallet) -> JSON
+    when
+        Wallet :: {PrivateKey, PublicKey} | PrivateKey,
+        JSON :: binary().
+```
+
+**Description:** Serialize wallet to JWK (JSON Web Key) format. Supports RSA.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_to_json_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+to_json_rsa_test() ->
+    Wallet = ar_wallet:new({rsa, 65537}),
+    JSON = ar_wallet:to_json(Wallet),
+    ?assert(is_binary(JSON)),
+    ?assert(binary:match(JSON, <<"kty">>) =/= nomatch),
+    ?assert(binary:match(JSON, <<"RSA">>) =/= nomatch),
+    ?assert(binary:match(JSON, <<"n">>) =/= nomatch),
+    ?assert(binary:match(JSON, <<"d">>) =/= nomatch).
+
+%% ECDSA/EdDSA: Can't create with new/1, so can't test to_json
+%% But from_json/1 can deserialize them
+```
+
+---
+
+### 13. from_json/1
+
+```erlang
+-spec from_json(JSON) -> {PrivateKey, PublicKey}
+    when
+        JSON :: binary(),
+        PrivateKey :: {{KeyType, binary(), binary()}, {KeyType, binary()}},
+        PublicKey :: {KeyType, binary()}.
+```
+
+**Description:** Deserialize wallet from JWK format.
+
+**Test Code:**
+```erlang
+-module(ar_wallet_from_json_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+from_json_test() ->
+    OrigWallet = ar_wallet:new(),
+    JSON = ar_wallet:to_json(OrigWallet),
+    {{KeyType, Priv, Pub}, {KeyType, Pub}} = ar_wallet:from_json(JSON),
+    ?assertEqual({rsa, 65537}, KeyType),
+    ?assert(is_binary(Priv)),
+    ?assert(is_binary(Pub)).
+
+json_roundtrip_test() ->
+    {{_, OrigPriv, OrigPub}, _} = OrigWallet = ar_wallet:new(),
+    JSON = ar_wallet:to_json(OrigWallet),
+    {{_, Priv, Pub}, _} = ar_wallet:from_json(JSON),
+    ?assertEqual(OrigPub, Pub),
+    ?assertEqual(OrigPriv, Priv).
+
+json_sign_verify_test() ->
+    {PrivWallet, PubWallet} = ar_wallet:new(),
+    Data = <<"JSON test">>,
+    JSON = ar_wallet:to_json(PrivWallet),
+    {NewPrivWallet, NewPubWallet} = ar_wallet:from_json(JSON),
+    Signature = ar_wallet:sign(NewPrivWallet, Data, sha256),
+    ?assert(ar_wallet:verify(PubWallet, Data, Signature, sha256)),
+    ?assert(ar_wallet:verify(NewPubWallet, Data, Signature, sha256)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create RSA wallet (default)
+{PrivWallet, PubWallet} = ar_wallet:new(),
+Signature = ar_wallet:sign(PrivWallet, Data, sha384),
+true = ar_wallet:verify(PubWallet, Data, Signature, sha384).
+
+%% Create ECDSA wallet (Ethereum compatible) - use new_keyfile
+{PrivECDSA, PubECDSA} = ar_wallet:new_keyfile({ecdsa, secp256k1}, <<"my_eth_wallet">>),
+EthAddress = ar_wallet:to_address(PubECDSA, {ecdsa, 256}),  % 20 bytes
+
+%% Note: EdDSA not fully supported (new_keyfile calls broken new/1)
+
+%% Save and load
+JSON = ar_wallet:to_json(PrivWallet),
+file:write_file("wallet.json", JSON),
+{ok, JSON2} = file:read_file("wallet.json"),
+{LoadedPriv, LoadedPub} = ar_wallet:from_json(JSON2).
+```
+
+---
+
+## Key Types Summary
+
+| Key Type | Function | Public Key Size | Address Size | Status |
+|----------|----------|-----------------|--------------|--------|
+| RSA-4096 | `new/0`, `new/1`, `new_keyfile/2` | 512 bytes | 32 bytes (SHA-256) | ✅ Fully supported |
+| ECDSA | `new_keyfile/2` | 33 bytes (compressed) | 20 bytes (Keccak-256) | ✅ Fully supported |
+| EdDSA | - | 32 bytes | 32 bytes (SHA-256) | ❌ Broken (line 106 bug) |
+
+**Note:** EdDSA implementation has a bug - `new_keyfile/2` calls `new/1` which doesn't support EdDSA.
+
+---
+
+## References
+
+- **Arweave Yellow Paper** - Transaction signing
+- **JWK RFC 7517** - JSON Web Key format
+- **RSA-PSS** - See `rsa_pss.erl`
+- **secp256k1** - Bitcoin/Ethereum curve
+- **ed25519** - Modern signature scheme

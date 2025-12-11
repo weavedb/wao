@@ -1,0 +1,349 @@
+# dev_snp_nif.erl - AMD SEV-SNP NIF Interface
+
+## Overview
+
+**Purpose:** Native interface to AMD SEV-SNP hardware attestation functions  
+**Module:** `dev_snp_nif`  
+**Type:** NIF (Native Implemented Function)  
+**Implementation:** Rust via Cargo
+
+This module provides the low-level native interface to AMD SEV-SNP hardware functions. It wraps Rust implementations for generating attestation reports, computing launch digests, and verifying measurements and signatures against hardware root of trust.
+
+## Dependencies
+
+- **Erlang/OTP:** `crypto`
+- **Build System:** Cargo (Rust)
+- **Includes:** `include/cargo.hrl`, `include/hb.hrl`
+- **Testing:** `eunit`
+- **Test Files:** `test/snp-measurement.json`, `test/snp-attestation.json`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Hardware Support
+-spec check_snp_support() -> {ok, boolean()}.
+
+%% Attestation Report
+-spec generate_attestation_report(UniqueData, VMPL) -> {ok, ReportJSON}.
+
+%% Measurement
+-spec compute_launch_digest(Args) -> {ok, Digest}.
+-spec verify_measurement(Report, Expected) -> {ok, boolean()}.
+
+%% Signature
+-spec verify_signature(Report) -> {ok, boolean()}.
+```
+
+---
+
+## Public Functions
+
+### 1. check_snp_support/0
+
+```erlang
+-spec check_snp_support() -> {ok, boolean()}.
+```
+
+**Description:** Check if AMD SEV-SNP is supported on the current hardware. Returns `{ok, true}` if SNP is available, `{ok, false}` otherwise.
+
+**Test Code:**
+```erlang
+-module(dev_snp_nif_support_test).
+-include_lib("eunit/include/eunit.hrl").
+
+check_support_test() ->
+    Result = dev_snp_nif:check_snp_support(),
+    ?assertMatch({ok, _}, Result),
+    {ok, Supported} = Result,
+    ?assert(is_boolean(Supported)).
+```
+
+---
+
+### 2. generate_attestation_report/2
+
+```erlang
+-spec generate_attestation_report(UniqueData, VMPL) -> {ok, ReportJSON}
+    when
+        UniqueData :: binary(),
+        VMPL :: integer(),
+        ReportJSON :: binary().
+```
+
+**Description:** Generate an AMD SEV-SNP attestation report with the provided unique data (nonce) and VMPL (Virtual Machine Privilege Level). The unique data is embedded in the report to bind it to a specific verification request.
+
+**Parameters:**
+- `UniqueData` - 64-byte binary nonce to embed in report
+- `VMPL` - Virtual Machine Privilege Level (typically 1)
+
+**Test Code:**
+```erlang
+-module(dev_snp_nif_generate_test).
+-include_lib("eunit/include/eunit.hrl").
+
+generate_attestation_report_test() ->
+    case dev_snp_nif:check_snp_support() of
+        {ok, true} ->
+            UniqueData = crypto:strong_rand_bytes(64),
+            VMPL = 1,
+            Result = dev_snp_nif:generate_attestation_report(UniqueData, VMPL),
+            ?assertMatch({ok, _}, Result),
+            {ok, ReportJSON} = Result,
+            ?assert(is_binary(ReportJSON));
+        {ok, false} ->
+            % SNP not supported, skip test
+            ok
+    end.
+```
+
+---
+
+### 3. compute_launch_digest/1
+
+```erlang
+-spec compute_launch_digest(Args) -> {ok, Digest}
+    when
+        Args :: map(),
+        Digest :: list().
+```
+
+**Description:** Compute the expected SNP launch digest (measurement) from the provided configuration parameters. This digest is compared against the measurement in attestation reports to verify software integrity.
+
+**Args Map Keys:**
+- `vcpus` - Number of virtual CPUs
+- `vcpu_type` - vCPU type identifier
+- `vmm_type` - VMM type identifier
+- `guest_features` - Guest feature flags
+- `firmware` - Firmware hash (hex string)
+- `kernel` - Kernel hash (hex string)
+- `initrd` - Initrd hash (hex string)
+- `append` - Append hash (hex string)
+
+**Test Code:**
+```erlang
+-module(dev_snp_nif_digest_test).
+-include_lib("eunit/include/eunit.hrl").
+
+compute_launch_digest_test() ->
+    ArgsMap = #{
+        vcpus => 32,
+        vcpu_type => 5,
+        vmm_type => 1,
+        guest_features => 16#1,
+        firmware => "b8c5d4082d5738db6b0fb0294174992738645df70c44cdecf7fad3a62244b788e7e408c582ee48a74b289f3acec78510",
+        kernel => "69d0cd7d13858e4fcef6bc7797aebd258730f215bc5642c4ad8e4b893cc67576",
+        initrd => "02e28b6c718bf0a5260d6f34d3c8fe0d71bf5f02af13e1bc695c6bc162120da1",
+        append => "56e1e5190622c8c6b9daa4fe3ad83f3831c305bb736735bf795b284cb462c9e7"
+    },
+    {ok, Result} = dev_snp_nif:compute_launch_digest(ArgsMap),
+    ?assert(is_list(Result)),
+    ExpectedEncoded = <<"wmSDSQYuzE2M3rQcourJnDJHgalADM8TBev3gyjM5ObRNOn8oglvVznFbaWhajU_">>,
+    ?assertEqual(ExpectedEncoded, hb_util:encode(Result)).
+
+compute_launch_digest_deterministic_test() ->
+    ArgsMap = #{
+        vcpus => 16,
+        vcpu_type => 3,
+        vmm_type => 1,
+        guest_features => 1,
+        firmware => "abcd1234",
+        kernel => "5678efgh",
+        initrd => "ijkl9012",
+        append => "mnop3456"
+    },
+    {ok, Result1} = dev_snp_nif:compute_launch_digest(ArgsMap),
+    {ok, Result2} = dev_snp_nif:compute_launch_digest(ArgsMap),
+    ?assertEqual(Result1, Result2).
+```
+
+---
+
+### 4. verify_measurement/2
+
+```erlang
+-spec verify_measurement(Report, Expected) -> {ok, boolean()}
+    when
+        Report :: binary(),
+        Expected :: binary().
+```
+
+**Description:** Verify that the measurement in an attestation report matches the expected measurement. The report is a JSON-encoded attestation report and the expected value is the binary launch digest.
+
+**Test Code:**
+```erlang
+-module(dev_snp_nif_verify_measurement_test).
+-include_lib("eunit/include/eunit.hrl").
+
+verify_measurement_test() ->
+    {ok, MockReport} = file:read_file("test/snp-measurement.json"),
+    ExpectedMeasurement = <<94,87,4,197,20,11,255,129,179,197,146,104,8,212,
+                           152,248,110,11,60,246,82,254,24,55,201,47,157,229,
+                           163,82,108,66,191,138,241,229,40,144,133,170,116,
+                           109,17,62,20,241,144,119>>,
+    Result = dev_snp_nif:verify_measurement(MockReport, ExpectedMeasurement),
+    ?assertMatch({ok, true}, Result).
+
+verify_measurement_mismatch_test() ->
+    {ok, MockReport} = file:read_file("test/snp-measurement.json"),
+    WrongMeasurement = crypto:strong_rand_bytes(48),
+    Result = dev_snp_nif:verify_measurement(MockReport, WrongMeasurement),
+    ?assertMatch({ok, false}, Result).
+```
+
+---
+
+### 5. verify_signature/1
+
+```erlang
+-spec verify_signature(Report) -> {ok, boolean()}
+    when
+        Report :: binary().
+```
+
+**Description:** Verify the cryptographic signature of an attestation report against AMD's hardware root of trust. This ensures the report was generated by genuine AMD SEV-SNP hardware and has not been tampered with.
+
+**Test Code:**
+```erlang
+-module(dev_snp_nif_verify_signature_test).
+-include_lib("eunit/include/eunit.hrl").
+
+verify_signature_test() ->
+    {ok, MockAttestation} = file:read_file("test/snp-attestation.json"),
+    Result = dev_snp_nif:verify_signature(MockAttestation),
+    ?assertMatch({ok, true}, Result).
+
+verify_signature_invalid_test() ->
+    InvalidReport = <<"{\"invalid\": \"report\"}">>,
+    Result = dev_snp_nif:verify_signature(InvalidReport),
+    % Should return false or error for invalid report
+    case Result of
+        {ok, false} -> ok;
+        {error, _} -> ok
+    end.
+```
+
+---
+
+## NIF Loading
+
+The module uses on-load initialization to load the Rust NIF:
+
+```erlang
+-on_load(init/0).
+
+init() ->
+    ?load_nif_from_crate(dev_snp_nif, 0).
+
+not_loaded(Line) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, Line}]}).
+```
+
+All exported functions return `not_loaded` error until the NIF is successfully loaded.
+
+---
+
+## Common Patterns
+
+```erlang
+%% Check hardware support before using
+case dev_snp_nif:check_snp_support() of
+    {ok, true} ->
+        %% SNP available, proceed with attestation
+        UniqueData = crypto:strong_rand_bytes(64),
+        {ok, Report} = dev_snp_nif:generate_attestation_report(UniqueData, 1),
+        process_report(Report);
+    {ok, false} ->
+        %% SNP not available, use alternative
+        {error, snp_not_supported}
+end.
+
+%% Compute and verify measurement
+Args = #{
+    vcpus => 32,
+    vcpu_type => 5,
+    vmm_type => 1,
+    guest_features => 1,
+    firmware => FirmwareHash,
+    kernel => KernelHash,
+    initrd => InitrdHash,
+    append => AppendHash
+},
+{ok, ExpectedDigest} = dev_snp_nif:compute_launch_digest(Args),
+{ok, IsValid} = dev_snp_nif:verify_measurement(ReportJSON, list_to_binary(ExpectedDigest)).
+
+%% Full attestation verification
+{ok, MeasurementValid} = dev_snp_nif:verify_measurement(Report, Expected),
+{ok, SignatureValid} = dev_snp_nif:verify_signature(Report),
+FullyValid = MeasurementValid andalso SignatureValid.
+```
+
+---
+
+## Build Configuration
+
+The NIF is built using Cargo. Ensure the Rust crate is properly configured:
+
+```toml
+# Cargo.toml for dev_snp_nif
+[lib]
+name = "dev_snp_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.x"
+# AMD SEV-SNP specific dependencies
+```
+
+---
+
+## Test Files
+
+The module uses test fixture files:
+
+- `test/snp-measurement.json` - Sample attestation report for measurement tests
+- `test/snp-attestation.json` - Sample attestation report for signature tests
+
+---
+
+## Error Handling
+
+### NIF Not Loaded
+
+```erlang
+{error, {not_loaded, [{module, dev_snp_nif}, {line, Line}]}}
+```
+
+This error occurs when:
+- Rust NIF compilation failed
+- NIF library not found
+- Architecture mismatch
+
+### Hardware Not Supported
+
+When `check_snp_support/0` returns `{ok, false}`, all attestation operations will fail or be unavailable.
+
+---
+
+## References
+
+- **High-Level Interface** - `dev_snp.erl`
+- **AMD SEV-SNP** - AMD Secure Encrypted Virtualization documentation
+- **Rustler** - Erlang NIF library for Rust
+- **Cargo Integration** - `include/cargo.hrl`
+
+---
+
+## Notes
+
+1. **Hardware Dependency:** Functions require AMD SEV-SNP capable hardware
+2. **NIF Loading:** Module must successfully load Rust NIF on startup
+3. **Binary Format:** Reports are JSON-encoded binary strings
+4. **Measurement Size:** Launch digest is typically 48 bytes
+5. **VMPL Levels:** Virtual Machine Privilege Level (0-3, typically 1)
+6. **Deterministic Digests:** Same inputs produce same launch digest
+7. **Root of Trust:** Signature verification uses AMD certificate chain
+8. **Test Fixtures:** Sample reports required for unit testing
+9. **Error Propagation:** NIF errors returned as Erlang terms
+10. **Thread Safety:** NIF functions are thread-safe

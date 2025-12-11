@@ -1,0 +1,442 @@
+# dev_trie.erl - Multi-Layer Prefix Tree Device
+
+## Overview
+
+**Purpose:** Efficiently store large datasets in nested messages using a prefix tree structure  
+**Module:** `dev_trie`  
+**Device Name:** `trie@1.0`  
+**Type:** Data structure device
+
+This device implements a multi-layer prefix trie for storing large datasets in nested messages. Each element is accessible by resolving its name directly, despite the underlying hierarchical structure. The device handles setting values with automatic prefix tree organization and regenerates only necessary identifiers.
+
+## Key Features
+
+- **Transparent Access:** Elements accessible by direct key lookup
+- **Automatic Organization:** Keys automatically organized by prefix
+- **Configurable Depth:** Adjustable prefix layering
+- **Efficient Storage:** Only regenerates changed nodes
+- **Commitment Support:** Maintains message commitments
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_cache`, `hb_message`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info() -> InfoMap.
+
+%% Trie Operations
+-spec get(Key, Trie, Req, Opts) -> {ok, Value} | {error, Reason}.
+-spec set(Base, Req, Opts) -> {ok, UpdatedTrie}.
+```
+
+---
+
+## Public Functions
+
+### 1. info/0
+
+```erlang
+-spec info() -> InfoMap
+    when
+        InfoMap :: map().
+```
+
+**Description:** Returns device information. Exports a default handler for key lookups using `get/4`.
+
+**Return Structure:**
+```erlang
+#{
+    default => fun get/4
+}
+```
+
+---
+
+### 2. get/3, get/4
+
+```erlang
+-spec get(Key, Trie, Req, Opts) -> {ok, Value} | {error, Reason}
+    when
+        Key :: binary(),
+        Trie :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Value :: term(),
+        Reason :: binary().
+
+-spec get(Trie, Req, Opts) -> {ok, Value} | {error, Reason}.
+```
+
+**Description:** Get a value from the trie by recursively matching the longest prefix. Searches through nested trie layers to find the complete key.
+
+**Error Conditions:**
+- Missing `key` parameter returns error
+- No match found returns `{error, not_found}`
+
+**Test Code:**
+```erlang
+-module(dev_trie_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+immediate_get_test() ->
+    Trie = #{
+        <<"device">> => <<"trie@1.0">>,
+        <<"abc">> => 1
+    },
+    ?assertEqual(1, hb_ao:get(<<"abc">>, Trie, #{})).
+
+second_layer_get_test() ->
+    Trie = #{
+        <<"device">> => <<"trie@1.0">>,
+        <<"a">> => #{
+            <<"b">> => <<"layer-2">>
+        }
+    },
+    ?assertEqual(<<"layer-2">>, hb_ao:get(<<"ab">>, Trie, #{})).
+
+not_found_test() ->
+    Trie = #{
+        <<"device">> => <<"trie@1.0">>,
+        <<"abc">> => 1
+    },
+    ?assertEqual(not_found, hb_ao:get(<<"xyz">>, Trie, #{})).
+```
+
+---
+
+### 3. set/3
+
+```erlang
+-spec set(Base, Req, Opts) -> {ok, UpdatedTrie}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        UpdatedTrie :: map().
+```
+
+**Description:** Set keys and values in the trie with automatic prefix organization. The `set-depth` key in the request determines how many layers the keys are separated into. Setting a value over a prefix node replaces all existing values at that node.
+
+**Request Keys:**
+- `set-depth` - Number of prefix layers (default: 2)
+- Other keys - Key-value pairs to insert
+
+**Behavior:**
+- Keys shorter than `DEFAULT_LAYERS` (2) are filtered
+- Depth 0 performs flat set without trie structure
+- Empty string key returns terminal value directly
+- Automatic commitment normalization
+
+**Test Code:**
+```erlang
+-module(dev_trie_set_test).
+-include_lib("eunit/include/eunit.hrl").
+
+immediate_set_test() ->
+    Trie = #{
+        <<"device">> => <<"trie@1.0">>,
+        <<"a">> => 1
+    },
+    UpdatedTrie = hb_ao:set(Trie, #{ <<"b">> => 2 }, #{}),
+    ?assert(hb_message:match(
+        #{ <<"a">> => 1, <<"b">> => 2 },
+        UpdatedTrie,
+        primary
+    )).
+
+second_layer_set_test() ->
+    Trie = #{
+        <<"device">> => <<"trie@1.0">>,
+        <<"a">> => #{ <<"b">> => 1 }
+    },
+    UpdatedTrie = hb_ao:set(
+        Trie,
+        #{ <<"a">> => #{ <<"c">> => 2 } },
+        #{}
+    ),
+    ?assert(hb_message:match(
+        #{ <<"a">> => #{ <<"b">> => 1, <<"c">> => 2 } },
+        UpdatedTrie,
+        primary
+    )).
+
+custom_depth_test() ->
+    Trie = #{ <<"device">> => <<"trie@1.0">> },
+    UpdatedTrie = hb_ao:set(
+        Trie,
+        #{
+            <<"set-depth">> => 1,
+            <<"very-long-key-1">> => <<"value1">>,
+            <<"very-long-key-2">> => <<"value2">>
+        },
+        #{}
+    ),
+    ?assertEqual(<<"value1">>, hb_ao:get(<<"very-long-key-1">>, UpdatedTrie, #{})),
+    ?assertEqual(<<"value2">>, hb_ao:get(<<"very-long-key-2">>, UpdatedTrie, #{})).
+```
+
+---
+
+## Trie Structure
+
+### Layered Organization
+
+Keys are automatically organized into prefix layers:
+
+```erlang
+%% Input keys
+#{
+    <<"alice">> => <<"value1">>,
+    <<"alvin">> => <<"value2">>,
+    <<"bob">> => <<"value3">>
+}
+
+%% Trie structure (depth=2)
+#{
+    <<"al">> => #{
+        <<"ice">> => <<"value1">>,
+        <<"vin">> => <<"value2">>
+    },
+    <<"bo">> => #{
+        <<"b">> => <<"value3">>
+    }
+}
+```
+
+### Depth Configuration
+
+```erlang
+%% Default depth: 2 layers
+-define(DEFAULT_LAYERS, 2).
+
+%% Custom depth in request
+hb_ao:set(Trie, #{
+    <<"set-depth">> => 3,
+    <<"key1">> => <<"val1">>
+}, #{}).
+
+%% Depth 0: flat structure (no trie)
+hb_ao:set(Trie, #{
+    <<"set-depth">> => 0,
+    <<"key1">> => <<"val1">>
+}, #{}).
+```
+
+---
+
+## Prefix Replacement Behavior
+
+Setting a value over a prefix node replaces the entire subtree:
+
+```erlang
+%% Initial trie
+Trie = #{ <<"aaa">> => 1, <<"aab">> => 2, <<"aba">> => 3 }
+
+%% Set value at prefix "aa"
+UpdatedTrie = hb_ao:set(Trie, #{ <<"aa">> => 4 }, #{})
+
+%% Result: "aaa" and "aab" replaced, "aba" preserved
+#{ <<"aa">> => 4, <<"aba">> => 3 }
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create a trie
+Trie = #{ <<"device">> => <<"trie@1.0">> }.
+
+%% Add multiple keys
+UpdatedTrie = hb_ao:set(Trie, #{
+    <<"user-001">> => <<"Alice">>,
+    <<"user-002">> => <<"Bob">>,
+    <<"user-003">> => <<"Charlie">>
+}, #{}).
+
+%% Retrieve values
+Alice = hb_ao:get(<<"user-001">>, UpdatedTrie, #{}).
+
+%% Update existing values
+UpdatedTrie2 = hb_ao:set(UpdatedTrie, #{
+    <<"user-001">> => <<"Alice Smith">>,
+    <<"user-004">> => <<"Diana">>
+}, #{}).
+
+%% Shallow depth for long keys
+CustomTrie = hb_ao:set(Trie, #{
+    <<"set-depth">> => 1,
+    <<"very-long-identifier-1">> => <<"data1">>,
+    <<"very-long-identifier-2">> => <<"data2">>
+}, #{}).
+
+%% Handle short keys
+ShortKeyTrie = hb_ao:set(Trie, #{
+    <<"a">> => <<"value-a">>,
+    <<"b">> => <<"value-b">>,
+    <<"0">> => <<"zero">>
+}, #{}).
+
+%% Committed trie
+Wallet = hb:wallet(),
+CommittedTrie = hb_message:commit(#{
+    <<"device">> => <<"trie@1.0">>,
+    <<"key1">> => <<"value1">>,
+    <<"key2">> => <<"value2">>
+}, Wallet).
+```
+
+---
+
+## Key Grouping Algorithm
+
+The trie groups keys by longest common prefix:
+
+```erlang
+%% Input
+Req = #{
+    <<"a1">> => 1,
+    <<"a2">> => 2,
+    <<"b1">> => 3,
+    <<"b2">> => 4
+}
+
+%% Grouped by prefix
+#{
+    <<"a">> => #{
+        <<"1">> => 1,
+        <<"2">> => 2
+    },
+    <<"b">> => #{
+        <<"1">> => 3,
+        <<"2">> => 4
+    }
+}
+```
+
+---
+
+## Commitment Handling
+
+The trie maintains message commitments properly:
+
+```erlang
+%% Normalization process
+1. Convert to structured@1.0 (linkification)
+2. Remove old commitments
+3. Generate new unsigned commitments
+4. Commit with unsigned type
+```
+
+---
+
+## Performance Characteristics
+
+- **Lookup:** O(d × k) where d = depth, k = key length
+- **Insert:** O(d × k) for single key
+- **Bulk Insert:** Groups keys efficiently by prefix
+- **Storage:** Only changed nodes regenerated
+
+---
+
+## Special Cases
+
+### Short Keys
+
+Keys shorter than `DEFAULT_LAYERS` (2 bytes) are filtered during set but can still be stored:
+
+```erlang
+%% Single-byte keys
+Trie = hb_ao:set(
+    #{ <<"device">> => <<"trie@1.0">> },
+    #{ <<"a">> => 1, <<"b">> => 2 },
+    #{}
+).
+```
+
+### Terminal Values
+
+Empty string key returns value directly:
+
+```erlang
+%% Terminal value indicator
+Req = #{ <<>> => TerminalValue }
+% Returns TerminalValue immediately
+```
+
+### Zero Depth
+
+Depth 0 bypasses trie structure:
+
+```erlang
+%% Flat storage
+hb_ao:set(Trie, #{
+    <<"set-depth">> => 0,
+    <<"key1">> => <<"val1">>,
+    <<"key2">> => <<"val2">>
+}, #{}).
+```
+
+---
+
+## Use Cases
+
+### Large Key-Value Stores
+
+```erlang
+%% User balances in blockchain
+Balances = hb_ao:set(
+    #{ <<"device">> => <<"trie@1.0">> },
+    #{
+        <<"addr1...">> => 1000,
+        <<"addr2...">> => 2000,
+        <<"addr3...">> => 3000
+    },
+    #{}
+).
+```
+
+### Hierarchical Data
+
+```erlang
+%% File system structure
+FileSystem = hb_ao:set(
+    #{ <<"device">> => <<"trie@1.0">> },
+    #{
+        <<"/etc/config">> => <<"config data">>,
+        <<"/var/log">> => <<"log data">>,
+        <<"/home/user">> => <<"user data">>
+    },
+    #{}
+).
+```
+
+---
+
+## References
+
+- **AO Resolution** - `hb_ao.erl`
+- **Message Handling** - `hb_message.erl`
+- **Cache System** - `hb_cache.erl`
+
+---
+
+## Notes
+
+1. **Transparent Access:** Keys accessible directly despite nested structure
+2. **Automatic Prefixing:** Keys split by longest common prefix
+3. **Configurable Depth:** Default 2 layers, customizable via `set-depth`
+4. **Prefix Replacement:** Setting at prefix replaces entire subtree
+5. **Short Key Filtering:** Keys < 2 bytes filtered but still accessible
+6. **Commitment Preservation:** Properly maintains message commitments
+7. **Link Conversion:** Handles linked messages via cache loading
+8. **Recursive Search:** Longest prefix matching for efficient lookups
+9. **Terminal Values:** Empty string key for immediate return
+10. **Zero Depth Fallback:** Flat structure when depth = 0

@@ -1,0 +1,716 @@
+# dev_query.erl - Cache Discovery & Search Engine
+
+## Overview
+
+**Purpose:** Search and discover messages in node's cache  
+**Module:** `dev_query`  
+**Pattern:** Match Specification → Cache Search → Filtered Results  
+**Device:** Query@1.0
+
+This device provides powerful search capabilities across cached messages, supporting various matching modes and return types. Enables discovery of transactions, messages, and data through flexible query patterns.
+
+## Search Modes
+
+- **all** (default) - Match all keys in request message
+- **base** - Match all keys in base message
+- **only** - Match specific keys from request
+
+---
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_maps`, `hb_util`, `hb_message`, `hb_json`
+- **GraphQL:** `dev_query_graphql` (separate module)
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Interface
+-spec info(Opts) -> DeviceInfo.
+
+%% Search Functions
+-spec all(Base, Req, Opts) -> {ok, Results} | {error, not_found}.
+-spec base(Base, Req, Opts) -> {ok, Results} | {error, not_found}.
+-spec only(Base, Req, Opts) -> {ok, Results} | {error, not_found}.
+
+%% GraphQL Interface
+-spec graphql(Req, Base, Opts) -> {ok, GraphQLResult}.
+-spec has_results(Base, Req, Opts) -> {ok, boolean()}.
+
+%% Test Setup
+-spec test_setup() -> {ok, Opts, Metadata}.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(Opts) -> #{
+    excludes => [binary()],
+    default => fun()
+}
+    when
+        Opts :: map().
+```
+
+**Description:** Return device metadata. Defaults to `all` search mode, excludes keys/set operations.
+
+**Test Code:**
+```erlang
+-module(dev_query_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    Info = dev_query:info(#{}),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"keys">>, Excludes)),
+    ?assert(lists:member(<<"set">>, Excludes)).
+```
+
+---
+
+### 2. all/3
+
+```erlang
+-spec all(Base, Req, Opts) -> {ok, Results} | {error, not_found}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Results :: [Path] | [Message] | Count | boolean().
+```
+
+**Description:** Search for messages matching all keys in request (excluding defaults).
+
+**Default Excludes:**
+- `path`
+- `commitments`
+- `return`
+- `exclude`
+- `only`
+
+**Test Code:**
+```erlang
+-module(dev_query_all_test).
+-include_lib("eunit/include/eunit.hrl").
+
+all_basic_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    % Search for basic key-value
+    {ok, [ID]} = hb_ao:resolve(
+        <<"~query@1.0/all?basic=binary-value">>,
+        Opts
+    ),
+    
+    {ok, Msg} = hb_cache:read(ID, Opts),
+    ?assertEqual(<<"binary-value">>, hb_maps:get(<<"basic">>, Msg)).
+
+all_multiple_keys_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    {ok, [Msg]} = hb_ao:resolve(
+        <<"~query@1.0/all?test-key=test-value&return=messages">>,
+        Opts
+    ),
+    
+    ?assertEqual(<<"test-value">>, hb_maps:get(<<"test-key">>, Msg, Opts)),
+    ?assert(hb_maps:is_key(<<"nested">>, Msg, Opts)).
+
+all_no_matches_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    Result = hb_ao:resolve(
+        <<"~query@1.0/all?nonexistent=value">>,
+        Opts
+    ),
+    
+    ?assertMatch({error, not_found}, Result).
+```
+
+---
+
+### 3. base/3
+
+```erlang
+-spec base(Base, Req, Opts) -> {ok, Results} | {error, not_found}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Search using all keys from base message instead of request.
+
+**Test Code:**
+```erlang
+-module(dev_query_base_test).
+-include_lib("eunit/include/eunit.hrl").
+
+base_mode_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    Base = #{
+        <<"device">> => <<"query@1.0">>,
+        <<"basic">> => <<"binary-value">>
+    },
+    
+    {ok, [Msg]} = dev_query:base(
+        Base,
+        #{ <<"return">> => <<"messages">> },
+        Opts
+    ),
+    
+    ?assertEqual(<<"binary-value">>, hb_maps:get(<<"basic">>, Msg)).
+```
+
+---
+
+### 4. only/3
+
+```erlang
+-spec only(Base, Req, Opts) -> {ok, Results} | {error, not_found}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Search for specific keys specified in `only` parameter.
+
+**Only Parameter Formats:**
+
+**Binary (comma-separated):**
+```erlang
+<<"only=key1,key2,key3">>
+% Searches for key1, key2, key3
+```
+
+**Map (direct spec):**
+```erlang
+#{ <<"only">> => #{ <<"key1">> => <<"val1">> } }
+% Uses map as match spec
+```
+
+**List (key selection):**
+```erlang
+#{ <<"only">> => [<<"key1">>, <<"key2">>] }
+% Extracts values from request/base
+```
+
+**Test Code:**
+```erlang
+-module(dev_query_only_test).
+-include_lib("eunit/include/eunit.hrl").
+
+only_single_key_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    {ok, [Msg]} = hb_ao:resolve(
+        <<"~query@1.0/only=basic&basic=binary-value&wrong=1&return=messages">>,
+        Opts
+    ),
+    
+    ?assertEqual(<<"binary-value">>, hb_maps:get(<<"basic">>, Msg, Opts)).
+
+only_multiple_keys_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    {ok, [Msg]} = hb_ao:resolve(
+        <<
+            "~query@1.0/only=basic,basic-2",
+            "&basic=binary-value&basic-2=binary-value-2",
+            "&return=messages"
+        >>,
+        Opts
+    ),
+    
+    ?assertEqual(<<"binary-value">>, hb_maps:get(<<"basic">>, Msg)),
+    ?assertEqual(<<"binary-value-2">>, hb_maps:get(<<"basic-2">>, Msg)).
+
+only_as_map_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    {ok, Results} = dev_query:only(
+        #{},
+        #{
+            <<"only">> => #{ <<"basic">> => <<"binary-value">> },
+            <<"return">> => <<"messages">>
+        },
+        Opts
+    ),
+    
+    ?assertEqual(1, length(Results)).
+
+only_missing_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    Result = dev_query:only(#{}, #{}, Opts),
+    ?assertEqual({error, not_found}, Result).
+```
+
+---
+
+### 5. graphql/3
+
+```erlang
+-spec graphql(Req, Base, Opts) -> {ok, GraphQLResult}
+    when
+        Req :: map(),
+        Base :: map(),
+        Opts :: map().
+```
+
+**Description:** Execute GraphQL queries for Arweave-style transaction discovery. Delegates to `dev_query_graphql` module.
+
+**Test Code:**
+```erlang
+-module(dev_query_graphql_test).
+-include_lib("eunit/include/eunit.hrl").
+
+graphql_query_test() ->
+    {ok, Opts, _} = dev_query:test_setup(),
+    
+    Query = <<"
+        {
+            transactions(tags: [{name: \"test-key\", value: \"test-value\"}]) {
+                edges {
+                    node {
+                        id
+                    }
+                }
+            }
+        }
+    ">>,
+    
+    Result = dev_query:graphql(
+        #{ <<"query">> => Query },
+        #{},
+        Opts
+    ),
+    
+    ?assertMatch({ok, _}, Result).
+```
+
+---
+
+### 6. has_results/3
+
+```erlang
+-spec has_results(Base, Req, Opts) -> {ok, boolean()}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Check if GraphQL response contains transaction results. Used by gateway multirequest system.
+
+**Test Code:**
+```erlang
+-module(dev_query_has_results_test).
+-include_lib("eunit/include/eunit.hrl").
+
+has_results_true_test() ->
+    JSON = hb_json:encode(#{
+        <<"data">> => #{
+            <<"transactions">> => #{
+                <<"edges">> => [
+                    #{ <<"node">> => #{ <<"id">> => <<"123">> } }
+                ]
+            }
+        }
+    }),
+    
+    {ok, true} = dev_query:has_results(
+        #{ <<"body">> => JSON },
+        #{},
+        #{}
+    ).
+
+has_results_false_test() ->
+    JSON = hb_json:encode(#{
+        <<"data">> => #{
+            <<"transactions">> => #{
+                <<"edges">> => []
+            }
+        }
+    }),
+    
+    {ok, false} = dev_query:has_results(
+        #{ <<"body">> => JSON },
+        #{},
+        #{}
+    ).
+```
+
+---
+
+## Return Types
+
+### paths (default)
+
+```erlang
+<<"return=paths">>
+% Returns: {ok, [Path1, Path2, ...]}
+```
+
+### messages
+
+```erlang
+<<"return=messages">>
+% Returns: {ok, [Message1, Message2, ...]}
+```
+
+### count
+
+```erlang
+<<"return=count">>
+% Returns: {ok, 5}
+```
+
+### boolean
+
+```erlang
+<<"return=boolean">>
+% Returns: {ok, true} or {ok, false}
+```
+
+### first-path
+
+```erlang
+<<"return=first-path">>
+% Returns: {ok, Path}
+```
+
+### first-message or first
+
+```erlang
+<<"return=first-message">>
+% Returns: {ok, Message}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic search
+{ok, [Path]} = hb_ao:resolve(
+    <<"~query@1.0/all?key=value">>,
+    #{}
+).
+
+%% Get messages directly
+{ok, [Msg]} = hb_ao:resolve(
+    <<"~query@1.0/all?key=value&return=messages">>,
+    #{}
+).
+
+%% Check existence
+{ok, true} = hb_ao:resolve(
+    <<"~query@1.0/all?key=value&return=boolean">>,
+    #{}
+).
+
+%% Count matches
+{ok, 5} = hb_ao:resolve(
+    <<"~query@1.0/all?type=Message&return=count">>,
+    #{}
+).
+
+%% Search specific keys
+{ok, Results} = hb_ao:resolve(
+    <<"~query@1.0/only=target,action&target=xyz&action=Eval&return=messages">>,
+    #{}
+).
+
+%% Nested value search
+{ok, [Msg]} = hb_ao:resolve(
+    <<"~query@1.0/all?nested/key=value&return=first-message">>,
+    #{}
+).
+
+%% Custom exclude list
+{ok, Results} = dev_query:all(
+    #{},
+    #{
+        <<"key1">> => <<"val1">>,
+        <<"key2">> => <<"val2">>,
+        <<"exclude">> => [<<"key1">>, <<"commitments">>]
+    },
+    #{}
+).
+
+%% List element matching
+{ok, [Msg]} = hb_ao:resolve(
+    <<"~query@1.0/all?2+integer=2&3+atom=ok&return=messages">>,
+    #{}
+).
+% Matches list: [<<"a">>, 2, ok]
+
+%% Via HTTP
+Node = hb_http_server:start_node(Opts),
+{ok, Msg} = hb_http:get(
+    Node,
+    <<"~query@1.0/only=basic&basic=value?return=first">>,
+    Opts
+).
+```
+
+---
+
+## Match Specification Processing
+
+### Key Selection (only mode)
+
+```erlang
+% From comma-separated string
+<<"only=key1,key2">>
+→ [<<"key1">>, <<"key2">>]
+
+% Extract values from request/base
+UserSpec = maps:from_list([
+    {Key, hb_maps:get(Key, Req, 
+        hb_maps:get(Key, Base, not_found, Opts), Opts)}
+||
+    Key <- [<<"key1">>, <<"key2">>],
+    Value =/= not_found
+]).
+```
+
+---
+
+### Exclude Processing
+
+```erlang
+FilteredSpec = hb_maps:without(
+    hb_maps:get(<<"exclude">>, Req, ?DEFAULT_EXCLUDES, Opts),
+    UserSpec
+).
+```
+
+**Default Excludes:**
+```erlang
+[<<"path">>, <<"commitments">>, <<"return">>, <<"exclude">>, <<"only">>]
+```
+
+---
+
+### Cache Matching
+
+```erlang
+case hb_cache:match(FilteredSpec, Opts) of
+    {ok, Matches} -> 
+        % Process based on return type
+        ...;
+    not_found -> 
+        {error, not_found}
+end.
+```
+
+---
+
+## Test Setup Helper
+
+```erlang
+-spec test_setup() -> {ok, Opts, Metadata}
+    when
+        Opts :: map(),
+        Metadata :: map().
+```
+
+**Description:** Create test environment with sample cached messages.
+
+**Test Data:**
+- Simple binary key-value message
+- Nested committed message
+- List message with typed elements
+
+**Test Code:**
+```erlang
+-module(dev_query_test_setup_test).
+-include_lib("eunit/include/eunit.hrl").
+
+test_setup_test() ->
+    {ok, Opts, Metadata} = dev_query:test_setup(),
+    
+    ?assert(maps:is_key(store, Opts)),
+    ?assert(maps:is_key(priv_wallet, Opts)),
+    ?assert(maps:is_key(<<"nested">>, Metadata)),
+    
+    % Verify test data searchable
+    {ok, [_]} = hb_ao:resolve(
+        <<"~query@1.0/all?basic=binary-value">>,
+        Opts
+    ).
+```
+
+---
+
+## Result Processing Flow
+
+```erlang
+match(UserSpec, Base, Req, Opts) ->
+    FilteredSpec = apply_excludes(UserSpec, Req, Opts),
+    ReturnType = hb_maps:get(<<"return">>, Req, <<"paths">>, Opts),
+    
+    case hb_cache:match(FilteredSpec, Opts) of
+        {ok, Matches} ->
+            process_return_type(ReturnType, Matches, Opts);
+        not_found ->
+            handle_not_found(ReturnType)
+    end.
+
+process_return_type(<<"count">>, Matches, _) -> 
+    {ok, length(Matches)};
+process_return_type(<<"paths">>, Matches, _) -> 
+    {ok, Matches};
+process_return_type(<<"messages">>, Matches, Opts) ->
+    {ok, [hb_util:ok(hb_cache:read(P, Opts)) || P <- Matches]};
+process_return_type(<<"first-path">>, Matches, _) -> 
+    {ok, hd(Matches)};
+process_return_type(<<"first-message">>, Matches, Opts) ->
+    {ok, hb_util:ok(hb_cache:read(hd(Matches), Opts))};
+process_return_type(<<"boolean">>, Matches, _) -> 
+    {ok, length(Matches) > 0}.
+
+handle_not_found(<<"boolean">>) -> {ok, false};
+handle_not_found(_) -> {error, not_found}.
+```
+
+---
+
+## HTTP Query String Format
+
+```erlang
+% Basic query
+GET /~query@1.0/all?key=value
+
+% With return type
+GET /~query@1.0/all?key=value&return=messages
+
+% Only specific keys
+GET /~query@1.0/only=key1,key2&key1=val1&key2=val2
+
+% Custom excludes
+GET /~query@1.0/all?key=value&exclude=commitments,path
+
+% Deep path access
+GET /~query@1.0/all?key=value&return=first-message/nested/data
+```
+
+---
+
+## Integration with Cache
+
+```erlang
+% Query relies on hb_cache:match/2
+hb_cache:match(#{ <<"key">> => <<"value">> }, Opts)
+→ {ok, [Path1, Path2, ...]} | not_found
+
+% Reads messages via hb_cache:read/2
+hb_cache:read(Path, Opts)
+→ {ok, Message} | not_found
+```
+
+---
+
+## Advanced Matching
+
+### Nested Key Matching
+
+```erlang
+% Search nested structures
+#{ 
+    <<"nested">> => #{
+        <<"key">> => <<"value">>
+    }
+}
+
+% Query:
+<<"~query@1.0/all?nested/key=value">>
+```
+
+---
+
+### Type Annotations
+
+```erlang
+% List index with type
+<<"~query@1.0/all?2+integer=42">>
+
+% Atom matching
+<<"~query@1.0/all?status+atom=ok">>
+```
+
+---
+
+## Error Cases
+
+```erlang
+% No matches found (non-boolean return)
+{error, not_found}
+
+% No matches found (boolean return)
+{ok, false}
+
+% Only parameter missing
+{error, not_found}
+
+% Empty result set
+{ok, []}  % For paths/messages return type
+{ok, 0}   % For count return type
+```
+
+---
+
+## Performance Considerations
+
+### Return Type Selection
+- **paths:** Fastest, no message loading
+- **count/boolean:** Fast, no message loading
+- **messages:** Slower, loads all messages
+- **first-*:** Loads only one message
+
+### Match Complexity
+- Simple key-value: Fast
+- Nested matching: Moderate
+- Many keys: Slower with more keys
+
+---
+
+## References
+
+- **GraphQL** - `dev_query_graphql.erl`, `dev_query_arweave.erl`
+- **Cache** - `hb_cache.erl`
+- **Maps** - `hb_maps.erl`
+- **AO Core** - `hb_ao.erl`
+
+---
+
+## Notes
+
+1. **Search Scope:** Only searches cached messages on local node
+2. **Default Excludes:** Path, commitments automatically excluded
+3. **Return Flexibility:** Multiple output formats supported
+4. **Key Selection:** Three modes for different use cases
+5. **Boolean Special:** Always returns value, never error
+6. **First Helpers:** Convenient for single-result queries
+7. **Nested Support:** Deep path matching enabled
+8. **Type System:** Supports typed list element matching
+9. **HTTP Compatible:** Full query string integration
+10. **GraphQL Integration:** Separate Arweave-compatible interface
+11. **Test Helper:** Comprehensive test setup function
+12. **Performance:** Path return fastest, message return slowest
+13. **Error Handling:** Consistent error patterns
+14. **Custom Excludes:** User can override defaults
+15. **Match Caching:** Relies on underlying cache implementation

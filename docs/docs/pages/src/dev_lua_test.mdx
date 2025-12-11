@@ -1,0 +1,481 @@
+# dev_lua_test.erl - Lua Script Testing Framework
+
+## Overview
+
+**Purpose:** Automated EUnit test generation and execution for Lua scripts  
+**Module:** `dev_lua_test`  
+**Test Command:** `rebar3 lua-test`  
+**Convention:** EUnit-style `_test` function suffix
+
+This module provides a testing framework that automatically discovers and executes Lua test functions. It scans Lua files for functions ending in `_test` and generates corresponding EUnit test suites, making it easy to test Lua code within the HyperBEAM environment.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_util`, `hb_opts`, `hb_format`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Test Specification Parsing
+-spec parse_spec(Input) -> TestSpecs
+    when
+        Input :: string() | binary() | tests,
+        TestSpecs :: [{FilePath, TestList}],
+        FilePath :: binary(),
+        TestList :: tests | [FunctionName],
+        FunctionName :: binary().
+```
+
+---
+
+## Public Functions
+
+### 1. parse_spec/1
+
+```erlang
+-spec parse_spec(Input) -> TestSpecs
+    when
+        Input :: string() | binary() | tests,
+        TestSpecs :: [{FilePath, TestList}],
+        FilePath :: binary(),
+        TestList :: tests | [FunctionName],
+        FunctionName :: binary().
+```
+
+**Description:** Parse test specification string from command line or environment variable. Converts human-readable test specs into structured test definitions.
+
+**Specification Syntax:**
+
+```
+Definitions := (ModDef,)+
+ModDef      := ModName(TestDefs)?
+ModName     := ModuleInLUA_SCRIPTS|(FileName[.lua])?
+TestDefs    := (:TestDef)+
+TestDef     := TestName
+```
+
+**Special Value:**
+- `tests` - Auto-discover all `*_test` functions in default script directory
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_parse_spec_test).
+-include_lib("eunit/include/eunit.hrl").
+
+parse_single_file_test() ->
+    Specs = dev_lua_test:parse_spec(<<"test.lua">>),
+    ?assertEqual([{<<"test.lua">>, tests}], Specs).
+
+parse_with_specific_tests_test() ->
+    Specs = dev_lua_test:parse_spec(<<"test.lua:func1:func2">>),
+    [{File, Tests}] = Specs,
+    ?assertEqual(<<"test.lua">>, File),
+    ?assertEqual([<<"func1">>, <<"func2">>], Tests).
+
+parse_multiple_files_test() ->
+    Specs = dev_lua_test:parse_spec(<<"test1.lua,test2.lua">>),
+    ?assertEqual(2, length(Specs)),
+    [{File1, _}, {File2, _}] = Specs,
+    ?assertEqual(<<"test1.lua">>, File1),
+    ?assertEqual(<<"test2.lua">>, File2).
+
+parse_module_name_test() ->
+    % Assumes LUA_SCRIPTS=scripts/
+    Specs = dev_lua_test:parse_spec(<<"mymodule">>),
+    [{File, _}] = Specs,
+    ?assert(binary:match(File, <<"mymodule.lua">>) =/= nomatch).
+
+parse_default_test() ->
+    % When no spec provided, discovers all .lua files
+    Specs = dev_lua_test:parse_spec(tests),
+    ?assert(is_list(Specs)),
+    lists:foreach(
+        fun({File, TestMode}) ->
+            ?assert(is_binary(File)),
+            ?assertEqual(tests, TestMode)
+        end,
+        Specs
+    ).
+```
+
+---
+
+## Test Specification Examples
+
+### Run All Tests in All Scripts
+```bash
+rebar3 lua-test
+# or
+LUA_TESTS="" rebar3 lua-test
+```
+
+### Run All Tests in Single File
+```bash
+LUA_TESTS="test.lua" rebar3 lua-test
+# or
+LUA_TESTS="~/src/LuaScripts/test.lua" rebar3 lua-test
+```
+
+### Run Specific Tests
+```bash
+# Single test from single file
+LUA_TESTS="test.lua:my_test" rebar3 lua-test
+
+# Multiple tests from single file
+LUA_TESTS="test.lua:test1:test2:test3" rebar3 lua-test
+```
+
+### Run Multiple Files
+```bash
+# All tests from multiple files
+LUA_TESTS="test1.lua,test2.lua" rebar3 lua-test
+
+# Mix of all tests and specific tests
+LUA_TESTS="test1.lua,test2.lua:specific_test" rebar3 lua-test
+```
+
+### Module Names (Without .lua Extension)
+```bash
+# Assumes file in LUA_SCRIPTS directory (default: scripts/)
+LUA_TESTS="mymodule" rebar3 lua-test
+
+# Specific tests from module
+LUA_TESTS="mymodule:test1:test2" rebar3 lua-test
+```
+
+### Complex Example
+```bash
+LUA_TESTS="test,scripts/other:func1:func2,~/custom.lua" rebar3 lua-test
+```
+
+This runs:
+1. All tests in `scripts/test.lua`
+2. Only `func1` and `func2` from `scripts/other.lua`
+3. All tests in `~/custom.lua`
+
+---
+
+## Internal Functions
+
+### suite/2
+
+```erlang
+-spec suite(File, Funcs) -> EUnitTestSuite
+    when
+        File :: binary(),
+        Funcs :: tests | [binary()],
+        EUnitTestSuite :: {foreach, SetupFun, CleanupFun, Tests}.
+```
+
+**Description:** Generate an EUnit test suite for a Lua script. Creates setup/cleanup functions and individual test cases.
+
+**Function Discovery:**
+- If `Funcs` is `tests`, scans for all functions ending in `_test`
+- If `Funcs` is a list, uses specified function names
+
+---
+
+### new_state/1
+
+```erlang
+-spec new_state(File) -> {ok, InitializedState}
+    when
+        File :: binary(),
+        InitializedState :: map().
+```
+
+**Description:** Create a new Lua environment for a script. Loads the module and initializes the `lua@5.3a` device.
+
+**Process:**
+1. Read Lua file from disk
+2. Create device message with module
+3. Initialize via `hb_ao:resolve/3`
+4. Return initialized state
+
+---
+
+### exec_test/2
+
+```erlang
+-spec exec_test(State, Function) -> ok
+    when
+        State :: map(),
+        Function :: binary().
+```
+
+**Description:** Execute a single Lua test function. Calls the function via AO-Core resolution and validates the result.
+
+**Behavior:**
+- Success: Function returns normally → Test passes
+- Failure: Function returns error status → Test fails with formatted output
+
+---
+
+### terminates_with/2
+
+```erlang
+-spec terminates_with(String, Suffix) -> boolean()
+    when
+        String :: binary() | string(),
+        Suffix :: binary().
+```
+
+**Description:** Check if a string ends with a given suffix. Used for filtering test functions and Lua files.
+
+---
+
+## Test Discovery Process
+
+### Automatic Discovery
+
+When `tests` is specified (or no spec provided):
+
+1. **Scan Directory**: Read files from `LUA_SCRIPTS` directory (default: `scripts/`)
+2. **Filter Lua Files**: Select only files ending in `.lua`
+3. **Load Modules**: Initialize each Lua module
+4. **Find Functions**: Query for all functions in global `_G` table
+5. **Filter Tests**: Select functions ending in `_test`
+6. **Generate Suite**: Create EUnit test for each function
+
+### Manual Specification
+
+When specific tests are provided:
+
+1. **Parse Spec**: Extract file paths and function names
+2. **Load Module**: Initialize specified Lua file
+3. **Generate Suite**: Create EUnit tests for specified functions only
+
+---
+
+## Lua Test Function Convention
+
+### Basic Test Function
+```lua
+function my_feature_test()
+    -- Test code here
+    assert(1 + 1 == 2, "Math is broken!")
+end
+```
+
+### Test with Setup
+```lua
+function setup()
+    return {
+        value = 42,
+        name = "test"
+    }
+end
+
+function test_with_setup()
+    local ctx = setup()
+    assert(ctx.value == 42)
+    assert(ctx.name == "test")
+end
+```
+
+### Test with AO-Core
+```lua
+function ao_resolve_test()
+    local msg = { data = "test" }
+    local status, result = ao.resolve(msg)
+    assert(status == "ok", "Resolution failed")
+end
+```
+
+### Test with Error Handling
+```lua
+function error_handling_test()
+    local success, err = pcall(function()
+        error("Expected error")
+    end)
+    assert(not success, "Should have failed")
+    assert(string.match(err, "Expected error"))
+end
+```
+
+---
+
+## Environment Variables
+
+### LUA_TESTS
+**Description:** Specifies which tests to run  
+**Format:** Comma-separated module definitions  
+**Default:** Runs all tests in all Lua files in `LUA_SCRIPTS` directory
+
+**Examples:**
+```bash
+LUA_TESTS="test"                    # All tests in scripts/test.lua
+LUA_TESTS="test:func1"             # Only func1 in scripts/test.lua
+LUA_TESTS="~/path/test.lua"        # Absolute path
+LUA_TESTS="test1,test2:func1"      # Multiple files
+```
+
+### LUA_SCRIPTS
+**Description:** Directory containing Lua scripts  
+**Default:** `scripts/`  
+**Format:** Directory path (relative or absolute)
+
+**Examples:**
+```bash
+LUA_SCRIPTS="./lua_modules"
+LUA_SCRIPTS="/home/user/project/scripts"
+```
+
+---
+
+## Common Patterns
+
+### Run All Tests
+```bash
+# Default behavior
+rebar3 lua-test
+
+# Explicit all tests
+LUA_TESTS="" rebar3 lua-test
+```
+
+### Run Single Test File
+```bash
+# From default directory
+LUA_TESTS="mytest" rebar3 lua-test
+
+# With .lua extension
+LUA_TESTS="mytest.lua" rebar3 lua-test
+
+# Absolute path
+LUA_TESTS="/path/to/test.lua" rebar3 lua-test
+```
+
+### Run Specific Tests
+```bash
+# Single test
+LUA_TESTS="test:my_test" rebar3 lua-test
+
+# Multiple tests
+LUA_TESTS="test:test1:test2:test3" rebar3 lua-test
+```
+
+### Run Tests from Multiple Files
+```bash
+# All tests from each
+LUA_TESTS="test1,test2,test3" rebar3 lua-test
+
+# Mixed: all from test1, specific from test2
+LUA_TESTS="test1,test2:specific_test" rebar3 lua-test
+```
+
+### Custom Script Directory
+```bash
+# Set directory and run
+LUA_SCRIPTS="./my_scripts" LUA_TESTS="" rebar3 lua-test
+
+# With specific test
+LUA_SCRIPTS="./my_scripts" LUA_TESTS="test:func" rebar3 lua-test
+```
+
+---
+
+## Test Output
+
+### Successful Test
+```
+scripts/test.lua:my_test...................[ok]
+```
+
+### Failed Test
+```
+scripts/test.lua:my_test...................[failed]
+  Expected: 42
+  Actual: 41
+```
+
+### Test Error
+```
+scripts/test.lua:broken_test...............[error]
+  Error: attempt to call a nil value
+```
+
+---
+
+## Integration with EUnit
+
+The module generates standard EUnit test structures:
+
+```erlang
+{foreach,
+    fun() -> ok end,              % Setup
+    fun(_) -> ok end,             % Cleanup
+    [
+        {
+            "test.lua:my_test",   % Test name
+            fun() ->              % Test function
+                exec_test(State, <<"my_test">>)
+            end
+        },
+        ...
+    ]
+}
+```
+
+**Benefits:**
+- Standard EUnit reporting
+- Integration with rebar3
+- Parallel test execution (when safe)
+- Test filtering and selection
+- CI/CD compatibility
+
+---
+
+## Error Handling
+
+### Module Load Errors
+If Lua module fails to load:
+```erlang
+{error, {badmatch, {error, enoent}}}
+```
+
+### Function Not Found
+If specified function doesn't exist:
+```
+Test crashes with function_clause error
+```
+
+### Test Execution Errors
+If test function throws error:
+```
+Test fails with formatted Lua error message
+```
+
+---
+
+## References
+
+- **dev_lua.erl** - Lua execution device
+- **hb_ao.erl** - AO-Core resolution
+- **hb_format.erl** - Test output formatting
+- **hb_opts.erl** - Configuration options
+- **EUnit** - Erlang testing framework
+
+---
+
+## Notes
+
+1. **Naming Convention**: Test functions must end in `_test` for auto-discovery
+2. **Function Scope**: Only global functions in `_G` table are discovered
+3. **File Extensions**: `.lua` extension is optional in specs
+4. **Path Resolution**: Relative paths are resolved from current directory
+5. **Module Names**: Names without `.lua` look in `LUA_SCRIPTS` directory
+6. **Case Sensitivity**: File and function names are case-sensitive
+7. **Comma Separator**: Multiple specs separated by commas
+8. **Colon Separator**: Functions separated by colons
+9. **Empty Spec**: Empty string or `tests` runs all discovered tests
+10. **Setup/Cleanup**: Currently minimal (no per-test setup)
+11. **Parallel Execution**: Tests run serially within a file
+12. **State Isolation**: Each file gets a new Lua state
+13. **Error Formatting**: Uses `hb_format:print/4` for readable errors
+14. **CI Integration**: Standard EUnit output works with CI systems
+15. **Performance**: New Lua VM created per file, not per test

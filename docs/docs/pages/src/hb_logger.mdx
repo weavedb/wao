@@ -1,0 +1,688 @@
+# hb_logger.erl - Simple Process Activity Logger
+
+## Overview
+
+**Purpose:** Monitor and log process activity in concurrent operations  
+**Module:** `hb_logger`  
+**Pattern:** Observer pattern with message passing  
+**Use Case:** Track multi-process test execution and debugging
+
+This module implements a simple logging system for monitoring concurrent processes. It collects registration events, log messages, and termination notifications from multiple processes, aggregating them into a central activity log. Primarily used for testing and debugging concurrent operations.
+
+## Design Pattern
+
+**Observer Pattern:**
+- Logger process (observer) monitors worker processes (subjects)
+- Workers send log messages to logger
+- Logger aggregates all activity
+- Client retrieves activity report on demand
+
+## State Record
+
+```erlang
+-record(state, {
+    client = undefined,    % PID to send final report
+    activity = [],         % Accumulated log entries
+    processes = waiting,   % List of registered PIDs or 'waiting'
+    console = true         % Whether to print to console
+}).
+```
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Logger Lifecycle
+-spec start() -> LoggerPID.
+-spec start(ClientPID) -> LoggerPID.
+
+%% Logging
+-spec log(Monitor, Data) -> ok.
+
+%% Process Management
+-spec register(Monitor) -> ok.
+
+%% Reporting
+-spec report(Monitor) -> Activity.
+```
+
+---
+
+## Public Functions
+
+### 1. start/0, start/1
+
+```erlang
+-spec start() -> LoggerPID
+    when
+        LoggerPID :: pid().
+
+-spec start(ClientPID) -> LoggerPID
+    when
+        ClientPID :: pid() | undefined,
+        LoggerPID :: pid().
+```
+
+**Description:** Start a logger process that will collect activity from registered processes. Optional client PID to receive final report when all processes terminate.
+
+**Implementation:**
+```erlang
+start() -> start(undefined).
+start(Client) ->
+    spawn(fun() ->
+        loop(#state{client = Client})
+    end).
+```
+
+**Behavior:**
+- **With Client:** Sends `{hb_logger, LoggerPID, done, Activity}` when all processes terminate
+- **Without Client:** Logger terminates when all processes complete
+
+**Test Code:**
+```erlang
+-module(hb_logger_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_logger_test() ->
+    Logger = hb_logger:start(),
+    ?assert(is_pid(Logger)),
+    ?assert(is_process_alive(Logger)).
+
+start_with_client_test() ->
+    ClientPID = self(),
+    Logger = hb_logger:start(ClientPID),
+    ?assert(is_pid(Logger)),
+    
+    % Register and complete
+    hb_logger:register(Logger),
+    
+    % Should receive done message
+    receive
+        {hb_logger, Logger, done, Activity} ->
+            ?assert(is_list(Activity))
+    after 1000 ->
+        ?assert(false)
+    end.
+```
+
+---
+
+### 2. log/2
+
+```erlang
+-spec log(Monitor, Data) -> ok
+    when
+        Monitor :: pid(),
+        Data :: term().
+```
+
+**Description:** Send a log message to the logger process. The message is added to the activity log and optionally printed to console.
+
+**Implementation:**
+```erlang
+log(Monitor, Data) ->
+    Monitor ! {log, Data}.
+```
+
+**Test Code:**
+```erlang
+-module(hb_logger_log_test).
+-include_lib("eunit/include/eunit.hrl").
+
+log_message_test() ->
+    Logger = hb_logger:start(),
+    
+    % Send log messages
+    hb_logger:log(Logger, {info, test_message, <<"data">>}),
+    hb_logger:log(Logger, {error, test_error, <<"error data">>}),
+    
+    % Register to allow reporting
+    hb_logger:register(Logger),
+    
+    % Get report
+    Activity = hb_logger:report(Logger),
+    
+    ?assert(length(Activity) >= 2),
+    ?assert(lists:any(
+        fun({info, test_message, _}) -> true; (_) -> false end,
+        Activity
+    )).
+```
+
+---
+
+### 3. register/1
+
+```erlang
+-spec register(Monitor) -> ok
+    when
+        Monitor :: pid().
+```
+
+**Description:** Register the calling process with the logger. The logger will track this process and wait for its termination before completing.
+
+**Implementation:**
+```erlang
+register(Monitor) ->
+    Monitor ! {register, self()}.
+```
+
+**Behavior:**
+- Adds calling process to tracked processes list
+- Logger monitors the process (currently commented out)
+- Logger waits for all registered processes to complete
+
+**Test Code:**
+```erlang
+-module(hb_logger_register_test).
+-include_lib("eunit/include/eunit.hrl").
+
+register_process_test() ->
+    Logger = hb_logger:start(),
+    
+    % Register current process
+    hb_logger:register(Logger),
+    
+    % Get report
+    Activity = hb_logger:report(Logger),
+    
+    % Should contain registration event
+    ?assert(lists:any(
+        fun({ok, registered, PID}) when PID =:= self() -> true; (_) -> false end,
+        Activity
+    )).
+
+multiple_processes_test() ->
+    ClientPID = self(),
+    Logger = hb_logger:start(ClientPID),
+    
+    % Spawn multiple workers
+    Workers = [
+        spawn(fun() ->
+            hb_logger:register(Logger),
+            hb_logger:log(Logger, {worker, N, started}),
+            timer:sleep(10),
+            hb_logger:log(Logger, {worker, N, done})
+        end)
+        || N <- lists:seq(1, 5)
+    ],
+    
+    % Wait for all to complete
+    receive
+        {hb_logger, Logger, done, Activity} ->
+            % Should have logs from all 5 workers
+            ?assert(length(Activity) >= 10)
+    after 5000 ->
+        ?assert(false)
+    end.
+```
+
+---
+
+### 4. report/1
+
+```erlang
+-spec report(Monitor) -> Activity
+    when
+        Monitor :: pid(),
+        Activity :: [LogEntry],
+        LogEntry :: term().
+```
+
+**Description:** Request and receive the current activity log from the logger. Blocks until response is received.
+
+**Implementation:**
+```erlang
+report(Monitor) ->
+    Monitor ! {report, self()},
+    receive
+        {report, Activity} ->
+            Activity
+    end.
+```
+
+**Test Code:**
+```erlang
+-module(hb_logger_report_test).
+-include_lib("eunit/include/eunit.hrl").
+
+report_activity_test() ->
+    Logger = hb_logger:start(),
+    
+    % Generate some activity
+    hb_logger:register(Logger),
+    hb_logger:log(Logger, {test, event, data}),
+    
+    % Get report
+    Activity = hb_logger:report(Logger),
+    
+    ?assert(is_list(Activity)),
+    ?assert(length(Activity) > 0).
+
+report_ordering_test() ->
+    Logger = hb_logger:start(),
+    
+    % Log in specific order
+    hb_logger:log(Logger, {event, 1}),
+    hb_logger:log(Logger, {event, 2}),
+    hb_logger:log(Logger, {event, 3}),
+    hb_logger:register(Logger),
+    
+    Activity = hb_logger:report(Logger),
+    
+    % Activity is stored in reverse order (prepended)
+    ?assertEqual({event, 1}, lists:last(Activity)).
+```
+
+---
+
+## Message Loop
+
+### Main Loop
+
+```erlang
+loop(State) ->
+    receive
+        {log, Activity} ->
+            console(State, Activity),
+            loop(State#state{activity = [Activity | State#state.activity]});
+        
+        {register, PID} ->
+            console(State, Act = {ok, registered, PID}),
+            loop(State#state{
+                processes = [PID | case State#state.processes of 
+                    waiting -> []; 
+                    L -> L 
+                end],
+                activity = [Act | State#state.activity]
+            });
+        
+        {'DOWN', _MonitorRef, process, PID, Reason} ->
+            console(State, Act = {terminated, Reason, PID}),
+            loop(State#state{
+                processes = State#state.processes -- [PID],
+                activity = [Act | State#state.activity]
+            });
+        
+        {report, PID} ->
+            PID ! {report, State#state.activity},
+            loop(State)
+    end.
+```
+
+---
+
+### Termination Conditions
+
+```erlang
+% No client, all processes done
+loop(#state{processes = [], client = undefined}) -> done;
+
+% Has client, all processes done
+loop(#state{processes = [], client = C, activity = A}) ->
+    C ! {?MODULE, self(), done, A};
+
+% Otherwise, continue looping
+loop(State) -> ...
+```
+
+---
+
+## Console Output
+
+### console/2
+
+```erlang
+console(#state{console = false}, _) ->
+    not_printing;
+console(S, {Status, Type, Details}) when is_record(Details, tx) ->
+    console(S, {Status, Type, hb_util:id(Details)});
+console(_S, {Status, Type, Details}) ->
+    io:format("### MU PUSH REPORT ~p ###~n~p: ~p~n~p~n~n",
+        [self(), Status, Type, Details]);
+console(_S, Act) ->
+    io:format("### MU PUSH UNEXPECTED ~p ###~n~p~n~n", [self(), Act]).
+```
+
+**Features:**
+- Automatic TX record ID extraction
+- Formatted output with status/type/details
+- Handles unexpected activity formats
+- Can be disabled with `console = false`
+
+---
+
+## Activity Log Structure
+
+### Log Entry Formats
+
+**Registration:**
+```erlang
+{ok, registered, PID}
+```
+
+**Custom Log:**
+```erlang
+{Status, Type, Details}
+% Example: {info, computation_complete, #{result => 42}}
+```
+
+**Process Termination:**
+```erlang
+{terminated, Reason, PID}
+% Reason: normal | killed | {error, Reason}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic logging pattern
+Logger = hb_logger:start(),
+hb_logger:register(Logger),
+
+% Do work and log progress
+hb_logger:log(Logger, {info, started, self()}),
+Result = do_work(),
+hb_logger:log(Logger, {info, completed, Result}),
+
+% Get activity report
+Activity = hb_logger:report(Logger).
+
+%% Multi-process coordination
+ClientPID = self(),
+Logger = hb_logger:start(ClientPID),
+
+% Spawn workers
+Workers = [
+    spawn(fun() ->
+        hb_logger:register(Logger),
+        hb_logger:log(Logger, {worker, N, starting}),
+        Work = do_work(N),
+        hb_logger:log(Logger, {worker, N, {completed, Work}})
+    end)
+    || N <- lists:seq(1, 10)
+],
+
+% Wait for completion notification
+receive
+    {hb_logger, Logger, done, Activity} ->
+        analyze_activity(Activity)
+end.
+
+%% Silent logging (no console output)
+Logger = hb_logger:start(),
+% Modify state to disable console
+% (Would need state access - currently not exposed)
+
+%% Progressive reporting
+Logger = hb_logger:start(),
+hb_logger:register(Logger),
+
+% Log at different stages
+hb_logger:log(Logger, {stage, 1, init}),
+stage1(),
+hb_logger:log(Logger, {stage, 2, processing}),
+stage2(),
+hb_logger:log(Logger, {stage, 3, finalize}),
+stage3(),
+
+% Get final report
+FinalActivity = hb_logger:report(Logger).
+
+%% Test helper pattern
+run_with_logging(TestFun) ->
+    Logger = hb_logger:start(),
+    hb_logger:register(Logger),
+    
+    Result = TestFun(Logger),
+    Activity = hb_logger:report(Logger),
+    
+    {Result, Activity}.
+
+% Usage:
+{Result, Logs} = run_with_logging(fun(L) ->
+    hb_logger:log(L, {test, starting}),
+    Value = complex_operation(),
+    hb_logger:log(L, {test, done}),
+    Value
+end).
+```
+
+---
+
+## Use Cases
+
+### 1. Test Debugging
+
+```erlang
+test_concurrent_operations() ->
+    Logger = hb_logger:start(),
+    
+    % Spawn test workers
+    lists:foreach(
+        fun(N) ->
+            spawn(fun() ->
+                hb_logger:register(Logger),
+                hb_logger:log(Logger, {test, N, starting}),
+                
+                % Test operation
+                Result = test_operation(N),
+                
+                hb_logger:log(Logger, {test, N, {result, Result}})
+            end)
+        end,
+        lists:seq(1, 100)
+    ),
+    
+    % Wait and verify
+    timer:sleep(1000),
+    Activity = hb_logger:report(Logger),
+    verify_all_completed(Activity).
+```
+
+---
+
+### 2. Performance Monitoring
+
+```erlang
+benchmark_with_logging() ->
+    ClientPID = self(),
+    Logger = hb_logger:start(ClientPID),
+    
+    spawn(fun() ->
+        hb_logger:register(Logger),
+        
+        Start = os:timestamp(),
+        hb_logger:log(Logger, {benchmark, start, Start}),
+        
+        % Run benchmark
+        Result = run_benchmark(),
+        
+        End = os:timestamp(),
+        Duration = timer:now_diff(End, Start),
+        hb_logger:log(Logger, {benchmark, end, {Duration, Result}})
+    end),
+    
+    receive
+        {hb_logger, Logger, done, Activity} ->
+            analyze_benchmark_results(Activity)
+    end.
+```
+
+---
+
+### 3. Process Coordination
+
+```erlang
+coordinate_workers(Tasks) ->
+    Logger = hb_logger:start(self()),
+    
+    % Spawn workers
+    lists:foreach(
+        fun(Task) ->
+            spawn(fun() ->
+                hb_logger:register(Logger),
+                hb_logger:log(Logger, {worker, started, Task}),
+                
+                execute_task(Task),
+                
+                hb_logger:log(Logger, {worker, completed, Task})
+            end)
+        end,
+        Tasks
+    ),
+    
+    % Wait for all workers
+    receive
+        {hb_logger, Logger, done, Activity} ->
+            {ok, Activity}
+    end.
+```
+
+---
+
+## Limitations
+
+1. **No Process Monitoring:** `erlang:monitor/2` call is commented out
+2. **Console Only:** No file logging support
+3. **Memory:** All activity kept in memory
+4. **No Filtering:** Cannot filter by log level or type
+5. **Simple Format:** Basic console output format
+6. **Reverse Order:** Activity stored newest-first
+
+---
+
+## Activity Analysis
+
+### Extract Specific Events
+
+```erlang
+extract_events(Activity, Type) ->
+    lists:filter(
+        fun({_, T, _}) when T =:= Type -> true; (_) -> false end,
+        Activity
+    ).
+
+% Usage:
+Errors = extract_events(Activity, error),
+Info = extract_events(Activity, info).
+```
+
+---
+
+### Count by Status
+
+```erlang
+count_by_status(Activity) ->
+    lists:foldl(
+        fun({Status, _, _}, Acc) ->
+            maps:update_with(Status, fun(N) -> N + 1 end, 1, Acc);
+           (_, Acc) ->
+            Acc
+        end,
+        #{},
+        Activity
+    ).
+
+% Usage:
+Counts = count_by_status(Activity),
+% #{ok => 10, error => 2, info => 15}
+```
+
+---
+
+### Timeline Reconstruction
+
+```erlang
+% Activity is in reverse chronological order
+timeline(Activity) ->
+    lists:reverse(Activity).
+
+% With timestamps
+timeline_with_time(Activity) ->
+    lists:reverse([
+        {os:timestamp(), Event}
+        || Event <- Activity
+    ]).
+```
+
+---
+
+## Testing Utilities
+
+```erlang
+%% Wait for specific log entry
+wait_for_log(Logger, Matcher, Timeout) ->
+    wait_for_log(Logger, Matcher, Timeout, os:timestamp()).
+
+wait_for_log(Logger, Matcher, Timeout, StartTime) ->
+    Activity = hb_logger:report(Logger),
+    case lists:any(Matcher, Activity) of
+        true -> {ok, found};
+        false ->
+            Elapsed = timer:now_diff(os:timestamp(), StartTime) div 1000,
+            if
+                Elapsed > Timeout -> {error, timeout};
+                true ->
+                    timer:sleep(10),
+                    wait_for_log(Logger, Matcher, Timeout, StartTime)
+            end
+    end.
+
+% Usage:
+wait_for_log(Logger, fun({ok, completed, _}) -> true; (_) -> false end, 5000).
+```
+
+---
+
+## Enhancement Ideas
+
+```erlang
+%% Enable file logging
+start_with_file(Filename) ->
+    spawn(fun() ->
+        {ok, File} = file:open(Filename, [write, append]),
+        loop(#state{client = undefined, console = false, file = File})
+    end).
+
+%% Add log levels
+log(Monitor, Level, Data) ->
+    Monitor ! {log, {Level, os:timestamp(), Data}}.
+
+%% Filter by level
+get_logs_by_level(Logger, Level) ->
+    Activity = report(Logger),
+    [Data || {L, _Time, Data} <- Activity, L =:= Level].
+```
+
+---
+
+## References
+
+- **Process Communication** - Erlang message passing
+- **Process Monitoring** - `erlang:monitor/2` (commented out)
+- **Testing** - EUnit integration
+- **Concurrency** - Multi-process coordination
+
+---
+
+## Notes
+
+1. **Simple Design:** Minimal logger for basic needs
+2. **Message Passing:** Pure Erlang message passing (no gen_server)
+3. **Client Notification:** Optional final report to client
+4. **Console Output:** Automatic logging to stdout
+5. **Activity Storage:** All logs kept in memory
+6. **Reverse Order:** Logs prepended (newest first)
+7. **Process Tracking:** Waits for all registered processes
+8. **Commented Monitoring:** Process monitoring code present but disabled
+9. **TX Record Support:** Special handling for transaction records
+10. **No Levels:** All logs treated equally
+11. **Synchronous Report:** `report/1` blocks until response
+12. **Test Focus:** Designed primarily for test scenarios
+13. **No Persistence:** Activity lost when logger terminates
+14. **Simple Format:** Basic tuple-based log format
+15. **Concurrent Safe:** Multiple processes can log simultaneously

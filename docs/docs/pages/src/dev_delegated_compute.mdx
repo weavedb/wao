@@ -1,0 +1,512 @@
+# dev_delegated_compute.erl - Delegated Compute Device
+
+## Overview
+
+**Purpose:** Execute computation on remote machines via JSON-Iface protocol  
+**Module:** `dev_delegated_compute`  
+**Pattern:** Relay-based external compute with state management  
+**Integration:** Can be used standalone or as Execution-Device for AO processes
+
+This module wraps remote compute engines that implement the JSON-Iface protocol, enabling trusted computation results to be brought into the local node. It handles both assignments and dry-runs, manages checkpoints, and relays computation requests to external servers.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_json`, `hb_util`
+- **Device Layer:** `dev_stack`, `dev_process`, `dev_scheduler_formats`, `dev_json_iface`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lifecycle
+-spec init(Msg1, Msg2, Opts) -> {ok, Msg}.
+-spec normalize(Msg1, Msg2, Opts) -> {ok, Msg} | {error, Reason}.
+
+%% Computation
+-spec compute(Msg1, Msg2, Opts) -> {ok, MsgWithResults} | {error, Reason}.
+
+%% State Management
+-spec snapshot(Msg, Msg2, Opts) -> {ok, SnapshotResponse}.
+```
+
+---
+
+## Public Functions
+
+### 1. init/3
+
+```erlang
+-spec init(Msg1, Msg2, Opts) -> {ok, Msg}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Msg :: map().
+```
+
+**Description:** Initialize the delegated compute device. Currently no special initialization required.
+
+**Test Code:**
+```erlang
+-module(dev_delegated_compute_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_test() ->
+    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
+    Msg2 = #{},
+    {ok, Result} = dev_delegated_compute:init(Msg1, Msg2, #{}),
+    ?assertEqual(Msg1, Result).
+
+init_preserves_data_test() ->
+    Msg1 = #{
+        <<"device">> => <<"delegated-compute@1.0">>,
+        <<"data">> => <<"test">>
+    },
+    {ok, Result} = dev_delegated_compute:init(Msg1, #{}, #{}),
+    ?assertEqual(<<"test">>, maps:get(<<"data">>, Result)).
+```
+
+---
+
+### 2. normalize/3
+
+```erlang
+-spec normalize(Msg1, Msg2, Opts) -> {ok, Msg} | {error, Reason}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Msg :: map(),
+        Reason :: term().
+```
+
+**Description:** Normalize the device by loading snapshots if present. Handles checkpoint-type snapshots by calling `/state` endpoint to restore state on the remote server.
+
+**Snapshot Handling:**
+- Checks for `snapshot` key in Msg1
+- If `type` is `Checkpoint`, loads state to remote server
+- Removes `snapshot` key after loading
+- Uses `POST /state` endpoint with snapshot data
+
+**Test Code:**
+```erlang
+-module(dev_delegated_compute_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_no_snapshot_test() ->
+    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
+    Msg2 = #{},
+    {ok, Result} = dev_delegated_compute:normalize(Msg1, Msg2, #{}),
+    ?assertEqual(Msg1, Result).
+
+normalize_with_checkpoint_test() ->
+    Snapshot = #{
+        <<"type">> => <<"Checkpoint">>,
+        <<"data">> => <<"checkpoint-data">>,
+        <<"memory-limit">> => <<"1-gb">>
+    },
+    Msg1 = #{
+        <<"device">> => <<"delegated-compute@1.0">>,
+        <<"snapshot">> => Snapshot
+    },
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
+        {ok, #{<<"status">> => 200}}
+    end),
+    {ok, Result} = dev_delegated_compute:normalize(Msg1, #{}, #{}),
+    ?assertNot(maps:is_key(<<"snapshot">>, Result)),
+    meck:unload(hb_ao).
+
+normalize_non_checkpoint_test() ->
+    Snapshot = #{
+        <<"type">> => <<"Other">>,
+        <<"data">> => <<"other-data">>
+    },
+    Msg1 = #{
+        <<"device">> => <<"delegated-compute@1.0">>,
+        <<"snapshot">> => Snapshot
+    },
+    {ok, Result} = dev_delegated_compute:normalize(Msg1, #{}, #{}),
+    ?assertNot(maps:is_key(<<"snapshot">>, Result)).
+```
+
+---
+
+### 3. compute/3
+
+```erlang
+-spec compute(Msg1, Msg2, Opts) -> {ok, MsgWithResults} | {error, Reason}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        MsgWithResults :: map(),
+        Reason :: term().
+```
+
+**Description:** Execute computation on remote machine. Routes to either assignment computation or dry-run based on message type.
+
+**Execution Modes:**
+
+**Assignment Mode** (`Type = <<"Assignment">>`):
+- Converts to AOS2 format
+- Calls `POST /result/&#123;slot&#125;?process-id=&#123;id&#125;`
+- Stores result permanently
+
+**Dry-Run Mode** (any other type):
+- Converts to JSON-Iface format
+- Calls `POST /dry-run?process-id=&#123;id&#125;`
+- Does not affect state
+
+**Output Structure:**
+```erlang
+#{
+    <<OutputPrefix/binary, "/results">> => ParsedMessage,
+    <<OutputPrefix/binary, "/results/json">> => #{
+        <<"content-type">> => <<"application/json">>,
+        <<"body">> => JSONResponse
+    }
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_delegated_compute_compute_test).
+-include_lib("eunit/include/eunit.hrl").
+
+compute_assignment_test() ->
+    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
+    Msg2 = #{
+        <<"type">> => <<"Assignment">>,
+        <<"process-id">> => <<"proc-123">>,
+        <<"slot">> => 1,
+        <<"action">> => <<"test">>
+    },
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
+        {ok, #{<<"body">> => <<"{\"ok\": true}">>}}
+    end),
+    meck:new(dev_json_iface, [passthrough]),
+    meck:expect(dev_json_iface, json_to_message, fun(_, _) -> 
+        {ok, #{<<"status">> => <<"ok">>}}
+    end),
+    {ok, Result} = dev_delegated_compute:compute(Msg1, Msg2, #{}),
+    ?assert(maps:is_key(<<"/results">>, Result)),
+    meck:unload([hb_ao, dev_json_iface]).
+
+compute_dryrun_test() ->
+    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
+    Msg2 = #{
+        <<"type">> => <<"Message">>,
+        <<"process-id">> => <<"proc-123">>,
+        <<"action">> => <<"test">>
+    },
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
+        {ok, #{<<"body">> => <<"{\"result\": \"test\"}">>}}
+    end),
+    meck:new(dev_json_iface, [passthrough]),
+    meck:expect(dev_json_iface, json_to_message, fun(_, _) -> 
+        {ok, #{<<"result">> => <<"test">>}}
+    end),
+    {ok, Result} = dev_delegated_compute:compute(Msg1, Msg2, #{}),
+    ?assert(maps:is_key(<<"/results">>, Result)),
+    meck:unload([hb_ao, dev_json_iface]).
+
+compute_error_test() ->
+    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
+    Msg2 = #{
+        <<"type">> => <<"Assignment">>,
+        <<"process-id">> => <<"proc-123">>
+    },
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
+        {error, <<"Connection failed">>}
+    end),
+    {error, _} = dev_delegated_compute:compute(Msg1, Msg2, #{}),
+    meck:unload(hb_ao).
+```
+
+---
+
+### 4. snapshot/3
+
+```erlang
+-spec snapshot(Msg, Msg2, Opts) -> {ok, SnapshotResponse}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        SnapshotResponse :: map().
+```
+
+**Description:** Generate a snapshot of running computation by calling `POST /snapshot/&#123;process-id&#125;` endpoint on remote server.
+
+**Response Structure:**
+```erlang
+% Success
+{ok, #{
+    <<"type">> => <<"Checkpoint">>,
+    <<"data">> => SnapshotData,
+    ...
+}}
+
+% Error
+{ok, #{
+    <<"error">> => <<"No checkpoint produced.">>,
+    <<"error-details">> => ErrorDetails
+}}
+```
+
+**Test Code:**
+```erlang
+-module(dev_delegated_compute_snapshot_test).
+-include_lib("eunit/include/eunit.hrl").
+
+snapshot_success_test() ->
+    Msg = #{
+        <<"device">> => <<"delegated-compute@1.0">>,
+        <<"process-id">> => <<"proc-123">>
+    },
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
+        {ok, #{
+            <<"type">> => <<"Checkpoint">>,
+            <<"data">> => <<"snapshot-data">>
+        }}
+    end),
+    {ok, Result} = dev_delegated_compute:snapshot(Msg, #{}, #{}),
+    ?assertEqual(<<"Checkpoint">>, maps:get(<<"type">>, Result)),
+    meck:unload(hb_ao).
+
+snapshot_error_test() ->
+    Msg = #{
+        <<"device">> => <<"delegated-compute@1.0">>,
+        <<"process-id">> => <<"proc-123">>
+    },
+    meck:new(hb_ao, [passthrough]),
+    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
+        {error, <<"Snapshot failed">>}
+    end),
+    {ok, Result} = dev_delegated_compute:snapshot(Msg, #{}, #{}),
+    ?assert(maps:is_key(<<"error">>, Result)),
+    meck:unload(hb_ao).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Execute assignment on remote CU
+Msg = #{
+    <<"device">> => <<"delegated-compute@1.0">>,
+    <<"process-id">> => ProcessID
+},
+Assignment = #{
+    <<"type">> => <<"Assignment">>,
+    <<"process-id">> => ProcessID,
+    <<"slot">> => 1,
+    <<"action">> => <<"execute">>
+},
+{ok, Result} = dev_delegated_compute:compute(Msg, Assignment, Opts),
+Results = maps:get(<<"/results">>, Result).
+
+%% Dry-run computation (no state change)
+DryRunMsg = #{
+    <<"type">> => <<"Message">>,
+    <<"process-id">> => ProcessID,
+    <<"action">> => <<"test">>
+},
+{ok, Result} = dev_delegated_compute:compute(Msg, DryRunMsg, Opts),
+JSONResults = maps:get(<<"/results/json">>, Result).
+
+%% Load checkpoint before computation
+Snapshot = #{
+    <<"type">> => <<"Checkpoint">>,
+    <<"data">> => CheckpointData,
+    <<"memory-limit">> => <<"1-gb">>
+},
+Msg = #{
+    <<"device">> => <<"delegated-compute@1.0">>,
+    <<"process-id">> => ProcessID,
+    <<"snapshot">> => Snapshot
+},
+{ok, Normalized} = dev_delegated_compute:normalize(Msg, #{}, Opts),
+{ok, Result} = dev_delegated_compute:compute(Normalized, Assignment, Opts).
+
+%% Create snapshot
+Msg = #{
+    <<"device">> => <<"delegated-compute@1.0">>,
+    <<"process-id">> => ProcessID
+},
+{ok, Snapshot} = dev_delegated_compute:snapshot(Msg, #{}, Opts),
+case maps:get(<<"type">>, Snapshot, undefined) of
+    <<"Checkpoint">> -> 
+        % Save checkpoint
+        CheckpointData = maps:get(<<"data">>, Snapshot);
+    _ ->
+        % Handle error
+        Error = maps:get(<<"error">>, Snapshot)
+end.
+
+%% Use as process execution device
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"delegated-compute@1.0">>,
+    <<"process-id">> => ProcessID
+},
+{ok, Result} = hb_ao:resolve(Process, Message, Opts).
+```
+
+---
+
+## API Endpoints
+
+### POST /result/&#123;slot&#125;
+**Purpose:** Execute assignment and store result
+
+**Query Parameters:**
+- `process-id` - Process identifier
+
+**Body:** AOS2-formatted assignment
+
+**Response:** JSON-Iface formatted results
+
+---
+
+### POST /dry-run
+**Purpose:** Execute without state changes
+
+**Query Parameters:**
+- `process-id` - Process identifier
+
+**Body:** JSON-Iface formatted message
+
+**Response:** JSON-Iface formatted results
+
+---
+
+### POST /state
+**Purpose:** Load checkpoint state
+
+**Body:** Checkpoint data
+
+**Headers:** Checkpoint metadata (without data field)
+
+**Response:** Success/error status
+
+---
+
+### POST /snapshot/&#123;process-id&#125;
+**Purpose:** Generate process snapshot
+
+**Body:** Empty object `{}`
+
+**Response:** Checkpoint or error
+
+---
+
+## Relay Integration
+
+### Relay Device Usage
+All external calls use `relay@1.0` device:
+
+```erlang
+#{
+    <<"device">> => <<"relay@1.0">>,
+    <<"content-type">> => <<"application/json">>,
+    <<"path">> => <<"call">>,
+    <<"target">> => <<"payload">>,
+    <<"payload">> => #{
+        <<"path">> => APIPath,
+        <<"method">> => Method,
+        <<"body">> => Body,
+        <<"content-type">> => ContentType
+    }
+}
+```
+
+### Cache Control
+External calls bypass cache:
+```erlang
+Opts#{
+    hashpath => ignore,
+    cache_control => [<<"no-store">>, <<"no-cache">>]
+}
+```
+
+---
+
+## Format Conversion
+
+### Assignment → AOS2
+```erlang
+dev_scheduler_formats:assignments_to_aos2(
+    ProcessID,
+    #{Slot => Assignment},
+    false,
+    Opts
+)
+% Returns: #{<<"body">> => JSONBody, ...headers...}
+```
+
+### Message → JSON-Iface
+```erlang
+Body = hb_json:encode(
+    dev_json_iface:message_to_json_struct(Message, Opts)
+)
+```
+
+### JSON-Iface → Message
+```erlang
+{ok, Msg} = dev_json_iface:json_to_message(JSONResponse, Opts)
+```
+
+---
+
+## Process ID Resolution
+
+Priority order:
+1. From device state: `dev_process:process_id(Msg1, #{}, Opts)`
+2. From request: `hb_ao:get(<<"process-id">>, Msg2, Opts)`
+
+```erlang
+get_process_id(Msg1, Msg2, Opts) ->
+    case dev_process:process_id(Msg1, #{}, Opts) of
+        not_found -> hb_ao:get(<<"process-id">>, Msg2, Opts);
+        ProcID -> ProcID
+    end
+```
+
+---
+
+## References
+
+- **JSON-Iface** - `dev_json_iface.erl`
+- **Relay Device** - `dev_relay.erl`
+- **Process Device** - `dev_process.erl`
+- **Scheduler Formats** - `dev_scheduler_formats.erl`
+- **AO Resolution** - `hb_ao.erl`
+
+---
+
+## Notes
+
+1. **Remote Execution:** All computation happens on external server
+2. **State Management:** Server maintains state between calls
+3. **Checkpoint Support:** Full checkpoint save/restore via snapshots
+4. **Dual Mode:** Supports both assignments and dry-runs
+5. **JSON-Iface:** Uses standard JSON-Iface protocol for compatibility
+6. **AOS2 Format:** Assignments converted to AOS2 format
+7. **Cache Bypass:** External calls always bypass cache
+8. **Relay Pattern:** Uses relay device for all HTTP communication
+9. **Error Handling:** Returns structured errors on failure
+10. **Process Integration:** Can be used as execution device in processes
+11. **Format Agnostic:** Handles format conversion transparently
+12. **Metadata Preservation:** Preserves all metadata through conversions
+13. **Snapshot Cleanup:** Removes snapshot key after loading
+14. **Type Detection:** Automatically detects assignment vs dry-run
+15. **Output Prefix:** Uses stack prefix for result keys

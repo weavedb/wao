@@ -1,0 +1,398 @@
+# dev_faff.erl - Friends and Family Pricing Device
+
+## Overview
+
+**Purpose:** Allow-list based access control for node resources  
+**Module:** `dev_faff`  
+**Pattern:** Whitelist-only pricing policy with zero-cost access  
+**Integration:** Implements both Pricing and Ledger P4 APIs
+
+This module implements a "friends and family" pricing policy that restricts node access to an allow-list of addresses. It serves as both an access control mechanism and an example of custom pricing policy implementation. While fundamentally against permissionlessness principles, it's useful for private nodes and demonstrates P4 API integration.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_opts`, `hb_ao`, `hb_message`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Pricing API
+-spec estimate(_, Msg, NodeMsg) -> {ok, Price}.
+
+%% Ledger API
+-spec charge(_, Req, NodeMsg) -> {ok, true}.
+```
+
+---
+
+## Public Functions
+
+### 1. estimate/3
+
+```erlang
+-spec estimate(_, Msg, NodeMsg) -> {ok, Price}
+    when
+        Msg :: map(),
+        NodeMsg :: map(),
+        Price :: 0 | binary().
+```
+
+**Description:** Estimate cost of servicing a request. Returns `0` for allowed addresses, `<<"infinity">>` for non-allowed addresses.
+
+**Access Control:**
+- Checks if all request signers are in allow-list
+- Allow-list configured via `faff_allow_list` option
+- Returns 0 cost for allowed signers
+- Returns infinity cost for disallowed signers
+
+**Test Code:**
+```erlang
+-module(dev_faff_estimate_test).
+-include_lib("eunit/include/eunit.hrl").
+
+estimate_allowed_test() ->
+    Wallet = ar_wallet:new(),
+    Address = ar_wallet:to_address(Wallet),
+    Req = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet}),
+    Msg = #{<<"request">> => Req},
+    NodeMsg = #{faff_allow_list => [Address]},
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(0, Price).
+
+estimate_not_allowed_test() ->
+    Wallet = ar_wallet:new(),
+    Req = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet}),
+    Msg = #{<<"request">> => Req},
+    NodeMsg = #{faff_allow_list => []},
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(<<"infinity">>, Price).
+
+estimate_multiple_signers_all_allowed_test() ->
+    Wallet1 = ar_wallet:new(),
+    Wallet2 = ar_wallet:new(),
+    Addr1 = ar_wallet:to_address(Wallet1),
+    Addr2 = ar_wallet:to_address(Wallet2),
+    Req1 = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet1}),
+    Req2 = hb_message:commit(Req1, #{priv_wallet => Wallet2}),
+    Msg = #{<<"request">> => Req2},
+    NodeMsg = #{faff_allow_list => [Addr1, Addr2]},
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(0, Price).
+
+estimate_multiple_signers_partial_test() ->
+    Wallet1 = ar_wallet:new(),
+    Wallet2 = ar_wallet:new(),
+    Addr1 = ar_wallet:to_address(Wallet1),
+    Req1 = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet1}),
+    Req2 = hb_message:commit(Req1, #{priv_wallet => Wallet2}),
+    Msg = #{<<"request">> => Req2},
+    NodeMsg = #{faff_allow_list => [Addr1]},  % Only Wallet1 allowed
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(<<"infinity">>, Price).
+
+estimate_empty_allow_list_test() ->
+    Wallet = ar_wallet:new(),
+    Req = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet}),
+    Msg = #{<<"request">> => Req},
+    NodeMsg = #{},  % No allow list configured
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(<<"infinity">>, Price).
+
+estimate_no_signers_test() ->
+    Msg = #{<<"request">> => #{<<"action">> => <<"test">>}},
+    NodeMsg = #{faff_allow_list => [<<"some-address">>]},
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(<<"infinity">>, Price).
+```
+
+---
+
+### 2. charge/3
+
+```erlang
+-spec charge(_, Req, NodeMsg) -> {ok, true}
+    when
+        Req :: map(),
+        NodeMsg :: map().
+```
+
+**Description:** Charge the user's account. Since this is a friends and family policy with zero cost, always returns success without actually debiting.
+
+**Behavior:**
+- Always returns `{ok, true}`
+- No actual charging occurs
+- Implements required Ledger API interface
+- Assumes estimate/3 already validated access
+
+**Test Code:**
+```erlang
+-module(dev_faff_charge_test).
+-include_lib("eunit/include/eunit.hrl").
+
+charge_test() ->
+    Req = #{<<"action">> => <<"test">>},
+    NodeMsg = #{},
+    {ok, Result} = dev_faff:charge(unused, Req, NodeMsg),
+    ?assertEqual(true, Result).
+
+charge_with_request_test() ->
+    Wallet = ar_wallet:new(),
+    Req = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet}),
+    NodeMsg = #{faff_allow_list => [ar_wallet:to_address(Wallet)]},
+    {ok, Result} = dev_faff:charge(unused, Req, NodeMsg),
+    ?assertEqual(true, Result).
+
+charge_always_succeeds_test() ->
+    % Even for non-allowed addresses, charge succeeds
+    % (estimate should have rejected before reaching here)
+    Req = #{<<"action">> => <<"test">>},
+    NodeMsg = #{faff_allow_list => []},
+    {ok, Result} = dev_faff:charge(unused, Req, NodeMsg),
+    ?assertEqual(true, Result).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Configure node with allow-list
+NodeMsg = #{
+    faff_allow_list => [
+        <<"address1...">>,
+        <<"address2...">>,
+        <<"address3...">>
+    ]
+},
+application:set_env(hb, node_msg, NodeMsg).
+
+%% Check access for a request
+Wallet = ar_wallet:new(),
+Address = ar_wallet:to_address(Wallet),
+Req = hb_message:commit(
+    #{<<"action">> => <<"process">>},
+    #{priv_wallet => Wallet}
+),
+Msg = #{<<"request">> => Req},
+NodeMsg = #{faff_allow_list => [Address]},
+case dev_faff:estimate(unused, Msg, NodeMsg) of
+    {ok, 0} ->
+        % Access allowed, proceed
+        {ok, _} = dev_faff:charge(unused, Req, NodeMsg);
+    {ok, <<"infinity">>} ->
+        % Access denied
+        {error, unauthorized}
+end.
+
+%% Use as pricing policy
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"pricing-policy">> => <<"faff@1.0">>,
+    <<"faff_allow_list">> => AllowedAddresses
+},
+{ok, Result} = hb_ao:resolve(Process, Request, Opts).
+
+%% Multiple signers scenario
+Wallet1 = ar_wallet:new(),
+Wallet2 = ar_wallet:new(),
+Addr1 = ar_wallet:to_address(Wallet1),
+Addr2 = ar_wallet:to_address(Wallet2),
+
+% Create multi-signed request
+Req1 = hb_message:commit(#{<<"action">> => <<"test">>}, 
+    #{priv_wallet => Wallet1}),
+Req2 = hb_message:commit(Req1, #{priv_wallet => Wallet2}),
+
+% Both addresses must be in allow-list
+NodeMsg = #{faff_allow_list => [Addr1, Addr2]},
+Msg = #{<<"request">> => Req2},
+{ok, 0} = dev_faff:estimate(unused, Msg, NodeMsg).
+```
+
+---
+
+## Configuration
+
+### Allow-List Setup
+
+**Via Options:**
+```erlang
+hb_opts:set(faff_allow_list, [
+    <<"address1...">>,
+    <<"address2...">>
+])
+```
+
+**Via Node Message:**
+```erlang
+NodeMsg = #{
+    faff_allow_list => [
+        <<"address1...">>,
+        <<"address2...">>
+    ]
+}
+```
+
+**Via Application Environment:**
+```erlang
+application:set_env(hb, faff_allow_list, [
+    <<"address1...">>,
+    <<"address2...">>
+])
+```
+
+---
+
+## P4 API Implementation
+
+### Pricing API
+
+**Required Functions:**
+- `estimate/3` - Calculate cost (implemented)
+
+**Optional Functions:**
+- `price/3` - Actual price (uses estimate by default)
+
+### Ledger API
+
+**Required Functions:**
+- `charge/3` - Debit account (implemented as no-op)
+
+**Not Implemented:**
+- `credit/3` - Credit account (not needed for zero-cost policy)
+
+---
+
+## Access Control Flow
+
+```
+1. Request arrives with signatures
+   ↓
+2. Extract request from message
+   ↓
+3. Get all signers from request
+   ↓
+4. Load allow-list from options
+   ↓
+5. Check if ALL signers in allow-list
+   ↓
+   ├─ Yes → Return {ok, 0}
+   └─ No → Return {ok, <<"infinity">>}
+```
+
+---
+
+## Signer Validation
+
+### Single Signer
+```erlang
+Signers = hb_message:signers(Req, NodeMsg)
+% Returns: [<<"signer-address">>]
+
+lists:all(
+    fun(Signer) -> lists:member(Signer, AllowList) end,
+    Signers
+)
+```
+
+### Multiple Signers
+```erlang
+% All signers must be in allow-list
+Signers = [Addr1, Addr2, Addr3]
+AllowList = [Addr1, Addr2, Addr3]
+% Result: true
+
+Signers = [Addr1, Addr2, Addr3]
+AllowList = [Addr1, Addr2]
+% Result: false (Addr3 not in list)
+```
+
+---
+
+## Price Values
+
+### Allowed Access
+```erlang
+{ok, 0}
+```
+- Zero cost
+- Request proceeds normally
+- charge/3 called (returns success)
+
+### Denied Access
+```erlang
+{ok, <<"infinity">>}
+```
+- Infinite cost
+- Request rejected
+- charge/3 not called
+
+---
+
+## Integration Examples
+
+### As Process Pricing Policy
+```erlang
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"pricing-policy">> => #{
+        <<"device">> => <<"faff@1.0">>,
+        <<"allow-list">> => [
+            <<"trusted-addr-1">>,
+            <<"trusted-addr-2">>
+        ]
+    }
+}
+```
+
+### With Custom Validation
+```erlang
+estimate_with_custom_validation(_, Msg, NodeMsg) ->
+    AllowList = hb_opts:get(faff_allow_list, [], NodeMsg),
+    ExtendedList = AllowList ++ get_dynamic_allow_list(),
+    Req = hb_ao:get(<<"request">>, Msg, NodeMsg),
+    Signers = hb_message:signers(Req, NodeMsg),
+    case all_signers_allowed(Signers, ExtendedList) of
+        true -> {ok, 0};
+        false -> {ok, <<"infinity">>}
+    end.
+```
+
+---
+
+## References
+
+- **P4 Pricing API** - HyperBEAM pricing specification
+- **P4 Ledger API** - HyperBEAM ledger specification
+- **Message Signing** - `hb_message.erl`
+- **Options Management** - `hb_opts.erl`
+- **Wallet Operations** - `ar_wallet.erl`
+
+---
+
+## Notes
+
+1. **Zero Cost:** Friends get free access (cost = 0)
+2. **Whitelist Only:** Non-friends cannot access (cost = infinity)
+3. **All Signers:** All request signers must be in allow-list
+4. **No Charging:** charge/3 is a no-op, no actual debiting occurs
+5. **P4 Compatible:** Implements standard Pricing and Ledger APIs
+6. **Configuration Flexible:** Allow-list from options, node message, or app env
+7. **Multi-Signature:** Supports requests signed by multiple parties
+8. **Example Code:** Serves as template for custom pricing policies
+9. **Permissioned Access:** Against permissionlessness but useful for private nodes
+10. **Simple Logic:** Easy to understand and modify for custom policies
+11. **No Credit:** Does not implement credit/3 (not needed)
+12. **Address-Based:** Access control by wallet address
+13. **Runtime Updates:** Allow-list can be updated without restart
+14. **Event Logging:** Logs estimate and charge events for debugging
+15. **Stub APIs:** Provides minimal viable implementation of P4 interfaces

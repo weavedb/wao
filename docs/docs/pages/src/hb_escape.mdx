@@ -1,0 +1,503 @@
+# hb_escape.erl - URI & String Encoding for HTTP Headers
+
+## Overview
+
+**Purpose:** Escape and unescape values for HTTP header transmission  
+**Module:** `hb_escape`  
+**Encoding:** Percent-encoding (URI), quote escaping, ampersand encoding  
+**Use Case:** HTTP/2 and HTTP/3 header compliance
+
+This module provides encoding functions necessary for transmitting AO-Core messages over HTTP/2 and HTTP/3, where uppercase header keys are explicitly disallowed. It supports percent-encoding, quote escaping, and XML ampersand encoding.
+
+## HTTP/2 & HTTP/3 Compliance
+
+HTTP/2 and HTTP/3 specifications disallow uppercase characters in header keys. Since HyperBEAM IDs are not normalized to lowercase, all header keys must be encoded to lowercase percent-encoded URI-style strings for transmission.
+
+## Dependencies
+
+- **Erlang/OTP:** None (pure Erlang)
+- **HyperBEAM:** `hb_maps`, `hb_util`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Percent Encoding (URI)
+-spec encode(Bin) -> EncodedBin.
+-spec decode(Bin) -> DecodedBin.
+
+%% Quote Escaping
+-spec encode_quotes(String) -> EscapedString.
+-spec decode_quotes(String) -> UnescapedString.
+
+%% Ampersand Encoding
+-spec encode_ampersand(String) -> EncodedString.
+
+%% Map Key Encoding
+-spec encode_keys(Msg, Opts) -> EncodedMsg.
+-spec decode_keys(Msg, Opts) -> DecodedMsg.
+```
+
+---
+
+## Public Functions
+
+### 1. encode/1
+
+```erlang
+-spec encode(Bin) -> EncodedBin
+    when
+        Bin :: binary(),
+        EncodedBin :: binary().
+```
+
+**Description:** Encode a binary as a URI-encoded string using percent-encoding. Uppercase letters and special characters are encoded as `%XX` hexadecimal values.
+
+**Preserved Characters:**
+- Lowercase letters: `a-z`
+- Digits: `0-9`
+- Special: `. - _ / ? &`
+
+**Test Code:**
+```erlang
+-module(hb_escape_encode_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_lowercase_test() ->
+    ?assertEqual(<<"hello">>, hb_escape:encode(<<"hello">>)).
+
+encode_uppercase_test() ->
+    ?assertEqual(<<"%41">>, hb_escape:encode(<<"A">>)),
+    ?assertEqual(<<"%42">>, hb_escape:encode(<<"B">>)),
+    ?assertEqual(<<"%5a">>, hb_escape:encode(<<"Z">>)).
+
+encode_mixed_case_test() ->
+    ?assertEqual(<<"hello%20%57orld">>, hb_escape:encode(<<"hello World">>)),
+    ?assertEqual(<<"test%41%42%43">>, hb_escape:encode(<<"testABC">>)).
+
+encode_special_chars_test() ->
+    ?assertEqual(<<"%21">>, hb_escape:encode(<<"!">>)),
+    ?assertEqual(<<"%40">>, hb_escape:encode(<<"@">>)),
+    ?assertEqual(<<"%23">>, hb_escape:encode(<<"#">>)).
+
+encode_preserved_chars_test() ->
+    ?assertEqual(<<"123">>, hb_escape:encode(<<"123">>)),
+    ?assertEqual(<<"a-b_c.d">>, hb_escape:encode(<<"a-b_c.d">>)),
+    ?assertEqual(<<"path/to/resource">>, hb_escape:encode(<<"path/to/resource">>)).
+
+encode_empty_test() ->
+    ?assertEqual(<<>>, hb_escape:encode(<<>>)).
+```
+
+---
+
+### 2. decode/1
+
+```erlang
+-spec decode(Bin) -> DecodedBin
+    when
+        Bin :: binary(),
+        DecodedBin :: binary().
+```
+
+**Description:** Decode a URI-encoded string back to its original form. Converts `%XX` sequences to their corresponding bytes.
+
+**Test Code:**
+```erlang
+-module(hb_escape_decode_test).
+-include_lib("eunit/include/eunit.hrl").
+
+decode_basic_test() ->
+    ?assertEqual(<<"a">>, hb_escape:decode(<<"%61">>)),
+    ?assertEqual(<<"A">>, hb_escape:decode(<<"%41">>)),
+    ?assertEqual(<<"!">>, hb_escape:decode(<<"%21">>)).
+
+decode_mixed_test() ->
+    ?assertEqual(<<"hello, World!">>, 
+        hb_escape:decode(<<"hello%2c%20%57orld%21">>)).
+
+decode_path_test() ->
+    ?assertEqual(<<"/">>, hb_escape:decode(<<"%2f">>)),
+    ?assertEqual(<<"?">>, hb_escape:decode(<<"%3f">>)).
+
+decode_no_encoding_test() ->
+    ?assertEqual(<<"hello">>, hb_escape:decode(<<"hello">>)),
+    ?assertEqual(<<"123">>, hb_escape:decode(<<"123">>)).
+
+decode_empty_test() ->
+    ?assertEqual(<<>>, hb_escape:decode(<<>>)).
+
+decode_case_insensitive_test() ->
+    ?assertEqual(<<"A">>, hb_escape:decode(<<"%41">>)),
+    ?assertEqual(<<"A">>, hb_escape:decode(<<"%4a">>)).  % Also lowercase hex
+```
+
+---
+
+### 3. encode_quotes/1, decode_quotes/1
+
+```erlang
+-spec encode_quotes(String) -> EscapedString
+    when
+        String :: binary() | list(),
+        EscapedString :: binary() | list().
+
+-spec decode_quotes(String) -> UnescapedString
+    when
+        String :: binary() | list(),
+        UnescapedString :: binary() | list().
+```
+
+**Description:** Escape and unescape double quote characters. Converts `"` to `\"` and vice versa. Used for JSON-like string encoding.
+
+**Test Code:**
+```erlang
+-module(hb_escape_quotes_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_quotes_basic_test() ->
+    ?assertEqual(<<"hello">>, hb_escape:encode_quotes(<<"hello">>)).
+
+encode_quotes_with_quotes_test() ->
+    ?assertEqual(<<"\\\"hello\\\"">>, 
+        hb_escape:encode_quotes(<<"\"hello\"">>)).
+
+encode_quotes_mixed_test() ->
+    ?assertEqual(<<"say \\\"hello\\\" world">>,
+        hb_escape:encode_quotes(<<"say \"hello\" world">>)).
+
+decode_quotes_basic_test() ->
+    ?assertEqual(<<"hello">>, hb_escape:decode_quotes(<<"hello">>)).
+
+decode_quotes_escaped_test() ->
+    ?assertEqual(<<"\"hello\"">>,
+        hb_escape:decode_quotes(<<"\\\"hello\\\"">>)).
+
+decode_quotes_removes_unescaped_test() ->
+    % Unescaped quotes are removed
+    ?assertEqual(<<"hello">>,
+        hb_escape:decode_quotes(<<"\"hello\"">>)).
+
+encode_decode_quotes_identity_test() ->
+    Original = <<"normal text with \"quotes\" inside">>,
+    Encoded = hb_escape:encode_quotes(Original),
+    Decoded = hb_escape:decode_quotes(Encoded),
+    ?assertEqual(Original, Decoded).
+```
+
+---
+
+### 4. encode_ampersand/1
+
+```erlang
+-spec encode_ampersand(String) -> EncodedString
+    when
+        String :: binary() | list(),
+        EncodedString :: binary() | list().
+```
+
+**Description:** Encode ampersands as `&amp;` for XML output. Used when generating XML or HTML content.
+
+**Test Code:**
+```erlang
+-module(hb_escape_ampersand_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_ampersand_basic_test() ->
+    ?assertEqual(<<"hello">>, hb_escape:encode_ampersand(<<"hello">>)).
+
+encode_ampersand_single_test() ->
+    ?assertEqual(<<"a&amp;b">>, 
+        hb_escape:encode_ampersand(<<"a&b">>)).
+
+encode_ampersand_multiple_test() ->
+    ?assertEqual(<<"a&amp;b&amp;c">>,
+        hb_escape:encode_ampersand(<<"a&b&c">>)).
+
+encode_ampersand_xml_test() ->
+    ?assertEqual(<<"<tag attr=\"a&amp;b\">">>,
+        hb_escape:encode_ampersand(<<"<tag attr=\"a&b\">">>)).
+
+encode_ampersand_empty_test() ->
+    ?assertEqual(<<>>, hb_escape:encode_ampersand(<<>>)).
+```
+
+---
+
+### 5. encode_keys/2, decode_keys/2
+
+```erlang
+-spec encode_keys(Msg, Opts) -> EncodedMsg
+    when
+        Msg :: map(),
+        Opts :: map(),
+        EncodedMsg :: map().
+
+-spec decode_keys(Msg, Opts) -> DecodedMsg
+    when
+        Msg :: map(),
+        Opts :: map(),
+        DecodedMsg :: map().
+```
+
+**Description:** URI encode/decode all keys in the base layer of a map. Does not recurse into nested structures. Non-map values are returned unchanged.
+
+**Test Code:**
+```erlang
+-module(hb_escape_keys_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_keys_basic_test() ->
+    Msg = #{<<"Key">> => <<"value">>},
+    Encoded = hb_escape:encode_keys(Msg, #{}),
+    ?assertEqual(#{<<"%4bey">> => <<"value">>}, Encoded).
+
+encode_keys_multiple_test() ->
+    Msg = #{
+        <<"Key1">> => <<"val1">>,
+        <<"Key2">> => <<"val2">>
+    },
+    Encoded = hb_escape:encode_keys(Msg, #{}),
+    ?assert(maps:is_key(<<"%4bey1">>, Encoded)),
+    ?assert(maps:is_key(<<"%4bey2">>, Encoded)).
+
+encode_keys_lowercase_unchanged_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    Encoded = hb_escape:encode_keys(Msg, #{}),
+    ?assertEqual(#{<<"key">> => <<"value">>}, Encoded).
+
+decode_keys_basic_test() ->
+    Encoded = #{<<"%4bey">> => <<"value">>},
+    Decoded = hb_escape:decode_keys(Encoded, #{}),
+    ?assertEqual(#{<<"Key">> => <<"value">>}, Decoded).
+
+decode_keys_multiple_test() ->
+    Encoded = #{
+        <<"%4bey1">> => <<"val1">>,
+        <<"%4bey2">> => <<"val2">>
+    },
+    Decoded = hb_escape:decode_keys(Encoded, #{}),
+    ?assertEqual(#{
+        <<"Key1">> => <<"val1">>,
+        <<"Key2">> => <<"val2">>
+    }, Decoded).
+
+encode_decode_keys_identity_test() ->
+    Original = #{
+        <<"UpperKey">> => <<"value">>,
+        <<"MixedCase">> => <<"data">>,
+        <<"lowercase">> => <<"unchanged">>
+    },
+    Encoded = hb_escape:encode_keys(Original, #{}),
+    Decoded = hb_escape:decode_keys(Encoded, #{}),
+    ?assertEqual(Original, Decoded).
+
+encode_keys_non_map_test() ->
+    ?assertEqual(<<"binary">>, hb_escape:encode_keys(<<"binary">>, #{})),
+    ?assertEqual(123, hb_escape:encode_keys(123, #{})).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Encode headers for HTTP/2 transmission
+Headers = #{
+    <<"Content-Type">> => <<"application/json">>,
+    <<"X-Custom-Header">> => <<"Value">>
+},
+EncodedHeaders = hb_escape:encode_keys(Headers, #{}).
+% Result: #{
+%   <<"%43ontent-%54ype">> => <<"application/json">>,
+%   <<"%58-%43ustom-%48eader">> => <<"Value">>
+% }
+
+%% Decode received headers
+ReceivedHeaders = #{
+    <<"%43ontent-%54ype">> => <<"application/json">>
+},
+OriginalHeaders = hb_escape:decode_keys(ReceivedHeaders, #{}).
+
+%% Encode individual values
+ID = <<"TX-ID-UPPER">>,
+EncodedID = hb_escape:encode(ID),
+% Result: <<"%54%58-%49%44-%55%50%50%45%52">>
+
+%% Decode individual values
+DecodedID = hb_escape:decode(EncodedID),
+% Result: <<"TX-ID-UPPER">>
+
+%% Round-trip encoding (identity)
+Original = <<"MixedCase!@#$%">>,
+Encoded = hb_escape:encode(Original),
+Decoded = hb_escape:decode(Encoded),
+% Decoded == Original
+
+%% Escape quotes for JSON
+JSONString = <<"He said \"hello\"">>,
+Escaped = hb_escape:encode_quotes(JSONString),
+% Result: <<"He said \\\"hello\\\"">>
+
+%% Encode ampersands for XML
+XMLContent = <<"<tag>A&B</tag>">>,
+SafeXML = hb_escape:encode_ampersand(XMLContent),
+% Result: <<"<tag>A&amp;B</tag>">>
+```
+
+---
+
+## Encoding Details
+
+### Percent Encoding Rules
+
+**Preserved (no encoding):**
+```
+a-z     Lowercase letters
+0-9     Digits
+. - _   Punctuation marks
+/ ? &   URL structure characters
+```
+
+**Encoded (percent-encoding):**
+```
+A-Z         Uppercase letters → %41-%5A
+Space       → %20
+! @ # $ %   Special characters → %21, %40, %23, etc.
+```
+
+**Format:** `%XX` where XX is hexadecimal ASCII value
+
+### Quote Encoding Rules
+
+```
+Input:  "hello"
+Output: \"hello\"
+
+Input:  say "hi"
+Output: say \"hi\"
+```
+
+### Ampersand Encoding Rules
+
+```
+Input:  A&B
+Output: A&amp;B
+
+Input:  A&B&C
+Output: A&amp;B&amp;C
+```
+
+---
+
+## HTTP Header Transmission
+
+### Why Encoding is Needed
+
+HTTP/2 and HTTP/3 specifications:
+- Require all header keys to be lowercase
+- Disallow uppercase characters in keys
+- More strict than HTTP/1.1
+
+### AO-Core Message Transmission
+
+```erlang
+%% Original message with uppercase IDs
+Msg = #{
+    <<"ID">> => <<1:256>>,
+    <<"Path">> => <<"/data">>,
+    <<"Method">> => <<"GET">>
+},
+
+%% Encode for HTTP/2 transmission
+EncodedMsg = hb_escape:encode_keys(Msg, #{}),
+
+%% Send over HTTP/2
+hb_http:post(Node, EncodedMsg, Opts),
+
+%% Receiver decodes
+DecodedMsg = hb_escape:decode_keys(ReceivedMsg, #{}),
+
+%% Now matches original
+DecodedMsg == Msg.  % true
+```
+
+---
+
+## Performance Considerations
+
+### Encoding Speed
+
+- **Character-by-character**: Processes strings as lists
+- **Pure Erlang**: No NIFs or external dependencies
+- **Benchmarked**: Suitable for header encoding (small payloads)
+
+### When to Encode
+
+**Always encode:**
+- HTTP/2 and HTTP/3 headers
+- Map keys for transmission
+- IDs with mixed case
+
+**Don't encode:**
+- HTTP/1.1 headers (optional)
+- Binary message bodies
+- Already lowercase keys
+
+---
+
+## Edge Cases
+
+### Empty Strings
+
+```erlang
+hb_escape:encode(<<>>).           % → <<>>
+hb_escape:decode(<<>>).           % → <<>>
+hb_escape:encode_quotes(<<>>).    % → <<>>
+hb_escape:encode_ampersand(<<>>). % → <<>>
+```
+
+### Special Characters
+
+```erlang
+% All special characters are encoded
+SpecialChars = <<"!@#$%^&*()+={}[]|\\:;'<>,?">>,
+Encoded = hb_escape:encode(SpecialChars),
+Decoded = hb_escape:decode(Encoded),
+% Decoded == SpecialChars (identity preserved)
+```
+
+### Quote Removal
+
+```erlang
+% decode_quotes removes unescaped quotes
+hb_escape:decode_quotes(<<"\"text\"">>).  % → <<"text">>
+hb_escape:decode_quotes(<<"\\\"text\\\"">>).  % → <<"\"text\"">>
+```
+
+---
+
+## References
+
+- **HTTP/2 Specification** - RFC 7540 (Header Field Representation)
+- **HTTP/3 Specification** - RFC 9114 (Header Compression)
+- **Percent-Encoding** - RFC 3986 (URI Generic Syntax)
+- **XML Entities** - W3C XML Specification
+- **AO-Core Protocol** - Message transmission format
+
+---
+
+## Notes
+
+1. **HTTP/2 Compliance**: Encoding required for uppercase header keys
+2. **No Recursion**: `encode_keys/2` only encodes top-level map keys
+3. **Identity Preservation**: `decode(encode(X)) == X` for all inputs
+4. **Pure Erlang**: No external dependencies, portable
+5. **Character-by-character**: Processes strings as character lists
+6. **Hex Format**: Uses lowercase hex digits (`%4a` not `%4A`)
+7. **Preserved Chars**: URL structure characters (/, ?, &) not encoded
+8. **Quote Removal**: `decode_quotes` removes unescaped quotes
+9. **XML Safe**: `encode_ampersand` makes strings XML-safe
+10. **Case Sensitive**: Decoding preserves original case through encoding

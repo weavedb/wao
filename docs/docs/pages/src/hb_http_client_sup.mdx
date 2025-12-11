@@ -1,0 +1,469 @@
+# hb_http_client_sup.erl - HTTP Client Supervisor
+
+## Overview
+
+**Purpose:** Supervise the HTTP client gen_server  
+**Module:** `hb_http_client_sup`  
+**Behavior:** `supervisor`  
+**Strategy:** `one_for_one`  
+**Supervision:** Single worker (`hb_http_client`)
+
+This module implements a simple OTP supervisor for the HTTP client connection manager. It ensures the HTTP client gen_server is running and restarts it if it crashes, maintaining HTTP connectivity for the HyperBEAM node.
+
+## Supervision Strategy
+
+**Strategy:** `one_for_one`  
+**Max Restarts:** 5  
+**Time Window:** 10 seconds  
+**Shutdown Timeout:** 10-30 seconds (depends on build mode)
+
+```erlang
+{one_for_one, MaxRestarts, TimeWindow}
+```
+
+If `hb_http_client` crashes more than 5 times in 10 seconds, the supervisor terminates.
+
+## Dependencies
+
+- **OTP:** `supervisor`
+- **Worker:** `hb_http_client`
+
+---
+
+## Module Defines
+
+### Shutdown Timeout
+
+```erlang
+-ifdef(DEBUG).
+-define(SHUTDOWN_TIMEOUT, 10000).  % 10 seconds in debug mode
+-else.
+-define(SHUTDOWN_TIMEOUT, 30000).  % 30 seconds in production
+-endif.
+```
+
+**Purpose:** Allow sufficient time for graceful shutdown of Gun connections and pending requests.
+
+**Debug Mode:** Faster shutdown for development
+**Production Mode:** Longer timeout to ensure clean connection closure
+
+---
+
+### Child Specification Macro
+
+```erlang
+-define(CHILD(I, Type, Opts), 
+    {
+        I,                          % Child ID
+        {I, start_link, Opts},      % Start function
+        permanent,                  % Restart policy
+        ?SHUTDOWN_TIMEOUT,          % Shutdown timeout
+        Type,                       % Child type (worker/supervisor)
+        [I]                         % Modules
+    }
+).
+```
+
+**Parameters:**
+- `I` - Module name (used as ID)
+- `Type` - `worker` or `supervisor`
+- `Opts` - Start arguments
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Supervisor Callbacks
+-spec start_link(Opts) -> {ok, pid()} | {error, Reason}.
+-spec init(Opts) -> {ok, {SupervisorSpec, ChildSpecs}}.
+```
+
+---
+
+## Public Functions
+
+### 1. start_link/1
+
+```erlang
+-spec start_link(Opts) -> {ok, pid()} | {error, Reason}
+    when
+        Opts :: list(),
+        Reason :: term().
+```
+
+**Description:** Start the HTTP client supervisor with given options.
+
+**Registration:** Registered locally as `hb_http_client_sup`
+
+**Implementation:**
+```erlang
+start_link(Opts) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, Opts).
+```
+
+**Usage:**
+```erlang
+% Start from application supervisor
+{ok, Pid} = hb_http_client_sup:start_link([Opts]).
+
+% Typically started by application controller
+% in hb_sup.erl or similar top-level supervisor
+```
+
+---
+
+### 2. init/1
+
+```erlang
+-spec init(Opts) -> {ok, {SupervisorSpec, ChildSpecs}}
+    when
+        Opts :: list(),
+        SupervisorSpec :: {RestartStrategy, MaxRestarts, TimeWindow},
+        RestartStrategy :: one_for_one,
+        MaxRestarts :: non_neg_integer(),
+        TimeWindow :: non_neg_integer(),
+        ChildSpecs :: [ChildSpec].
+```
+
+**Description:** Initialize supervisor with child specification for `hb_http_client`.
+
+**Implementation:**
+```erlang
+init(Opts) ->
+    {ok, {{one_for_one, 5, 10}, [?CHILD(hb_http_client, worker, Opts)]}}.
+```
+
+**Supervisor Spec:**
+```erlang
+{
+    one_for_one,  % Strategy: restart only failed child
+    5,            % Max 5 restarts
+    10            % Within 10 seconds
+}
+```
+
+**Child Spec:**
+```erlang
+{
+    hb_http_client,                      % Child ID
+    {hb_http_client, start_link, Opts},  % Start: hb_http_client:start_link(Opts)
+    permanent,                           % Restart: always restart if terminated
+    ?SHUTDOWN_TIMEOUT,                   % Shutdown: 10s or 30s
+    worker,                              % Type: worker process
+    [hb_http_client]                     % Modules: for code upgrades
+}
+```
+
+---
+
+## Supervision Tree
+
+```
+hb_http_client_sup (one_for_one)
+    └── hb_http_client (gen_server, permanent)
+```
+
+**Characteristics:**
+- Single child worker
+- Automatic restart on crash
+- Clean shutdown with timeout
+- Connection pool managed by child
+
+---
+
+## Restart Policies
+
+### Child Restart: `permanent`
+
+The `hb_http_client` child uses `permanent` restart policy:
+- **Normal Termination:** Supervisor restarts child
+- **Shutdown:** Supervisor restarts child
+- **Crash:** Supervisor restarts child
+
+This ensures HTTP client is always available.
+
+---
+
+### Supervisor Restart Intensity
+
+```erlang
+{one_for_one, 5, 10}
+```
+
+If the child crashes more than 5 times in 10 seconds:
+1. Supervisor terminates itself
+2. Parent supervisor (if any) handles supervisor failure
+3. Prevents restart loop on persistent errors
+
+---
+
+## Shutdown Behavior
+
+### Graceful Shutdown
+
+1. Supervisor sends shutdown signal to `hb_http_client`
+2. Child has `?SHUTDOWN_TIMEOUT` to clean up:
+   - Close Gun connections
+   - Reply to pending requests with errors
+   - Save state if needed
+3. If timeout expires, supervisor kills child forcefully
+
+### Timeout Values
+
+| Build Mode | Timeout | Use Case |
+|------------|---------|----------|
+| Debug | 10s | Fast iteration during development |
+| Production | 30s | Ensure all connections close cleanly |
+
+---
+
+## Common Patterns
+
+```erlang
+%% Start supervisor (typically in application supervisor)
+-module(my_app_sup).
+-behaviour(supervisor).
+
+init([]) ->
+    Children = [
+        #{
+            id => hb_http_client_sup,
+            start => {hb_http_client_sup, start_link, [[#{port => 8080}]]},
+            restart => permanent,
+            type => supervisor
+        }
+        % ... other children
+    ],
+    {ok, {{one_for_one, 10, 60}, Children}}.
+
+%% Check if HTTP client is running
+IsRunning = whereis(hb_http_client) =/= undefined.
+
+%% Get supervisor info
+supervisor:which_children(hb_http_client_sup).
+% Returns: [{hb_http_client, Pid, worker, [hb_http_client]}]
+
+%% Get supervisor status
+supervisor:count_children(hb_http_client_sup).
+% Returns: [{specs, 1}, {active, 1}, {supervisors, 0}, {workers, 1}]
+```
+
+---
+
+## Configuration
+
+The supervisor passes options directly to `hb_http_client:start_link/1`:
+
+```erlang
+Opts = [#{
+    % HTTP client options
+    http_client => gun | httpc,
+    port => 8734,
+    prometheus => true,
+    
+    % Connection options
+    connect_timeout => 5000,
+    http_request_send_timeout => 30000,
+    
+    % Any other options for hb_http_client
+}].
+
+{ok, Pid} = hb_http_client_sup:start_link(Opts).
+```
+
+---
+
+## Monitoring & Debugging
+
+### Check Supervisor Status
+
+```erlang
+% Get supervisor PID
+SupPid = whereis(hb_http_client_sup).
+
+% Check children
+Children = supervisor:which_children(hb_http_client_sup).
+% [{hb_http_client, <0.123.0>, worker, [hb_http_client]}]
+
+% Count children
+Counts = supervisor:count_children(hb_http_client_sup).
+% [{specs,1},{active,1},{supervisors,0},{workers,1}]
+
+% Restart child (for debugging)
+supervisor:terminate_child(hb_http_client_sup, hb_http_client).
+supervisor:restart_child(hb_http_client_sup, hb_http_client).
+```
+
+---
+
+### Check Restart Statistics
+
+```erlang
+% Check if supervisor restarted recently
+sys:get_status(hb_http_client_sup).
+
+% Check child's restart history via supervisor
+% (OTP tracks this internally)
+```
+
+---
+
+## Error Handling
+
+### Child Crashes
+
+```erlang
+% Scenario: hb_http_client crashes
+1. Supervisor detects child exit
+2. Increments restart counter
+3. If under restart intensity limit:
+   - Starts new hb_http_client process
+   - Passes same Opts
+   - New process initializes fresh state
+4. If over restart intensity limit:
+   - Supervisor terminates itself
+   - Parent supervisor handles failure
+```
+
+### Max Restart Intensity Reached
+
+```erlang
+% When child crashes > 5 times in 10 seconds:
+% 
+% 1. Supervisor logs: "Too many restarts"
+% 2. Supervisor terminates
+% 3. If under parent supervisor:
+%    - Parent restarts hb_http_client_sup
+%    - Fresh restart counter
+% 4. If no parent:
+%    - Application may crash
+```
+
+---
+
+## Testing Patterns
+
+```erlang
+-module(hb_http_client_sup_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_supervisor_test() ->
+    {ok, Pid} = hb_http_client_sup:start_link([#{}]),
+    ?assert(is_pid(Pid)),
+    ?assertEqual(Pid, whereis(hb_http_client_sup)),
+    
+    % Verify child is running
+    Children = supervisor:which_children(hb_http_client_sup),
+    ?assertMatch([{hb_http_client, _Pid, worker, [hb_http_client]}], Children),
+    
+    % Cleanup
+    exit(Pid, shutdown).
+
+child_restart_test() ->
+    {ok, _} = hb_http_client_sup:start_link([#{}]),
+    
+    % Get original child PID
+    [{_, ChildPid1, _, _}] = supervisor:which_children(hb_http_client_sup),
+    
+    % Kill child
+    exit(ChildPid1, kill),
+    timer:sleep(100),
+    
+    % Verify new child started
+    [{_, ChildPid2, _, _}] = supervisor:which_children(hb_http_client_sup),
+    ?assertNotEqual(ChildPid1, ChildPid2).
+
+supervisor_restart_intensity_test() ->
+    {ok, SupPid} = hb_http_client_sup:start_link([#{}]),
+    
+    % Crash child 6 times rapidly (exceeds 5 in 10s limit)
+    lists:foreach(
+        fun(_) ->
+            [{_, ChildPid, _, _}] = supervisor:which_children(hb_http_client_sup),
+            exit(ChildPid, kill),
+            timer:sleep(100)
+        end,
+        lists:seq(1, 6)
+    ),
+    
+    timer:sleep(100),
+    
+    % Supervisor should have terminated
+    ?assertEqual(undefined, whereis(hb_http_client_sup)).
+```
+
+---
+
+## Best Practices
+
+1. **Always Start Under Supervision:** Never start `hb_http_client` directly
+2. **Handle Restart Loops:** Monitor restart intensity in production
+3. **Graceful Shutdown:** Ensure child respects shutdown timeout
+4. **Configuration:** Pass all options through supervisor
+5. **Monitoring:** Use `observer` or metrics to track restarts
+6. **Testing:** Test both normal operation and crash scenarios
+7. **Logging:** Log supervisor events for debugging
+
+---
+
+## Integration
+
+### Application Supervisor Integration
+
+```erlang
+-module(my_app_sup).
+-behaviour(supervisor).
+
+init([]) ->
+    SupFlags = #{
+        strategy => one_for_one,
+        intensity => 10,
+        period => 60
+    },
+    
+    Children = [
+        #{
+            id => hb_http_client_sup,
+            start => {hb_http_client_sup, start_link, [[#{
+                prometheus => true,
+                port => 8734
+            }]]},
+            restart => permanent,
+            shutdown => infinity,  % Supervisor shutdown
+            type => supervisor,
+            modules => [hb_http_client_sup]
+        }
+        % ... other children
+    ],
+    
+    {ok, {SupFlags, Children}}.
+```
+
+---
+
+## References
+
+- **Worker** - `hb_http_client.erl`
+- **Supervisor Design** - [OTP Supervisor Behaviour](https://www.erlang.org/doc/design_principles/sup_princ.html)
+- **Restart Strategies** - [OTP Restart Strategy](https://www.erlang.org/doc/design_principles/sup_princ.html#restart-strategy)
+
+---
+
+## Notes
+
+1. **Simple Design:** Single-child supervisor for HTTP client
+2. **Restart Policy:** Child always restarted (`permanent`)
+3. **Shutdown Timeout:** Longer in production for clean connection closure
+4. **Debug Mode:** Faster shutdown for development iteration
+5. **Restart Intensity:** 5 restarts in 10 seconds before supervisor terminates
+6. **One-For-One:** Only failed child restarted (N/A with single child)
+7. **Child Type:** Worker process (not supervisor)
+8. **Registration:** Supervisor registered as `hb_http_client_sup`
+9. **Options:** Passed through to child's start_link
+10. **No State:** Supervisor is stateless; child maintains connection pool
+11. **Monitoring:** OTP supervisor automatically monitors child
+12. **Upgrade:** Supports code upgrades via modules specification
+13. **Parent:** Typically under application supervisor tree
+14. **Testing:** Easy to test with EUnit (start/stop supervisor)
+15. **Simplicity:** Minimal supervisor for maximal reliability

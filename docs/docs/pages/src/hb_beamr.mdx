@@ -1,0 +1,546 @@
+# hb_beamr.erl - WASM Execution via WAMR
+
+## Overview
+
+**Purpose:** WebAssembly execution in BEAM using WAMR (WebAssembly Micro Runtime)  
+**Module:** `hb_beamr`  
+**Pattern:** Linked-In Driver (LID) wrapper  
+**Runtime:** WAMR engine with async workers
+
+BEAMR is a library that executes WASM modules in BEAM using the WebAssembly Micro Runtime. Each WASM instance runs as an independent async worker, enabling long-running WASM executions that can easily interact with Erlang functions and processes.
+
+## Dependencies
+
+- **Erlang/OTP:** `erl_ddll` (dynamic driver loading)
+- **Native:** `hb_beamr` C driver (WAMR wrapper)
+- **HyperBEAM:** `hb_beamr_io`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Control API
+-spec start(WasmBinary) -> {ok, Port, Imports, Exports} | {error, Reason}.
+-spec start(WasmBinary, Mode) -> {ok, Port, Imports, Exports} | {error, Reason}.
+-spec call(Port, FuncName, Args) -> {ok, Result}.
+-spec call(Port, FuncName, Args, ImportFun) -> {ok, Result, State}.
+-spec call(Port, FuncName, Args, ImportFun, State, Opts) -> {ok, Result, NewState}.
+-spec stop(Port) -> ok.
+-spec wasm_send(WASM, Message) -> ok.
+
+%% Utility API
+-spec serialize(Port) -> {ok, Memory}.
+-spec deserialize(Port, Memory) -> ok.
+-spec stub(Msg1, Msg2, Opts) -> {ok, [0], Msg1}.
+```
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│          Erlang Process (Caller)             │
+│                                              │
+│  call(WASM, "func", [args]) ──┐             │
+│                                │             │
+└────────────────────────────────┼─────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────┐
+│       Worker Process (WASM Instance)         │
+│                                              │
+│  ┌────────────────────────────────────────┐ │
+│  │    Port to hb_beamr.so (LID)           │ │
+│  │                                        │ │
+│  │  ┌──────────────────────────────────┐ │ │
+│  │  │   WAMR Runtime                   │ │ │
+│  │  │   (WebAssembly Execution)        │ │ │
+│  │  │                                  │ │ │
+│  │  │   - Memory management            │ │ │
+│  │  │   - Function execution           │ │ │
+│  │  │   - Import/Export handling       │ │ │
+│  │  └──────────────────────────────────┘ │ │
+│  └────────────────────────────────────────┘ │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## Public Functions
+
+### 1. start/1, start/2
+
+```erlang
+-spec start(WasmBinary) -> {ok, WASM, Imports, Exports} | {error, Reason}
+    when
+        WasmBinary :: binary(),
+        WASM :: pid(),
+        Imports :: [{Module, Function, Args, Signature}],
+        Exports :: [{Function, Args, Signature}],
+        Reason :: term().
+
+-spec start(WasmBinary, Mode) -> {ok, WASM, Imports, Exports} | {error, Reason}
+    when
+        Mode :: wasm | aot.
+```
+
+**Description:** Load and initialize a WASM module. Returns worker PID and module metadata.
+
+**Modes:**
+- `wasm` - Standard WASM bytecode (default)
+- `aot` - Ahead-of-time compiled WASM
+
+**Test Code:**
+```erlang
+-module(hb_beamr_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_basic_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, Imports, Exports} = hb_beamr:start(File),
+    ?assert(is_pid(WASM)),
+    ?assert(is_list(Imports)),
+    ?assert(is_list(Exports)),
+    hb_beamr:stop(WASM).
+
+start_with_mode_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File, wasm),
+    ?assert(is_process_alive(WASM)),
+    hb_beamr:stop(WASM).
+
+start_invalid_wasm_test() ->
+    InvalidWASM = <<"not a valid wasm file">>,
+    Result = hb_beamr:start(InvalidWASM),
+    ?assertMatch({error, _}, Result).
+
+start_memory64_test() ->
+    {ok, File} = file:read_file("test/test-64.wasm"),
+    {ok, WASM, _, Exports} = hb_beamr:start(File),
+    ?assert(is_pid(WASM)),
+    ?assert(lists:keymember("fac", 1, Exports)),
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 2. call/3, call/4, call/5, call/6
+
+```erlang
+-spec call(WASM, FuncName, Args) -> {ok, Result}
+    when
+        WASM :: pid(),
+        FuncName :: string() | binary() | integer(),
+        Args :: [number()],
+        Result :: [number()].
+
+-spec call(WASM, FuncName, Args, ImportFun) -> {ok, Result, State}.
+-spec call(WASM, FuncName, Args, ImportFun, State, Opts) -> 
+    {ok, Result, NewState} | {error, Error, Reason, Stack, State}.
+```
+
+**Description:** Call a WASM function. Supports both direct calls (by name) and indirect calls (by table index).
+
+**Function Names:**
+- String: `"function_name"`
+- Binary: `<<"function_name">>`
+- Integer: Function table index (indirect call)
+
+**Arguments:** List of integers or floats
+
+**Import Function:** `fun(State, Import, Opts) -> {ok, Response, NewState}`
+
+**Test Code:**
+```erlang
+-module(hb_beamr_call_test).
+-include_lib("eunit/include/eunit.hrl").
+
+call_simple_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, [Result]} = hb_beamr:call(WASM, "fac", [5.0]),
+    ?assertEqual(120.0, Result),
+    hb_beamr:stop(WASM).
+
+call_with_imports_test() ->
+    {ok, File} = file:read_file("test/pow_calculator.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    
+    ImportFun = fun(State, #{args := [A, B]}, _Opts) ->
+        {ok, [A * B], State}
+    end,
+    
+    {ok, [Result], _} = hb_beamr:call(WASM, <<"pow">>, [2, 5], ImportFun),
+    ?assertEqual(32, Result),
+    hb_beamr:stop(WASM).
+
+call_with_state_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    
+    InitState = #{counter => 0},
+    
+    ImportFun = fun(State = #{counter := C}, _, _) ->
+        {ok, [0], State#{counter => C + 1}}
+    end,
+    
+    {ok, _, State1} = hb_beamr:call(WASM, "fac", [3.0], ImportFun, InitState, #{}),
+    ?assertEqual(0, maps:get(counter, State1)),
+    hb_beamr:stop(WASM).
+
+call_binary_function_name_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, [Result]} = hb_beamr:call(WASM, <<"fac">>, [4.0]),
+    ?assertEqual(24.0, Result),
+    hb_beamr:stop(WASM).
+
+call_indirect_test() ->
+    % Indirect call via function table index
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Result} = hb_beamr:call(WASM, 0, [5.0]),  % Index 0
+    ?assert(is_list(Result)),
+    hb_beamr:stop(WASM).
+
+call_invalid_args_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    
+    % Args must be integers or floats
+    Result = hb_beamr:call(WASM, "fac", [<<"invalid">>]),
+    ?assertMatch({error, {invalid_args, _}}, Result),
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 3. stop/1
+
+```erlang
+-spec stop(WASM) -> ok
+    when WASM :: pid().
+```
+
+**Description:** Stop a WASM executor, closing the port and terminating the worker process.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_stop_test).
+-include_lib("eunit/include/eunit.hrl").
+
+stop_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    ?assert(is_process_alive(WASM)),
+    
+    ok = hb_beamr:stop(WASM),
+    timer:sleep(10),
+    ?assert(not is_process_alive(WASM)).
+
+stop_idempotent_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    
+    ok = hb_beamr:stop(WASM),
+    ok = hb_beamr:stop(WASM),  % Should not crash
+    ok.
+```
+
+---
+
+### 4. wasm_send/2
+
+```erlang
+-spec wasm_send(WASM, Message) -> ok
+    when
+        WASM :: pid(),
+        Message :: {command, binary()}.
+```
+
+**Description:** Send a raw command message to the WASM worker. Used internally.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_wasm_send_test).
+-include_lib("eunit/include/eunit.hrl").
+
+wasm_send_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    
+    ok = hb_beamr:wasm_send(WASM, {command, term_to_binary({call, "fac", [5.0]})}),
+    
+    receive
+        {execution_result, [Result]} ->
+            ?assertEqual(120.0, Result)
+    after 5000 ->
+        ?assert(false)
+    end,
+    
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 5. serialize/1
+
+```erlang
+-spec serialize(WASM) -> {ok, Memory}
+    when
+        WASM :: pid(),
+        Memory :: binary().
+```
+
+**Description:** Serialize WASM memory state to binary. Useful for checkpointing or migration.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_serialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+serialize_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    
+    % Execute some function to change state
+    {ok, _} = hb_beamr:call(WASM, "fac", [5.0]),
+    
+    {ok, Memory} = hb_beamr:serialize(WASM),
+    ?assert(is_binary(Memory)),
+    ?assert(byte_size(Memory) > 0),
+    
+    hb_beamr:stop(WASM).
+
+serialize_size_test() ->
+    {ok, File} = file:read_file("test/test.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    
+    {ok, Size} = hb_beamr_io:size(WASM),
+    {ok, Memory} = hb_beamr:serialize(WASM),
+    
+    ?assertEqual(Size, byte_size(Memory)),
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 6. deserialize/2
+
+```erlang
+-spec deserialize(WASM, Memory) -> ok
+    when
+        WASM :: pid(),
+        Memory :: binary().
+```
+
+**Description:** Deserialize WASM memory state from binary. Restores previous state.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_deserialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+deserialize_roundtrip_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    
+    % Write some data
+    TestData = <<"Hello, World!">>,
+    ok = hb_beamr_io:write(WASM, 0, TestData),
+    
+    % Serialize
+    {ok, Memory} = hb_beamr:serialize(WASM),
+    
+    % Overwrite with different data
+    ok = hb_beamr_io:write(WASM, 0, <<"Different!">>),
+    
+    % Deserialize
+    ok = hb_beamr:deserialize(WASM, Memory),
+    
+    % Verify original data restored
+    {ok, Restored} = hb_beamr_io:read(WASM, 0, byte_size(TestData)),
+    ?assertEqual(TestData, Restored),
+    
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 7. stub/3
+
+```erlang
+-spec stub(Msg1, Msg2, Opts) -> {ok, [0], Msg1}.
+```
+
+**Description:** Default stub import function. Returns `[0]` for all imports.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_stub_test).
+-include_lib("eunit/include/eunit.hrl").
+
+stub_test() ->
+    State = #{test => value},
+    Import = #{func => <<"test">>, args => [1, 2]},
+    
+    {ok, [0], NewState} = hb_beamr:stub(State, Import, #{}),
+    ?assertEqual(State, NewState).
+```
+
+---
+
+## Import Function Specification
+
+```erlang
+ImportFun = fun(State, ImportInfo, Opts) -> 
+    {ok, Response, NewState}
+end
+
+%% ImportInfo structure
+#{
+    instance => WASM,       % PID of WASM instance
+    module => Module,       % Module name (binary)
+    func => Function,       % Function name (binary)
+    args => [Arg1, Arg2],  % Arguments (numbers)
+    func_sig => Signature   % Function signature
+}
+
+%% Response must be
+[ReturnValue1, ReturnValue2, ...]  % List of numbers
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Load and execute WASM
+{ok, File} = file:read_file("module.wasm"),
+{ok, WASM, _, _} = hb_beamr:start(File),
+{ok, [Result]} = hb_beamr:call(WASM, "compute", [10.0]),
+hb_beamr:stop(WASM).
+
+%% Handle imports
+ImportFun = fun(State, #{module := Mod, func := Fun, args := Args}, _Opts) ->
+    io:format("Import called: ~s:~s(~p)~n", [Mod, Fun, Args]),
+    Result = my_import_handler(Mod, Fun, Args),
+    {ok, [Result], State}
+end,
+
+{ok, Result, _} = hb_beamr:call(WASM, "main", [], ImportFun, #{}, #{}).
+
+%% State management
+InitState = #{counter => 0, data => []},
+
+ImportFun = fun(State = #{counter := C, data := D}, #{args := [Val]}, _) ->
+    NewState = State#{counter => C + 1, data => [Val | D]},
+    {ok, [C], NewState}
+end,
+
+{ok, _, FinalState} = hb_beamr:call(WASM, "process", [42.0], ImportFun, InitState, #{}).
+
+%% Checkpoint and restore
+{ok, WASM, _, _} = hb_beamr:start(WasmBinary),
+{ok, _} = hb_beamr:call(WASM, "setup", []),
+{ok, Checkpoint} = hb_beamr:serialize(WASM),
+
+% Later...
+{ok, WASM2, _, _} = hb_beamr:start(WasmBinary),
+ok = hb_beamr:deserialize(WASM2, Checkpoint),
+{ok, Result} = hb_beamr:call(WASM2, "continue", []).
+
+%% Multi-process execution
+{ok, WASM, _, _} = hb_beamr:start(WasmBinary),
+
+Clients = [spawn(fun() ->
+    {ok, [R]} = hb_beamr:call(WASM, "work", [N]),
+    Parent ! {done, R}
+end) || N <- lists:seq(1, 10)],
+
+% Note: Only one process can call at a time
+% Concurrent calls will execute sequentially
+```
+
+---
+
+## Memory Management
+
+WASM memory can never shrink, only grow. See `hb_beamr_io` for memory operations:
+
+```erlang
+%% Get memory size
+{ok, Size} = hb_beamr_io:size(WASM),
+
+%% Read/write memory
+ok = hb_beamr_io:write(WASM, Offset, Data),
+{ok, Data} = hb_beamr_io:read(WASM, Offset, Size),
+
+%% Allocate/free via WASM malloc/free
+{ok, Ptr} = hb_beamr_io:malloc(WASM, Size),
+ok = hb_beamr_io:free(WASM, Ptr).
+```
+
+---
+
+## Performance Considerations
+
+### Async Workers
+- Each WASM instance uses one async thread
+- Configure BEAM: `erl +A N` (N = number of async threads)
+- Default is usually 10, may need more for many instances
+
+### Benchmarks
+```erlang
+% Simple factorial call: ~1000-10000 ops/sec
+% Complex operations: Varies by WASM code
+```
+
+---
+
+## Error Handling
+
+```erlang
+%% Start errors
+{error, driver_load_failed}
+{error, invalid_wasm}
+{error, unsupported_feature}
+
+%% Call errors
+{error, {invalid_args, Args}}
+{error, function_not_found}
+{error, wasm_trap}
+{error, Error, Reason, Stack, State}  % Import function error
+
+%% Import errors propagate
+ImportFun = fun(State, Import, Opts) ->
+    throw({my_error, reason})  % Caught and returned as error
+end.
+```
+
+---
+
+## References
+
+- **WAMR** - WebAssembly Micro Runtime
+- **WebAssembly Spec** - WASM standard
+- **Erlang Ports** - Port communication
+- **hb_beamr_io** - Memory management
+
+---
+
+## Notes
+
+1. **One Call at a Time**: Worker processes are single-threaded
+2. **Memory Persistence**: WASM memory persists between calls
+3. **Memory Growth**: WASM pages can grow but never shrink
+4. **Async Threads**: Requires `+A N` for concurrent instances
+5. **Import Blocking**: Imports block until response provided
+6. **State Threading**: State must be manually threaded through imports
+7. **Number Types**: Only integers and floats supported in args/returns
+8. **Worker PID**: Returned PID is wrapper, not actual port
+9. **Serialization**: Full memory snapshot, can be large
+10. **AOT Support**: Can load ahead-of-time compiled WASM

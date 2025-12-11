@@ -1,0 +1,678 @@
+# hb_http_multi.erl - Multi-Node HTTP Request Dispatcher
+
+## Overview
+
+**Purpose:** Dispatch HTTP requests across multiple nodes with configurable response collection  
+**Module:** `hb_http_multi`  
+**Pattern:** Single request → Multiple nodes → Filtered responses  
+**Execution Modes:** Serial or parallel
+
+This module enables HyperBEAM to send the same HTTP request to multiple nodes simultaneously or sequentially, collecting responses based on configurable criteria. It supports response filtering by status code and custom admissibility checks via AO-Core resolution.
+
+## Use Cases
+
+- **Gateway Redundancy:** Query multiple Arweave gateways for reliability
+- **Consensus:** Gather responses from multiple nodes for validation
+- **Race Conditions:** Accept first valid response from multiple sources
+- **Backup Nodes:** Try primary, fall back to secondaries
+- **Load Distribution:** Spread requests across multiple endpoints
+
+## Dependencies
+
+- **HyperBEAM:** `hb_http`, `hb_ao`, `hb_maps`, `hb_message`, `hb_opts`, `hb_util`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Configuration Fields
+
+The `Config` message supports the following fields:
+
+```erlang
+Config = #{
+    % Required
+    <<"nodes">> => [Node1, Node2, ...],
+    
+    % Optional (with defaults)
+    <<"responses">> => Integer,              % Default: 1 (race for first)
+    <<"stop-after">> => Boolean,             % Default: true
+    <<"parallel">> => Boolean,               % Default: false (serial)
+    <<"admissible">> => Message | undefined, % Default: undefined
+    <<"admissible-status">> => Status        % Default: <<"All">>
+}
+```
+
+### Field Descriptions
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `nodes` | `[binary() \| map()]` | Required | List of node URIs or node configs |
+| `responses` | `integer()` | `1` | Number of responses to collect |
+| `stop-after` | `boolean()` | `true` | Stop after collecting required responses |
+| `parallel` | `boolean()` | `false` | Execute requests in parallel |
+| `admissible` | `map() \| undefined` | `undefined` | AO-Core message for response validation |
+| `admissible-status` | `binary() \| integer() \| [integer()]` | `<<"All">>` | Allowed HTTP status codes |
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Multi-Request Dispatcher
+-spec request(Config, Method, Path, Message, Opts) -> 
+    {ok | error | failure, Response} | 
+    {ok | error | failure, [Response]} |
+    {error, no_viable_responses}.
+```
+
+---
+
+## Public Functions
+
+### 1. request/5
+
+```erlang
+-spec request(Config, Method, Path, Message, Opts) -> Result
+    when
+        Config :: #{
+            <<"nodes">> := [Node],
+            <<"responses">> => integer(),
+            <<"stop-after">> => boolean(),
+            <<"parallel">> => boolean(),
+            <<"admissible">> => map(),
+            <<"admissible-status">> => binary() | integer() | [integer()]
+        },
+        Method :: binary(),
+        Path :: binary(),
+        Message :: map(),
+        Opts :: map(),
+        Node :: binary() | #{hostname := binary(), address => binary()},
+        Result :: {Status, Response} | {Status, [Response]} | {error, no_viable_responses},
+        Status :: ok | error | failure,
+        Response :: map().
+```
+
+**Description:** Dispatch the same HTTP request to multiple nodes, collecting responses based on configuration. Returns single response or list based on `responses` setting.
+
+**Return Values:**
+- `{Status, Response}` - When `responses => 1` (single response)
+- `{Status, [Response]}` - When `responses > 1` (multiple responses)
+- `{error, no_viable_responses}` - No nodes returned admissible responses
+
+**Execution Flow:**
+```erlang
+Config + Message
+    ↓
+Parse Options
+    ↓
+Remove multirequest- prefixes from Message
+    ↓
+Choose: Serial or Parallel?
+    ↓
+Execute Requests
+    ↓
+Filter by Admissibility
+    ↓
+Collect Required Responses
+    ↓
+Return Results
+```
+
+**Test Code:**
+```erlang
+-module(hb_http_multi_test).
+-include_lib("eunit/include/eunit.hrl").
+
+race_for_first_response_test() ->
+    Node1 = hb_http_server:start_node(),
+    Node2 = hb_http_server:start_node(),
+    
+    Config = #{
+        <<"nodes">> => [Node1, Node2],
+        <<"responses">> => 1,
+        <<"parallel">> => true
+    },
+    
+    Message = #{<<"path">> => <<"/~meta@1.0/info">>},
+    {ok, Response} = hb_http_multi:request(Config, <<"GET">>, <<"/">>, Message, #{}),
+    
+    ?assert(is_map(Response)).
+
+collect_multiple_responses_test() ->
+    Nodes = [
+        hb_http_server:start_node(),
+        hb_http_server:start_node(),
+        hb_http_server:start_node()
+    ],
+    
+    Config = #{
+        <<"nodes">> => Nodes,
+        <<"responses">> => 3,
+        <<"parallel">> => true
+    },
+    
+    {ok, Responses} = hb_http_multi:request(Config, <<"GET">>, <<"/">>, #{}, #{}),
+    ?assert(is_list(Responses)),
+    ?assertEqual(3, length(Responses)).
+
+status_filter_test() ->
+    Node1 = <<"http://node1.example.com">>,
+    Node2 = <<"http://node2.example.com">>,
+    
+    Config = #{
+        <<"nodes">> => [Node1, Node2],
+        <<"responses">> => 1,
+        <<"admissible-status">> => 200,
+        <<"parallel">> => true
+    },
+    
+    % Only 200 responses accepted
+    Result = hb_http_multi:request(Config, <<"GET">>, <<"/api">>, #{}, #{}).
+```
+
+---
+
+## Execution Modes
+
+### Serial Execution (Default)
+
+```erlang
+Config = #{
+    <<"nodes">> => [Node1, Node2, Node3],
+    <<"parallel">> => false  % or omit (default)
+}
+```
+
+**Behavior:**
+1. Request Node1
+2. Check if response is admissible
+3. If yes, add to results; if no, discard
+4. If collected enough responses, stop
+5. Otherwise, request Node2
+6. Repeat until responses collected or nodes exhausted
+
+**Advantages:**
+- Lower resource usage
+- Predictable order
+- Easy to debug
+- Fail-fast on first success
+
+**Disadvantages:**
+- Slower total time
+- Sequential latency accumulation
+
+---
+
+### Parallel Execution
+
+```erlang
+Config = #{
+    <<"nodes">> => [Node1, Node2, Node3],
+    <<"parallel">> => true
+}
+```
+
+**Behavior:**
+1. Spawn worker for each node
+2. All workers request simultaneously
+3. Workers send responses to parent
+4. Parent collects until target reached
+5. Optional: Stop remaining workers
+
+**Advantages:**
+- Faster response time
+- Race condition for fastest node
+- Natural load distribution
+
+**Disadvantages:**
+- Higher resource usage
+- Multiple concurrent connections
+- More complex error handling
+
+---
+
+## Response Collection
+
+### Stop After (Default: true)
+
+```erlang
+Config = #{
+    <<"responses">> => 2,
+    <<"stop-after">> => true
+}
+```
+
+**Behavior:**
+- Collect 2 responses
+- Kill/stop remaining workers immediately
+- Return collected responses
+
+**Use Case:** First N valid responses
+
+---
+
+### Continue After
+
+```erlang
+Config = #{
+    <<"responses">> => 2,
+    <<"stop-after">> => false
+}
+```
+
+**Behavior:**
+- Collect 2 responses (requirement met)
+- Allow remaining workers to complete
+- Discard additional responses
+- Return first 2 collected responses
+
+**Use Case:** Resource cleanup, don't kill workers abruptly
+
+---
+
+## Admissibility Filtering
+
+### Status-Based Filtering
+
+#### Accept All Statuses (Default)
+
+```erlang
+Config = #{
+    <<"admissible-status">> => <<"All">>
+}
+```
+
+**Accepts:** Any HTTP status code
+
+---
+
+#### Single Status
+
+```erlang
+Config = #{
+    <<"admissible-status">> => 200
+}
+```
+
+**Accepts:** Only HTTP 200
+
+---
+
+#### Multiple Statuses
+
+```erlang
+Config = #{
+    <<"admissible-status">> => <<"200,201,204">>  % Binary comma-separated
+}
+
+% Or as list
+Config = #{
+    <<"admissible-status">> => [200, 201, 204]
+}
+```
+
+**Accepts:** HTTP 200, 201, or 204
+
+---
+
+### Message-Based Filtering
+
+```erlang
+Config = #{
+    <<"admissible">> => #{
+        <<"device">> => <<"query@1.0">>,
+        <<"path">> => <<"is-valid">>
+    }
+}
+```
+
+**Behavior:**
+1. Receive response from node
+2. Execute: `hb_ao:resolve(AdmissibleMsg, Response#{<<"path">> => <<"is-valid">>}, Opts)`
+3. If result is `true` (as atom or binary), response is admissible
+4. If result is `false` or error, response is rejected
+
+**Admissible Message Execution:**
+```erlang
+Base = hb_message:without_unless_signed([<<"path">>], AdmissibleMsg, Opts),
+Req = Response#{<<"path">> => AdmissibleMsgPath},
+{ok, Result} = hb_ao:resolve(Base, Req, Opts),
+IsAdmissible = hb_util:atom(Result) == true
+```
+
+**Example Use Cases:**
+- Validate response schema
+- Check data consistency
+- Verify cryptographic proofs
+- Custom business logic
+
+---
+
+## Configuration Precedence
+
+Options can be specified in both `Config` and `Message`. Message options take precedence:
+
+```erlang
+Config = #{
+    <<"responses">> => 2,
+    <<"parallel">> => false
+},
+
+Message = #{
+    <<"multirequest-responses">> => 3,  % Overrides config
+    <<"multirequest-parallel">> => true  % Overrides config
+},
+
+% Effective configuration:
+% responses => 3 (from message)
+% parallel => true (from message)
+```
+
+**Prefix Rule:** Message fields prefixed with `multirequest-` override config
+
+---
+
+## Serial Implementation
+
+```erlang
+serial_multirequest([], _, _, _, _, _, _, _) -> 
+    [].  % No more nodes
+serial_multirequest(_Nodes, 0, _, _, _, _, _, _) -> 
+    [].  % Collected enough responses
+serial_multirequest([Node|Nodes], Remaining, Method, Path, Message, Admissible, Statuses, Opts) ->
+    {ErlStatus, Res} = hb_http:request(Method, Node, Path, Message, Opts),
+    case is_admissible(ErlStatus, Res, Admissible, Statuses, Opts) of
+        true ->
+            [{ErlStatus, Res} | serial_multirequest(
+                Nodes, Remaining - 1, Method, Path, Message, Admissible, Statuses, Opts
+            )];
+        false ->
+            serial_multirequest(
+                Nodes, Remaining, Method, Path, Message, Admissible, Statuses, Opts
+            )
+    end.
+```
+
+**Key Points:**
+- Recursive function
+- Stop when `Remaining == 0` or `Nodes == []`
+- Only include admissible responses
+- Tail-recursive for efficiency
+
+---
+
+## Parallel Implementation
+
+```erlang
+parallel_multirequest(Nodes, Responses, StopAfter, Method, Path, Message, Admissible, Statuses, Opts) ->
+    Ref = make_ref(),
+    Parent = self(),
+    
+    % Spawn worker for each node
+    Procs = lists:map(
+        fun(Node) ->
+            spawn(fun() ->
+                Res = hb_http:request(Method, Node, Path, Message, Opts),
+                receive no_reply -> stopping
+                after 0 -> Parent ! {Ref, self(), Res}
+                end
+            end)
+        end,
+        Nodes
+    ),
+    
+    % Collect responses
+    parallel_responses([], Procs, Ref, Responses, StopAfter, Admissible, Statuses, Opts).
+```
+
+**Worker Pattern:**
+```erlang
+spawn(fun() ->
+    Res = do_request(),
+    receive no_reply -> exit(normal)  % Parent signaled stop
+    after 0 -> Parent ! {Ref, self(), Res}  % Send response
+    end
+end)
+```
+
+---
+
+### Response Collection Loop
+
+```erlang
+parallel_responses(Results, Procs, Ref, 0, StopAfter, _, _, _) ->
+    % Collected enough responses
+    case StopAfter of
+        true ->
+            % Kill remaining workers
+            lists:foreach(fun(P) -> exit(P, kill) end, Procs),
+            empty_inbox(Ref),
+            Results;
+        false ->
+            % Let workers complete naturally
+            lists:foreach(fun(P) -> P ! no_reply end, Procs),
+            empty_inbox(Ref),
+            Results
+    end;
+parallel_responses(Results, Procs, Ref, Awaiting, StopAfter, Admissible, Statuses, Opts) ->
+    receive
+        {Ref, Pid, {Status, NewRes}} ->
+            case is_admissible(Status, NewRes, Admissible, Statuses, Opts) of
+                true ->
+                    parallel_responses(
+                        [NewRes | Results],
+                        lists:delete(Pid, Procs),
+                        Ref,
+                        Awaiting - 1,
+                        StopAfter,
+                        Admissible,
+                        Statuses,
+                        Opts
+                    );
+                false ->
+                    parallel_responses(
+                        Results,
+                        lists:delete(Pid, Procs),
+                        Ref,
+                        Awaiting,
+                        StopAfter,
+                        Admissible,
+                        Statuses,
+                        Opts
+                    )
+            end
+    end.
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Race for first response
+Config = #{
+    <<"nodes">> => [Node1, Node2, Node3],
+    <<"responses">> => 1,
+    <<"parallel">> => true,
+    <<"stop-after">> => true
+},
+{ok, Response} = hb_http_multi:request(Config, <<"GET">>, <<"/data">>, #{}, #{}).
+
+%% Consensus with 3 nodes
+Config = #{
+    <<"nodes">> => [Node1, Node2, Node3],
+    <<"responses">> => 3,
+    <<"parallel">> => true
+},
+{ok, [Res1, Res2, Res3]} = hb_http_multi:request(Config, <<"GET">>, <<"/state">>, #{}, #{}).
+
+%% Fallback pattern (serial with status filter)
+Config = #{
+    <<"nodes">> => [Primary, Secondary, Tertiary],
+    <<"responses">> => 1,
+    <<"parallel">> => false,
+    <<"admissible-status">> => 200
+},
+{ok, Response} = hb_http_multi:request(Config, <<"GET">>, <<"/api">>, #{}, #{}).
+
+%% Gateway query with custom validation
+Config = #{
+    <<"nodes">> => GatewayList,
+    <<"responses">> => 1,
+    <<"parallel">> => true,
+    <<"admissible">> => #{
+        <<"device">> => <<"query@1.0">>,
+        <<"path">> => <<"has-results">>
+    }
+},
+{ok, Result} = hb_http_multi:request(Config, <<"POST">>, <<"/graphql">>, Query, #{}).
+
+%% Override config from message
+Config = #{
+    <<"nodes">> => Nodes,
+    <<"responses">> => 2
+},
+Message = #{
+    <<"multirequest-responses">> => 5,  % Override to 5
+    <<"multirequest-parallel">> => true,
+    <<"data">> => <<"payload">>
+},
+{ok, Responses} = hb_http_multi:request(Config, <<"POST">>, <<"/api">>, Message, #{}).
+
+%% No viable responses error handling
+Config = #{
+    <<"nodes">> => [Node1, Node2],
+    <<"responses">> => 1,
+    <<"admissible-status">> => 200
+},
+case hb_http_multi:request(Config, <<"GET">>, <<"/api">>, #{}, #{}) of
+    {ok, Response} -> process(Response);
+    {error, no_viable_responses} -> handle_failure()
+end.
+```
+
+---
+
+## Configuration Examples
+
+### Minimal (Race Condition)
+
+```erlang
+Config = #{
+    <<"nodes">> => [Node1, Node2]
+}
+% Defaults: responses=1, parallel=false, stop-after=true, admissible-status="All"
+```
+
+---
+
+### High Reliability
+
+```erlang
+Config = #{
+    <<"nodes">> => [Gateway1, Gateway2, Gateway3, Gateway4],
+    <<"responses">> => 2,
+    <<"parallel">> => true,
+    <<"stop-after">> => true,
+    <<"admissible-status">> => <<"200,201">>
+}
+```
+
+---
+
+### Consensus Validation
+
+```erlang
+Config = #{
+    <<"nodes">> => ValidatorNodes,
+    <<"responses">> => length(ValidatorNodes),  % All responses
+    <<"parallel">> => true,
+    <<"stop-after">> => false,  % Let all complete
+    <<"admissible">> => #{
+        <<"device">> => <<"validator@1.0">>,
+        <<"path">> => <<"is-valid-signature">>
+    }
+}
+```
+
+---
+
+### Progressive Fallback
+
+```erlang
+Config = #{
+    <<"nodes">> => [Tier1Primary, Tier1Secondary, Tier2Primary, Tier2Secondary],
+    <<"responses">> => 1,
+    <<"parallel">> => false,  % Try in order
+    <<"stop-after">> => true,
+    <<"admissible-status">> => 200
+}
+```
+
+---
+
+## Error Handling
+
+```erlang
+% No admissible responses from any node
+{error, no_viable_responses}
+
+% Some nodes returned responses, but not enough
+{error, no_viable_responses}
+
+% Network/connection errors are not propagated
+% They simply result in that node not contributing a response
+```
+
+---
+
+## Performance Considerations
+
+1. **Parallel vs Serial:**
+   - Parallel: Use for latency-sensitive operations
+   - Serial: Use for resource-constrained environments
+
+2. **Stop After:**
+   - `true`: Faster, kills workers immediately
+   - `false`: Cleaner, but slower
+
+3. **Response Count:**
+   - Higher count = more network usage
+   - Balance reliability vs cost
+
+4. **Worker Management:**
+   - Parallel spawns N workers
+   - Monitor worker count for large node lists
+
+5. **Message Size:**
+   - Same message sent to all nodes
+   - Keep payloads reasonable for parallel
+
+---
+
+## References
+
+- **HTTP Client** - `hb_http.erl`
+- **AO Resolution** - `hb_ao.erl`
+- **Message Handling** - `hb_message.erl`
+- **Gateway Client** - `hb_gateway_client.erl` (uses multi-request)
+
+---
+
+## Notes
+
+1. **Default Behavior:** Race for first response (responses=1, parallel=false)
+2. **Configuration:** Message options override Config options
+3. **Prefix Stripping:** `multirequest-` prefix removed before sending to nodes
+4. **Worker Spawn:** One worker per node in parallel mode
+5. **Inbox Cleanup:** `empty_inbox/1` prevents message leaks
+6. **Admissibility:** Two-stage filtering (status + custom logic)
+7. **Erlang Status:** Must be `ok` for admissibility checks
+8. **Status Classes:** Supports integer, binary, and list formats
+9. **Custom Validation:** Via AO-Core resolution for complex checks
+10. **Response Format:** Single response or list based on `responses` value
+11. **Worker Termination:** `exit(P, kill)` for stop-after=true
+12. **Worker Signaling:** `P ! no_reply` for stop-after=false
+13. **Reference:** Unique ref prevents message confusion
+14. **Tail Recursion:** Serial implementation is tail-recursive
+15. **Use in Routes:** Automatically invoked by `hb_http` when route has `nodes` field

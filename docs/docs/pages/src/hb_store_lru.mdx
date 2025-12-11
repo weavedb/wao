@@ -1,0 +1,735 @@
+# hb_store_lru.erl - LRU In-Memory Cache Store
+
+## Overview
+
+**Purpose:** In-memory LRU (Least Recently Used) cache with optional persistent backing  
+**Module:** `hb_store_lru`  
+**Pattern:** ETS-based cache server with automatic eviction and offloading
+
+This module provides an in-memory store implementation using a least-recently-used eviction policy. Data is cached in ETS tables with automatic eviction to a persistent store when capacity limits are reached. The cache maintains order, size, and index information across three separate ETS tables for efficient LRU management.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_store`, `hb_maps`, `hb_path`, `hb_util`
+- **Erlang/OTP:** `ets`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lifecycle Management
+-spec start(StoreOpts) -> {ok, Instance}.
+-spec stop(Opts) -> ok.
+-spec reset(Opts) -> ok.
+-spec scope(Opts) -> local.
+
+%% Core Store Operations
+-spec read(Opts, Key) -> {ok, Value} | not_found.
+-spec write(Opts, Key, Value) -> ok.
+-spec list(Opts, Path) -> {ok, [Key]} | {error, not_found}.
+-spec type(Opts, Key) -> composite | simple | not_found.
+
+%% Hierarchical Structure
+-spec make_link(Opts, Existing, New) -> ok.
+-spec make_group(Opts, Key) -> ok.
+-spec resolve(Opts, Key) -> binary().
+```
+
+---
+
+## Public Functions
+
+### 1. start/1
+
+```erlang
+-spec start(StoreOpts) -> {ok, Instance}
+    when
+        StoreOpts :: #{ <<"name">> := binary(), <<"capacity">> => integer() },
+        Instance :: #{ <<"pid">> => pid(), <<"cache-table">> => ets:tid() }.
+```
+
+**Description:** Start the LRU cache server. Creates three ETS tables: cache data (public with read concurrency), cache statistics (private), and cache index (ordered set). Optionally initializes persistent backing store.
+
+**Configuration:**
+- `<<"name">>`: Cache identifier (required)
+- `<<"capacity">>`: Maximum cache size in bytes (default: 4GB)
+- `<<"persistent-store">>`: Optional backing store configuration
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_basic_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"test-cache">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000
+    },
+    {ok, Instance} = hb_store_lru:start(StoreOpts),
+    ?assert(is_map(Instance)),
+    ?assert(is_pid(maps:get(<<"pid">>, Instance))),
+    ?assert(is_reference(maps:get(<<"cache-table">>, Instance))),
+    hb_store_lru:stop(StoreOpts).
+
+start_with_persistent_store_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-persist">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-cache-persist">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 500,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, _Instance} = hb_store_lru:start(StoreOpts),
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+### 2. stop/1
+
+```erlang
+-spec stop(Opts) -> ok
+    when
+        Opts :: map().
+```
+
+**Description:** Stop the LRU cache server. Evicts all remaining entries to persistent store (if configured) before terminating.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_stop_test).
+-include_lib("eunit/include/eunit.hrl").
+
+stop_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-stop">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-stop">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 500,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, Instance} = hb_store_lru:start(StoreOpts),
+    ServerPID = maps:get(<<"pid">>, Instance),
+    
+    hb_store_lru:write(StoreOpts, <<"key1">>, <<"value1">>),
+    hb_store_lru:write(StoreOpts, <<"key2">>, <<"value2">>),
+    
+    ?assertEqual(ok, hb_store_lru:stop(StoreOpts)),
+    ?assertEqual(false, is_process_alive(ServerPID)),
+    
+    % Verify data was offloaded
+    ?assertEqual({ok, <<"value1">>}, hb_store:read(PersistentStore, <<"key1">>)),
+    ?assertEqual({ok, <<"value2">>}, hb_store:read(PersistentStore, <<"key2">>)).
+```
+
+---
+
+### 3. reset/1
+
+```erlang
+-spec reset(Opts) -> ok
+    when
+        Opts :: map().
+```
+
+**Description:** Clear all entries from the cache and reset the persistent store (if configured). Deletes all objects from all three ETS tables.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_reset_test).
+-include_lib("eunit/include/eunit.hrl").
+
+reset_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"test-reset">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000,
+        <<"persistent-store">> => no_store
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    hb_store_lru:write(StoreOpts, <<"key1">>, <<"Hello">>),
+    hb_store_lru:write(StoreOpts, <<"key2">>, <<"Hi">>),
+    ?assertEqual({ok, <<"Hello">>}, hb_store_lru:read(StoreOpts, <<"key1">>)),
+    
+    hb_store_lru:reset(StoreOpts),
+    ?assertEqual(not_found, hb_store_lru:read(StoreOpts, <<"key1">>)),
+    ?assertEqual(not_found, hb_store_lru:read(StoreOpts, <<"key2">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+### 4. scope/1
+
+```erlang
+-spec scope(Opts) -> local
+    when
+        Opts :: map().
+```
+
+**Description:** Return the scope of the store. LRU cache is always local.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_scope_test).
+-include_lib("eunit/include/eunit.hrl").
+
+scope_test() ->
+    ?assertEqual(local, hb_store_lru:scope(#{})).
+```
+
+---
+
+### 5. write/3
+
+```erlang
+-spec write(Opts, Key, Value) -> ok
+    when
+        Opts :: map(),
+        Key :: binary() | list(),
+        Value :: binary().
+```
+
+**Description:** Write an entry to the cache. If the value exceeds cache capacity, it's immediately offloaded to persistent store. Otherwise, it's cached and the LRU order is updated. May trigger eviction if capacity is exceeded.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_write_test).
+-include_lib("eunit/include/eunit.hrl").
+
+write_basic_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"test-write">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000,
+        <<"persistent-store">> => no_store
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    ?assertEqual(ok, hb_store_lru:write(StoreOpts, <<"key1">>, <<"Hello">>)),
+    ?assertEqual({ok, <<"Hello">>}, hb_store_lru:read(StoreOpts, <<"key1">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+
+write_triggers_eviction_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-evict">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-evict">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 500,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    Binary = crypto:strong_rand_bytes(200),
+    hb_store_lru:write(StoreOpts, <<"key1">>, Binary),
+    hb_store_lru:write(StoreOpts, <<"key2">>, Binary),
+    hb_store_lru:read(StoreOpts, <<"key1">>),  % Make key1 most recent
+    hb_store_lru:write(StoreOpts, <<"key3">>, Binary),  % Triggers eviction
+    
+    ?assertEqual({ok, Binary}, hb_store_lru:read(StoreOpts, <<"key1">>)),
+    ?assertEqual(not_found, hb_store_lru:read(StoreOpts, <<"key2">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+### 6. read/2
+
+```erlang
+-spec read(Opts, Key) -> {ok, Value} | not_found
+    when
+        Opts :: map(),
+        Key :: binary() | list(),
+        Value :: binary().
+```
+
+**Description:** Retrieve a value from the cache. Automatically resolves links. If not found in cache, checks persistent store. Updates LRU order on successful cache hit.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_from_cache_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"test-read">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000,
+        <<"persistent-store">> => no_store
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    hb_store_lru:write(StoreOpts, <<"key1">>, <<"Hello">>),
+    ?assertEqual({ok, <<"Hello">>}, hb_store_lru:read(StoreOpts, <<"key1">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+
+read_not_found_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"test-read-nf">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000,
+        <<"persistent-store">> => no_store
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    ?assertEqual(not_found, hb_store_lru:read(StoreOpts, <<"nonexistent">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+
+read_from_persistent_store_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-read-persist">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-persist-read">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 500,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    Binary = crypto:strong_rand_bytes(200),
+    hb_store_lru:write(StoreOpts, <<"key1">>, Binary),
+    hb_store_lru:write(StoreOpts, <<"key2">>, Binary),
+    hb_store_lru:read(StoreOpts, <<"key1">>),
+    hb_store_lru:write(StoreOpts, <<"key3">>, Binary),  % Evicts key2
+    
+    % key2 evicted from cache but available in persistent store
+    ?assertEqual({ok, Binary}, hb_store_lru:read(StoreOpts, <<"key2">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+### 7. list/2
+
+```erlang
+-spec list(Opts, Path) -> {ok, [Key]} | {error, not_found}
+    when
+        Opts :: map(),
+        Path :: binary(),
+        Key :: binary().
+```
+
+**Description:** List all immediate children under a path. Searches both cache and persistent store, merging results. Automatically resolves links.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+list_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-list">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-list">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 500,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    Binary = crypto:strong_rand_bytes(200),
+    hb_store_lru:make_group(StoreOpts, <<"sub">>),
+    hb_store_lru:write(StoreOpts, <<"sub/key1">>, Binary),
+    hb_store_lru:write(StoreOpts, <<"sub/key2">>, Binary),
+    
+    {ok, Keys1} = hb_store_lru:list(StoreOpts, <<"sub">>),
+    ?assertEqual([<<"key1">>, <<"key2">>], lists:sort(Keys1)),
+    
+    hb_store_lru:write(StoreOpts, <<"sub/key3">>, Binary),
+    {ok, Keys2} = hb_store_lru:list(StoreOpts, <<"sub">>),
+    ?assertEqual([<<"key1">>, <<"key2">>, <<"key3">>], lists:sort(Keys2)),
+    
+    hb_store_lru:stop(StoreOpts).
+
+list_nested_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-list-nest">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-list-nest">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 500,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    Binary = crypto:strong_rand_bytes(200),
+    hb_store_lru:write(StoreOpts, <<"sub/inner/key1">>, Binary),
+    {ok, Keys} = hb_store_lru:list(StoreOpts, <<"sub">>),
+    ?assertEqual([<<"inner">>], Keys),
+    
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+### 8. type/2
+
+```erlang
+-spec type(Opts, Key) -> composite | simple | not_found
+    when
+        Opts :: map(),
+        Key :: binary().
+```
+
+**Description:** Determine the type of value at a key. Checks cache first, then persistent store. Automatically follows links to determine target type.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+type_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-type">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-type">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 500,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    Binary = crypto:strong_rand_bytes(200),
+    hb_store_lru:write(StoreOpts, <<"key1">>, Binary),
+    ?assertEqual(simple, hb_store_lru:type(StoreOpts, <<"key1">>)),
+    
+    hb_store_lru:write(StoreOpts, <<"sub/key1">>, Binary),
+    ?assertEqual(composite, hb_store_lru:type(StoreOpts, <<"sub">>)),
+    
+    hb_store_lru:make_link(StoreOpts, <<"key1">>, <<"keylink">>),
+    ?assertEqual(simple, hb_store_lru:type(StoreOpts, <<"keylink">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+### 9. make_link/3
+
+```erlang
+-spec make_link(Opts, Existing, New) -> ok
+    when
+        Opts :: map(),
+        Existing :: binary(),
+        New :: binary().
+```
+
+**Description:** Create a symbolic link from New to Existing. Links are stored in cache and track back-references for proper link management.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_make_link_test).
+-include_lib("eunit/include/eunit.hrl").
+
+make_link_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-link">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-link">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    hb_store_lru:write(StoreOpts, <<"key1">>, <<"Hello">>),
+    hb_store_lru:make_link(StoreOpts, <<"key1">>, <<"keylink">>),
+    ?assertEqual({ok, <<"Hello">>}, hb_store_lru:read(StoreOpts, <<"keylink">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+
+replace_link_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-relink">>
+    },
+    StoreOpts = #{
+        <<"name">> => <<"test-relink">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000,
+        <<"persistent-store">> => PersistentStore
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    hb_store_lru:write(StoreOpts, <<"key1">>, <<"Hello">>),
+    hb_store_lru:make_link(StoreOpts, <<"key1">>, <<"keylink">>),
+    ?assertEqual({ok, <<"Hello">>}, hb_store_lru:read(StoreOpts, <<"keylink">>)),
+    
+    hb_store_lru:write(StoreOpts, <<"key2">>, <<"Hello2">>),
+    hb_store_lru:make_link(StoreOpts, <<"key2">>, <<"keylink">>),
+    ?assertEqual({ok, <<"Hello2">>}, hb_store_lru:read(StoreOpts, <<"keylink">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+### 10. make_group/2
+
+```erlang
+-spec make_group(Opts, Key) -> ok
+    when
+        Opts :: map(),
+        Key :: binary().
+```
+
+**Description:** Create a group (composite entry) at the specified path. Groups are tracked as directories that can contain child entries.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_make_group_test).
+-include_lib("eunit/include/eunit.hrl").
+
+make_group_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"test-mkgroup">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000,
+        <<"persistent-store">> => no_store
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    ?assertEqual(ok, hb_store_lru:make_group(StoreOpts, <<"mygroup">>)),
+    ?assertEqual(composite, hb_store_lru:type(StoreOpts, <<"mygroup">>)),
+    
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+### 11. resolve/2
+
+```erlang
+-spec resolve(Opts, Key) -> binary()
+    when
+        Opts :: map(),
+        Key :: binary() | list().
+```
+
+**Description:** Resolve a path by following all links in the path segments (except final segment). Returns the fully resolved path.
+
+**Test Code:**
+```erlang
+-module(hb_store_lru_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"test-resolve">>,
+        <<"store-module">> => hb_store_lru,
+        <<"capacity">> => 1000000,
+        <<"persistent-store">> => no_store
+    },
+    {ok, _} = hb_store_lru:start(StoreOpts),
+    
+    hb_store_lru:write(StoreOpts, <<"key">>, <<"value">>),
+    ?assertEqual(<<"key">>, hb_store_lru:resolve(StoreOpts, <<"key">>)),
+    
+    hb_store_lru:make_group(StoreOpts, <<"target">>),
+    hb_store_lru:write(StoreOpts, <<"target/key">>, <<"value">>),
+    hb_store_lru:make_link(StoreOpts, <<"target">>, <<"link">>),
+    
+    Resolved = hb_store_lru:resolve(StoreOpts, [<<"link">>, <<"key">>]),
+    ?assertEqual(<<"target/key">>, Resolved),
+    
+    hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Initialize cache with persistent backing
+PersistentStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"cache-mainnet">>
+},
+StoreOpts = #{
+    <<"name">> => <<"main-cache">>,
+    <<"store-module">> => hb_store_lru,
+    <<"capacity">> => 4_000_000_000,  % 4GB
+    <<"persistent-store">> => PersistentStore
+},
+{ok, _Instance} = hb_store_lru:start(StoreOpts).
+
+%% Write and read with automatic LRU management
+hb_store_lru:write(StoreOpts, <<"key1">>, <<"value1">>),
+{ok, Value} = hb_store_lru:read(StoreOpts, <<"key1">>).
+
+%% Cache will automatically evict least-recently-used entries
+hb_store_lru:write(StoreOpts, <<"key2">>, LargeData),
+hb_store_lru:write(StoreOpts, <<"key3">>, LargeData),
+hb_store_lru:read(StoreOpts, <<"key2">>),  % Updates LRU order
+hb_store_lru:write(StoreOpts, <<"key4">>, LargeData).  % May evict key1
+
+%% Create hierarchical structure
+hb_store_lru:make_group(StoreOpts, <<"messages">>),
+hb_store_lru:write(StoreOpts, <<"messages/msg1">>, <<"data1">>),
+{ok, Children} = hb_store_lru:list(StoreOpts, <<"messages">>).
+
+%% Use links for data deduplication
+hb_store_lru:write(StoreOpts, <<"data/hash">>, <<"content">>),
+hb_store_lru:make_link(StoreOpts, <<"data/hash">>, <<"msg1/body">>),
+hb_store_lru:make_link(StoreOpts, <<"data/hash">>, <<"msg2/body">>).
+
+%% Stop and offload all data
+hb_store_lru:stop(StoreOpts).
+```
+
+---
+
+## LRU Architecture
+
+### Three-Table Design
+
+```
+1. Cache Table (set, public, read_concurrency)
+   - Stores: Key → {raw|link|group, Entry}
+   - Entry: #{id, value, size, links}
+
+2. Stats Table (set, private)
+   - Tracks: Total cache size, next ID
+
+3. Index Table (ordered_set, private)  
+   - Maps: ID → Key (ordered for LRU)
+   - First ID = least recent, Last ID = most recent
+```
+
+### Entry Structure
+
+```erlang
+#{
+    id => integer(),           % Unique entry ID for LRU ordering
+    value => binary(),         % Actual data value
+    size => integer(),         % Size in bytes
+    links => [binary()]        % Back-references from other keys
+}
+```
+
+### LRU Eviction Strategy
+
+```
+Write Operation:
+1. Calculate value size
+2. Check if size > capacity → direct offload
+3. Check if cache_size + value_size > capacity
+4. If yes, evict oldest entries until space available
+5. Add new entry with new ID (highest)
+6. Update cache size
+
+Read Operation:
+1. Fetch entry from cache
+2. Assign new ID (making it most recent)
+3. Update index (delete old ID, add new ID)
+4. Return value
+```
+
+### Eviction Process
+
+```
+1. Find oldest ID (first in index table)
+2. Get corresponding key
+3. Get entry from cache table
+4. Offload to persistent store
+5. Delete from cache and index
+6. Update cache size
+7. Repeat until sufficient space
+```
+
+---
+
+## Configuration
+
+### Default Capacity
+
+```erlang
+-define(DEFAULT_LRU_CAPACITY, 4_000_000_000).  % 4GB
+```
+
+### Retry Threshold
+
+```erlang
+-define(RETRY_THRESHOLD, 2).  % Retries for concurrent operations
+```
+
+---
+
+## Performance Considerations
+
+### Cache Hits vs Misses
+
+- **Cache hit**: O(1) lookup + LRU update
+- **Cache miss**: Fallback to persistent store
+- **LRU update**: O(log N) for index table operations
+
+### Eviction Performance
+
+- Evicts entries one at a time until space available
+- Offloads to persistent store synchronously
+- May cause write latency if many evictions needed
+
+### Concurrency
+
+- Cache table has read concurrency enabled
+- All writes go through server process
+- Stats and index tables are private to server
+
+### Memory Management
+
+- Each entry tracks its size
+- Total cache size maintained in stats table
+- Automatic eviction when capacity exceeded
+
+---
+
+## References
+
+- **ETS Documentation** - Erlang Term Storage
+- **hb_store** - HyperBEAM store interface
+- **hb_store_fs** - Common persistent backing store
+- **LRU Algorithm** - Least Recently Used caching
+
+---
+
+## Notes
+
+1. **Singleton Registration**: Cache registered under `{in_memory, Name}` in `hb_name`
+2. **Read Concurrency**: Cache table optimized for concurrent reads
+3. **Server Serialization**: All writes serialized through server process
+4. **Automatic Offloading**: Large values bypassing cache go directly to persistent store
+5. **Back-references**: Links track which keys reference them
+6. **Link Resolution**: Automatic and recursive
+7. **Group Tracking**: Groups implicitly created by path hierarchies
+8. **Size Tracking**: Accurate byte-level cache size management
+9. **Persistent Fallback**: Seamless fallback to persistent store on cache miss
+10. **Clean Shutdown**: Evicts all data before process termination

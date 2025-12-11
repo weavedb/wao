@@ -1,0 +1,574 @@
+# ar_timestamp.erl - Arweave Timestamp Cache Server
+
+## Overview
+
+**Purpose:** Cached Arweave network timestamp with periodic refresh  
+**Module:** `ar_timestamp`  
+**Pattern:** Gen-server-like caching server  
+**Refresh Interval:** 15 seconds (15,000 ms)
+
+This module implements a simple caching server that maintains the current Arweave network timestamp and refreshes it periodically. It avoids repeated network calls by caching the timestamp and serving it from memory.
+
+## Dependencies
+
+- **Erlang/OTP:** `timer`
+- **Arweave:** `hb_client` (for `arweave_timestamp/0`)
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Server Management
+-spec start() -> PID
+    when PID :: pid().
+
+%% Timestamp Retrieval
+-spec get() -> Timestamp
+    when Timestamp :: non_neg_integer().
+```
+
+---
+
+## Architecture
+
+### Server Model
+
+```
+┌─────────────────────────────────────────────┐
+│         ar_timestamp (Registered Process)    │
+│                                              │
+│  ┌────────────┐          ┌───────────────┐  │
+│  │   Cache    │◄─────────┤   Refresher   │  │
+│  │  Process   │          │   Process     │  │
+│  └─────┬──────┘          └───────┬───────┘  │
+│        │                         │          │
+│        │ Serves cached           │ Updates  │
+│        │ timestamp               │ every    │
+│        │                         │ 15s      │
+└────────┼─────────────────────────┼──────────┘
+         │                         │
+         ▼                         ▼
+   Client Requests         hb_client:arweave_timestamp()
+```
+
+### Process Communication
+
+```
+Client                Cache Process         Refresher Process
+  │                        │                       │
+  ├──{get, self()}────────►│                       │
+  │                        │                       │
+  │◄──{timestamp, TS}──────┤                       │
+  │                        │                       │
+  │                        │◄──{refresh, NewTS}────┤
+  │                        │                       │
+  │                        │  (every 15 seconds)   │
+```
+
+---
+
+## Public Functions
+
+### 1. start/0
+
+```erlang
+-spec start() -> PID
+    when
+        PID :: pid().
+```
+
+**Description:** Start the timestamp cache server. If the server is already running, returns the existing PID. If not running or dead, spawns a new server.
+
+**Behavior:**
+1. Check if process is registered as `ar_timestamp`
+2. If not registered → spawn new server
+3. If registered but dead → spawn new server
+4. If registered and alive → return existing PID
+
+**Test Code:**
+```erlang
+-module(ar_timestamp_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_creates_process_test() ->
+    % Ensure clean state
+    case whereis(ar_timestamp) of
+        undefined -> ok;
+        OldPID -> 
+            unregister(ar_timestamp),
+            exit(OldPID, kill),
+            timer:sleep(10)
+    end,
+    
+    PID = ar_timestamp:start(),
+    ?assert(is_pid(PID)),
+    ?assert(is_process_alive(PID)),
+    ?assertEqual(PID, whereis(ar_timestamp)).
+
+start_idempotent_test() ->
+    PID1 = ar_timestamp:start(),
+    PID2 = ar_timestamp:start(),
+    ?assertEqual(PID1, PID2),
+    ?assert(is_process_alive(PID1)).
+
+start_restarts_dead_process_test() ->
+    PID1 = ar_timestamp:start(),
+    unregister(ar_timestamp),
+    exit(PID1, kill),
+    timer:sleep(10),
+    register(ar_timestamp, PID1),  % Register dead PID
+    
+    PID2 = ar_timestamp:start(),
+    ?assert(is_process_alive(PID2)),
+    ?assertNotEqual(PID1, PID2).
+```
+
+---
+
+### 2. get/0
+
+```erlang
+-spec get() -> Timestamp
+    when
+        Timestamp :: non_neg_integer().
+```
+
+**Description:** Get the current cached Arweave timestamp. Automatically starts the server if not running. Returns Unix timestamp in seconds.
+
+**Behavior:**
+1. Ensure server is started (calls `start/0`)
+2. Send `{get, self()}` message to cache process
+3. Wait for `{timestamp, Timestamp}` response
+4. Return timestamp
+
+**Blocking:** This function blocks until it receives the timestamp response.
+
+**Test Code:**
+```erlang
+-module(ar_timestamp_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_returns_timestamp_test() ->
+    Timestamp = ar_timestamp:get(),
+    ?assert(is_integer(Timestamp)),
+    ?assert(Timestamp > 0),
+    % Timestamp should be reasonable (after 2020, before 2100)
+    ?assert(Timestamp > 1577836800),  % 2020-01-01
+    ?assert(Timestamp < 4102444800).  % 2100-01-01
+
+get_starts_server_test() ->
+    % Ensure clean state
+    case whereis(ar_timestamp) of
+        undefined -> ok;
+        OldPID -> 
+            unregister(ar_timestamp),
+            exit(OldPID, kill),
+            timer:sleep(10)
+    end,
+    
+    ?assertEqual(undefined, whereis(ar_timestamp)),
+    Timestamp = ar_timestamp:get(),
+    ?assert(is_integer(Timestamp)),
+    ?assertNotEqual(undefined, whereis(ar_timestamp)).
+
+get_multiple_times_test() ->
+    TS1 = ar_timestamp:get(),
+    TS2 = ar_timestamp:get(),
+    TS3 = ar_timestamp:get(),
+    
+    ?assert(is_integer(TS1)),
+    ?assert(is_integer(TS2)),
+    ?assert(is_integer(TS3)),
+    
+    % Within 15 seconds, should return same cached value
+    ?assertEqual(TS1, TS2),
+    ?assertEqual(TS2, TS3).
+
+get_concurrent_test() ->
+    % Multiple processes getting timestamp concurrently
+    Self = self(),
+    Pids = [
+        spawn(fun() -> 
+            TS = ar_timestamp:get(),
+            Self ! {timestamp, TS}
+        end)
+        || _ <- lists:seq(1, 10)
+    ],
+    
+    Timestamps = [
+        receive {timestamp, TS} -> TS end
+        || _ <- Pids
+    ],
+    
+    % All should get a timestamp
+    ?assertEqual(10, length(Timestamps)),
+    lists:foreach(fun(TS) -> ?assert(is_integer(TS)) end, Timestamps),
+    
+    % All should be the same (from cache)
+    [First | Rest] = Timestamps,
+    lists:foreach(fun(TS) -> ?assertEqual(First, TS) end, Rest).
+
+get_after_refresh_test() ->
+    TS1 = ar_timestamp:get(),
+    
+    % Wait for refresh (15 seconds + buffer)
+    timer:sleep(16000),
+    
+    TS2 = ar_timestamp:get(),
+    
+    % Should potentially be different after refresh
+    ?assert(is_integer(TS1)),
+    ?assert(is_integer(TS2)),
+    ?assert(TS2 >= TS1).  % Time should not go backwards
+```
+
+---
+
+## Internal Functions
+
+### spawn_server/0
+
+```erlang
+-spec spawn_server() -> PID
+    when PID :: pid().
+```
+
+**Description:** Spawn new cache and refresher processes. Registers cache process as `ar_timestamp`.
+
+**Behavior:**
+1. Spawn cache process with initial timestamp from `hb_client:arweave_timestamp()`
+2. Spawn refresher process that updates cache every 15 seconds
+3. Register cache process as `ar_timestamp`
+4. Return cache process PID
+
+---
+
+### cache/1
+
+```erlang
+-spec cache(Current) -> no_return()
+    when Current :: non_neg_integer().
+```
+
+**Description:** Main cache loop. Handles `{get, Pid}` and `{refresh, New}` messages.
+
+**Messages:**
+- `{get, Pid}` → Send `{timestamp, Current}` to Pid, continue with same timestamp
+- `{refresh, New}` → Update cached timestamp to New, continue with new value
+
+**Tail Recursive:** Yes, infinite loop with tail recursion
+
+---
+
+### refresher/1
+
+```erlang
+-spec refresher(TSServer) -> no_return()
+    when TSServer :: pid().
+```
+
+**Description:** Periodic refresh loop. Updates cache every 15 seconds.
+
+**Behavior:**
+1. Sleep for 15 seconds (`?TIMEOUT`)
+2. Fetch new timestamp from `hb_client:arweave_timestamp()`
+3. Send `{refresh, TS}` to cache process
+4. Repeat (tail recursion)
+
+**Tail Recursive:** Yes, infinite loop with tail recursion
+
+---
+
+## Configuration
+
+### Refresh Interval
+
+```erlang
+-define(TIMEOUT, 1000 * 15).  % 15 seconds = 15,000 milliseconds
+```
+
+**Rationale:**
+- Balances freshness vs network load
+- Arweave block time is ~2 minutes
+- 15 seconds provides reasonably fresh timestamps
+- Reduces network calls by ~8x compared to per-request fetching
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple usage - get current timestamp
+Timestamp = ar_timestamp:get().
+
+%% Ensure server is running (usually automatic)
+ar_timestamp:start(),
+TS = ar_timestamp:get().
+
+%% Use timestamp in transaction
+TX = #tx{
+    timestamp = ar_timestamp:get(),
+    data = <<"Transaction data">>
+}.
+
+%% Multiple reads (efficient - uses cache)
+TS1 = ar_timestamp:get(),
+% ... do work ...
+TS2 = ar_timestamp:get(),
+% TS1 and TS2 will be the same within 15-second window
+
+%% Time-based operations
+Now = ar_timestamp:get(),
+ExpiryTime = Now + 3600,  % 1 hour from now
+IsExpired = ar_timestamp:get() > ExpiryTime.
+
+%% Startup in application
+-spec init([]) -> {ok, State}.
+init([]) ->
+    ar_timestamp:start(),  % Start timestamp server
+    {ok, #state{}}.
+```
+
+---
+
+## Timestamp Format
+
+### Unix Timestamp
+- **Format:** Seconds since Unix epoch (1970-01-01 00:00:00 UTC)
+- **Type:** Non-negative integer
+- **Example:** `1699999999` (2023-11-14)
+
+### Precision
+- **Granularity:** 1 second
+- **Refresh:** Every 15 seconds
+- **Staleness:** Maximum 15 seconds old
+
+---
+
+## Process Lifecycle
+
+### Startup Sequence
+
+```erlang
+1. start() called
+   ├─> Check if registered
+   │   ├─> Not registered → spawn_server()
+   │   └─> Registered
+   │       ├─> Process alive → return PID
+   │       └─> Process dead → spawn_server()
+   │
+2. spawn_server()
+   ├─> Spawn cache process
+   │   └─> Initial fetch: hb_client:arweave_timestamp()
+   ├─> Spawn refresher process
+   │   └─> Loop: sleep 15s → fetch → send refresh
+   └─> Register cache as 'ar_timestamp'
+```
+
+### Message Flow
+
+```erlang
+%% Client request
+Client:
+    PID = start(),
+    PID ! {get, self()},
+    receive {timestamp, TS} -> TS end.
+
+%% Cache response
+Cache:
+    receive
+        {get, Pid} -> Pid ! {timestamp, Current}
+    end.
+
+%% Refresher update
+Refresher:
+    timer:sleep(15000),
+    TS = hb_client:arweave_timestamp(),
+    CachePID ! {refresh, TS}.
+```
+
+---
+
+## Advantages
+
+### Performance
+- **Cached Reads:** O(1) message passing, no network call
+- **Reduced Network Load:** 15-second intervals vs per-request
+- **Low Latency:** Memory access vs HTTP request
+
+### Reliability
+- **Automatic Recovery:** Restarts if process dies
+- **Singleton Pattern:** Single registered process
+- **No State Loss:** Refresher continues independently
+
+### Simplicity
+- **No GenServer:** Simple message-passing pattern
+- **Minimal Code:** ~60 lines total
+- **Easy Testing:** Direct process communication
+
+---
+
+## Limitations
+
+### Staleness
+- Maximum 15 seconds behind network time
+- Not suitable for sub-second precision requirements
+
+### Single Point of Failure
+- If refresher dies, timestamp becomes stale
+- No supervision tree (relies on manual restart)
+
+### Network Dependency
+- Requires `hb_client:arweave_timestamp()` to work
+- Initial startup blocked on network call
+- Refresh failures not handled (uses old timestamp)
+
+---
+
+## Comparison with Alternatives
+
+### vs. Per-Request Fetching
+```erlang
+% Direct (slow, accurate)
+TS = hb_client:arweave_timestamp().
+
+% Cached (fast, slightly stale)
+TS = ar_timestamp:get().
+```
+
+### vs. System Time
+```erlang
+% System time (instant, may be wrong)
+TS = erlang:system_time(second).
+
+% Arweave time (cached network time, authoritative)
+TS = ar_timestamp:get().
+```
+
+### vs. GenServer
+```erlang
+% GenServer (more features, more code)
+{ok, TS} = gen_server:call(ar_timestamp, get_timestamp).
+
+% Simple server (minimal, sufficient)
+TS = ar_timestamp:get().
+```
+
+---
+
+## Testing Strategies
+
+### Unit Tests
+```erlang
+% Test server lifecycle
+test_start_stop() ->
+    PID = ar_timestamp:start(),
+    ?assert(is_process_alive(PID)).
+
+% Test caching
+test_cache_consistency() ->
+    TS1 = ar_timestamp:get(),
+    TS2 = ar_timestamp:get(),
+    ?assertEqual(TS1, TS2).  % Within 15s window
+```
+
+### Integration Tests
+```erlang
+% Test refresh mechanism
+test_refresh() ->
+    TS1 = ar_timestamp:get(),
+    timer:sleep(16000),  % Wait for refresh
+    TS2 = ar_timestamp:get(),
+    ?assert(TS2 >= TS1).
+
+% Test concurrent access
+test_concurrent() ->
+    Pids = [spawn(fun() -> ar_timestamp:get() end) || _ <- lists:seq(1, 100)],
+    timer:sleep(1000),
+    ?assert(true).  % Should not crash
+```
+
+### Mocking
+```erlang
+% Mock hb_client for deterministic testing
+meck:new(hb_client, [passthrough]),
+meck:expect(hb_client, arweave_timestamp, fun() -> 1234567890 end),
+TS = ar_timestamp:get(),
+?assertEqual(1234567890, TS),
+meck:unload(hb_client).
+```
+
+---
+
+## Error Handling
+
+### Current Behavior
+- **No explicit error handling:** Assumes `hb_client:arweave_timestamp()` succeeds
+- **Process crashes:** If initial fetch fails, cache process crashes
+- **Stale data:** If refresh fails, continues serving old timestamp
+
+### Recommended Improvements
+```erlang
+% Graceful degradation
+cache(Current) ->
+    receive
+        {get, Pid} -> Pid ! {timestamp, Current};
+        {refresh, {ok, New}} -> cache(New);
+        {refresh, {error, _}} -> cache(Current)  % Keep old on error
+    end.
+
+% Retry logic
+refresher(TSServer) ->
+    timer:sleep(?TIMEOUT),
+    case catch_arweave_timestamp() of
+        {ok, TS} -> TSServer ! {refresh, {ok, TS}};
+        {error, E} -> TSServer ! {refresh, {error, E}}
+    end,
+    refresher(TSServer).
+```
+
+---
+
+## Performance Characteristics
+
+### Time Complexity
+- `start/0`: O(1) - process lookup
+- `get/0`: O(1) - message passing
+- Cache hit: O(1) - memory access
+- Refresh: O(1) - periodic, amortized
+
+### Space Complexity
+- O(1) - Single integer cached
+- Minimal process overhead (~2KB per process)
+- Two processes total (cache + refresher)
+
+### Concurrency
+- Thread-safe via message passing
+- Multiple concurrent readers supported
+- Single writer (refresher)
+
+---
+
+## References
+
+- **Arweave Network Time** - Block timestamp synchronization
+- **Erlang Processes** - Lightweight process model
+- **Message Passing** - Actor model communication
+- **hb_client** - HyperBEAM client module
+
+---
+
+## Notes
+
+1. **Singleton:** Only one server runs per Erlang VM (registered as `ar_timestamp`)
+2. **Auto-Start:** `get/0` automatically starts server if needed
+3. **No Supervision:** Process is not supervised; manual recovery only
+4. **Staleness:** Up to 15 seconds behind network time
+5. **Blocking:** `get/0` blocks until response received
+6. **Concurrent Safe:** Multiple processes can call `get/0` safely
+7. **Refresh Interval:** Fixed at 15 seconds (compile-time constant)
+8. **Initial Fetch:** First `start()` call makes network request
+9. **No Timeout:** `get/0` has no timeout (could hang if server dead)
+10. **Event Logging:** Includes `?event` macros for debugging/monitoring

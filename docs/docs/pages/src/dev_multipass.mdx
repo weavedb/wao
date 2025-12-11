@@ -1,0 +1,559 @@
+# dev_multipass.erl - Multi-Pass Execution Device
+
+## Overview
+
+**Purpose:** Enable sequential multi-pass execution across device stacks  
+**Module:** `dev_multipass`  
+**Device Name:** `multipass@1.0`  
+**Pattern:** Iterative repass until completion
+
+This device enables processes to execute multiple passes over the same messages, allowing complex workflows that require sequential processing stages. Each pass can access and build upon the results of previous passes.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`
+- **Devices:** `dev_message`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Information
+-spec info(M1) -> DeviceInfo.
+
+%% Request Handling
+-spec handle(Key, M1, M2, Opts) -> {ok, M1} | {pass, M1}.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(M1) -> DeviceInfo
+    when
+        M1 :: map(),
+        DeviceInfo :: #{ handler => HandlerFun },
+        HandlerFun :: fun((Key, M1, M2, Opts) -> Result).
+```
+
+**Description:** Return device configuration. Uses custom handler for all key access.
+
+**Test Code:**
+```erlang
+-module(dev_multipass_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_structure_test() ->
+    Info = dev_multipass:info(#{}),
+    ?assert(maps:is_key(handler, Info)),
+    ?assert(is_function(maps:get(handler, Info))).
+```
+
+---
+
+### 2. handle/4
+
+```erlang
+-spec handle(Key, M1, M2, Opts) -> {ok, M1} | {pass, M1}
+    when
+        Key :: binary(),
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map().
+```
+
+**Description:** Handle key access with pass deduplication. Returns `{pass, M1}` to trigger repass, `{ok, M1}` when passes complete.
+
+**Behavior:**
+- **`keys` key**: Delegates to `dev_message:keys/2`
+- **`set` key**: Delegates to `dev_message:set/3`
+- **Other keys**: 
+  - If `pass < passes`: Return `{pass, M1}` (trigger repass)
+  - If `pass == passes`: Return `{ok, M1}` (complete)
+
+**Test Code:**
+```erlang
+-module(dev_multipass_handle_test).
+-include_lib("eunit/include/eunit.hrl").
+
+handle_incomplete_pass_test() ->
+    Msg = #{
+        <<"device">> => <<"multipass@1.0">>,
+        <<"passes">> => 3,
+        <<"pass">> => 1
+    },
+    Result = dev_multipass:handle(<<"compute">>, Msg, #{}, #{}),
+    ?assertMatch({pass, _}, Result).
+
+handle_final_pass_test() ->
+    Msg = #{
+        <<"device">> => <<"multipass@1.0">>,
+        <<"passes">> => 2,
+        <<"pass">> => 2
+    },
+    Result = dev_multipass:handle(<<"compute">>, Msg, #{}, #{}),
+    ?assertMatch({ok, _}, Result).
+
+handle_keys_test() ->
+    Msg = #{
+        <<"device">> => <<"multipass@1.0">>,
+        <<"key1">> => <<"value1">>
+    },
+    {ok, Keys} = dev_multipass:handle(<<"keys">>, Msg, #{}, #{}),
+    ?assert(is_list(Keys)).
+
+handle_set_test() ->
+    Msg1 = #{
+        <<"device">> => <<"multipass@1.0">>,
+        <<"existing">> => <<"old">>
+    },
+    Msg2 = #{ <<"new">> => <<"value">> },
+    {ok, Result} = dev_multipass:handle(<<"set">>, Msg1, Msg2, #{}),
+    ?assertEqual(<<"value">>, maps:get(<<"new">>, Result)).
+```
+
+---
+
+## Pass Configuration
+
+### Required Fields
+
+```erlang
+#{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => TotalPasses,  % Total number of passes to execute
+    <<"pass">> => CurrentPass      % Current pass number (1-indexed)
+}
+```
+
+### Pass Tracking
+
+- **`passes`**: Total number of passes (integer ≥ 1)
+- **`pass`**: Current pass number (integer, 1 to `passes`)
+
+**Default Values:**
+- `passes`: 1 (single pass)
+- `pass`: 1 (first pass)
+
+---
+
+## Execution Flow
+
+### Single Pass (Default)
+
+```erlang
+Msg = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 1,
+    <<"pass">> => 1
+}
+% Result: {ok, Msg} - Complete immediately
+```
+
+### Two-Pass Execution
+
+```erlang
+% Pass 1
+Msg1 = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 2,
+    <<"pass">> => 1
+}
+% Result: {pass, Msg1} - Trigger repass
+
+% Pass 2 (automatically incremented)
+Msg2 = Msg1#{ <<"pass">> => 2 }
+% Result: {ok, Msg2} - Complete
+```
+
+### Multi-Pass Execution
+
+```erlang
+% Pass 1
+{pass, _} = hb_ao:resolve(#{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 3,
+    <<"pass">> => 1
+}, <<"compute">>, #{})
+
+% Pass 2
+{pass, _} = hb_ao:resolve(#{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 3,
+    <<"pass">> => 2
+}, <<"compute">>, #{})
+
+% Pass 3
+{ok, _} = hb_ao:resolve(#{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 3,
+    <<"pass">> => 3
+}, <<"compute">>, #{})
+```
+
+---
+
+## Integration with Device Stacks
+
+### Stack Configuration
+
+```erlang
+#{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => [
+        <<"multipass@1.0">>,
+        <<"device-1@1.0">>,
+        <<"device-2@1.0">>
+    ],
+    <<"passes">> => 3
+}
+```
+
+### Stack Execution Pattern
+
+1. **Pass 1**: 
+   - `multipass@1.0` → `{pass, Msg}`
+   - Triggers reexecution
+
+2. **Pass 2**:
+   - `pass` incremented to 2
+   - `multipass@1.0` → `{pass, Msg}`
+   - Triggers reexecution
+
+3. **Pass 3**:
+   - `pass` incremented to 3
+   - `multipass@1.0` → `{ok, Msg}`
+   - Stack completes
+
+---
+
+## Use Cases
+
+### 1. Multi-Stage Compilation
+
+```erlang
+Process = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 3,
+    <<"stages">> => #{
+        <<"1">> => <<"parse">>,
+        <<"2">> => <<"optimize">>,
+        <<"3">> => <<"codegen">>
+    }
+}
+```
+
+### 2. Iterative Refinement
+
+```erlang
+Process = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 5,
+    <<"tolerance">> => 0.001,
+    <<"algorithm">> => <<"gradient-descent">>
+}
+```
+
+### 3. Pipeline Processing
+
+```erlang
+Process = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 4,
+    <<"pipeline">> => [
+        <<"validate">>,
+        <<"transform">>,
+        <<"enrich">>,
+        <<"store">>
+    ]
+}
+```
+
+### 4. Consensus Building
+
+```erlang
+Process = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 3,
+    <<"consensus">> => #{
+        <<"1">> => <<"propose">>,
+        <<"2">> => <<"vote">>,
+        <<"3">> => <<"commit">>
+    }
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic two-pass execution
+Msg = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 2,
+    <<"pass">> => 1
+},
+?assertMatch({pass, _}, hb_ao:resolve(Msg, <<"Compute">>, #{})),
+?assertMatch({ok, _}, hb_ao:resolve(Msg#{ <<"pass">> => 2 }, <<"Compute">>, #{})).
+
+%% With device stack
+Process = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => [
+        <<"multipass@1.0">>,
+        <<"lua@5.3a">>
+    ],
+    <<"passes">> => 3,
+    <<"module">> => LuaModule
+}.
+
+%% Conditional pass count
+Process = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 
+        case ComplexityLevel of
+            low -> 1;
+            medium -> 3;
+            high -> 5
+        end
+}.
+
+%% Pass-specific behavior
+handle_by_pass(Pass) ->
+    case Pass of
+        1 -> initialize();
+        2 -> process();
+        3 -> finalize()
+    end.
+
+%% Accumulating results across passes
+Process = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 3,
+    <<"results">> => #{
+        <<"1">> => undefined,
+        <<"2">> => undefined,
+        <<"3">> => undefined
+    }
+}.
+```
+
+---
+
+## Pass Increment Behavior
+
+The pass counter is automatically incremented by the HyperBEAM runtime when `{pass, Msg}` is returned:
+
+```erlang
+% Before repass
+Msg1 = #{ <<"pass">> => 1, <<"passes">> => 3 }
+
+% Device returns {pass, Msg1}
+
+% After repass (automatic increment)
+Msg2 = #{ <<"pass">> => 2, <<"passes">> => 3 }
+```
+
+**Note:** Device does not need to increment pass counter manually.
+
+---
+
+## Keys and Set Operations
+
+### Keys Delegation
+
+```erlang
+% Always delegates to dev_message
+{ok, Keys} = dev_multipass:handle(<<"keys">>, Msg, #{}, #{})
+% Same as:
+{ok, Keys} = dev_message:keys(Msg, #{})
+```
+
+### Set Delegation
+
+```erlang
+% Always delegates to dev_message
+{ok, Updated} = dev_multipass:handle(<<"set">>, Msg1, Msg2, #{})
+% Same as:
+{ok, Updated} = dev_message:set(Msg1, Msg2, #{})
+```
+
+**Rationale:** `keys` and `set` are fundamental operations that should work consistently regardless of pass state.
+
+---
+
+## Testing Patterns
+
+### Basic Multipass Test
+
+```erlang
+basic_multipass_test() ->
+    Msg1 = #{
+        <<"device">> => <<"multipass@1.0">>,
+        <<"passes">> => 2,
+        <<"pass">> => 1
+    },
+    Msg2 = Msg1#{ <<"pass">> => 2 },
+    ?assertMatch({pass, _}, hb_ao:resolve(Msg1, <<"Compute">>, #{})),
+    ?assertMatch({ok, _}, hb_ao:resolve(Msg2, <<"Compute">>, #{})).
+```
+
+### Pass Counter Test
+
+```erlang
+pass_counter_test() ->
+    test_passes([1, 2, 3], 3).
+
+test_passes([], _Total) ->
+    ok;
+test_passes([Pass|Rest], Total) ->
+    Msg = #{
+        <<"device">> => <<"multipass@1.0">>,
+        <<"passes">> => Total,
+        <<"pass">> => Pass
+    },
+    Expected = if
+        Pass < Total -> pass;
+        true -> ok
+    end,
+    ?assertMatch({Expected, _}, hb_ao:resolve(Msg, <<"compute">>, #{})),
+    test_passes(Rest, Total).
+```
+
+### Integration Test
+
+```erlang
+integration_test() ->
+    Parent = self(),
+    PassCounter = fun(Pass) ->
+        fun(_State, _Req, _Opts) ->
+            Parent ! {pass_executed, Pass},
+            {ok, #{}}
+        end
+    end,
+    
+    Stack = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => [
+            <<"multipass@1.0">>,
+            #{ <<"device">> => #{ <<"compute">> => PassCounter(1) } }
+        ],
+        <<"passes">> => 2
+    },
+    
+    hb_ao:resolve(Stack, <<"compute">>, #{}),
+    
+    % Should receive signal for each pass
+    receive {pass_executed, 1} -> ok after 100 -> error(timeout) end,
+    receive {pass_executed, 2} -> ok after 100 -> error(timeout) end.
+```
+
+---
+
+## Performance Considerations
+
+### Pass Overhead
+
+Each pass incurs:
+- Full message resolution
+- Device stack traversal
+- State updates
+
+**Optimization Strategies:**
+1. Minimize number of passes
+2. Cache intermediate results
+3. Use conditional passes
+4. Skip passes when possible
+
+### Pass Count Guidelines
+
+- **1 pass**: Simple operations
+- **2-3 passes**: Most complex workflows
+- **4-5 passes**: Highly iterative algorithms
+- **5+ passes**: Rare; consider alternative approaches
+
+---
+
+## Error Handling
+
+### Invalid Pass Configuration
+
+```erlang
+% Missing passes field - defaults to 1
+Msg = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"pass">> => 1
+}
+% Behaves as single-pass
+
+% Pass exceeds passes
+Msg = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 2,
+    <<"pass">> => 3
+}
+% Returns {ok, Msg} - treats as complete
+```
+
+---
+
+## Comparison with Other Patterns
+
+### vs. Recursion
+
+**Multipass:**
+- Structured pass count
+- Automatic pass increment
+- Clear termination
+
+**Recursion:**
+- Flexible control flow
+- Manual state management
+- Complex termination logic
+
+### vs. Loops
+
+**Multipass:**
+- Message-based iteration
+- Immutable state between passes
+- Distributed execution friendly
+
+**Loops:**
+- Local iteration
+- Mutable state
+- Single-machine execution
+
+---
+
+## References
+
+- **dev_message.erl** - Message device for delegation
+- **dev_monitor.erl** - Monitoring multi-pass execution
+- **hb_ao.erl** - AO-Core resolution system
+- **Stack Devices** - Device stacking framework
+
+---
+
+## Notes
+
+1. **Pass Increment**: Automatic pass counter increment by runtime
+2. **Delegation**: `keys` and `set` always delegate to `dev_message`
+3. **Termination**: Returns `{ok, Msg}` when pass equals passes
+4. **Repass Signal**: Returns `{pass, Msg}` to trigger reexecution
+5. **Default Values**: Missing fields default to 1
+6. **Pass Index**: 1-indexed (first pass is 1, not 0)
+7. **State Immutable**: Each pass sees previous pass results
+8. **Stack Integration**: Works seamlessly with device stacks
+9. **Performance**: Each pass incurs full resolution overhead
+10. **Testing**: Easy to test with simple pass counter checks
+11. **Flexibility**: Pass count can be computed dynamically
+12. **Monitoring**: Compatible with `dev_monitor` for observation
+13. **Error Handling**: Gracefully handles edge cases
+14. **Composability**: Combines with other devices in stacks
+15. **Simplicity**: Minimal API for maximum flexibility

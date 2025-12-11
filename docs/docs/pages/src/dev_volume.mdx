@@ -1,0 +1,467 @@
+# dev_volume.erl - Secure Volume Management Device
+
+## Overview
+
+**Purpose:** Manage encrypted storage volumes for HyperBEAM nodes  
+**Module:** `dev_volume`  
+**Device Name:** `volume@1.0`  
+**Type:** Storage infrastructure device
+
+This module handles encrypted storage operations for HyperBEAM, providing secure data persistence through LUKS encryption. It manages the complete lifecycle of encrypted volumes from detection to creation, formatting, and mounting, automatically reconfiguring node storage paths to use mounted volumes.
+
+## Key Responsibilities
+
+- Volume detection and initialization
+- Encrypted partition creation and formatting
+- Secure mounting using cryptographic keys
+- Store path reconfiguration
+- Automatic handling of various system states
+
+## Security Model
+
+- **Data at Rest Protection:** LUKS encryption for all volumes
+- **Volume Sanitization:** Proper secure mounting procedures
+- **Configuration-Only:** Operations only apply configuration from node options
+- **No HTTP Commands:** Cannot format disks via HTTP requests
+- **OS Permission Protection:** Safeguarded by host operating system permissions
+
+## Dependencies
+
+- **HyperBEAM:** `hb_opts`, `hb_volume`, `hb_http_server`
+- **Erlang/OTP:** `crypto`, `public_key`
+- **Includes:** `include/hb.hrl`, `include/public_key.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info(Msg) -> InfoMap.
+-spec info(Msg1, Msg2, Opts) -> {ok, Response}.
+
+%% Volume Operations
+-spec mount(M1, M2, Opts) -> {ok, binary()} | {error, binary()}.
+-spec public_key(M1, M2, Opts) -> {ok, map()} | {error, binary()}.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1, info/3
+
+```erlang
+-spec info(Msg) -> InfoMap
+    when
+        Msg :: term(),
+        InfoMap :: map().
+
+-spec info(Msg1, Msg2, Opts) -> {ok, Response}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Response :: map().
+```
+
+**Description:** Returns device information. The arity-1 version exports available functions, while arity-3 returns detailed HTTP response with API documentation.
+
+**Exported Functions:**
+- `info`
+- `mount`
+- `public_key`
+
+**Test Code:**
+```erlang
+-module(dev_volume_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_exports_test() ->
+    Info = dev_volume:info(#{}),
+    ?assertEqual([<<"info">>, <<"mount">>, <<"public_key">>], maps:get(exports, Info)).
+
+info_http_response_test() ->
+    {ok, Response} = dev_volume:info(#{}, #{}, #{}),
+    ?assertEqual(200, maps:get(<<"status">>, Response)),
+    Body = maps:get(<<"body">>, Response),
+    ?assert(maps:is_key(<<"api">>, Body)),
+    ?assert(maps:is_key(<<"mount">>, maps:get(<<"api">>, Body))).
+```
+
+---
+
+### 2. mount/3
+
+```erlang
+-spec mount(M1, M2, Opts) -> {ok, binary()} | {error, binary()}
+    when
+        M1 :: term(),
+        M2 :: term(),
+        Opts :: map().
+```
+
+**Description:** Handles the complete process of secure encrypted volume mounting. Validates encryption key, checks device/partition existence, creates and formats partitions as needed, mounts the volume, and updates node store configuration.
+
+**Mount Process:**
+1. Validate encryption key is present
+2. Check if base device exists
+3. Check if partition exists on device
+4. If partition exists, attempt to mount
+5. If not, create partition, format with encryption, and mount
+6. Update node's store configuration
+
+**Required Configuration Options:**
+- `priv_volume_key` - The encryption key (can be encrypted)
+- `volume_device` - Base device path (e.g., `/dev/sdb`)
+- `volume_partition` - Partition path (e.g., `/dev/sdb1`)
+- `volume_partition_type` - Filesystem type (e.g., `ext4`)
+- `volume_name` - Name for encrypted volume
+- `volume_mount_point` - Where to mount (e.g., `/mnt/secure`)
+- `volume_store_path` - Store path on volume
+
+**Optional Configuration:**
+- `volume_skip_decryption` - Set to `<<"true">>` to skip key decryption
+
+**Test Code:**
+```erlang
+-module(dev_volume_mount_test).
+-include_lib("eunit/include/eunit.hrl").
+
+mount_missing_key_test() ->
+    Opts = #{
+        volume_device => <<"/dev/sdb">>,
+        volume_partition => <<"/dev/sdb1">>,
+        volume_partition_type => <<"ext4">>,
+        volume_name => <<"secure">>,
+        volume_mount_point => <<"/mnt/secure">>,
+        volume_store_path => <<"/mnt/secure/store">>
+        % Missing priv_volume_key
+    },
+    Result = dev_volume:mount(#{}, #{}, Opts),
+    ?assertMatch({error, _}, Result).
+
+mount_missing_config_test() ->
+    Opts = #{
+        priv_volume_key => <<"test-key">>
+        % Missing other required options
+    },
+    Result = dev_volume:mount(#{}, #{}, Opts),
+    ?assertMatch({error, _}, Result).
+```
+
+---
+
+### 3. public_key/3
+
+```erlang
+-spec public_key(M1, M2, Opts) -> {ok, map()} | {error, binary()}
+    when
+        M1 :: term(),
+        M2 :: term(),
+        Opts :: map().
+```
+
+**Description:** Returns the node's public key for secure key exchange. Allows users to encrypt their volume key with the node's public key before sending it, ensuring sensitive keys are never transmitted in plaintext.
+
+**Key Exchange Process:**
+1. User requests node's public key
+2. User encrypts volume key with public key
+3. User sends encrypted key to node
+4. Node decrypts using its private key
+5. Node uses decrypted key for volume encryption
+
+**Test Code:**
+```erlang
+-module(dev_volume_public_key_test).
+-include_lib("eunit/include/eunit.hrl").
+
+public_key_success_test() ->
+    Wallet = ar_wallet:new(),
+    Opts = #{ priv_wallet => Wallet },
+    {ok, Result} = dev_volume:public_key(#{}, #{}, Opts),
+    ?assert(maps:is_key(<<"public_key">>, Result)),
+    ?assert(maps:is_key(<<"format">>, Result)),
+    ?assertEqual(<<"PEM">>, maps:get(<<"format">>, Result)).
+
+public_key_no_wallet_test() ->
+    Opts = #{},
+    Result = dev_volume:public_key(#{}, #{}, Opts),
+    ?assertMatch({error, <<"Node wallet not available">>}, Result).
+```
+
+---
+
+## Volume Lifecycle
+
+### State Detection Flow
+
+```
+1. Check base device exists
+   ├─ No → Error: Device not found
+   └─ Yes → Continue
+       
+2. Check partition exists
+   ├─ No → Create partition → Format → Mount
+   └─ Yes → Check if mounted
+       ├─ No → Mount existing
+       └─ Yes → Update store path
+```
+
+### Creation Flow
+
+```
+Device exists
+  ↓
+Create partition (parted/fdisk)
+  ↓
+Format with LUKS (cryptsetup)
+  ↓
+Mount encrypted volume
+  ↓
+Update store configuration
+  ↓
+Success
+```
+
+---
+
+## Configuration Examples
+
+### Basic Volume Mount
+
+```erlang
+NodeOpts = #{
+    priv_wallet => ar_wallet:new(),
+    priv_volume_key => <<"my-secure-encryption-key">>,
+    volume_device => <<"/dev/sdb">>,
+    volume_partition => <<"/dev/sdb1">>,
+    volume_partition_type => <<"ext4">>,
+    volume_name => <<"hyperbeam-secure">>,
+    volume_mount_point => <<"/mnt/hyperbeam">>,
+    volume_store_path => <<"/mnt/hyperbeam/store">>
+}.
+```
+
+### With Encrypted Key Exchange
+
+```erlang
+%% Step 1: Get node's public key
+{ok, #{<<"public_key">> := PubKeyPEM}} = 
+    hb_http:get(Node, <<"/~volume@1.0/public_key">>, #{}).
+
+%% Step 2: Encrypt your volume key
+EncryptedKey = encrypt_with_public_key(MyVolumeKey, PubKeyPEM).
+
+%% Step 3: Send encrypted key to mount
+NodeOpts = #{
+    priv_volume_key => EncryptedKey,
+    volume_device => <<"/dev/sdb">>,
+    volume_partition => <<"/dev/sdb1">>,
+    volume_partition_type => <<"ext4">>,
+    volume_name => <<"secure">>,
+    volume_mount_point => <<"/mnt/secure">>,
+    volume_store_path => <<"/mnt/secure/store">>
+}.
+```
+
+### Skip Key Decryption
+
+```erlang
+%% If key is already in plaintext
+NodeOpts = #{
+    priv_volume_key => <<"plaintext-key">>,
+    volume_skip_decryption => <<"true">>,
+    volume_device => <<"/dev/sdb">>,
+    volume_partition => <<"/dev/sdb1">>,
+    volume_partition_type => <<"ext4">>,
+    volume_name => <<"secure">>,
+    volume_mount_point => <<"/mnt/secure">>,
+    volume_store_path => <<"/mnt/secure/store">>
+}.
+```
+
+---
+
+## Store Configuration
+
+### Automatic Store Update
+
+After successful mount, the device updates node configuration:
+
+```erlang
+%% Before mount
+CurrentStore = [
+    hb_store_fs:init("/tmp/store")
+]
+
+%% After mount
+NewStore = [
+    hb_store_fs:init("/mnt/secure/store")
+]
+
+%% Also updates genesis_wasm_db_dir
+GenesisPath = <<"/mnt/secure/store/cache-mainnet/genesis-wasm">>
+```
+
+---
+
+## Key Management
+
+### Public Key Format
+
+The node's public key is returned in PEM format:
+
+```erlang
+#{
+    <<"public_key">> => <<"-----BEGIN PUBLIC KEY-----\n...">>,
+    <<"format">> => <<"PEM">>
+}
+```
+
+### Key Decryption
+
+Encrypted keys are automatically decrypted using the node's private wallet:
+
+```erlang
+%% Internal process
+1. Extract RSA private key from wallet
+2. Decrypt using RSA OAEP padding
+3. Use decrypted key for volume operations
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+| Error | Description |
+|-------|-------------|
+| Missing required opts | Configuration parameter missing |
+| Device not found | Base device doesn't exist |
+| Partition creation failed | Cannot create partition |
+| Format failed | LUKS formatting error |
+| Mount failed | Cannot mount volume |
+| Store update failed | Store reconfiguration error |
+| No wallet available | Node doesn't have wallet for public_key |
+| Key decrypt failed | Cannot decrypt encrypted key |
+
+### Error Responses
+
+```erlang
+%% Missing configuration
+{error, <<"Required option 'volume_device' not found">>}
+
+%% Device not found
+{error, <<"Device /dev/sdb does not exist">>}
+
+%% Partition already exists
+{ok, <<"Volume mounted and store updated successfully">>}
+
+%% Mount failed
+{error, <<"Failed to mount volume">>}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Initialize node with encrypted volume
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new(),
+    priv_volume_key => <<"secure-key">>,
+    volume_device => <<"/dev/sdb">>,
+    volume_partition => <<"/dev/sdb1">>,
+    volume_partition_type => <<"ext4">>,
+    volume_name => <<"hyperbeam">>,
+    volume_mount_point => <<"/mnt/hyperbeam">>,
+    volume_store_path => <<"/mnt/hyperbeam/store">>
+}).
+
+%% Mount volume via HTTP (with encrypted key exchange)
+{ok, #{<<"public_key">> := PubKey}} = 
+    hb_http:get(Node, <<"/~volume@1.0/public_key">>, #{}),
+EncryptedKey = encrypt_key(MyKey, PubKey),
+{ok, <<"Volume mounted and store updated successfully">>} =
+    hb_http:post(Node, #{
+        <<"path">> => <<"/~volume@1.0/mount">>,
+        <<"priv_volume_key">> => EncryptedKey
+    }, #{}).
+
+%% Check current store configuration
+CurrentStore = hb_opts:get(store, [], NodeOpts).
+```
+
+---
+
+## Internal Operations
+
+### Volume Detection
+
+```erlang
+1. check_base_device/8
+   - Verifies base device exists
+   - Checks partition presence
+   - Routes to appropriate handler
+
+2. check_partition/8
+   - Determines if partition exists
+   - Mounts existing or creates new
+
+3. create_and_mount_partition/8
+   - Creates partition with specified type
+   - Formats with LUKS encryption
+   - Mounts formatted volume
+```
+
+### Store Reconfiguration
+
+```erlang
+1. update_store_path/2
+   - Gets current store from options
+   - Calls hb_volume:change_node_store/2
+   - Returns new store configuration
+
+2. update_node_config/3
+   - Sets new store in node options
+   - Updates genesis_wasm_db_dir path
+   - Persists configuration via hb_http_server:set_opts/1
+```
+
+---
+
+## Security Considerations
+
+1. **Encryption at Rest:** All data protected by LUKS
+2. **Key Protection:** Keys never stored in plaintext
+3. **Secure Exchange:** Public key encryption for key transmission
+4. **OS Permissions:** Host OS controls device access
+5. **Configuration Only:** No arbitrary disk operations via HTTP
+6. **Audit Trail:** All operations logged via events
+
+---
+
+## References
+
+- **Volume Operations** - `hb_volume.erl` for low-level operations
+- **HTTP Server** - `hb_http_server.erl`
+- **Options** - `hb_opts.erl`
+- **LUKS** - Linux Unified Key Setup documentation
+
+---
+
+## Notes
+
+1. **Read-Only via HTTP:** Disk operations only apply node configuration
+2. **OS Protection:** Host permissions control device access
+3. **Automatic Detection:** Handles various volume states automatically
+4. **Store Migration:** Seamlessly switches to mounted volume
+5. **Genesis Path:** Automatically updates WASM genesis database path
+6. **Key Formats:** Supports both plaintext and encrypted keys
+7. **PEM Export:** Public key exported in standard PEM format
+8. **LUKS Encryption:** Industry-standard disk encryption
+9. **Partition Types:** Supports various filesystem types (ext4, xfs, etc.)
+10. **Mount Points:** Configurable mount location

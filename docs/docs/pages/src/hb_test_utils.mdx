@@ -1,0 +1,505 @@
+# hb_test_utils.erl - Testing Utilities & Benchmarking
+
+## Overview
+
+**Purpose:** Testing utilities, benchmarking tools, and test suite management  
+**Module:** `hb_test_utils`  
+**Pattern:** EUnit test helpers with isolated store contexts
+
+This module provides utilities for testing HyperBEAM, including isolated test store generation, parameterized test suites, benchmarking tools, and event comparison utilities. Designed to work seamlessly with EUnit while providing additional functionality for performance testing and multi-configuration test execution.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_store`, `hb_opts`, `hb_maps`, `hb_util`, `hb_event`, `hb_message`, `hb_http_server`, `hb_format`, `hb_features`
+- **Erlang/OTP:** `timer`, `filelib`, `crypto`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Test Store Management
+-spec test_store() -> StoreOpts.
+-spec test_store(Module) -> StoreOpts.
+-spec test_store(Module, Tag) -> StoreOpts.
+
+%% Test Suite Management  
+-spec suite_with_opts(Suite, OptsList) -> [TestGroup].
+-spec run(Name, OptsName, Suite, OptsList) -> Result.
+
+%% Benchmarking
+-spec benchmark(Fun) -> Iterations.
+-spec benchmark(Fun, Time) -> Iterations.
+-spec benchmark(Fun, Time, Procs) -> TotalIterations.
+-spec benchmark_iterations(Fun, N) -> TimeInSeconds.
+-spec benchmark_print(Verb, Iterations) -> ok.
+-spec benchmark_print(Verb, Iterations, Time) -> ok.
+-spec benchmark_print(Verb, Noun, Iterations, Time) -> ok.
+
+%% Event Comparison
+-spec compare_events(Fun, Opts1, Opts2) -> EventsDiff.
+-spec compare_events(Fun, OptsName1, OptsName2, OptsList) -> EventsDiff.
+-spec compare_events(Name, OptsName1, OptsName2, Suite, OptsList) -> EventsDiff.
+
+%% Assertions
+-spec assert_throws(Fun, Args, ExpectedException, Label) -> ok.
+```
+
+---
+
+## Public Functions
+
+### 1. test_store/0, test_store/1, test_store/2
+
+```erlang
+-spec test_store() -> StoreOpts.
+-spec test_store(Module) -> StoreOpts.
+-spec test_store(Module, Tag) -> StoreOpts
+    when
+        Module :: atom(),
+        Tag :: binary(),
+        StoreOpts :: map().
+```
+
+**Description:** Generate a unique, isolated test store with timestamped directory. Ensures each test gets its own clean storage context to prevent interference between tests.
+
+**Test Code:**
+```erlang
+-module(hb_test_utils_store_test).
+-include_lib("eunit/include/eunit.hrl").
+
+test_store_basic_test() ->
+    Store1 = hb_test_utils:test_store(),
+    Store2 = hb_test_utils:test_store(),
+    
+    % Each store should be unique
+    ?assertNotEqual(
+        maps:get(<<"name">>, Store1),
+        maps:get(<<"name">>, Store2)
+    ),
+    
+    % Should have store-module
+    ?assert(maps:is_key(<<"store-module">>, Store1)).
+
+test_store_with_module_test() ->
+    Store = hb_test_utils:test_store(hb_store_lmdb),
+    ?assertEqual(hb_store_lmdb, maps:get(<<"store-module">>, Store)).
+
+test_store_with_tag_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs, <<"my-test">>),
+    Name = maps:get(<<"name">>, Store),
+    ?assert(binary:match(Name, <<"my-test">>) =/= nomatch).
+```
+
+---
+
+### 2. suite_with_opts/2
+
+```erlang
+-spec suite_with_opts(Suite, OptsList) -> [TestGroup]
+    when
+        Suite :: [{TestName, Description, TestFun}],
+        OptsList :: [OptSpec],
+        OptSpec :: #{name := atom(), opts := map(), desc => binary(), skip => [atom()]},
+        TestGroup :: term().
+```
+
+**Description:** Run a test suite with multiple option configurations. Creates isolated store contexts for each test, automatically handles setup/teardown, and supports conditional test skipping and requirement checking.
+
+**Test Code:**
+```erlang
+-module(hb_test_utils_suite_test).
+-include_lib("eunit/include/eunit.hrl").
+
+suite_with_opts_test_() ->
+    Suite = [
+        {test1, "First test", fun(Opts) ->
+            ?assert(is_map(Opts))
+        end},
+        {test2, "Second test", fun(Opts) ->
+            Store = hb_opts:get(store, Opts),
+            ?assert(Store =/= undefined)
+        end}
+    ],
+    
+    OptsList = [
+        #{
+            name => config1,
+            desc => <<"Config 1">>,
+            opts => #{
+                store => hb_test_utils:test_store(hb_store_fs)
+            }
+        },
+        #{
+            name => config2,
+            desc => <<"Config 2">>,
+            opts => #{
+                store => hb_test_utils:test_store(hb_store_lmdb)
+            },
+            skip => [test2]  % Skip test2 for this config
+        }
+    ],
+    
+    hb_test_utils:suite_with_opts(Suite, OptsList).
+```
+
+---
+
+### 3. run/4
+
+```erlang
+-spec run(Name, OptsName, Suite, OptsList) -> Result
+    when
+        Name :: atom(),
+        OptsName :: atom(),
+        Suite :: [{atom(), binary(), fun()}],
+        OptsList :: [map()],
+        Result :: term().
+```
+
+**Description:** Run a single test from a suite with specific options. Useful for debugging individual tests.
+
+**Test Code:**
+```erlang
+-module(hb_test_utils_run_test).
+-include_lib("eunit/include/eunit.hrl").
+
+run_single_test() ->
+    Suite = [
+        {my_test, "Test", fun(Opts) ->
+            ?assertEqual(test_value, maps:get(test_key, Opts))
+        end}
+    ],
+    
+    OptsList = [
+        #{
+            name => test_opts,
+            opts => #{test_key => test_value}
+        }
+    ],
+    
+    Result = hb_test_utils:run(my_test, test_opts, Suite, OptsList),
+    ?assert(Result == ok orelse Result == undefined).
+```
+
+---
+
+### 4. benchmark/1, benchmark/2, benchmark/3
+
+```erlang
+-spec benchmark(Fun) -> Iterations
+    when
+        Fun :: fun(() -> term()),
+        Iterations :: non_neg_integer().
+
+-spec benchmark(Fun, Time) -> Iterations
+    when
+        Fun :: fun(() -> term()),
+        Time :: pos_integer(),
+        Iterations :: non_neg_integer().
+
+-spec benchmark(Fun, Time, Procs) -> TotalIterations
+    when
+        Fun :: fun(() -> term()),
+        Time :: pos_integer(),
+        Procs :: pos_integer(),
+        TotalIterations :: non_neg_integer().
+```
+
+**Description:** Execute a function repeatedly for a duration and count iterations. 3-arity version runs in parallel across multiple processes.
+
+**Test Code:**
+```erlang
+-module(hb_test_utils_benchmark_test).
+-include_lib("eunit/include/eunit.hrl").
+
+benchmark_basic_test() ->
+    Fun = fun() -> lists:sum([1,2,3]) end,
+    Count = hb_test_utils:benchmark(Fun, 1),
+    ?assert(Count > 0),
+    ?assert(is_integer(Count)).
+
+benchmark_parallel_test() ->
+    Fun = fun() -> timer:sleep(1) end,
+    Count = hb_test_utils:benchmark(Fun, 1, 4),
+    ?assert(Count > 0).
+```
+
+---
+
+### 5. benchmark_iterations/2
+
+```erlang
+-spec benchmark_iterations(Fun, N) -> TimeInSeconds
+    when
+        Fun :: fun((integer()) -> term()),
+        N :: pos_integer(),
+        TimeInSeconds :: float().
+```
+
+**Description:** Run a function N times and return total execution time in seconds. Function receives iteration number as argument.
+
+**Test Code:**
+```erlang
+-module(hb_test_utils_iterations_test).
+-include_lib("eunit/include/eunit.hrl").
+
+benchmark_iterations_test() ->
+    Fun = fun(I) -> I * 2 end,
+    Time = hb_test_utils:benchmark_iterations(Fun, 100),
+    ?assert(is_float(Time)),
+    ?assert(Time > 0).
+```
+
+---
+
+### 6. benchmark_print/2, benchmark_print/3, benchmark_print/4
+
+```erlang
+-spec benchmark_print(Verb, Iterations) -> ok.
+-spec benchmark_print(Verb, Iterations, Time) -> ok.
+-spec benchmark_print(Verb, Noun, Iterations, Time) -> ok
+    when
+        Verb :: string(),
+        Noun :: string(),
+        Iterations :: integer(),
+        Time :: number().
+```
+
+**Description:** Print benchmark results in human-readable format to console. Automatically formats large numbers with commas and includes per-second rates.
+
+**Test Code:**
+```erlang
+-module(hb_test_utils_print_test).
+-include_lib("eunit/include/eunit.hrl").
+
+benchmark_print_test() ->
+    ?assertEqual(ok, hb_test_utils:benchmark_print("Processed", 1000)),
+    ?assertEqual(ok, hb_test_utils:benchmark_print("Hashed", 50000, 5)),
+    ?assertEqual(ok, hb_test_utils:benchmark_print("Computed", "hashes", 100000, 10)).
+```
+
+---
+
+### 7. compare_events/3, compare_events/4, compare_events/5
+
+```erlang
+-spec compare_events(Fun, Opts1, Opts2) -> EventsDiff
+    when
+        Fun :: fun((map()) -> term()),
+        Opts1 :: map(),
+        Opts2 :: map(),
+        EventsDiff :: map().
+```
+
+**Description:** Compare events generated by executing a function with two different option sets. Useful for performance analysis and debugging configuration differences.
+
+**Test Code:**
+```erlang
+-module(hb_test_utils_compare_test).
+-include_lib("eunit/include/eunit.hrl").
+
+compare_events_test() ->
+    Fun = fun(Opts) ->
+        Store = hb_opts:get(store, Opts),
+        hb_store:write(Store, <<"key">>, <<"value">>)
+    end,
+    
+    Opts1 = #{store => hb_test_utils:test_store(hb_store_fs)},
+    Opts2 = #{store => hb_test_utils:test_store(hb_store_lmdb)},
+    
+    Diff = hb_test_utils:compare_events(Fun, Opts1, Opts2),
+    ?assert(is_map(Diff)).
+```
+
+---
+
+### 8. assert_throws/4
+
+```erlang
+-spec assert_throws(Fun, Args, ExpectedException, Label) -> ok
+    when
+        Fun :: fun(),
+        Args :: [term()],
+        ExpectedException :: term(),
+        Label :: string().
+```
+
+**Description:** Assert that a function throws a specific exception. Provides better error messages than EUnit's `?assertException`.
+
+**Test Code:**
+```erlang
+-module(hb_test_utils_assert_test).
+-include_lib("eunit/include/eunit.hrl").
+
+assert_throws_test() ->
+    Fun = fun(X) -> 
+        case X of
+            0 -> error(division_by_zero);
+            N -> 100 / N
+        end
+    end,
+    
+    hb_test_utils:assert_throws(Fun, [0], division_by_zero, "Should throw division_by_zero").
+
+assert_throws_no_exception_test() ->
+    Fun = fun(X) -> X * 2 end,
+    ?assertError(
+        _,
+        hb_test_utils:assert_throws(Fun, [5], some_error, "Should fail")
+    ).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create isolated test store
+basic_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:write(Store, <<"key">>, <<"value">>),
+    {ok, Value} = hb_store:read(Store, <<"key">>),
+    ?assertEqual(<<"value">>, Value).
+
+%% Multi-configuration test suite
+my_suite_test_() ->
+    Suite = [
+        {test1, "First test", fun(Opts) -> 
+            % Test logic
+        end},
+        {test2, "Second test", fun(Opts) ->
+            % Test logic
+        end}
+    ],
+    
+    Configs = [
+        #{name => fs, opts => #{store => hb_test_utils:test_store(hb_store_fs)}},
+        #{name => lmdb, opts => #{store => hb_test_utils:test_store(hb_store_lmdb)}}
+    ],
+    
+    hb_test_utils:suite_with_opts(Suite, Configs).
+
+%% Benchmark with reporting
+benchmark_hash_test() ->
+    HashFun = fun() ->
+        crypto:hash(sha256, <<"test data">>)
+    end,
+    
+    Iterations = hb_test_utils:benchmark(HashFun, 5),
+    hb_test_utils:benchmark_print("Hashed", Iterations, 5).
+
+%% Compare performance
+compare_implementations_test() ->
+    TestFun = fun(Opts) ->
+        Implementation = maps:get(impl, Opts),
+        Implementation(<<"data">>)
+    end,
+    
+    Opts1 = #{impl => fun fast_impl/1},
+    Opts2 = #{impl => fun slow_impl/1},
+    
+    Diff = hb_test_utils:compare_events(TestFun, Opts1, Opts2),
+    % Analyze diff...
+```
+
+---
+
+## Benchmarking Output Examples
+
+```erlang
+% Basic benchmark
+benchmark_print("Processed", 10000).
+% Output: "Processed 10,000 in 1s (10,000/s)"
+
+% With custom time
+benchmark_print("Computed", 50000, 5).
+% Output: "Computed 50,000 in 5s (10,000/s)"
+
+% With noun
+benchmark_print("Validated", "messages", 100000, 10).
+% Output: "Validated 100,000 messages in 10s (10,000 messages/s)"
+```
+
+---
+
+## Test Suite Configuration
+
+### OptSpec Structure
+
+```erlang
+#{
+    name => atom(),              % Required: Config identifier
+    opts => map(),               % Required: Options to pass to tests
+    desc => binary(),            % Optional: Human-readable description
+    skip => [atom()],            % Optional: Tests to skip
+    requires => [atom()]         % Optional: Required features/modules
+}
+```
+
+### Requirements Checking
+
+```erlang
+% Skip test if RocksDB not enabled
+#{
+    name => rocks_config,
+    opts => #{store => #{<<"store-module">> => hb_store_rocksdb}},
+    requires => [hb_store_rocksdb]
+}
+```
+
+---
+
+## Performance Testing
+
+### Parallel Benchmarks
+
+```erlang
+% Test scalability
+Fun = fun() -> expensive_operation() end,
+
+Single = hb_test_utils:benchmark(Fun, 5, 1),
+Dual = hb_test_utils:benchmark(Fun, 5, 2),
+Quad = hb_test_utils:benchmark(Fun, 5, 4),
+
+Speedup = Quad / Single,
+io:format("4-core speedup: ~.2fx~n", [Speedup]).
+```
+
+### Iteration-Based Timing
+
+```erlang
+% Precise timing for N operations
+Fun = fun(I) -> 
+    process_item(I)
+end,
+
+Time = hb_test_utils:benchmark_iterations(Fun, 1000),
+PerItem = Time / 1000,
+io:format("Per-item: ~.6fs~n", [PerItem]).
+```
+
+---
+
+## References
+
+- **EUnit** - Erlang unit testing framework
+- **hb_store** - Storage interface
+- **hb_event** - Event tracking system
+- **hb_message** - Message utilities
+
+---
+
+## Notes
+
+1. **Isolated Stores**: Each `test_store()` call creates unique directory
+2. **Automatic Cleanup**: Suite runner resets stores between tests
+3. **Timestamp Uniqueness**: 1ms sleep ensures unique directory names
+4. **Parallel Benchmarks**: Uses message passing for coordination
+5. **Event Comparison**: Captures full event trace for analysis
+6. **Requirement Checking**: Automatically skips tests for disabled features
+7. **Human-Readable Output**: Numbers formatted with commas
+8. **Flexible Assertions**: `assert_throws` provides better error messages
+9. **Store Reset**: Suite runner calls `hb_store:reset` before each test
+10. **Default Benchmark Time**: 1 second when time not specified

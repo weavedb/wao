@@ -1,0 +1,735 @@
+# dev_lua_test_ledgers.erl - Ledger Testing Framework
+
+## Overview
+
+**Purpose:** Testing framework for `hyper-token.lua` ledger implementation  
+**Module:** `dev_lua_test_ledgers`  
+**Test Suite:** Multi-ledger token transfer and routing validation  
+**Pattern:** Client library + Assertions + Test scenarios
+
+This module provides a comprehensive testing framework for token ledgers, including utilities for creating ledgers, executing transfers, managing sub-ledgers, and validating invariants across complex multi-ledger networks.
+
+## Module Structure
+
+The module is organized into four components:
+
+1. **Client Library** - Functions for interacting with ledgers
+2. **Assertion Functions** - Verify ledger state invariants
+3. **Utility Functions** - Normalize and inspect test environments
+4. **Test Cases** - Complete test scenarios
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_util`, `hb_cache`, `hb_message`, `hb_opts`
+- **Arweave:** `ar_wallet`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Client Library Functions
+
+### 1. ledger/2, ledger/3
+
+```erlang
+-spec ledger(Script, Opts) -> Process
+    when
+        Script :: binary() | [binary()],
+        Opts :: map(),
+        Process :: map().
+
+-spec ledger(Script, Extra, Opts) -> Process
+    when
+        Script :: binary() | [binary()],
+        Extra :: map(),
+        Opts :: map(),
+        Process :: map().
+```
+
+**Description:** Generate and write a Lua ledger process to cache. Automatically converts wallet objects in balances to human-readable addresses.
+
+**Parameters:**
+- `Script` - File path(s) to Lua module(s)
+- `Extra` - Additional process fields (e.g., initial balance)
+- `Opts` - Options including `priv_wallet`
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_ledgers_ledger_test).
+-include_lib("eunit/include/eunit.hrl").
+
+create_ledger_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        Opts
+    ),
+    ?assert(is_map(Ledger)),
+    ?assert(maps:is_key(<<"device">>, Ledger)).
+
+create_ledger_with_balance_test() ->
+    Alice = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    AliceAddr = hb_util:human_id(ar_wallet:to_address(Alice)),
+    Balance = dev_lua_test_ledgers:balance(Ledger, AliceAddr, Opts),
+    ?assertEqual(1000, Balance).
+
+create_ledger_multiple_modules_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        [<<"scripts/utils.lua">>, <<"scripts/hyper-token.lua">>],
+        Opts
+    ),
+    ?assert(is_map(Ledger)).
+```
+
+---
+
+### 2. subledger/2, subledger/3
+
+```erlang
+-spec subledger(Root, Opts) -> SubProcess
+    when
+        Root :: map(),
+        Opts :: map(),
+        SubProcess :: map().
+
+-spec subledger(Root, Extra, Opts) -> SubProcess
+    when
+        Root :: map(),
+        Extra :: map(),
+        Opts :: map(),
+        SubProcess :: map().
+```
+
+**Description:** Create a sub-ledger process that references a root ledger. Removes balance and token fields from root, adds token reference.
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_ledgers_subledger_test).
+-include_lib("eunit/include/eunit.hrl").
+
+create_subledger_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Root = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        Opts
+    ),
+    Sub = dev_lua_test_ledgers:subledger(Root, Opts),
+    ?assert(is_map(Sub)),
+    RootID = hb_message:id(Root, all),
+    ?assertEqual(RootID, maps:get(<<"token">>, Sub)).
+
+subledger_no_balance_test() ->
+    Alice = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Root = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    Sub = dev_lua_test_ledgers:subledger(Root, Opts),
+    ?assertNot(maps:is_key(<<"balance">>, Sub)).
+```
+
+---
+
+### 3. transfer/5, transfer/6
+
+```erlang
+-spec transfer(ProcMsg, Sender, Recipient, Quantity, Opts) -> Result
+    when
+        ProcMsg :: map(),
+        Sender :: wallet() | address(),
+        Recipient :: wallet() | address(),
+        Quantity :: integer(),
+        Opts :: map(),
+        Result :: {ok, map()} | {error, term()}.
+
+-spec transfer(ProcMsg, Sender, Recipient, Quantity, Route, Opts) -> Result
+    when
+        Route :: undefined | map() | binary().
+```
+
+**Description:** Execute a token transfer on a ledger, optionally with routing to another ledger.
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_ledgers_transfer_test).
+-include_lib("eunit/include/eunit.hrl").
+
+simple_transfer_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    dev_lua_test_ledgers:transfer(Ledger, Alice, Bob, 500, Opts),
+    ?assertEqual(500, dev_lua_test_ledgers:balance(Ledger, Alice, Opts)),
+    ?assertEqual(500, dev_lua_test_ledgers:balance(Ledger, Bob, Opts)).
+
+routed_transfer_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Root = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    Sub = dev_lua_test_ledgers:subledger(Root, Opts),
+    dev_lua_test_ledgers:transfer(Root, Alice, Bob, 500, Sub, Opts),
+    ?assertEqual(500, dev_lua_test_ledgers:balance(Root, Alice, Opts)),
+    ?assertEqual(500, dev_lua_test_ledgers:balance(Sub, Bob, Opts)).
+```
+
+---
+
+### 4. register/3
+
+```erlang
+-spec register(ProcMsg, Peer, Opts) -> Result
+    when
+        ProcMsg :: map(),
+        Peer :: map() | binary(),
+        Opts :: map(),
+        Result :: {ok, map()}.
+```
+
+**Description:** Register a peer ledger for cross-ledger transfers. Required before tokens can be routed to sub-ledgers.
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_ledgers_register_test).
+-include_lib("eunit/include/eunit.hrl").
+
+register_subledger_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Root = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        Opts
+    ),
+    Sub = dev_lua_test_ledgers:subledger(Root, Opts),
+    {ok, _} = dev_lua_test_ledgers:register(Root, Sub, Opts),
+    Peers = dev_lua_test_ledgers:peers(Root, Opts),
+    SubID = hb_message:id(Sub, all),
+    ?assert(maps:is_key(SubID, Peers)).
+```
+
+---
+
+### 5. balance/3
+
+```erlang
+-spec balance(ProcMsg, User, Opts) -> Balance
+    when
+        ProcMsg :: map(),
+        User :: wallet() | address(),
+        Opts :: map(),
+        Balance :: integer().
+```
+
+**Description:** Retrieve the current balance for a user on a ledger.
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_ledgers_balance_test).
+-include_lib("eunit/include/eunit.hrl").
+
+balance_existing_test() ->
+    Alice = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    ?assertEqual(1000, dev_lua_test_ledgers:balance(Ledger, Alice, Opts)).
+
+balance_zero_test() ->
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    ?assertEqual(0, dev_lua_test_ledgers:balance(Ledger, Bob, Opts)).
+```
+
+---
+
+### 6. balances/2, balances/3
+
+```erlang
+-spec balances(ProcMsg, Opts) -> Balances
+    when
+        ProcMsg :: map(),
+        Opts :: map(),
+        Balances :: map().
+
+-spec balances(Mode, ProcMsg, Opts) -> Balances
+    when
+        Mode :: now | initial | binary().
+```
+
+**Description:** Get all balances on a ledger. Supports viewing current (`now`) or initial state.
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_ledgers_balances_test).
+-include_lib("eunit/include/eunit.hrl").
+
+balances_test() ->
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{
+            <<"balance">> => #{
+                Alice => 1000,
+                Bob => 500
+            }
+        },
+        Opts
+    ),
+    Balances = dev_lua_test_ledgers:balances(Ledger, Opts),
+    ?assertEqual(2, maps:size(Balances)).
+
+initial_balances_test() ->
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    dev_lua_test_ledgers:transfer(Ledger, Alice, Bob, 500, Opts),
+    InitialBalances = dev_lua_test_ledgers:balances(initial, Ledger, Opts),
+    CurrentBalances = dev_lua_test_ledgers:balances(now, Ledger, Opts),
+    ?assertNotEqual(InitialBalances, CurrentBalances).
+```
+
+---
+
+### 7. supply/2, supply/3
+
+```erlang
+-spec supply(ProcMsg, Opts) -> Supply
+    when
+        ProcMsg :: map(),
+        Opts :: map(),
+        Supply :: integer().
+
+-spec supply(Mode, ProcMsg, Opts) -> Supply
+    when
+        Mode :: now | initial.
+```
+
+**Description:** Get total token supply on a ledger.
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_ledgers_supply_test).
+-include_lib("eunit/include/eunit.hrl").
+
+supply_test() ->
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{
+            <<"balance">> => #{
+                Alice => 1000,
+                Bob => 500
+            }
+        },
+        Opts
+    ),
+    ?assertEqual(1500, dev_lua_test_ledgers:supply(Ledger, Opts)).
+
+supply_unchanged_after_transfer_test() ->
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    InitialSupply = dev_lua_test_ledgers:supply(Ledger, Opts),
+    dev_lua_test_ledgers:transfer(Ledger, Alice, Bob, 500, Opts),
+    FinalSupply = dev_lua_test_ledgers:supply(Ledger, Opts),
+    ?assertEqual(InitialSupply, FinalSupply).
+```
+
+---
+
+## Assertion Functions
+
+### 8. assert_supply_conserved/2
+
+```erlang
+-spec assert_supply_conserved(Env, Opts) -> ok
+    when
+        Env :: map() | [map()],
+        Opts :: map().
+```
+
+**Description:** Assert that total supply is conserved across all ledgers in an environment. Critical invariant for token systems.
+
+**Test Code:**
+```erlang
+-module(dev_lua_test_ledgers_assert_test).
+-include_lib("eunit/include/eunit.hrl").
+
+supply_conserved_single_ledger_test() ->
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Ledger = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    dev_lua_test_ledgers:transfer(Ledger, Alice, Bob, 500, Opts),
+    ?assertEqual(ok, dev_lua_test_ledgers:assert_supply_conserved(Ledger, Opts)).
+
+supply_conserved_multi_ledger_test() ->
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Opts = #{ priv_wallet => hb:wallet() },
+    Root = dev_lua_test_ledgers:ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    Sub = dev_lua_test_ledgers:subledger(Root, Opts),
+    dev_lua_test_ledgers:transfer(Root, Alice, Bob, 500, Sub, Opts),
+    ?assertEqual(
+        ok,
+        dev_lua_test_ledgers:assert_supply_conserved([Root, Sub], Opts)
+    ).
+```
+
+---
+
+## Utility Functions
+
+### 9. normalize_env/1
+
+```erlang
+-spec normalize_env(Env) -> NormalizedEnv
+    when
+        Env :: map() | [map()],
+        NormalizedEnv :: map().
+```
+
+**Description:** Convert environment to normalized map format. Handles both single processes and lists of processes.
+
+---
+
+### 10. map/3
+
+```erlang
+-spec map(Processes, Names, Opts) -> FormattedMap
+    when
+        Processes :: [map()],
+        Names :: map(),
+        Opts :: map(),
+        FormattedMap :: map().
+```
+
+**Description:** Create human-readable map of ledger states with custom names for debugging.
+
+---
+
+## Test Scenarios
+
+### Test 1: Simple Transfers
+
+```erlang
+simple_transfer_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Ledger = ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    transfer(Ledger, Alice, Bob, 500, Opts),
+    ?assertEqual(500, balance(Ledger, Alice, Opts)),
+    ?assertEqual(500, balance(Ledger, Bob, Opts)),
+    assert_supply_conserved(Ledger, Opts).
+```
+
+**Validates:**
+- Basic token transfers work
+- Balances update correctly
+- Supply is conserved
+
+---
+
+### Test 2: Cross-Ledger Routing
+
+```erlang
+cross_ledger_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Root = ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    Sub = subledger(Root, Opts),
+    transfer(Root, Alice, Bob, 500, Sub, Opts),
+    ?assertEqual(500, balance(Root, Alice, Opts)),
+    ?assertEqual(0, balance(Root, Bob, Opts)),
+    ?assertEqual(500, balance(Sub, Bob, Opts)),
+    assert_supply_conserved([Root, Sub], Opts).
+```
+
+**Validates:**
+- Tokens can be routed between ledgers
+- Balances update on correct ledgers
+- Total supply is conserved
+
+---
+
+### Test 3: Multi-Hop Routing
+
+```erlang
+multi_hop_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Charlie = ar_wallet:new(),
+    Root = ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{ <<"balance">> => #{ Alice => 1000 } },
+        Opts
+    ),
+    Sub1 = subledger(Root, Opts),
+    Sub2 = subledger(Root, Opts),
+    % Alice → Bob on Sub1
+    transfer(Root, Alice, Bob, 500, Sub1, Opts),
+    % Bob → Charlie on Sub2
+    transfer(Sub1, Bob, Charlie, 300, Sub2, Opts),
+    ?assertEqual(500, balance(Root, Alice, Opts)),
+    ?assertEqual(200, balance(Sub1, Bob, Opts)),
+    ?assertEqual(300, balance(Sub2, Charlie, Opts)),
+    assert_supply_conserved([Root, Sub1, Sub2], Opts).
+```
+
+**Validates:**
+- Multi-hop routing between ledgers
+- Balance tracking across hops
+- Conservation across network
+
+---
+
+### Test 4: Authority Validation
+
+```erlang
+authority_test() ->
+    Opts = #{ priv_wallet => hb:wallet() },
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    UnauthorizedWallet = ar_wallet:new(),
+    Ledger = ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{
+            <<"balance">> => #{ Alice => 1000 },
+            <<"authority">> => [hb_util:human_id(hb:wallet())]
+        },
+        Opts
+    ),
+    % Authorized transfer succeeds
+    transfer(Ledger, Alice, Bob, 500, Opts),
+    ?assertEqual(500, balance(Ledger, Bob, Opts)),
+    % Unauthorized transfer fails
+    UnauthorizedOpts = Opts#{ priv_wallet => UnauthorizedWallet },
+    transfer(Ledger, Alice, Bob, 500, UnauthorizedOpts),
+    ?assertEqual(500, balance(Ledger, Bob, UnauthorizedOpts)).
+```
+
+**Validates:**
+- Authority checking works
+- Unauthorized transfers are rejected
+- Authorized transfers succeed
+
+---
+
+### Test 5: Multi-Scheduler
+
+```erlang
+multischeduler_test() ->
+    NodeWallet = ar_wallet:new(),
+    Scheduler2 = ar_wallet:new(),
+    Alice = ar_wallet:new(),
+    Bob = ar_wallet:new(),
+    Opts = #{
+        priv_wallet => NodeWallet,
+        identities => #{
+            <<"extra-scheduler">> => #{
+                priv_wallet => Scheduler2
+            }
+        }
+    },
+    Ledger = ledger(
+        <<"scripts/hyper-token.lua">>,
+        #{
+            <<"balance">> => #{ Alice => 1000 },
+            <<"scheduler">> => [
+                hb_util:human_id(NodeWallet),
+                hb_util:human_id(Scheduler2)
+            ],
+            <<"scheduler-required">> => [
+                hb_util:human_id(NodeWallet)
+            ]
+        },
+        Opts
+    ),
+    transfer(Ledger, Alice, Bob, 100, Opts),
+    ?assertEqual(100, balance(Ledger, Bob, Opts)).
+```
+
+**Validates:**
+- Multi-scheduler support
+- Scheduler requirement constraints
+- Cross-scheduler validation
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create ledger with initial balances
+Ledger = dev_lua_test_ledgers:ledger(
+    <<"scripts/hyper-token.lua">>,
+    #{
+        <<"balance">> => #{
+            Alice => 1000,
+            Bob => 500
+        }
+    },
+    Opts
+).
+
+%% Create sub-ledger network
+Root = dev_lua_test_ledgers:ledger(Script, Opts),
+Sub1 = dev_lua_test_ledgers:subledger(Root, Opts),
+Sub2 = dev_lua_test_ledgers:subledger(Root, Opts).
+
+%% Execute routed transfer
+dev_lua_test_ledgers:transfer(
+    SourceLedger,
+    Sender,
+    Recipient,
+    Amount,
+    TargetLedger,
+    Opts
+).
+
+%% Check balances
+Balance = dev_lua_test_ledgers:balance(Ledger, User, Opts),
+AllBalances = dev_lua_test_ledgers:balances(Ledger, Opts).
+
+%% Verify invariants
+dev_lua_test_ledgers:assert_supply_conserved([Root, Sub1, Sub2], Opts).
+
+%% Get total across ledgers
+Total = dev_lua_test_ledgers:balance_total(
+    #{root => Root, sub => Sub},
+    Alice,
+    Opts
+).
+```
+
+---
+
+## Testing Best Practices
+
+### 1. Always Check Supply Conservation
+```erlang
+% After any series of transfers
+assert_supply_conserved(AllLedgers, Opts)
+```
+
+### 2. Use Wallet Conversion
+```erlang
+% The library handles wallet→address conversion
+Ledger = ledger(Script, #{ <<"balance">> => #{ Wallet => Amount } }, Opts)
+% No need to manually convert to addresses
+```
+
+### 3. Test Multi-Ledger Scenarios
+```erlang
+% Create network
+Root = ledger(Script, Opts),
+Sub1 = subledger(Root, Opts),
+Sub2 = subledger(Root, Opts),
+
+% Test routing
+transfer(Root, Alice, Bob, 100, Sub1, Opts),
+transfer(Sub1, Bob, Charlie, 50, Sub2, Opts),
+
+% Verify
+assert_supply_conserved([Root, Sub1, Sub2], Opts)
+```
+
+### 4. Test Authority Scenarios
+```erlang
+% Test with authorized wallet
+Opts1 = #{ priv_wallet => AuthorizedWallet },
+transfer(Ledger, Alice, Bob, 100, Opts1),
+
+% Test with unauthorized wallet
+Opts2 = #{ priv_wallet => UnauthorizedWallet },
+transfer(Ledger, Alice, Bob, 100, Opts2),
+% Verify it failed
+```
+
+---
+
+## References
+
+- **hyper-token.lua** - Token ledger implementation
+- **dev_lua.erl** - Lua execution device
+- **hb_ao.erl** - AO-Core resolution
+- **hb_cache.erl** - Process caching
+- **ar_wallet.erl** - Wallet management
+
+---
+
+## Notes
+
+1. **Wallet Conversion**: Automatically converts wallets to addresses in balances
+2. **Supply Conservation**: Critical invariant validated across all tests
+3. **Sub-Ledger Support**: Full support for hierarchical ledger structures
+4. **Routing**: Supports arbitrary routing between registered ledgers
+5. **Authority**: Validates scheduler and authority constraints
+6. **Multi-Scheduler**: Supports multiple schedulers with requirements
+7. **Human-Readable**: Uses human IDs for better test readability
+8. **State Tracking**: Tracks both initial and current states
+9. **Normalization**: Provides utilities for inspecting complex environments
+10. **Assertion Library**: Rich set of assertions for ledger invariants
+11. **Test Utilities**: Helper functions reduce boilerplate
+12. **Network Topology**: Can test arbitrary ledger network topologies
+13. **Registration**: Supports explicit peer registration
+14. **Balance Queries**: Multiple ways to query balances
+15. **Debug Support**: Map formatting for readable debug output

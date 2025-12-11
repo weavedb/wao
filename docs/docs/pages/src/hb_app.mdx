@@ -1,0 +1,437 @@
+# hb_app.erl - HyperBEAM Application Module
+
+## Overview
+
+**Purpose:** OTP application entry point for HyperBEAM  
+**Module:** `hb_app`  
+**Behavior:** `application`  
+**Startup:** Initializes all core services and supervision tree
+
+This module serves as the main OTP application callback, responsible for starting and stopping the HyperBEAM node in a supervised manner.
+
+## Dependencies
+
+- **Erlang/OTP:** `application`
+- **HyperBEAM:** `hb`, `hb_sup`, `hb_http_server`, `dev_scheduler_registry`
+- **Arweave:** `ar_timestamp`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Application Callbacks
+-spec start(StartType, StartArgs) -> {ok, PID} | {error, Reason}
+    when
+        StartType :: normal | {takeover, Node} | {failover, Node},
+        StartArgs :: term(),
+        PID :: pid(),
+        Reason :: term().
+
+-spec stop(State) -> ok
+    when State :: term().
+```
+
+---
+
+## Public Functions
+
+### 1. start/2
+
+```erlang
+-spec start(StartType, StartArgs) -> {ok, PID}
+    when
+        StartType :: normal | {takeover, Node} | {failover, Node},
+        StartArgs :: term(),
+        PID :: pid().
+```
+
+**Description:** Start the HyperBEAM application. Initializes core systems in sequence:
+1. System initialization (`hb:init/0`)
+2. Supervision tree (`hb_sup:start_link/0`)
+3. Device scheduler registry
+4. Timestamp cache server
+5. HTTP server
+
+**Startup Sequence:**
+```erlang
+hb:init()
+  └─> Set backtrace depth
+  └─> Start naming service
+
+hb_sup:start_link()
+  └─> Start supervision tree
+  └─> Launch supervised workers
+
+dev_scheduler_registry:start()
+  └─> Initialize device scheduler
+
+ar_timestamp:start()
+  └─> Start timestamp cache (15s refresh)
+
+hb_http_server:start()
+  └─> Start HTTP server (Cowboy)
+  └─> Configure routes
+```
+
+**Test Code:**
+```erlang
+-module(hb_app_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_test() ->
+    {ok, SupPid} = hb_app:start(normal, []),
+    ?assert(is_pid(SupPid)),
+    ?assert(is_process_alive(SupPid)),
+    
+    % Verify timestamp server started
+    ?assertNotEqual(undefined, whereis(ar_timestamp)),
+    
+    % Verify HTTP server started
+    % (Check would depend on hb_http_server implementation)
+    
+    % Cleanup
+    hb_app:stop([]).
+
+start_initializes_system_test() ->
+    % Ensure clean state
+    {ok, _} = hb_app:start(normal, []),
+    
+    % Verify system initialized
+    StackDepth = erlang:system_flag(backtrace_depth, 20),
+    ?assert(is_integer(StackDepth)),
+    
+    % Cleanup
+    hb_app:stop([]).
+
+start_scheduler_registry_test() ->
+    {ok, _} = hb_app:start(normal, []),
+    
+    % Verify scheduler registry available
+    % (Specific check depends on dev_scheduler_registry API)
+    
+    hb_app:stop([]).
+```
+
+---
+
+### 2. stop/1
+
+```erlang
+-spec stop(State) -> ok
+    when State :: term().
+```
+
+**Description:** Stop the HyperBEAM application. Clean shutdown of all services.
+
+**Test Code:**
+```erlang
+-module(hb_app_stop_test).
+-include_lib("eunit/include/eunit.hrl").
+
+stop_test() ->
+    {ok, SupPid} = hb_app:start(normal, []),
+    
+    ok = hb_app:stop([]),
+    
+    % Process should be stopped
+    timer:sleep(100),
+    ?assert(not is_process_alive(SupPid)).
+
+stop_idempotent_test() ->
+    {ok, _} = hb_app:start(normal, []),
+    
+    ok = hb_app:stop([]),
+    ok = hb_app:stop([]),  % Should not crash
+    
+    ok.
+```
+
+---
+
+## Application Configuration
+
+### .app File
+
+```erlang
+{application, hyperbeam, [
+    {description, "HyperBEAM - AO-Core Protocol Implementation"},
+    {vsn, "1.0.0"},
+    {modules, [hb_app, hb_sup, ...]},
+    {registered, [hb_sup, ar_timestamp, ...]},
+    {applications, [
+        kernel,
+        stdlib,
+        inets,
+        ssl,
+        ranch,
+        cowboy,
+        gun,
+        os_mon
+    ]},
+    {mod, {hb_app, []}},
+    {env, [
+        {port, 8080},
+        {mode, dev},
+        {debug_stack_depth, 20}
+    ]}
+]}.
+```
+
+---
+
+## Startup Dependencies
+
+### Required Applications
+```erlang
+% Must be started before HyperBEAM
+kernel      % Erlang kernel
+stdlib      % Standard library
+inets       % HTTP client/server
+ssl         % SSL/TLS support
+ranch       % Socket acceptor pool
+cowboy      % HTTP server
+gun         % HTTP client
+os_mon      % OS monitoring
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Start application programmatically
+application:ensure_all_started(hyperbeam).
+
+%% Start with custom environment
+application:load(hyperbeam),
+application:set_env(hyperbeam, port, 9000),
+application:set_env(hyperbeam, mode, prod),
+application:start(hyperbeam).
+
+%% Stop application
+application:stop(hyperbeam).
+
+%% Get application info
+application:which_applications().
+%% => [{hyperbeam, "HyperBEAM - AO-Core Protocol", "1.0.0"}, ...]
+
+%% Check if running
+lists:keyfind(hyperbeam, 1, application:which_applications()).
+```
+
+---
+
+## Supervision Tree
+
+```
+hb_sup (supervisor)
+    │
+    ├─> hb_http_server (worker)
+    │   └─> Cowboy HTTP Server
+    │
+    ├─> ar_timestamp (worker)
+    │   ├─> Timestamp cache process
+    │   └─> Refresher process (15s)
+    │
+    ├─> dev_scheduler_registry (worker)
+    │   └─> Device execution scheduler
+    │
+    └─> [Other supervised processes]
+```
+
+---
+
+## Startup Order
+
+```
+1. application:start(hyperbeam)
+   │
+2. hb_app:start(normal, [])
+   │
+3. hb:init()
+   ├─> hb_name:start()
+   └─> Set backtrace_depth
+   │
+4. hb_sup:start_link()
+   └─> Supervisor PID returned
+   │
+5. dev_scheduler_registry:start()
+   └─> Scheduler initialized
+   │
+6. ar_timestamp:start()
+   ├─> Cache process spawned
+   └─> Refresher process spawned
+   │
+7. hb_http_server:start()
+   └─> Cowboy listener started
+```
+
+---
+
+## Error Handling
+
+### Start Failures
+
+```erlang
+% If any initialization step fails, application fails to start
+{ok, _} = hb_app:start(normal, [])
+  % OR
+{error, Reason}
+
+% Common failure reasons:
+% - Port already in use (HTTP server)
+% - Missing dependencies
+% - Configuration errors
+% - Wallet loading failures
+```
+
+### Recovery Strategy
+
+```erlang
+% Supervisor handles process crashes
+% Restart strategy: one_for_one (typical)
+% Max restarts: 5
+% Within: 60 seconds
+
+% If critical process crashes repeatedly:
+% - Supervisor terminates
+% - Application stops
+% - Error logged
+```
+
+---
+
+## Environment Variables
+
+```erlang
+% Set before application start
+application:set_env(hyperbeam, port, 8080).
+application:set_env(hyperbeam, mode, prod).
+application:set_env(hyperbeam, debug_stack_depth, 50).
+application:set_env(hyperbeam, priv_key_location, "/path/to/wallet.json").
+
+% Get during runtime
+Port = application:get_env(hyperbeam, port, 8080).
+```
+
+---
+
+## Testing Strategies
+
+### Unit Tests
+```erlang
+% Test application start/stop
+start_stop_test() ->
+    {ok, _} = hb_app:start(normal, []),
+    ok = hb_app:stop([]).
+
+% Test initialization order
+init_order_test() ->
+    {ok, _} = hb_app:start(normal, []),
+    % Verify all services started
+    ?assertNotEqual(undefined, whereis(ar_timestamp)),
+    ok = hb_app:stop([]).
+```
+
+### Integration Tests
+```erlang
+% Test full application lifecycle
+full_lifecycle_test() ->
+    application:ensure_all_started(hyperbeam),
+    
+    % Make HTTP request
+    URL = "http://localhost:8080/health",
+    {ok, {{_, 200, _}, _, _}} = httpc:request(URL),
+    
+    application:stop(hyperbeam).
+```
+
+---
+
+## Production Deployment
+
+### Release Configuration
+```erlang
+% reltool.config or relx.config
+{release, {hyperbeam, "1.0.0"}, [
+    hyperbeam,
+    sasl,
+    runtime_tools
+]}.
+
+{sys, [
+    {boot_rel, "hyperbeam"},
+    {rel, "hyperbeam", "1.0.0", [
+        kernel,
+        stdlib,
+        sasl,
+        hyperbeam
+    ]}
+]}.
+```
+
+### systemd Service
+```ini
+[Unit]
+Description=HyperBEAM Node
+After=network.target
+
+[Service]
+Type=forking
+User=hyperbeam
+Environment="HOME=/home/hyperbeam"
+WorkingDirectory=/opt/hyperbeam
+ExecStart=/opt/hyperbeam/bin/hyperbeam start
+ExecStop=/opt/hyperbeam/bin/hyperbeam stop
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+---
+
+## Monitoring
+
+### Health Checks
+```erlang
+% Check application status
+is_running() ->
+    case lists:keyfind(hyperbeam, 1, application:which_applications()) of
+        false -> false;
+        {hyperbeam, _, _} -> true
+    end.
+
+% Check critical processes
+health_check() ->
+    Checks = [
+        {ar_timestamp, whereis(ar_timestamp) =/= undefined},
+        {hb_sup, whereis(hb_sup) =/= undefined}
+    ],
+    lists:all(fun({_, Status}) -> Status end, Checks).
+```
+
+---
+
+## References
+
+- **OTP Application Behavior** - Erlang/OTP documentation
+- **Supervision Principles** - OTP design patterns
+- **hb_sup** - Supervisor implementation
+- **hb:init/0** - System initialization
+
+---
+
+## Notes
+
+1. **Application Behavior**: Implements standard OTP application callbacks
+2. **Startup Order**: Fixed sequence ensures proper initialization
+3. **Supervision**: Uses `hb_sup` for process supervision
+4. **Timestamp Server**: Always started for network time sync
+5. **HTTP Server**: Starts on configured port (default 8080)
+6. **Clean Shutdown**: `stop/1` ensures graceful termination
+7. **Error Propagation**: Any init failure stops application start
+8. **No State**: `stop/1` receives empty state (State is ignored)
+9. **Registered Processes**: ar_timestamp, hb_sup are registered names
+10. **Dependencies**: Requires kernel, stdlib, and web stack applications

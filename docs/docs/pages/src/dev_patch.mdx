@@ -1,0 +1,547 @@
+# dev_patch.erl - Message Reorganization & Patching Device
+
+## Overview
+
+**Purpose:** Move and reorganize data between message paths  
+**Module:** `dev_patch`  
+**Pattern:** Source Path → Target Path Data Movement  
+**Version:** Patch@1.0
+
+This device reorganizes messages by moving data from one path to another within message structures. It operates in two modes: moving all data from a source path, or selectively moving PATCH-tagged submessages. Supports both execution-device standard hooks and standalone operation.
+
+## Operation Modes
+
+### 1. All Mode
+Moves **all data** from source path to target path.
+
+### 2. Patches Mode (Default)
+Moves only submessages with:
+- `method` key of `PATCH`
+- `device` key of `patch@1.0`
+
+---
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_path`, `hb_maps`, `hb_message`
+- **Arweave:** None direct
+- **Includes:** `include/hb.hrl`
+- **Standards:** Implements `execution-device` interface
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Primary Functions
+-spec all(Msg1, Msg2, Opts) -> {ok, PatchedMsg} | {error, Reason}.
+-spec patches(Msg1, Msg2, Opts) -> {ok, PatchedMsg} | {error, Reason}.
+
+%% Execution Device Standard Hooks
+-spec init(Msg1, Msg2, Opts) -> {ok, Msg1}.
+-spec compute(Msg1, Msg2, Opts) -> {ok, PatchedMsg}.
+-spec normalize(Msg1, Msg2, Opts) -> {ok, Msg1}.
+-spec snapshot(Msg1, Msg2, Opts) -> {ok, Msg1}.
+```
+
+---
+
+## Path Resolution
+
+### Search Order (for `from` and `to` keys)
+
+1. `patch-X` key in execution message (Msg2)
+2. `X` key in execution message (Msg2)
+3. `patch-X` key in request message (Msg1)
+4. `X` key in request message (Msg1)
+
+Where `X` is either `from` or `to`.
+
+### Path Prefixes
+
+```erlang
+% Paths can be prefixed to specify source message
+<<"base:/path">>  % Relative to Msg1 (base/execution message)
+<<"req:/path">>   % Relative to Msg2 (request message)
+<<"/path">>       % Defaults to Msg1 (base message)
+```
+
+---
+
+## Public Functions
+
+### 1. all/3
+
+```erlang
+-spec all(Msg1, Msg2, Opts) -> {ok, PatchedMsg} | {error, not_found}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        PatchedMsg :: map().
+```
+
+**Description:** Move all data from source path to target path, regardless of content or structure.
+
+**Test Code:**
+```erlang
+-module(dev_patch_all_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+all_mode_basic_test() ->
+    InitState = #{
+        <<"device">> => <<"patch@1.0">>,
+        <<"input">> => #{
+            <<"zones">> => #{
+                <<"1">> => #{
+                    <<"prices">> => #{
+                        <<"apple">> => 100,
+                        <<"banana">> => 200
+                    }
+                },
+                <<"2">> => #{
+                    <<"prices">> => #{
+                        <<"orange">> => 300
+                    }
+                }
+            }
+        },
+        <<"state">> => #{
+            <<"prices">> => #{
+                <<"apple">> => 1000
+            }
+        }
+    },
+    {ok, ResolvedState} = hb_ao:resolve(
+        InitState,
+        #{
+            <<"path">> => <<"all">>,
+            <<"patch-to">> => <<"/state">>,
+            <<"patch-from">> => <<"/input/zones">>
+        },
+        #{}
+    ),
+    ?assertEqual(100, hb_ao:get(<<"state/1/prices/apple">>, ResolvedState, #{})),
+    ?assertEqual(300, hb_ao:get(<<"state/2/prices/orange">>, ResolvedState, #{})),
+    ?assertEqual(not_found, hb_ao:get(<<"input/zones">>, ResolvedState, #{})).
+
+all_with_base_prefix_test() ->
+    BaseMsg = #{
+        <<"device">> => <<"patch@1.0">>,
+        <<"data">> => #{
+            <<"original">> => <<"value1">>
+        }
+    },
+    ReqMsg = #{
+        <<"path">> => <<"all">>,
+        <<"patch-from">> => <<"base:/data">>,
+        <<"patch-to">> => <<"/result">>
+    },
+    {ok, Result} = hb_ao:resolve(BaseMsg, ReqMsg, #{}),
+    ?assertEqual(<<"value1">>, hb_ao:get(<<"result/original">>, Result, #{})),
+    ?assertEqual(not_found, hb_ao:get(<<"data">>, Result, #{})).
+```
+
+---
+
+### 2. patches/3
+
+```erlang
+-spec patches(Msg1, Msg2, Opts) -> {ok, PatchedMsg} | {error, not_found}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        PatchedMsg :: map().
+```
+
+**Description:** Selectively move only submessages marked with `method=PATCH` or `device=patch@1.0` from source to target path. Non-PATCH messages remain at source.
+
+**Filtering Logic:**
+- Extracts messages where `method == <<"PATCH">>`
+- Extracts messages where `device == <<"patch@1.0">>`
+- Removes `commitments` and `Tags` fields from patches
+- Removes `method` field after moving
+- Non-matching messages stay in source
+
+**Test Code:**
+```erlang
+-module(dev_patch_patches_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+patches_mode_basic_test() ->
+    InitState = #{
+        <<"device">> => <<"patch@1.0">>,
+        <<"results">> => #{
+            <<"outbox">> => #{
+                <<"1">> => #{
+                    <<"method">> => <<"PATCH">>,
+                    <<"prices">> => #{
+                        <<"apple">> => 100,
+                        <<"banana">> => 200
+                    }
+                },
+                <<"2">> => #{
+                    <<"method">> => <<"GET">>,
+                    <<"prices">> => #{
+                        <<"apple">> => 1000
+                    }
+                }
+            }
+        },
+        <<"patch-to">> => <<"/">>,
+        <<"patch-from">> => <<"/results/outbox">>
+    },
+    {ok, ResolvedState} = hb_ao:resolve(
+        InitState,
+        <<"compute">>,
+        #{}
+    ),
+    ?assertEqual(100, hb_ao:get(<<"prices/apple">>, ResolvedState, #{})),
+    ?assertEqual(not_found, hb_ao:get(<<"results/outbox/1">>, ResolvedState, #{})),
+    % Non-PATCH message remains in source
+    ?assertMatch(
+        #{<<"method">> := <<"GET">>},
+        hb_ao:get(<<"results/outbox/2">>, ResolvedState, #{})
+    ).
+
+patches_to_submessage_test() ->
+    InitState = #{
+        <<"device">> => <<"patch@1.0">>,
+        <<"results">> => #{
+            <<"outbox">> => #{
+                <<"1">> => hb_message:commit(#{
+                    <<"method">> => <<"PATCH">>,
+                    <<"prices">> => #{
+                        <<"apple">> => 100,
+                        <<"banana">> => 200
+                    }
+                }, hb:wallet())
+            }
+        },
+        <<"state">> => #{
+            <<"prices">> => #{
+                <<"apple">> => 1000
+            }
+        },
+        <<"patch-to">> => <<"/state">>,
+        <<"patch-from">> => <<"/results/outbox">>
+    },
+    {ok, ResolvedState} = hb_ao:resolve(
+        InitState,
+        <<"compute">>,
+        #{}
+    ),
+    ?assertEqual(100, hb_ao:get(<<"state/prices/apple">>, ResolvedState, #{})).
+
+patches_with_device_tag_test() ->
+    InitState = #{
+        <<"device">> => <<"patch@1.0">>,
+        <<"results">> => #{
+            <<"outbox">> => #{
+                <<"1">> => #{
+                    <<"device">> => <<"patch@1.0">>,
+                    <<"data">> => <<"patched-value">>
+                }
+            }
+        },
+        <<"patch-to">> => <<"/">>,
+        <<"patch-from">> => <<"/results/outbox">>
+    },
+    {ok, ResolvedState} = hb_ao:resolve(
+        InitState,
+        <<"compute">>,
+        #{}
+    ),
+    ?assertEqual(<<"patched-value">>, hb_ao:get(<<"data">>, ResolvedState, #{})).
+```
+
+---
+
+### 3. compute/3 (Execution Device Hook)
+
+```erlang
+-spec compute(Msg1, Msg2, Opts) -> {ok, PatchedMsg}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        PatchedMsg :: map().
+```
+
+**Description:** Standard execution-device compute hook. Delegates to `patches/3` for default behavior.
+
+**Test Code:**
+```erlang
+-module(dev_patch_compute_test).
+-include_lib("eunit/include/eunit.hrl").
+
+compute_hook_test() ->
+    State = #{
+        <<"device">> => <<"patch@1.0">>,
+        <<"from">> => #{
+            <<"1">> => #{
+                <<"method">> => <<"PATCH">>,
+                <<"value">> => 42
+            }
+        },
+        <<"to">> => <<"/result">>
+    },
+    {ok, Result} = dev_patch:compute(State, #{}, #{}),
+    ?assertEqual(42, hb_ao:get(<<"result/value">>, Result, #{})).
+```
+
+---
+
+### 4. init/3, normalize/3, snapshot/3
+
+```erlang
+-spec init(Msg1, Msg2, Opts) -> {ok, Msg1}.
+-spec normalize(Msg1, Msg2, Opts) -> {ok, Msg1}.
+-spec snapshot(Msg1, Msg2, Opts) -> {ok, Msg1}.
+```
+
+**Description:** Standard execution-device hooks required for compliance. All pass through Msg1 unchanged.
+
+**Test Code:**
+```erlang
+-module(dev_patch_hooks_test).
+-include_lib("eunit/include/eunit.hrl").
+
+hooks_passthrough_test() ->
+    Msg = #{ <<"data">> => <<"value">> },
+    ?assertEqual({ok, Msg}, dev_patch:init(Msg, #{}, #{})),
+    ?assertEqual({ok, Msg}, dev_patch:normalize(Msg, #{}, #{})),
+    ?assertEqual({ok, Msg}, dev_patch:snapshot(Msg, #{}, #{})).
+```
+
+---
+
+## Path Resolution Examples
+
+```erlang
+%% Absolute path from base message (default)
+#{
+    <<"patch-from">> => <<"/results/outbox">>,
+    <<"patch-to">> => <<"/state">>
+}
+
+%% Explicit base message reference
+#{
+    <<"patch-from">> => <<"base:/results/outbox">>,
+    <<"patch-to">> => <<"/state">>
+}
+
+%% Request message reference
+#{
+    <<"patch-from">> => <<"req:/input/data">>,
+    <<"patch-to">> => <<"/state">>
+}
+
+%% Root path
+#{
+    <<"from">> => <<"/">>,
+    <<"to">> => <<"/backup">>
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Apply PATCH messages from outbox to root state
+State = #{
+    <<"device">> => <<"patch@1.0">>,
+    <<"results">> => #{
+        <<"outbox">> => #{
+            <<"1">> => #{ <<"method">> => <<"PATCH">>, <<"x">> => 1 },
+            <<"2">> => #{ <<"method">> => <<"PATCH">>, <<"y">> => 2 }
+        }
+    },
+    <<"patch-from">> => <<"/results/outbox">>,
+    <<"patch-to">> => <<"/">>
+},
+{ok, Patched} = hb_ao:resolve(State, <<"compute">>, #{}).
+% Result: #{<<"x">> => 1, <<"y">> => 2, ...}
+
+%% Move all data (not just patches)
+State = #{
+    <<"device">> => <<"patch@1.0">>,
+    <<"temp">> => #{ <<"data">> => <<"value">> }
+},
+Request = #{
+    <<"path">> => <<"all">>,
+    <<"from">> => <<"/temp">>,
+    <<"to">> => <<"/permanent">>
+},
+{ok, Moved} = hb_ao:resolve(State, Request, #{}).
+
+%% Use in execution stack
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"stack@1.0">>,
+    <<"execution-stack">> => [
+        <<"lua@5.3a">>,
+        <<"patch@1.0">>,
+        <<"multipass@1.0">>
+    ],
+    <<"patch-from">> => <<"/results/outbox">>,
+    <<"patch-to">> => <<"/">>
+}.
+
+%% Patch with custom set device (e.g., trie)
+State = #{
+    <<"device">> => <<"patch@1.0">>,
+    <<"results">> => #{
+        <<"outbox">> => #{
+            <<"1">> => #{
+                <<"device">> => <<"patch@1.0">>,
+                <<"balances">> => #{
+                    <<"device">> => <<"trie@1.0">>
+                }
+            },
+            <<"2">> => #{
+                <<"device">> => <<"patch@1.0">>,
+                <<"balances">> => #{
+                    <<"A">> => <<"50">>,
+                    <<"B">> => <<"100">>
+                }
+            }
+        }
+    },
+    <<"patch-from">> => <<"/results/outbox">>
+},
+{ok, Result} = hb_ao:resolve(State, <<"compute">>, #{}).
+% Custom devices properly handled during patching
+```
+
+---
+
+## Integration with AO Processes
+
+```erlang
+%% AOS process with state patching
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"stack@1.0">>,
+    <<"execution-stack">> => [
+        <<"wasi@1.0">>,
+        <<"json-iface@1.0">>,
+        <<"wasm-64@1.0">>,
+        <<"patch@1.0">>,      % Apply patches from Lua
+        <<"multipass@1.0">>
+    ]
+},
+
+%% Lua code that generates PATCH messages
+LuaCode = <<"
+    table.insert(ao.outbox.Messages, {
+        method = 'PATCH',
+        x = 'banana',
+        y = 42
+    })
+">>,
+
+%% After execution, patch@1.0 moves PATCH messages to process state
+{ok, Result} = hb_ao:resolve(Process, #{
+    <<"target">> => ProcessID,
+    <<"action">> => <<"Eval">>,
+    <<"data">> => LuaCode
+}, #{}).
+% State updated with x="banana", y=42
+```
+
+---
+
+## Behavior Details
+
+### Source Path Processing
+
+1. Parse `from` path with prefix handling
+2. Resolve path against appropriate message (base or req)
+3. Return error if source not found
+
+### Target Path Application
+
+1. Parse `to` path (always relative to base message)
+2. Apply filtered/all data to target
+3. Remove source data from original location
+
+### PATCH Message Filtering
+
+- Strips `commitments` field
+- Strips `Tags` field
+- Removes `method` field after moving
+- Preserves all other data
+
+### New Source Value
+
+- `all` mode: Sets source to `unset` (removes it)
+- `patches` mode: Keeps non-PATCH messages at source
+
+---
+
+## Error Handling
+
+```erlang
+%% Source path not found
+{error, not_found}
+
+%% Source path exists but is empty
+{ok, MessageWithEmptyTarget}
+
+%% Invalid path syntax
+% Caught by hb_path module
+```
+
+---
+
+## Use Cases
+
+1. **State Updates from Computation Results**
+   - Move PATCH messages from outbox to process state
+   - Common in AO process execution stacks
+
+2. **Data Reorganization**
+   - Move temporary data to permanent locations
+   - Restructure message hierarchies
+
+3. **Selective Message Processing**
+   - Filter specific message types
+   - Apply only relevant updates
+
+4. **Cross-Message Data Transfer**
+   - Move data from request to base message
+   - Consolidate information from multiple sources
+
+5. **Custom Device Integration**
+   - Works with devices having custom `set` implementations
+   - Preserves device-specific behavior (e.g., trie@1.0)
+
+---
+
+## References
+
+- **Execution Device Standard** - Device interface compliance
+- **Stack Device** - `dev_stack.erl` for execution pipelines
+- **AO Process** - `dev_process.erl` for process execution
+- **Path Handling** - `hb_path.erl` for path parsing
+- **Map Operations** - `hb_maps.erl` for deep map manipulation
+
+---
+
+## Notes
+
+1. **Default Mode:** `compute/3` uses `patches` mode, not `all`
+2. **Method Removal:** PATCH method removed after applying
+3. **Commitment Stripping:** Signatures/commitments removed from patches
+4. **Source Deletion:** Source path cleared after successful move
+5. **Path Defaults:** Both `from` and `to` default to `/` if not specified
+6. **Prefix Parsing:** Only `from` supports base:/req: prefixes
+7. **Execution Stack:** Often used as final step in execution pipeline
+8. **Custom Devices:** Respects custom `set` implementations
+9. **Error Return:** Uses `maybe` syntax, returns `{error, not_found}` on failure
+10. **Map Keys:** Works with both string and binary keys in maps

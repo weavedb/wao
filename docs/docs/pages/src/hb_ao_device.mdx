@@ -1,0 +1,584 @@
+# hb_ao_device.erl - Device Management Library
+
+## Overview
+
+**Purpose:** Device loading, verification, and function extraction  
+**Module:** `hb_ao_device`  
+**Pattern:** Device abstraction layer  
+**Security:** Trusted signer verification for remote devices
+
+This module provides services for working with HyperBEAM-compatible AO-Core devices, including loading devices from Arweave, verifying compatibility, and extracting Erlang functions.
+
+## Dependencies
+
+- **Erlang/OTP:** `erlang`
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_util`, `hb_message`, `hb_cache`, `hb_store`, `hb_opts`, `dev_message`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Loading
+-spec load(DeviceID, Opts) -> {ok, Module} | {error, Reason}.
+
+%% Function Extraction
+-spec message_to_fun(Msg, Key, Opts) -> {Status, Device, Function}.
+-spec message_to_device(Msg, Opts) -> Device.
+-spec find_exported_function(Msg, Dev, Key, MaxArity, Opts) -> {ok, Fun} | not_found.
+
+%% Device Information
+-spec info(DeviceModule, Msg, Opts) -> InfoMap.
+-spec info(Msg, Opts) -> InfoMap.
+-spec default() -> DefaultDevice.
+
+%% Validation
+-spec is_exported(Msg, Dev, Key, Opts) -> boolean().
+-spec is_exported(Info, Key, Opts) -> boolean().
+-spec is_direct_key_access(Base, Req, Opts) -> boolean().
+-spec is_direct_key_access(Base, Req, Opts, Store) -> boolean().
+
+%% Utilities
+-spec truncate_args(Fun, Args) -> TruncatedArgs.
+```
+
+---
+
+## Device Resolution Forms
+
+```erlang
+1. Default Device
+   % No device specified → use dev_message
+   
+2. Handler Function
+   % Device has handler in info() → use it
+   
+3. Exported Function
+   % Device exports function named Key → call it
+   
+4. Default Handler
+   % Device has default in info() → use it
+   
+5. Default Device Fallback
+   % No handler → use dev_message
+   
+Error: Device specified but not loadable
+```
+
+---
+
+## Public Functions
+
+### 1. load/2
+
+```erlang
+-spec load(DeviceID, Opts) -> {ok, Module} | {error, Reason}
+    when
+        DeviceID :: binary() | atom(),
+        Opts :: map(),
+        Module :: atom(),
+        Reason :: term().
+```
+
+**Description:** Load a device module. Can load from:
+- Atom: Preloaded device name
+- Binary: Arweave TX ID (if `load_remote_devices` enabled)
+- Map: Device definition
+
+**Security:** Remote devices must be signed by trusted signers.
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_load_test).
+-include_lib("eunit/include/eunit.hrl").
+
+load_preloaded_test() ->
+    Opts = #{
+        preloaded_devices => [
+            #{
+                <<"name">> => <<"test@1.0">>,
+                <<"module">> => dev_message
+            }
+        ]
+    },
+    {ok, Mod} = hb_ao_device:load(<<"test@1.0">>, Opts),
+    ?assertEqual(dev_message, Mod).
+
+load_atom_test() ->
+    {ok, Mod} = hb_ao_device:load(dev_message, #{}),
+    ?assertEqual(dev_message, Mod).
+
+load_not_found_test() ->
+    {error, Reason} = hb_ao_device:load(<<"nonexistent@1.0">>, #{}),
+    ?assert(is_tuple(Reason)).
+
+load_remote_untrusted_test() ->
+    TxID = crypto:strong_rand_bytes(32),
+    Opts = #{
+        load_remote_devices => true,
+        trusted_device_signers => []  % No trusted signers
+    },
+    
+    % Should fail - untrusted signer
+    {error, device_signer_not_trusted} = 
+        hb_ao_device:load(TxID, Opts).
+
+load_beam_device_test() ->
+    % Create BEAM device message
+    DeviceMsg = #{
+        <<"content-type">> => <<"application/beam">>,
+        <<"module-name">> => <<"test_dev">>,
+        <<"body">> => compile_test_module()
+    },
+    
+    % Store it
+    ID = crypto:strong_rand_bytes(32),
+    hb_cache:write(hb_opts:get(store), ID, DeviceMsg),
+    
+    Opts = #{
+        load_remote_devices => true,
+        trusted_device_signers => [test_signer()]
+    },
+    
+    % Load should succeed if signed correctly
+    Result = hb_ao_device:load(ID, Opts),
+    ?assert(element(1, Result) =:= ok orelse element(1, Result) =:= error).
+```
+
+---
+
+### 2. message_to_fun/3
+
+```erlang
+-spec message_to_fun(Msg, Key, Opts) -> {Status, Device, Function}
+    when
+        Msg :: map(),
+        Key :: binary(),
+        Opts :: map(),
+        Status :: ok | add_key,
+        Device :: atom(),
+        Function :: function().
+```
+
+**Description:** Extract the Erlang function that should be called for a given key.
+
+**Returns:**
+- `{ok, Device, Fun}` - Function ready to call
+- `{add_key, Device, Fun}` - Add key as first argument
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_message_to_fun_test).
+-include_lib("eunit/include/eunit.hrl").
+
+message_to_fun_default_device_test() ->
+    Msg = #{<<"data">> => <<"value">>},
+    {Status, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"data">>, #{}),
+    ?assertEqual(dev_message, Dev),
+    ?assert(is_function(Fun)).
+
+message_to_fun_with_handler_test() ->
+    % Device with handler function
+    Msg = #{
+        <<"device">> => #{
+            <<"handler">> => fun(Key, M1, M2, Opts) -> {ok, Key} end
+        }
+    },
+    {add_key, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"test">>, #{}),
+    ?assert(is_map(Dev)),
+    ?assert(is_function(Fun)).
+
+message_to_fun_exported_test() ->
+    Msg = #{<<"device">> => dev_message},
+    {ok, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"get">>, #{}),
+    ?assertEqual(dev_message, Dev),
+    ?assert(is_function(Fun)).
+```
+
+---
+
+### 3. message_to_device/2
+
+```erlang
+-spec message_to_device(Msg, Opts) -> Device
+    when
+        Msg :: map(),
+        Opts :: map(),
+        Device :: atom() | map().
+```
+
+**Description:** Extract device module from message. Returns default if not specified.
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_message_to_device_test).
+-include_lib("eunit/include/eunit.hrl").
+
+message_to_device_default_test() ->
+    Msg = #{<<"data">> => <<"value">>},
+    Dev = hb_ao_device:message_to_device(Msg, #{}),
+    ?assertEqual(dev_message, Dev).
+
+message_to_device_specified_test() ->
+    Msg = #{<<"device">> => <<"custom@1.0">>},
+    Opts = #{
+        preloaded_devices => [
+            #{<<"name">> => <<"custom@1.0">>, <<"module">> => my_device}
+        ]
+    },
+    Dev = hb_ao_device:message_to_device(Msg, Opts),
+    ?assertEqual(my_device, Dev).
+```
+
+---
+
+### 4. find_exported_function/5
+
+```erlang
+-spec find_exported_function(Msg, Dev, Key, MaxArity, Opts) -> 
+    {ok, Function} | not_found
+    when
+        Msg :: map(),
+        Dev :: atom() | map(),
+        Key :: binary() | atom(),
+        MaxArity :: integer(),
+        Opts :: map(),
+        Function :: function().
+```
+
+**Description:** Find function with highest arity ≤ MaxArity that matches the key name.
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_find_exported_test).
+-include_lib("eunit/include/eunit.hrl").
+
+find_exported_function_module_test() ->
+    Msg = #{},
+    {ok, Fun} = hb_ao_device:find_exported_function(
+        Msg, dev_message, get, 3, #{}
+    ),
+    ?assert(is_function(Fun)),
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    ?assert(Arity =< 3).
+
+find_exported_function_map_test() ->
+    Dev = #{
+        <<"my_key">> => fun(M1, M2) -> {ok, M1} end
+    },
+    {ok, Fun} = hb_ao_device:find_exported_function(
+        #{}, Dev, <<"my_key">>, 3, #{}
+    ),
+    ?assert(is_function(Fun)).
+
+find_exported_function_not_found_test() ->
+    Result = hb_ao_device:find_exported_function(
+        #{}, dev_message, <<"nonexistent">>, 3, #{}
+    ),
+    ?assertEqual(not_found, Result).
+```
+
+---
+
+### 5. info/2, info/3
+
+```erlang
+-spec info(Msg, Opts) -> InfoMap.
+-spec info(DeviceModule, Msg, Opts) -> InfoMap
+    when
+        InfoMap :: map().
+```
+
+**Description:** Get device info map. Calls `DevMod:info/0`, `info/1`, or `info/2` if available.
+
+**Info Keys:**
+- `exports` - List of exported keys
+- `excludes` - List of excluded keys
+- `handler` - Override handler function
+- `default` - Default handler for unknown keys
+- `grouper` - Concurrency grouping function
+- `worker` - Server loop function
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_basic_test() ->
+    Msg = #{<<"device">> => dev_message},
+    Info = hb_ao_device:info(Msg, #{}),
+    ?assert(is_map(Info)).
+
+info_with_exports_test() ->
+    % Create device with info
+    -module(test_device).
+    -export([info/0, my_key/2]).
+    
+    info() ->
+        #{
+            exports => [my_key],
+            excludes => []
+        }.
+    
+    my_key(_M1, _M2) -> {ok, <<"result">>}.
+    
+    Info = hb_ao_device:info(test_device, #{}, #{}),
+    ?assert(maps:is_key(exports, Info)).
+
+info_no_function_test() ->
+    Info = hb_ao_device:info(erlang, #{}, #{}),
+    ?assertEqual(#{}, Info).
+```
+
+---
+
+### 6. is_exported/4
+
+```erlang
+-spec is_exported(Msg, Dev, Key, Opts) -> boolean().
+```
+
+**Description:** Check if key is exported by device. Respects `exports` and `excludes` lists.
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_is_exported_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_exported_true_test() ->
+    Info = #{exports => [<<"key1">>, <<"key2">>]},
+    ?assertEqual(true, hb_ao_device:is_exported(Info, <<"key1">>, #{})).
+
+is_exported_false_test() ->
+    Info = #{exports => [<<"key1">>]},
+    ?assertEqual(false, hb_ao_device:is_exported(Info, <<"key2">>, #{})).
+
+is_exported_excluded_test() ->
+    Info = #{
+        exports => [<<"key1">>, <<"key2">>],
+        excludes => [<<"key1">>]
+    },
+    ?assertEqual(false, hb_ao_device:is_exported(Info, <<"key1">>, #{})).
+
+is_exported_no_list_test() ->
+    Info = #{},
+    % Without exports list, defaults to true
+    ?assertEqual(true, hb_ao_device:is_exported(Info, <<"any_key">>, #{})).
+```
+
+---
+
+### 7. is_direct_key_access/3, is_direct_key_access/4
+
+```erlang
+-spec is_direct_key_access(Base, Req, Opts) -> boolean() | unknown.
+-spec is_direct_key_access(Base, Req, Opts, Store) -> boolean() | unknown.
+```
+
+**Description:** Check if key access is "direct" - literal key in map will be returned without device processing.
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_is_direct_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_direct_key_access_message_device_test() ->
+    Base = #{
+        <<"device">> => <<"message@1.0">>,
+        <<"data">> => <<"value">>
+    },
+    Req = #{<<"path">> => <<"data">>},
+    
+    % data is direct access in message@1.0
+    ?assertEqual(true, hb_ao_device:is_direct_key_access(Base, Req, #{})).
+
+is_direct_key_access_message_keys_test() ->
+    Base = #{<<"device">> => <<"message@1.0">>},
+    
+    % get/set/remove are not direct access
+    ?assertEqual(false, 
+        hb_ao_device:is_direct_key_access(Base, #{<<"path">> => <<"get">>}, #{})),
+    ?assertEqual(false, 
+        hb_ao_device:is_direct_key_access(Base, #{<<"path">> => <<"set">>}, #{})).
+
+is_direct_key_access_custom_device_test() ->
+    Base = #{
+        <<"device">> => <<"custom@1.0">>,
+        <<"data">> => <<"value">>
+    },
+    Req = #{<<"path">> => <<"data">>},
+    
+    Result = hb_ao_device:is_direct_key_access(Base, Req, #{}),
+    ?assert(is_boolean(Result) orelse Result =:= unknown).
+```
+
+---
+
+### 8. truncate_args/2
+
+```erlang
+-spec truncate_args(Fun, Args) -> TruncatedArgs
+    when
+        Fun :: function(),
+        Args :: list(),
+        TruncatedArgs :: list().
+```
+
+**Description:** Truncate argument list to match function arity.
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_truncate_test).
+-include_lib("eunit/include/eunit.hrl").
+
+truncate_args_test() ->
+    Fun = fun(A, B) -> {A, B} end,
+    Args = [1, 2, 3, 4, 5],
+    Truncated = hb_ao_device:truncate_args(Fun, Args),
+    ?assertEqual([1, 2], Truncated).
+
+truncate_args_exact_test() ->
+    Fun = fun(A, B, C) -> {A, B, C} end,
+    Args = [1, 2, 3],
+    Truncated = hb_ao_device:truncate_args(Fun, Args),
+    ?assertEqual([1, 2, 3], Truncated).
+
+truncate_args_less_test() ->
+    Fun = fun(A, B, C) -> {A, B, C} end,
+    Args = [1, 2],
+    Truncated = hb_ao_device:truncate_args(Fun, Args),
+    ?assertEqual([1, 2], Truncated).
+```
+
+---
+
+### 9. default/0
+
+```erlang
+-spec default() -> DefaultDevice
+    when DefaultDevice :: atom().
+```
+
+**Description:** Return the default device (`dev_message`).
+
+**Test Code:**
+```erlang
+-module(hb_ao_device_default_test).
+-include_lib("eunit/include/eunit.hrl").
+
+default_test() ->
+    ?assertEqual(dev_message, hb_ao_device:default()).
+```
+
+---
+
+## Device Info Structure
+
+```erlang
+#{
+    %% Export control
+    exports => [key1, key2, ...],      % Only these keys exported
+    excludes => [internal_key, ...],   % Exclude from exports
+    
+    %% Handlers
+    handler => Function,                % Override all key handling
+    default => DefaultFunction | Mod,   % Default for unknown keys
+    
+    %% Concurrency
+    grouper => fun(M1, M2) -> Group end, % Execution grouping
+    worker => fun() -> loop() end,       % Server loop
+    
+    %% Other
+    custom_field => Value                % Device-specific data
+}
+```
+
+---
+
+## Remote Device Loading
+
+### Requirements
+```erlang
+% Must be enabled
+load_remote_devices => true
+
+% Device must be signed by trusted signer
+trusted_device_signers => [<<"signer_address1">>, <<"signer_address2">>]
+
+% Device message must have
+#{
+    <<"content-type">> => <<"application/beam">>,
+    <<"module-name">> => <<"device_name">>,
+    <<"body">> => <<BEAM binary>>,
+    <<"requires-", Key/binary>> => SystemValue  % Optional compatibility
+}
+```
+
+### Compatibility Verification
+```erlang
+% Device can specify system requirements
+#{
+    <<"requires-otp_release">> => <<"27">>,
+    <<"requires-machine">> => <<"BEAM">>,
+    <<"requires-wordsize">> => <<"8">>
+}
+
+% System must match
+erlang:system_info(otp_release) == <<"27">>
+erlang:system_info(machine) == <<"BEAM">>
+erlang:system_info(wordsize) == 8
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Load preloaded device
+{ok, DevMod} = hb_ao_device:load(<<"my_device@1.0">>, Opts).
+
+%% Get function for key
+{ok, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"key">>, Opts),
+Result = apply(Fun, [Msg1, Msg2, Opts]).
+
+%% Check if key is direct access
+case hb_ao_device:is_direct_key_access(Base, Req, Opts) of
+    true -> maps:get(Key, Base);
+    false -> resolve_via_device(Base, Req, Opts)
+end.
+
+%% Get device info
+Info = hb_ao_device:info(dev_message, #{}, #{}),
+Exports = maps:get(exports, Info, []).
+
+%% Check if exported
+case hb_ao_device:is_exported(Msg, Dev, Key, Opts) of
+    true -> call_function(Dev, Key);
+    false -> use_default_handler()
+end.
+```
+
+---
+
+## References
+
+- **Device System** - Core AO-Core device architecture
+- **hb_ao** - Resolution engine
+- **dev_message** - Default device implementation
+- **Arweave** - Remote device storage
+
+---
+
+## Notes
+
+1. **Default Device**: Always `dev_message`
+2. **Security**: Remote devices require trusted signers
+3. **BEAM Format**: Remote devices must be compiled BEAM files
+4. **Compatibility**: Devices can specify system requirements
+5. **Arity Matching**: Functions matched by name and arity
+6. **Info Function**: Optional, returns empty map if missing
+7. **Handler Priority**: Handler > Exported > Default > dev_message
+8. **Direct Access**: Optimization for literal key reads
+9. **Excludes**: Keys in excludes list not exported even if in exports
+10. **Argument Truncation**: Functions called with correct arity

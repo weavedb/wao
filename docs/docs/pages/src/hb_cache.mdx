@@ -1,0 +1,656 @@
+# hb_cache.erl - Message & Compute Result Storage
+
+## Overview
+
+**Purpose:** Cache AO-Core protocol messages and compute results  
+**Module:** `hb_cache`  
+**Pattern:** Three-layer data representation with lazy loading  
+**Storage:** Key-value abstraction via `hb_store`
+
+This module provides caching infrastructure for HyperBEAM, storing messages, compute results, and hashpath graphs in key-value stores. It implements lazy loading of nested messages to minimize memory usage and supports content deduplication through binary hashing.
+
+## Three-Layer Data Representation
+
+1. **Raw Binary Data**: Stored at content hash for automatic deduplication
+2. **Hashpath Graph**: Links between hashpaths, keys, and underlying data
+3. **Messages**: Referrable by committed or uncommitted IDs
+
+## Lazy Loading
+
+Nested keys are loaded on-demand rather than eagerly:
+
+```erlang
+% Link format
+{link, ID, LinkOpts}
+
+% LinkOpts suggest loading options
+LinkOpts = #{
+    <<"type">> => <<"link">>,
+    <<"lazy">> => true,
+    store => Store
+}
+```
+
+## Dependencies
+
+- **HyperBEAM:** `hb_store`, `hb_opts`, `hb_util`, `hb_maps`, `hb_ao`, `hb_path`, `hb_link`, `hb_message`, `hb_private`, `dev_codec_structured`
+- **Arweave:** `ar_wallet`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lazy Loading
+-spec ensure_loaded(Value) -> LoadedValue.
+-spec ensure_loaded(Value, Opts) -> LoadedValue.
+-spec ensure_all_loaded(Message) -> FullyLoadedMessage.
+-spec ensure_all_loaded(Message, Opts) -> FullyLoadedMessage.
+
+%% Read/Write
+-spec read(ID, Opts) -> {ok, Message} | not_found.
+-spec read_resolved(Msg1, Msg2, Opts) -> {hit, Result} | miss.
+-spec write(Message, Opts) -> {ok, Path}.
+-spec write_binary(Path, Binary, Opts) -> {ok, Path}.
+-spec write_hashpath(Message, Opts) -> {ok, Path}.
+
+%% Utilities
+-spec link(Store, Path, Opts) -> Link.
+-spec list(Path, Opts) -> [Name].
+-spec list_numbered(Path, Opts) -> [Integer].
+-spec match(Template, Opts) -> {ok, [ID]}.
+```
+
+---
+
+## Core Functions
+
+### 1. ensure_loaded/1, ensure_loaded/2
+
+```erlang
+-spec ensure_loaded(Value, Opts) -> LoadedValue
+    when
+        Value :: term(),
+        Opts :: map(),
+        LoadedValue :: term().
+```
+
+**Description:** Load first layer of a value from cache if it's a link. Nested messages remain as links. Throws if link cannot be resolved.
+
+**Test Code:**
+```erlang
+-module(hb_cache_ensure_loaded_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+ensure_loaded_link_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    % Write data
+    Data = #{<<"key">> => <<"value">>},
+    {ok, ID} = hb_cache:write(Data, Opts),
+    
+    % Create link
+    Link = {link, ID, #{store => Store}},
+    Loaded = hb_cache:ensure_loaded(Link, Opts),
+    
+    ?assert(is_map(Loaded)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, Loaded)).
+
+ensure_loaded_non_link_test() ->
+    Value = <<"direct value">>,
+    Loaded = hb_cache:ensure_loaded(Value, #{}),
+    ?assertEqual(Value, Loaded).
+
+ensure_loaded_nested_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Inner = #{<<"inner">> => <<"data">>},
+    {ok, InnerID} = hb_cache:write(Inner, Opts),
+    
+    Outer = #{<<"outer">> => {link, InnerID, #{store => Store}}},
+    {ok, OuterID} = hb_cache:write(Outer, Opts),
+    
+    Link = {link, OuterID, #{store => Store}},
+    Loaded = hb_cache:ensure_loaded(Link, Opts),
+    
+    % Outer is loaded, inner is still a link
+    ?assert(is_map(Loaded)),
+    OuterVal = maps:get(<<"outer">>, Loaded),
+    ?assertMatch({link, _, _}, OuterVal).
+```
+
+---
+
+### 2. ensure_all_loaded/1, ensure_all_loaded/2
+
+```erlang
+-spec ensure_all_loaded(Message, Opts) -> FullyLoadedMessage
+    when
+        Message :: map() | list() | term(),
+        Opts :: map(),
+        FullyLoadedMessage :: term().
+```
+
+**Description:** Recursively load all components of a message into memory. Resolves all links at all depths. **Performance Warning:** Can be expensive for deeply nested messages.
+
+**Test Code:**
+```erlang
+-module(hb_cache_ensure_all_loaded_test).
+-include_lib("eunit/include/eunit.hrl").
+
+ensure_all_loaded_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    % Create nested structure
+    Deep = #{<<"deep">> => <<"value">>},
+    {ok, DeepID} = hb_cache:write(Deep, Opts),
+    
+    Middle = #{<<"middle">> => {link, DeepID, #{store => Store}}},
+    {ok, MiddleID} = hb_cache:write(Middle, Opts),
+    
+    Top = #{<<"top">> => {link, MiddleID, #{store => Store}}},
+    
+    % Fully load
+    Loaded = hb_cache:ensure_all_loaded(Top, Opts),
+    
+    % All links resolved
+    ?assert(is_map(Loaded)),
+    ?assert(is_map(maps:get(<<"top">>, Loaded))),
+    ?assert(is_map(maps:get(<<"middle">>, maps:get(<<"top">>, Loaded)))),
+    ?assertEqual(<<"value">>, 
+        maps:get(<<"deep">>, 
+            maps:get(<<"middle">>, 
+                maps:get(<<"top">>, Loaded)))).
+
+ensure_all_loaded_list_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Item = #{<<"item">> => <<"data">>},
+    {ok, ID} = hb_cache:write(Item, Opts),
+    
+    List = [
+        {link, ID, #{store => Store}},
+        {link, ID, #{store => Store}}
+    ],
+    
+    Loaded = hb_cache:ensure_all_loaded(List, Opts),
+    
+    ?assert(is_list(Loaded)),
+    ?assertEqual(2, length(Loaded)),
+    ?assert(is_map(lists:nth(1, Loaded))).
+```
+
+---
+
+### 3. read/2
+
+```erlang
+-spec read(ID, Opts) -> {ok, Message} | not_found
+    when
+        ID :: binary(),
+        Opts :: map(),
+        Message :: map().
+```
+
+**Description:** Read a message by ID (committed or uncommitted) from cache. Returns first layer only; nested messages are links.
+
+**Test Code:**
+```erlang
+-module(hb_cache_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_basic_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Msg = #{<<"key">> => <<"value">>},
+    {ok, ID} = hb_cache:write(Msg, Opts),
+    
+    {ok, Read} = hb_cache:read(ID, Opts),
+    ?assertEqual(Msg, Read).
+
+read_not_found_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    FakeID = hb_util:human_id(<<1:256>>),
+    Result = hb_cache:read(FakeID, Opts),
+    ?assertEqual(not_found, Result).
+
+read_signed_message_test() ->
+    Store = hb_test_utils:test_store(),
+    Wallet = ar_wallet:new(),
+    Opts = #{store => Store, priv_wallet => Wallet},
+    
+    Msg = hb_message:commit(
+        #{<<"data">> => <<"test">>},
+        Wallet
+    ),
+    SignedID = hb_message:id(Msg, signed, Opts),
+    
+    {ok, _} = hb_cache:write(Msg, Opts),
+    {ok, Read} = hb_cache:read(hb_util:human_id(SignedID), Opts),
+    
+    ?assert(is_map(Read)).
+```
+
+---
+
+### 4. read_resolved/3
+
+```erlang
+-spec read_resolved(Msg1, Msg2, Opts) -> {hit, Result} | miss
+    when
+        Msg1 :: map() | binary(),
+        Msg2 :: map() | binary(),
+        Opts :: map(),
+        Result :: {ok, Message} | not_found.
+```
+
+**Description:** Read a cached computation result for Msg1/Msg2 pair. Returns `{hit, Result}` if found, `miss` otherwise.
+
+**Test Code:**
+```erlang
+-module(hb_cache_read_resolved_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_resolved_hit_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = #{<<"path">> => <<"key">>},
+    
+    % Write messages
+    {ok, _} = hb_cache:write(Msg1, Opts),
+    {ok, _} = hb_cache:write(Msg2, Opts),
+    
+    % Write result
+    Result = <<"value">>,
+    Hashpath = hb_path:hashpath(Msg1, Msg2, Opts),
+    {ok, _} = hb_cache:write_binary(Hashpath, Result, Opts),
+    
+    % Read resolved
+    {hit, {ok, Cached}} = hb_cache:read_resolved(Msg1, Msg2, Opts),
+    ?assertEqual(Result, Cached).
+
+read_resolved_miss_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = #{<<"path">> => <<"key">>},
+    
+    Result = hb_cache:read_resolved(Msg1, Msg2, Opts),
+    ?assertEqual(miss, Result).
+```
+
+---
+
+### 5. write/2
+
+```erlang
+-spec write(Message, Opts) -> {ok, Path}
+    when
+        Message :: map(),
+        Opts :: map(),
+        Path :: binary().
+```
+
+**Description:** Write a message to cache. Stores both uncommitted and committed IDs. Recursively writes nested messages as links.
+
+**Test Code:**
+```erlang
+-module(hb_cache_write_test).
+-include_lib("eunit/include/eunit.hrl").
+
+write_basic_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Msg = #{<<"key">> => <<"value">>},
+    Result = hb_cache:write(Msg, Opts),
+    
+    ?assertMatch({ok, _}, Result).
+
+write_signed_test() ->
+    Store = hb_test_utils:test_store(),
+    Wallet = ar_wallet:new(),
+    Opts = #{store => Store, priv_wallet => Wallet},
+    
+    Msg = hb_message:commit(
+        #{<<"data">> => <<"test">>},
+        Wallet
+    ),
+    {ok, Path} = hb_cache:write(Msg, Opts),
+    
+    ?assert(is_binary(Path)),
+    
+    % Can read back
+    SignedID = hb_message:id(Msg, signed, Opts),
+    {ok, Read} = hb_cache:read(hb_util:human_id(SignedID), Opts),
+    ?assert(hb_message:match(Msg, Read, strict, Opts)).
+
+write_nested_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Inner = #{<<"inner">> => <<"data">>},
+    Outer = #{<<"outer">> => Inner},
+    
+    {ok, _} = hb_cache:write(Outer, Opts),
+    
+    % Read back
+    OuterID = hb_message:id(Outer, none, Opts),
+    {ok, Read} = hb_cache:read(hb_util:human_id(OuterID), Opts),
+    
+    % Inner is a link
+    ?assertMatch({link, _, _}, maps:get(<<"outer">>, Read)).
+```
+
+---
+
+### 6. write_binary/3, write_hashpath/2
+
+```erlang
+-spec write_binary(Path, Binary, Opts) -> {ok, Path}.
+-spec write_hashpath(Message, Opts) -> {ok, Path}.
+```
+
+**Description:** Write raw binary data or hashpath entry to cache.
+
+**Test Code:**
+```erlang
+-module(hb_cache_write_binary_test).
+-include_lib("eunit/include/eunit.hrl").
+
+write_binary_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Binary = <<"test data">>,
+    Path = <<"test-path">>,
+    
+    {ok, ResultPath} = hb_cache:write_binary(Path, Binary, Opts),
+    ?assertEqual(Path, ResultPath).
+
+write_hashpath_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = #{<<"path">> => <<"key">>},
+    
+    Result = hb_cache:write_hashpath([Msg1, Msg2], Opts),
+    ?assertMatch({ok, _}, Result).
+```
+
+---
+
+### 7. list/2, list_numbered/2
+
+```erlang
+-spec list(Path, Opts) -> [Name].
+-spec list_numbered(Path, Opts) -> [Integer].
+```
+
+**Description:** List items under a path. `list_numbered/2` assumes numeric names and returns sorted integers.
+
+**Test Code:**
+```erlang
+-module(hb_cache_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+list_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    % Write some items
+    {ok, _} = hb_cache:write(#{<<"a">> => <<"1">>}, Opts),
+    {ok, _} = hb_cache:write(#{<<"b">> => <<"2">>}, Opts),
+    
+    List = hb_cache:list(<<"/">>, Opts),
+    ?assert(is_list(List)).
+
+list_numbered_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    BasePath = <<"slots">>,
+    
+    % Write numbered items
+    lists:foreach(
+        fun(N) ->
+            Path = <<BasePath/binary, "/", (integer_to_binary(N))/binary>>,
+            hb_cache:write_binary(Path, <<N>>, Opts)
+        end,
+        [1, 2, 3, 5, 10]
+    ),
+    
+    Numbers = hb_cache:list_numbered(BasePath, Opts),
+    ?assertEqual([1, 2, 3, 5, 10], lists:sort(Numbers)).
+```
+
+---
+
+### 8. match/2
+
+```erlang
+-spec match(Template, Opts) -> {ok, [ID]}
+    when
+        Template :: map(),
+        Opts :: map(),
+        ID :: binary().
+```
+
+**Description:** Match template message against cache, returning IDs of matching messages. Matches on binary representation of values.
+
+**Test Code:**
+```erlang
+-module(hb_cache_match_test).
+-include_lib("eunit/include/eunit.hrl").
+
+match_simple_test() ->
+    Store = hb_test_utils:test_store(hb_store_lmdb),
+    Opts = #{store => Store},
+    
+    % Write matching messages
+    {ok, ID1} = hb_cache:write(#{<<"x">> => <<"1">>}, Opts),
+    {ok, _ID2} = hb_cache:write(#{<<"y">> => <<"2">>}, Opts),
+    {ok, ID3} = hb_cache:write(#{<<"x">> => <<"1">>, <<"z">> => <<"3">>}, Opts),
+    
+    % Match template
+    {ok, Matches} = hb_cache:match(#{<<"x">> => <<"1">>}, Opts),
+    
+    ?assertEqual(2, length(Matches)),
+    ?assert(lists:member(ID1, Matches)),
+    ?assert(lists:member(ID3, Matches)).
+
+match_nested_test() ->
+    Store = hb_test_utils:test_store(hb_store_lmdb),
+    Opts = #{store => Store},
+    
+    Inner = #{<<"b">> => <<"c">>},
+    Outer = #{<<"a">> => Inner},
+    {ok, _} = hb_cache:write(Outer, Opts),
+    
+    % Match inner structure
+    {ok, [MatchedID]} = hb_cache:match(#{<<"b">> => <<"c">>}, Opts),
+    {ok, Read} = hb_cache:read(MatchedID, Opts),
+    
+    ?assertEqual(Inner, hb_cache:ensure_all_loaded(Read, Opts)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Write and read message
+Msg = #{<<"key">> => <<"value">>},
+{ok, ID} = hb_cache:write(Msg, #{store => Store}),
+{ok, Read} = hb_cache:read(ID, #{store => Store}).
+
+%% Lazy loading
+Link = {link, ID, #{store => Store}},
+Loaded = hb_cache:ensure_loaded(Link, #{}),
+% Loaded has first layer only
+
+%% Full loading
+FullyLoaded = hb_cache:ensure_all_loaded(Link, #{store => Store}),
+% All nested structures resolved
+
+%% Cache computation result
+Msg1 = #{<<"data">> => <<"value">>},
+Msg2 = #{<<"path">> => <<"data">>},
+Result = <<"value">>,
+
+{ok, _} = hb_cache:write(Msg1, Opts),
+{ok, _} = hb_cache:write(Msg2, Opts),
+Hashpath = hb_path:hashpath(Msg1, Msg2, Opts),
+{ok, _} = hb_cache:write_binary(Hashpath, Result, Opts).
+
+%% Read cached result
+case hb_cache:read_resolved(Msg1, Msg2, Opts) of
+    {hit, {ok, Cached}} -> {cached, Cached};
+    miss -> {compute, perform_computation()}
+end.
+
+%% Match messages
+Template = #{<<"type">> => <<"process">>},
+{ok, MatchingIDs} = hb_cache:match(Template, Opts),
+Messages = [hb_cache:read(ID, Opts) || ID <- MatchingIDs].
+
+%% List numbered slots
+Slots = hb_cache:list_numbered(<<"scheduler/slots">>, Opts),
+% Returns [0, 1, 2, 3, 4, ...]
+```
+
+---
+
+## Link Structure
+
+```erlang
+% Basic link
+{link, ID, LinkOpts}
+
+% Multi-layer link (lazy resolution)
+{link, ID, #{
+    <<"type">> => <<"link">>,
+    <<"lazy">> => true,
+    store => Store
+}}
+
+% Typed link (decodes to specific type)
+{link, ID, #{
+    <<"type">> => <<"binary">>,
+    <<"lazy">> => true,
+    store => Store
+}}
+```
+
+---
+
+## Storage Layers
+
+### Layer 1: Binary Data
+
+```erlang
+% Stored at SHA-256 hash of content
+Hash = crypto:hash(sha256, Binary),
+Path = <<"data/", (hb_util:human_id(Hash))/binary>>.
+```
+
+### Layer 2: Hashpath Graph
+
+```erlang
+% Links between hashpaths
+Hashpath = hb_path:hashpath(Msg1, Msg2, Opts),
+% Stored at: <<"hashpath/", Hashpath/binary>>
+```
+
+### Layer 3: Message IDs
+
+```erlang
+% Uncommitted ID
+UncommittedID = hb_message:id(Msg, none, Opts),
+Path1 = <<"id/", (hb_util:human_id(UncommittedID))/binary>>.
+
+% Committed ID  
+CommittedID = hb_message:id(Msg, signed, Opts),
+Path2 = <<"id/", (hb_util:human_id(CommittedID))/binary>>.
+```
+
+---
+
+## Error Handling
+
+```erlang
+% Link not found
+try
+    hb_cache:ensure_loaded(BadLink, Opts)
+catch
+    throw:{necessary_message_not_found, Path, FormattedLink} ->
+        handle_not_found(Path, FormattedLink)
+end.
+
+% Read returns not_found
+case hb_cache:read(ID, Opts) of
+    {ok, Msg} -> process(Msg);
+    not_found -> handle_missing()
+end.
+
+% Match only works with LMDB
+case hb_store:module(Store) of
+    hb_store_lmdb -> 
+        {ok, IDs} = hb_cache:match(Template, Opts);
+    _ -> 
+        {skip, unsupported_store_backend}
+end.
+```
+
+---
+
+## Performance Considerations
+
+1. **Lazy Loading**: Only load what you need
+2. **Content Deduplication**: Identical binaries stored once
+3. **Link Overhead**: Small memory footprint for unloaded data
+4. **Match Performance**: Only LMDB backend supports efficient matching
+5. **ensure_all_loaded**: Can be very expensive for deep nesting
+
+---
+
+## References
+
+- **Store System** - `hb_store.erl`
+- **Message System** - `hb_message.erl`
+- **Path System** - `hb_path.erl`
+- **Link Format** - `hb_link.erl`
+
+---
+
+## Notes
+
+1. **Three Layers**: Binary data, hashpath graph, message IDs
+2. **Lazy Links**: Unresolved until explicitly loaded
+3. **Deduplication**: Content-addressed storage
+4. **Recursive Writing**: Nested messages become links
+5. **Store Backend**: Abstracted via hb_store module
+6. **Match Limitation**: Only hb_store_lmdb supports matching
+7. **Link Options**: Stored with link for loading hints
+8. **Scope**: Store scope can be local or remote
+9. **Type Annotation**: Links can specify data type
+10. **ensure_loaded**: Single layer resolution
+11. **ensure_all_loaded**: Full recursive resolution
+12. **Hashpath Storage**: Results cached at hashpath
+13. **ID Storage**: Both committed and uncommitted IDs stored
+14. **List Numbered**: Useful for sequential data (slots, etc.)
+15. **Device Maps**: Cannot write messages with `device => #{}`

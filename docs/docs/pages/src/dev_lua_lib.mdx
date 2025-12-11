@@ -1,0 +1,604 @@
+# dev_lua_lib.erl - AO-Core Lua Library
+
+## Overview
+
+**Purpose:** Provide AO-Core functionality to Lua execution environment  
+**Module:** `dev_lua_lib`  
+**Lua Table:** `ao`  
+**Convention:** Luerl calling convention with NodeMsg parameter
+
+This module implements the AO-Core library functions that are automatically exported to the Lua environment under the `ao` table. Each function provides access to HyperBEAM's message resolution, data access, and event system from within Lua scripts.
+
+## Calling Convention
+
+All exported functions follow the Luerl convention with an additional node message parameter:
+
+```erlang
+fun(Args, State, NodeMsg) -> {ResultTerms, NewState}
+```
+
+**Parameters:**
+- `Args` - List of decoded Lua arguments
+- `State` - Current Lua VM state
+- `NodeMsg` - HyperBEAM execution options with preloaded devices
+
+**Return:**
+- `ResultTerms` - List of values to return to Lua (supports multiple returns)
+- `NewState` - Updated Lua VM state
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_util`, `hb_cache`, `hb_opts`, `hb_path`, `hb_singleton`
+- **Lua:** `luerl`, `dev_lua`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Installation
+-spec install(Base, State, Opts) -> {ok, StateWithLibrary}.
+
+%% AO-Core Operations (Lua-accessible)
+-spec get(Args, State, ExecOpts) -> {[Result], State}.
+-spec set(Args, State, ExecOpts) -> {[Result], State}.
+-spec resolve(Args, State, ExecOpts) -> {[Status, Result], State}.
+-spec event(Args, State, ExecOpts) -> {[<<"ok">>], State}.
+```
+
+---
+
+## Public Functions
+
+### 1. install/3
+
+```erlang
+-spec install(Base, State, Opts) -> {ok, StateWithLibrary}
+    when
+        Base :: map(),
+        State :: luerl_state(),
+        Opts :: map(),
+        StateWithLibrary :: luerl_state().
+```
+
+**Description:** Install the AO-Core library into the Lua environment. Automatically adds all exported functions (except `module_info` and `install`) to the `ao` table in Lua.
+
+**Device Sandboxing:**
+- Reads `device-sandbox` from Base message
+- Restricts available devices to specified list
+- Always includes minimal AO-Core devices (`structured@1.0`)
+- If no sandbox specified, all devices available
+
+**Test Code:**
+```erlang
+-module(dev_lua_lib_install_test).
+-include_lib("eunit/include/eunit.hrl").
+
+install_test() ->
+    State = luerl:init(),
+    Base = #{},
+    Opts = #{ preloaded_devices => [] },
+    {ok, NewState} = dev_lua_lib:install(Base, State, Opts),
+    {ok, AOTable, _} = luerl:get_table_keys_dec([ao], NewState),
+    ?assertNotEqual(nil, AOTable).
+
+install_with_device_sandbox_test() ->
+    State = luerl:init(),
+    Base = #{
+        <<"device-sandbox">> => [
+            <<"structured@1.0">>,
+            <<"json-iface@1.0">>
+        ]
+    },
+    AllDevices = [
+        #{ <<"name">> => <<"structured@1.0">> },
+        #{ <<"name">> => <<"json-iface@1.0">> },
+        #{ <<"name">> => <<"other-device@1.0">> }
+    ],
+    Opts = #{ preloaded_devices => AllDevices },
+    {ok, NewState} = dev_lua_lib:install(Base, State, Opts),
+    ?assert(is_tuple(NewState)).
+
+install_preserves_existing_ao_table_test() ->
+    State0 = luerl:init(),
+    {ok, State1} = luerl:set_table_keys_dec(
+        [ao, custom],
+        <<"custom-value">>,
+        State0
+    ),
+    Base = #{},
+    {ok, NewState} = dev_lua_lib:install(Base, State1, #{}),
+    {ok, CustomVal, _} = luerl:get_table_keys_dec([ao, custom], NewState),
+    ?assertEqual(<<"custom-value">>, CustomVal).
+```
+
+---
+
+### 2. get/3
+
+```erlang
+-spec get(Args, State, ExecOpts) -> {[Result], State}
+    when
+        Args :: [Key, Base],
+        Key :: binary(),
+        Base :: map(),
+        State :: luerl_state(),
+        ExecOpts :: map(),
+        Result :: term().
+```
+
+**Description:** Wrapper for `hb_ao:get/3`. Retrieves a value from a message using a key path.
+
+**Lua Usage:**
+```lua
+-- Get a simple key
+local data = ao.get("data", message)
+
+-- Get nested value (using AO path notation)
+local balance = ao.get("balance/alice", ledger)
+
+-- With 'as' conversion
+local structured = ao.get({"as", "structured@1.0", message}, "key")
+```
+
+**Test Code:**
+```erlang
+-module(dev_lua_lib_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_simple_value_test() ->
+    State = luerl:init(),
+    Base = #{ <<"data">> => <<"test-value">> },
+    Args = [<<"data">>, Base],
+    {[Result], _NewState} = dev_lua_lib:get(Args, State, #{}),
+    ?assertEqual(<<"test-value">>, Result).
+
+get_nested_value_test() ->
+    State = luerl:init(),
+    Base = #{
+        <<"user">> => #{
+            <<"name">> => <<"Alice">>
+        }
+    },
+    Args = [<<"user">>, Base],
+    {[Result], _} = dev_lua_lib:get(Args, State, #{}),
+    ?assertEqual(#{<<"name">> => <<"Alice">>}, Result).
+
+get_not_found_test() ->
+    State = luerl:init(),
+    Base = #{ <<"data">> => <<"value">> },
+    Args = [<<"missing-key">>, Base],
+    {[Result], _} = dev_lua_lib:get(Args, State, #{}),
+    ?assertEqual(not_found, Result).
+```
+
+---
+
+### 3. set/3
+
+```erlang
+-spec set(Args, State, ExecOpts) -> {[Result], State}
+    when
+        Args :: [Base, Key, Value] | [Base, NewValues],
+        Base :: map(),
+        Key :: binary(),
+        Value :: term(),
+        NewValues :: map(),
+        State :: luerl_state(),
+        ExecOpts :: map(),
+        Result :: map().
+```
+
+**Description:** Wrapper for `hb_ao:set/3` and `hb_ao:set/4`. Sets values in a message, returning updated message.
+
+**Lua Usage:**
+```lua
+-- Set a single value
+local updated = ao.set(message, "result", 42)
+
+-- Set multiple values
+local updated = ao.set(message, {
+    result = 42,
+    status = "complete"
+})
+```
+
+**Test Code:**
+```erlang
+-module(dev_lua_lib_set_test).
+-include_lib("eunit/include/eunit.hrl").
+
+set_single_value_test() ->
+    State = luerl:init(),
+    Base = #{ <<"data">> => <<"original">> },
+    Args = [Base, <<"data">>, <<"updated">>],
+    {[Result], _} = dev_lua_lib:set(Args, State, #{}),
+    ?assertEqual(<<"updated">>, maps:get(<<"data">>, Result)).
+
+set_multiple_values_test() ->
+    State = luerl:init(),
+    Base = #{},
+    NewValues = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>
+    },
+    Args = [Base, NewValues],
+    {[Result], _} = dev_lua_lib:set(Args, State, #{}),
+    ?assertEqual(<<"value1">>, maps:get(<<"key1">>, Result)),
+    ?assertEqual(<<"value2">>, maps:get(<<"key2">>, Result)).
+
+set_preserves_other_keys_test() ->
+    State = luerl:init(),
+    Base = #{ <<"existing">> => <<"value">> },
+    Args = [Base, <<"new">>, <<"data">>],
+    {[Result], _} = dev_lua_lib:set(Args, State, #{}),
+    ?assertEqual(<<"value">>, maps:get(<<"existing">>, Result)),
+    ?assertEqual(<<"data">>, maps:get(<<"new">>, Result)).
+```
+
+---
+
+### 4. resolve/3
+
+```erlang
+-spec resolve(Args, State, ExecOpts) -> {[Status, Result], State}
+    when
+        Args :: [SingletonMsg] | [Base, Path] | MessageList,
+        SingletonMsg :: map(),
+        Base :: map(),
+        Path :: binary(),
+        MessageList :: [map()],
+        State :: luerl_state(),
+        ExecOpts :: map(),
+        Status :: <<"ok">> | <<"error">>,
+        Result :: term().
+```
+
+**Description:** Wrapper for AO-Core resolution. Supports singleton message parsing, path-based resolution, and multi-message resolution.
+
+**Resolution Modes:**
+1. **Singleton**: Single message parsed via `hb_singleton:from/2`
+2. **Base + Path**: Resolve path from base message
+3. **Message List**: Resolve multiple messages in sequence
+
+**Lua Usage:**
+```lua
+-- Resolve with singleton message
+local status, result = ao.resolve(message)
+
+-- Resolve a path
+local status, result = ao.resolve(process, "now/balance")
+
+-- Resolve multiple messages
+local status, result = ao.resolve({process, message1, message2})
+
+-- With 'as' conversion
+local status, result = ao.resolve({
+    {"as", "structured@1.0", base},
+    path_message
+})
+```
+
+**Test Code:**
+```erlang
+-module(dev_lua_lib_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_simple_path_test() ->
+    State = luerl:init(),
+    Base = #{ <<"data">> => <<"value">> },
+    Path = <<"data">>,
+    Args = [Base, Path],
+    ExecOpts = #{ preloaded_devices => [] },
+    {[Status, Result], _} = dev_lua_lib:resolve(Args, State, ExecOpts),
+    ?assertEqual(<<"ok">>, Status),
+    ?assertEqual(<<"value">>, Result).
+
+resolve_error_handling_test() ->
+    State = luerl:init(),
+    Base = #{},
+    Path = <<"nonexistent">>,
+    Args = [Base, Path],
+    {[Status, _Error], _} = dev_lua_lib:resolve(Args, State, #{}),
+    ?assert(Status == <<"error">> orelse Status == <<"ok">>).
+
+resolve_multiple_messages_test() ->
+    State = luerl:init(),
+    Msgs = [
+        #{ <<"step">> => <<"init">> },
+        #{ <<"step">> => <<"process">> }
+    ],
+    {[Status, _Result], _} = dev_lua_lib:resolve(Msgs, State, #{}),
+    ?assert(is_binary(Status)).
+```
+
+---
+
+### 5. event/3
+
+```erlang
+-spec event(Args, State, ExecOpts) -> {[<<"ok">>], State}
+    when
+        Args :: [Event] | [Group, Event],
+        Event :: term(),
+        Group :: atom() | binary(),
+        State :: luerl_state(),
+        ExecOpts :: map().
+```
+
+**Description:** Emit events to HyperBEAM's internal event system. Allows Lua scripts to log debug information and trigger event handlers.
+
+**Lua Usage:**
+```lua
+-- Emit global event
+ao.event("computation-complete")
+
+-- Emit grouped event
+ao.event("debug", {step = "init", value = 42})
+
+-- Emit structured event
+ao.event("performance", {
+    operation = "transfer",
+    duration_ms = 150
+})
+```
+
+**Test Code:**
+```erlang
+-module(dev_lua_lib_event_test).
+-include_lib("eunit/include/eunit.hrl").
+
+event_simple_test() ->
+    State = luerl:init(),
+    Args = [<<"test-event">>],
+    {[Result], _} = dev_lua_lib:event(Args, State, #{}),
+    ?assertEqual(<<"ok">>, Result).
+
+event_with_group_test() ->
+    State = luerl:init(),
+    Args = [<<"debug">>, <<"test-event">>],
+    {[Result], _} = dev_lua_lib:event(Args, State, #{}),
+    ?assertEqual(<<"ok">>, Result).
+
+event_with_structured_data_test() ->
+    State = luerl:init(),
+    EventData = #{
+        <<"action">> => <<"transfer">>,
+        <<"amount">> => 100
+    },
+    Args = [<<"ledger">>, EventData],
+    {[Result], _} = dev_lua_lib:event(Args, State, #{}),
+    ?assertEqual(<<"ok">>, Result).
+
+event_with_list_test() ->
+    State = luerl:init(),
+    % Lists are converted to tuples
+    Args = [<<"debug">>, [<<"step">>, <<"value">>]],
+    {[Result], _} = dev_lua_lib:event(Args, State, #{}),
+    ?assertEqual(<<"ok">>, Result).
+```
+
+---
+
+## Device Sandbox System
+
+### Minimal AO-Core Devices
+
+The following devices are always included in the device sandbox:
+
+```erlang
+-define(MINIMAL_AO_CORE_DEVICES, [<<"structured@1.0">>]).
+```
+
+### Device Sandbox Configuration
+
+**No Sandbox (All Devices):**
+```erlang
+Base = #{
+    <<"device-sandbox">> => false
+}
+```
+
+**Specific Devices Only:**
+```erlang
+Base = #{
+    <<"device-sandbox">> => [
+        <<"structured@1.0">>,
+        <<"json-iface@1.0">>,
+        <<"scheduler@1.0">>
+    ]
+}
+```
+
+**How It Works:**
+1. Reads `device-sandbox` from base message
+2. If `false`, all preloaded devices are available
+3. If list provided, filters preloaded devices to only those named
+4. Always adds minimal AO-Core devices to the list
+5. Duplicates are removed via `hb_util:unique/1`
+
+---
+
+## Encoding/Decoding Integration
+
+### Return Value Encoding
+
+All return values are automatically encoded for Lua consumption:
+
+```erlang
+return(Result, ExecState, Opts) ->
+    TableEncoded = dev_lua:encode(
+        hb_cache:ensure_all_loaded(Result, Opts), 
+        Opts
+    ),
+    {ReturnParams, ResultingState} = 
+        lists:foldr(
+            fun(LuaEncoded, {Params, StateIn}) ->
+                {NewParam, NewState} = luerl:encode(LuaEncoded, StateIn),
+                {[NewParam | Params], NewState}
+            end,
+            {[], ExecState},
+            TableEncoded
+        ),
+    {ReturnParams, ResultingState}.
+```
+
+### Argument Decoding
+
+Arguments are automatically decoded from Lua:
+
+```erlang
+Args = lists:map(
+    fun(Arg) ->
+        dev_lua:decode(luerl:decode(Arg, State), Opts)
+    end,
+    RawArgs
+)
+```
+
+---
+
+## Special Conversion: 'as' Terms
+
+The `convert_as/1` function handles special AO-Core `as` conversion syntax:
+
+```erlang
+%% Lua representation: {"as", "device@1.0", message}
+%% Converts to: {as, <<"device@1.0">>, message}
+
+convert_as([<<"as">>, Device, RawMsg]) ->
+    {as, Device, RawMsg};
+convert_as(Other) ->
+    Other.
+```
+
+**Lua Usage:**
+```lua
+-- Convert message to specific format
+local structured = ao.get(
+    "data",
+    {"as", "structured@1.0", raw_message}
+)
+```
+
+---
+
+## Common Patterns
+
+```lua
+-- Get balance from ledger
+local balance = ao.get("balance/alice", process)
+
+-- Set result of computation
+local updated = ao.set(process, "result", {
+    status = "complete",
+    value = 42
+})
+
+-- Resolve nested path
+local status, result = ao.resolve(process, "now/assignments/1")
+
+-- Emit debug event
+ao.event("debug", {
+    function_name = "handle_transfer",
+    sender = msg.From,
+    amount = msg.Quantity
+})
+
+-- Chain operations
+local msg1 = ao.set(base, "step", 1)
+local msg2 = ao.set(msg1, "data", result)
+local status, final = ao.resolve({msg2, "commit"})
+
+-- Error handling
+local status, result = ao.resolve(process, path)
+if status == "error" then
+    ao.event("error", {message = result})
+    return nil
+end
+
+-- Format conversion
+local json_msg = ao.get("data", {
+    "as",
+    "json-iface@1.0",
+    raw_message
+})
+```
+
+---
+
+## Execution Options
+
+The `ExecOpts` passed to library functions include:
+
+```erlang
+#{
+    preloaded_devices => [Device],  % Available devices
+    hashpath => ignore,             % Path hashing mode
+    % ... other HyperBEAM options
+}
+```
+
+**Key Options:**
+- `preloaded_devices` - List of devices available for resolution
+- `hashpath` - Controls how paths are hashed/cached
+- All standard HyperBEAM resolution options
+
+---
+
+## Error Handling
+
+Library functions catch and convert errors:
+
+```erlang
+try hb_ao:resolve_many(Msgs, ExecOpts) of
+    {Status, Res} ->
+        {[Status, Res], ExecState}
+catch
+    Error ->
+        {[<<"error">>, Error], ExecState}
+end
+```
+
+**Lua Error Handling:**
+```lua
+local status, result = ao.resolve(process, message)
+if status == "error" then
+    -- Handle error
+    print("Error:", result)
+else
+    -- Process result
+    process_result(result)
+end
+```
+
+---
+
+## References
+
+- **dev_lua.erl** - Lua execution device
+- **luerl** - Lua in Erlang runtime
+- **hb_ao.erl** - AO-Core resolution system
+- **hb_cache.erl** - Resource caching and loading
+- **hb_singleton.erl** - Singleton message parsing
+
+---
+
+## Notes
+
+1. **Automatic Installation**: All exported functions are automatically added to `ao` table
+2. **Multiple Returns**: Lua functions can return multiple values using lists
+3. **State Threading**: Lua state is threaded through all operations
+4. **Device Sandbox**: Restricts available devices for security
+5. **Full Loading**: Results are fully loaded before encoding for Lua
+6. **Event Integration**: Direct access to HyperBEAM event system
+7. **Error Conversion**: Erlang exceptions are converted to Lua error returns
+8. **Format Conversion**: Automatic encoding/decoding between Erlang and Lua
+9. **Path Resolution**: Supports all AO-Core path resolution modes
+10. **Singleton Support**: Can parse and resolve singleton messages
+11. **As Conversion**: Special handling for `{as, Device, Msg}` terms
+12. **Debug Events**: Library emits events for debugging and monitoring
+13. **Minimal Devices**: Always includes `structured@1.0` for basic operations
+14. **Preserve AO Table**: Doesn't overwrite existing `ao` table entries
+15. **Luerl Convention**: Follows standard Luerl calling convention

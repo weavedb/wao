@@ -1,0 +1,698 @@
+# hb_store_gateway.erl - Arweave Gateway Storage
+
+## Overview
+
+**Purpose:** Read-only store for accessing data from Arweave gateways and AO nodes  
+**Module:** `hb_store_gateway`  
+**Behavior:** `hb_store` (partial)  
+**Pattern:** Remote data fetching via GraphQL and HTTP APIs
+
+This module implements a read-only store that fetches data from Arweave gateways or AO network nodes. It supports both standard Arweave gateways and AO-specific query endpoints, with optional local caching for performance.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_gateway_client`, `hb_store_remote_node`, `hb_path`, `hb_maps`, `hb_message`, `hb_util`, `hb_private`
+- **Erlang/OTP:** None
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Scope
+-spec scope(StoreOpts) -> remote.
+
+%% Data Operations (Read-Only)
+-spec read(StoreOpts, Key) -> {ok, Message} | not_found.
+-spec type(StoreOpts, Key) -> simple | composite | not_found.
+-spec list(StoreOpts, Key) -> {ok, [Key]} | not_found.
+
+%% Path Operations
+-spec resolve(StoreOpts, Key) -> Key.
+```
+
+---
+
+## Public Functions
+
+### 1. scope/1
+
+```erlang
+-spec scope(StoreOpts) -> remote
+    when
+        StoreOpts :: map().
+```
+
+**Description:** Always returns `remote` as gateway stores fetch data over the network.
+
+**Test Code:**
+```erlang
+-module(hb_store_gateway_scope_test).
+-include_lib("eunit/include/eunit.hrl").
+
+scope_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    ?assertEqual(remote, hb_store_gateway:scope(Store)).
+```
+
+---
+
+### 2. read/2
+
+```erlang
+-spec read(StoreOpts, Key) -> {ok, Message} | not_found
+    when
+        StoreOpts :: map(),
+        Key :: binary() | [binary()],
+        Message :: map().
+```
+
+**Description:** Read a message from the gateway by ID. Only works with valid Arweave transaction IDs. Supports subpath access for nested data.
+
+**Test Code:**
+```erlang
+-module(hb_store_gateway_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_by_id_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    ID = <<"BOogk_XAI3bvNWnxNxwxmvOfglZt17o4MOVAdPNZ_ew">>,
+    
+    case hb_store_gateway:read(Store, ID) of
+        {ok, Message} ->
+            ?assert(is_map(Message)),
+            ?assertEqual(<<"aos">>, maps:get(<<"app-name">>, Message, undefined));
+        not_found ->
+            ?assert(false, "Gateway should return data")
+    end.
+
+read_with_subpath_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    ID = <<"BOogk_XAI3bvNWnxNxwxmvOfglZt17o4MOVAdPNZ_ew">>,
+    Key = [ID, <<"app-name">>],
+    
+    case hb_store_gateway:read(Store, Key) of
+        {ok, Value} ->
+            ?assertEqual(<<"aos">>, Value);
+        not_found ->
+            ?assert(false, "Should find nested value")
+    end.
+
+read_non_id_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    NonID = <<"not-an-id">>,
+    ?assertEqual(not_found, hb_store_gateway:read(Store, NonID)).
+
+read_invalid_id_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    InvalidID = <<"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">>,
+    ?assertEqual(not_found, hb_store_gateway:read(Store, InvalidID)).
+```
+
+---
+
+### 3. type/2
+
+```erlang
+-spec type(StoreOpts, Key) -> simple | composite | not_found
+    when
+        StoreOpts :: map(),
+        Key :: binary() | [binary()].
+```
+
+**Description:** Determine if a message contains simple (flat) or composite (nested) data. Reads the message and checks if all values are non-map types.
+
+**Test Code:**
+```erlang
+-module(hb_store_gateway_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+type_simple_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    ID = <<"simple-message-id">>,
+    % Assuming this message has only flat key-value pairs
+    case hb_store_gateway:type(Store, ID) of
+        simple -> ok;
+        composite -> ok;  % Either is valid depending on actual data
+        not_found -> ok
+    end.
+
+type_not_found_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    ?assertEqual(not_found, hb_store_gateway:type(Store, <<"nonexistent">>)).
+```
+
+---
+
+### 4. list/2
+
+```erlang
+-spec list(StoreOpts, Key) -> {ok, [Key]} | not_found
+    when
+        StoreOpts :: map(),
+        Key :: binary() | [binary()].
+```
+
+**Description:** List keys in a composite message. Reads the message and returns its top-level keys.
+
+**Test Code:**
+```erlang
+-module(hb_store_gateway_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+list_message_keys_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    ID = <<"BOogk_XAI3bvNWnxNxwxmvOfglZt17o4MOVAdPNZ_ew">>,
+    
+    case hb_store_gateway:list(Store, ID) of
+        {ok, Keys} ->
+            ?assert(is_list(Keys)),
+            ?assert(lists:member(<<"app-name">>, Keys));
+        not_found ->
+            ?assert(false, "Should list keys")
+    end.
+
+list_not_found_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    ?assertEqual(not_found, hb_store_gateway:list(Store, <<"missing">>)).
+```
+
+---
+
+### 5. resolve/2
+
+```erlang
+-spec resolve(StoreOpts, Key) -> Key
+    when
+        StoreOpts :: map(),
+        Key :: term().
+```
+
+**Description:** No-op resolution function. Returns the key unchanged as gateway stores don't use internal symlinks.
+
+**Test Code:**
+```erlang
+-module(hb_store_gateway_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_returns_same_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    Key = <<"test-key">>,
+    ?assertEqual(Key, hb_store_gateway:resolve(Store, Key)).
+```
+
+---
+
+## Configuration
+
+### Basic Gateway Store
+
+```erlang
+#{
+    <<"store-module">> => hb_store_gateway
+}
+% Uses default Arweave gateway
+```
+
+### Custom Node Configuration
+
+```erlang
+% Arweave gateway
+#{
+    <<"store-module">> => hb_store_gateway,
+    <<"node">> => <<"https://arweave.net">>,
+    <<"node-type">> => <<"arweave">>
+}
+
+% AO node
+#{
+    <<"store-module">> => hb_store_gateway,
+    <<"node">> => <<"https://ao.computer">>,
+    <<"node-type">> => <<"ao">>
+}
+```
+
+### With Local Caching
+
+```erlang
+#{
+    <<"store-module">> => hb_store_gateway,
+    <<"local-store">> => [
+        #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> => <<"cache/gateway">>
+        }
+    ]
+}
+% Fetched messages cached locally
+```
+
+### Custom Routes
+
+```erlang
+#{
+    <<"store-module">> => hb_store_gateway,
+    <<"routes">> => [
+        #{
+            <<"template">> => <<"/graphql">>,
+            <<"nodes">> => [
+                #{<<"prefix">> => <<"https://custom-gateway.com">>}
+            ]
+        }
+    ]
+}
+```
+
+---
+
+## Node Types
+
+### Arweave Gateway
+
+```erlang
+#{
+    <<"node">> => <<"https://arweave.net">>,
+    <<"node-type">> => <<"arweave">>
+}
+
+% Routes:
+% - /graphql - GraphQL queries
+% - /raw - Raw transaction data
+```
+
+**Endpoints:**
+- GraphQL: `https://arweave.net/graphql`
+- Raw: `https://arweave.net/raw/{id}`
+
+### AO Node
+
+```erlang
+#{
+    <<"node">> => <<"https://ao.computer">>,
+    <<"node-type">> => <<"ao">>
+}
+
+% Routes:
+% - /~query@1.0/graphql - GraphQL via query device
+% - /raw - Raw data endpoint
+```
+
+**Endpoints:**
+- GraphQL: `https://ao.computer/~query@1.0/graphql`
+- Raw: `https://ao.computer/{id}`
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple gateway store
+Store = #{<<"store-module">> => hb_store_gateway},
+{ok, Message} = hb_store_gateway:read(Store, ID).
+
+%% With local cache
+CacheStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"cache">>
+},
+GatewayStore = #{
+    <<"store-module">> => hb_store_gateway,
+    <<"local-store">> => [CacheStore]
+},
+{ok, Message} = hb_store_gateway:read(GatewayStore, ID).
+% First read: Fetches from gateway, caches locally
+% Second read: Returns from cache
+
+%% Read nested data
+{ok, Value} = hb_store_gateway:read(Store, [ID, <<"key">>, <<"nested">>]),
+% Fetches message by ID, then extracts nested value
+
+%% Check message structure
+case hb_store_gateway:type(Store, ID) of
+    simple -> io:format("Flat message~n");
+    composite -> 
+        {ok, Keys} = hb_store_gateway:list(Store, ID),
+        io:format("Keys: ~p~n", [Keys])
+end.
+
+%% Combined with local stores
+Stores = [
+    #{<<"store-module">> => hb_store_fs, <<"name">> => <<"local">>},
+    #{<<"store-module">> => hb_store_gateway}
+],
+% Try local first, then gateway
+case hb_store:read(Stores, ID) of
+    {ok, Data} -> Data;
+    not_found -> not_available
+end.
+
+%% Use with hb_cache
+Opts = #{
+    store => [
+        #{<<"store-module">> => hb_store_gateway}
+    ]
+},
+{ok, Message} = hb_cache:read(ID, Opts).
+```
+
+---
+
+## ID Recognition
+
+### Valid IDs
+
+Gateway store only processes keys that are valid Arweave transaction IDs:
+
+```erlang
+% Valid ID (43-character base64url)
+<<"IYkkrqlZNW_J-4T-5eFApZOMRl5P4VjvrcOXWvIqB1Q">>
+
+% With subpath
+[<<"IYkkrqlZNW_J-4T-5eFApZOMRl5P4VjvrcOXWvIqB1Q">>, <<"data">>]
+```
+
+### Invalid Keys
+
+Non-ID keys are ignored (return `not_found`):
+
+```erlang
+% Too short
+<<"shortkey">> → not_found
+
+% Wrong format
+<<"not-a-valid-transaction-id">> → not_found
+
+% Plain text
+<<"mydata">> → not_found
+```
+
+### ID Detection
+
+```erlang
+% Internal check (macro from hb.hrl)
+?IS_ID(Key) ->
+    is_binary(Key) andalso 
+    byte_size(Key) == 43 andalso
+    % base64url characters only
+```
+
+---
+
+## Subpath Access
+
+### Reading Nested Data
+
+```erlang
+% Message structure:
+% {
+%   "user": {
+%     "name": "Alice",
+%     "email": "alice@example.com"
+%   }
+% }
+
+% Read entire message
+{ok, Message} = read(Store, ID),
+
+% Read nested value directly
+{ok, <<"Alice">>} = read(Store, [ID, <<"user">>, <<"name">>]),
+
+% Subpath not found
+not_found = read(Store, [ID, <<"nonexistent">>]).
+```
+
+### Deep Path Resolution
+
+```erlang
+% Path: [ID, "a", "b", "c"]
+% 1. Fetch message by ID
+% 2. Extract: Message["a"]["b"]["c"]
+% 3. Return extracted value
+
+Key = [ID, <<"level1">>, <<"level2">>, <<"level3">>],
+{ok, Value} = hb_store_gateway:read(Store, Key).
+```
+
+---
+
+## Local Caching
+
+### Cache Configuration
+
+```erlang
+#{
+    <<"store-module">> => hb_store_gateway,
+    <<"local-store">> => [LocalStore]
+}
+```
+
+### Cache Behavior
+
+1. **First Read:** Fetch from gateway → Write to local-store
+2. **Subsequent Reads:** Return from local-store (faster)
+3. **Cache Miss:** Fetch from gateway again
+
+### Example
+
+```erlang
+LocalStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"gateway-cache">>
+},
+GatewayStore = #{
+    <<"store-module">> => hb_store_gateway,
+    <<"local-store">> => [LocalStore]
+},
+
+% First read (slow, fetches from gateway)
+{ok, Msg1} = hb_cache:read(ID, #{store => [GatewayStore]}),
+
+% Second read (fast, from cache)
+{ok, Msg2} = hb_cache:read(ID, #{store => [LocalStore]}),
+
+% Messages match
+true = hb_message:match(Msg1, Msg2).
+```
+
+---
+
+## Route Configuration
+
+### Route Structure
+
+```erlang
+#{
+    <<"template">> => PathTemplate,
+    <<"nodes">> => [NodeConfig],
+    % Optional
+    <<"match">> => MatchPattern,
+    <<"with">> => Replacement
+}
+```
+
+### GraphQL Route
+
+```erlang
+#{
+    <<"template">> => <<"/graphql">>,
+    <<"nodes">> => [
+        #{<<"prefix">> => <<"https://arweave.net">>}
+    ]
+}
+% Queries sent to: https://arweave.net/graphql
+```
+
+### Raw Data Route
+
+```erlang
+#{
+    <<"template">> => <<"/raw">>,
+    <<"nodes">> => [
+        #{<<"prefix">> => <<"https://arweave.net">>}
+    ]
+}
+% Raw data fetched from: https://arweave.net/raw/{id}
+```
+
+### Custom Routes
+
+```erlang
+#{
+    <<"routes">> => [
+        #{
+            <<"template">> => <<"/custom">>,
+            <<"nodes">> => [
+                #{<<"prefix">> => <<"https://my-gateway.com">>}
+            ]
+        }
+    ]
+}
+```
+
+---
+
+## Integration with hb_cache
+
+### Reading from Gateway
+
+```erlang
+Opts = #{
+    store => [
+        #{<<"store-module">> => hb_store_gateway}
+    ]
+},
+{ok, Message} = hb_cache:read(ID, Opts).
+```
+
+### Multi-Tier Storage
+
+```erlang
+Opts = #{
+    store => [
+        % Fast: In-memory cache
+        #{<<"store-module">> => hb_store_memory},
+        % Medium: Local filesystem
+        #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache">>},
+        % Slow: Remote gateway
+        #{<<"store-module">> => hb_store_gateway}
+    ]
+},
+{ok, Message} = hb_cache:read(ID, Opts).
+% Tries memory → filesystem → gateway
+```
+
+---
+
+## Performance Characteristics
+
+### Operation Costs
+
+| Operation | Local | Gateway | Notes |
+|-----------|-------|---------|-------|
+| Read | N/A | ~500ms | Network latency |
+| Type | N/A | ~500ms | Requires full fetch |
+| List | N/A | ~500ms | Requires full fetch |
+| Write | N/A | N/A | Read-only store |
+
+### Optimization Strategies
+
+**1. Local Caching:**
+```erlang
+#{
+    <<"local-store">> => [FastLocalStore]
+}
+% First read: Slow, subsequent: Fast
+```
+
+**2. Store Chain:**
+```erlang
+[LocalCache, Gateway]
+% Try cache first, gateway as fallback
+```
+
+**3. Batch Loading:**
+```erlang
+% Load multiple IDs together
+IDs = [ID1, ID2, ID3],
+Messages = lists:map(
+    fun(ID) -> hb_cache:read(ID, GatewayOpts) end,
+    IDs
+).
+```
+
+---
+
+## Error Handling
+
+### Network Errors
+
+```erlang
+case hb_store_gateway:read(Store, ID) of
+    {ok, Message} ->
+        process(Message);
+    not_found ->
+        % Could be:
+        % - ID doesn't exist
+        % - Network error
+        % - Gateway timeout
+        handle_not_found()
+end.
+```
+
+### Invalid ID Format
+
+```erlang
+% Non-ID keys silently return not_found
+not_found = hb_store_gateway:read(Store, <<"not-an-id">>).
+```
+
+### Gateway Unavailable
+
+```erlang
+% Falls back to next store in chain
+Stores = [
+    #{<<"store-module">> => hb_store_gateway, 
+      <<"node">> => <<"https://primary.arweave.net">>},
+    #{<<"store-module">> => hb_store_gateway, 
+      <<"node">> => <<"https://backup.arweave.net">>}
+],
+{ok, Message} = hb_store:read(Stores, ID).
+```
+
+---
+
+## Testing
+
+### With Local HTTP Server
+
+```erlang
+% Start test node
+hb_http_server:start_node(#{}),
+
+% Test gateway store
+Store = #{<<"store-module">> => hb_store_gateway},
+{ok, Message} = hb_store_gateway:read(Store, TestID).
+```
+
+### Mock Gateway
+
+```erlang
+% Mock hb_gateway_client
+meck:new(hb_gateway_client, [passthrough]),
+meck:expect(hb_gateway_client, read, 
+    fun(ID, _Opts) -> 
+        {ok, #{<<"id">> => ID, <<"data">> => <<"test">>}}
+    end
+),
+
+Store = #{<<"store-module">> => hb_store_gateway},
+{ok, Message} = hb_store_gateway:read(Store, <<"test-id">>),
+
+meck:unload(hb_gateway_client).
+```
+
+---
+
+## References
+
+- **Gateway Client** - `hb_gateway_client.erl`
+- **Store Interface** - `hb_store.erl`
+- **Cache System** - `hb_cache.erl`
+- **Remote Node Store** - `hb_store_remote_node.erl`
+- **Message System** - `hb_message.erl`
+
+---
+
+## Notes
+
+1. **Read-Only:** No write operations supported
+2. **ID-Only:** Only processes valid Arweave transaction IDs
+3. **Remote Scope:** Always returns `remote` scope
+4. **Network Dependent:** Performance depends on gateway response time
+5. **Subpath Support:** Can extract nested data directly
+6. **Cache Recommended:** Use with local-store for better performance
+7. **GraphQL Backend:** Uses GraphQL API for queries
+8. **AO Compatible:** Supports both Arweave and AO nodes
+9. **Automatic Caching:** Can auto-cache to local stores
+10. **Fallback Ready:** Works well in store chains for resilience

@@ -1,0 +1,135 @@
+# hb_beamr_io.erl - BEAMR Memory Management
+
+## Overview
+
+**Purpose:** Memory operations for BEAMR WASM instances  
+**Module:** `hb_beamr_io`  
+**Pattern:** Defensive type checking for C interop
+
+Provides safe memory read/write, string handling, and malloc/free operations for BEAMR WASM instances.
+
+## Public Functions Overview
+
+```erlang
+%% Memory Operations
+-spec size(WASM) -> {ok, Size}.
+-spec read(WASM, Offset, Size) -> {ok, Binary} | {error, Reason}.
+-spec write(WASM, Offset, Data) -> ok | {error, Reason}.
+
+%% String Operations
+-spec read_string(WASM, Offset) -> {ok, String}.
+-spec write_string(WASM, Data) -> {ok, Ptr} | {error, Reason}.
+
+%% Memory Allocation
+-spec malloc(WASM, Size) -> {ok, Ptr} | {error, Reason}.
+-spec free(WASM, Ptr) -> ok | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. size/1
+```erlang
+size(WASM) -> {ok, Bytes}
+```
+Get total memory size. Memory can grow but never shrink.
+
+### 2. read/3
+```erlang
+read(WASM, Offset, Size) -> {ok, Binary}
+```
+Read binary from memory at offset.
+
+### 3. write/3
+```erlang
+write(WASM, Offset, Data) -> ok
+```
+Write binary to memory at offset.
+
+### 4. read_string/2
+```erlang
+read_string(WASM, Offset) -> {ok, String}
+```
+Read null-terminated string. Reads in 8-byte chunks by default.
+
+### 5. write_string/2
+```erlang
+write_string(WASM, Data) -> {ok, Ptr}
+```
+Allocate and write null-terminated string. Returns pointer.
+
+### 6. malloc/2
+```erlang
+malloc(WASM, Size) -> {ok, Ptr}
+```
+Allocate memory via WASM's malloc function.
+
+### 7. free/2
+```erlang
+free(WASM, Ptr) -> ok
+```
+Free memory via WASM's free function.
+
+---
+
+## Test Code Examples
+
+```erlang
+% Get memory size
+{ok, File} = file:read_file("test.wasm"),
+{ok, WASM, _, _} = hb_beamr:start(File),
+{ok, Size} = hb_beamr_io:size(WASM),
+?assertEqual(65536, Size).  % 1 WASM page
+
+% Write and read
+ok = hb_beamr_io:write(WASM, 0, <<"Hello">>),
+{ok, Data} = hb_beamr_io:read(WASM, 0, 5),
+?assertEqual(<<"Hello">>, Data).
+
+% Allocate and write string
+{ok, Ptr} = hb_beamr_io:write_string(WASM, <<"Test">>),
+{ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+?assertEqual(<<"Test">>, Str).
+
+% Manual malloc/free
+{ok, Ptr} = hb_beamr_io:malloc(WASM, 100),
+ok = hb_beamr_io:write(WASM, Ptr, <<"Data">>),
+ok = hb_beamr_io:free(WASM, Ptr).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Pass string to WASM function
+{ok, Ptr} = hb_beamr_io:write_string(WASM, <<"input">>),
+{ok, [ResultPtr]} = hb_beamr:call(WASM, "process_string", [Ptr]),
+{ok, Result} = hb_beamr_io:read_string(WASM, ResultPtr),
+ok = hb_beamr_io:free(WASM, Ptr).
+
+%% Read WASM output buffer
+{ok, [BufPtr, BufLen]} = hb_beamr:call(WASM, "get_buffer", []),
+{ok, Buffer} = hb_beamr_io:read(WASM, BufPtr, BufLen).
+
+%% Write input, read output
+InputData = <<"binary data">>,
+{ok, InPtr} = hb_beamr_io:malloc(WASM, byte_size(InputData)),
+ok = hb_beamr_io:write(WASM, InPtr, InputData),
+{ok, [OutPtr]} = hb_beamr:call(WASM, "transform", [InPtr, byte_size(InputData)]),
+{ok, Output} = hb_beamr_io:read(WASM, OutPtr, OutputSize),
+ok = hb_beamr_io:free(WASM, InPtr).
+```
+
+---
+
+## Notes
+
+1. **WASM Pages**: 65,536 bytes each
+2. **Memory Growth**: Can grow but never shrink
+3. **Null Termination**: Strings include null byte
+4. **Chunk Size**: read_string reads 8 bytes at a time
+5. **Malloc Returns**: 0 indicates failure
+6. **Bounds Checking**: Out-of-bounds returns error
+7. **Type Safety**: Defensive guards prevent C crashes

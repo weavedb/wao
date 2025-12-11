@@ -1,0 +1,712 @@
+# dev_codec_structured.erl - Richly-Typed Message Codec
+
+## Overview
+
+**Purpose:** Codec for HyperBEAM's internal richly-typed message format  
+**Module:** `dev_codec_structured`  
+**Format:** `structured@1.0`  
+**Pattern:** Rich Types ↔ TABM with Type Annotations
+
+This module implements the codec interface for HyperBEAM's internal structured message format, which supports rich types beyond simple binaries. Types are encoded as binaries with annotations in the `ao-types` field using HTTP Structured Fields (RFC 8941) syntax.
+
+## Supported Rich Types
+
+- **`integer`** - Whole numbers
+- **`float`** - Decimal numbers
+- **`atom`** - Erlang atoms (as tokens)
+- **`list`** - Ordered arrays
+
+## Dependencies
+
+- **HyperBEAM:** `hb_message`, `hb_util`, `hb_maps`, `hb_ao`, `hb_link`, `hb_private`, `hb_structured_fields`, `hb_escape`, `hb_path`, `hb_opts`
+- **Codecs:** `dev_codec_httpsig` (for commit/verify)
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Codec Interface
+-spec to(TABM, Req, Opts) -> {ok, StructuredMsg}.
+-spec from(StructuredMsg, Req, Opts) -> {ok, TABM}.
+
+%% Commitment Interface (delegates to httpsig)
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Msg, Req, Opts) -> {ok, boolean()}.
+
+%% Type Handling
+-spec encode_ao_types(TypesMap, Opts) -> Binary.
+-spec decode_ao_types(Msg | Binary, Opts) -> TypesMap.
+-spec is_list_from_ao_types(Types, Opts) -> boolean().
+
+%% Value Encoding/Decoding
+-spec encode_value(Value) -> {Type, EncodedBinary}.
+-spec decode_value(Type, Binary) -> DecodedValue.
+
+%% Utilities
+-spec implicit_keys(Req, Opts) -> Keys.
+```
+
+---
+
+## Public Functions
+
+### 1. from/3
+
+```erlang
+-spec from(StructuredMsg, Req, Opts) -> {ok, TABM}
+    when
+        StructuredMsg :: term(),
+        Req :: map(),
+        Opts :: map(),
+        TABM :: map() | binary().
+```
+
+**Description:** Convert a richly-typed message into TABM (Type-Annotated Binary Message). Encodes rich types as binaries with type annotations in `ao-types` field.
+
+**Encoding Options:**
+- `<<"encode-types">>` in request - List of types to encode (default: all supported types)
+- If not specified, encodes: `integer`, `float`, `atom`, `list`
+
+**Test Code:**
+```erlang
+-module(dev_codec_structured_from_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_integer_test() ->
+    Msg = #{<<"count">> => 42},
+    {ok, TABM} = dev_codec_structured:from(Msg, #{}, #{}),
+    ?assert(is_binary(maps:get(<<"count">>, TABM))),
+    ?assert(maps:is_key(<<"ao-types">>, TABM)),
+    Types = dev_codec_structured:decode_ao_types(TABM, #{}),
+    ?assertEqual(<<"integer">>, maps:get(<<"count">>, Types)).
+
+from_atom_test() ->
+    Msg = #{<<"module">> => my_module},
+    {ok, TABM} = dev_codec_structured:from(Msg, #{}, #{}),
+    ?assert(is_binary(maps:get(<<"module">>, TABM))),
+    Types = dev_codec_structured:decode_ao_types(TABM, #{}),
+    ?assertEqual(<<"atom">>, maps:get(<<"module">>, Types)).
+
+from_list_test() ->
+    List = [1, 2, 3],
+    {ok, TABM} = dev_codec_structured:from(List, #{}, #{}),
+    ?assert(is_map(TABM) orelse is_list(TABM)),
+    % Check if list annotation present if encoded
+    case is_map(TABM) of
+        true ->
+            Types = dev_codec_structured:decode_ao_types(TABM, #{}),
+            ?assertEqual(<<"list">>, maps:get(<<".">>, Types, undefined));
+        false ->
+            ok
+    end.
+
+from_binary_passthrough_test() ->
+    Binary = <<"test data">>,
+    {ok, Result} = dev_codec_structured:from(Binary, #{}, #{}),
+    ?assertEqual(Binary, Result).
+
+from_mixed_types_test() ->
+    Msg = #{
+        <<"text">> => <<"hello">>,
+        <<"count">> => 42,
+        <<"ratio">> => 3.14,
+        <<"module">> => test_mod,
+        <<"nested">> => #{<<"inner">> => 100}
+    },
+    {ok, TABM} = dev_codec_structured:from(Msg, #{}, #{}),
+    Types = dev_codec_structured:decode_ao_types(TABM, #{}),
+    ?assertEqual(<<"integer">>, maps:get(<<"count">>, Types)),
+    ?assertEqual(<<"float">>, maps:get(<<"ratio">>, Types)),
+    ?assertEqual(<<"atom">>, maps:get(<<"module">>, Types)).
+
+from_selective_encoding_test() ->
+    Msg = #{
+        <<"num">> => 42,
+        <<"atom">> => my_atom
+    },
+    % Only encode atoms
+    {ok, TABM} = dev_codec_structured:from(
+        Msg,
+        #{<<"encode-types">> => [<<"atom">>]},
+        #{}
+    ),
+    Types = dev_codec_structured:decode_ao_types(TABM, #{}),
+    ?assertEqual(<<"atom">>, maps:get(<<"atom">>, Types)),
+    ?assertNot(maps:is_key(<<"num">>, Types)),
+    % Number should pass through as-is
+    ?assertEqual(42, maps:get(<<"num">>, TABM)).
+```
+
+---
+
+### 2. to/3
+
+```erlang
+-spec to(TABM, Req, Opts) -> {ok, StructuredMsg}
+    when
+        TABM :: map() | list() | binary(),
+        Req :: map(),
+        Opts :: map(),
+        StructuredMsg :: term().
+```
+
+**Description:** Convert a TABM into a native HyperBEAM message with rich types. Decodes binaries using `ao-types` annotations.
+
+**Test Code:**
+```erlang
+-module(dev_codec_structured_to_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_integer_test() ->
+    TABM = #{
+        <<"count">> => <<"42">>,
+        <<"ao-types">> => <<"count=integer">>
+    },
+    {ok, Msg} = dev_codec_structured:to(TABM, #{}, #{}),
+    ?assertEqual(42, maps:get(<<"count">>, Msg)),
+    ?assertNot(maps:is_key(<<"ao-types">>, Msg)).
+
+to_atom_test() ->
+    TABM = #{
+        <<"module">> => <<"my_module">>,
+        <<"ao-types">> => <<"module=atom">>
+    },
+    {ok, Msg} = dev_codec_structured:to(TABM, #{}, #{}),
+    ?assertEqual(my_module, maps:get(<<"module">>, Msg)).
+
+to_list_test() ->
+    TABM = #{
+        <<"1">> => <<"a">>,
+        <<"2">> => <<"b">>,
+        <<"3">> => <<"c">>,
+        <<"ao-types">> => <<".=list">>
+    },
+    {ok, Msg} = dev_codec_structured:to(TABM, #{}, #{}),
+    ?assert(is_list(Msg)),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Msg).
+
+to_binary_passthrough_test() ->
+    Binary = <<"raw data">>,
+    {ok, Result} = dev_codec_structured:to(Binary, #{}, #{}),
+    ?assertEqual(Binary, Result).
+
+to_nested_test() ->
+    TABM = #{
+        <<"nested">> => #{
+            <<"value">> => <<"100">>,
+            <<"ao-types">> => <<"value=integer">>
+        }
+    },
+    {ok, Msg} = dev_codec_structured:to(TABM, #{}, #{}),
+    Nested = maps:get(<<"nested">>, Msg),
+    ?assertEqual(100, maps:get(<<"value">>, Nested)).
+
+to_roundtrip_test() ->
+    Original = #{
+        <<"text">> => <<"hello">>,
+        <<"num">> => 42,
+        <<"atom">> => test
+    },
+    {ok, TABM} = dev_codec_structured:from(Original, #{}, #{}),
+    {ok, Restored} = dev_codec_structured:to(TABM, #{}, #{}),
+    ?assertEqual(<<"hello">>, maps:get(<<"text">>, Restored)),
+    ?assertEqual(42, maps:get(<<"num">>, Restored)),
+    ?assertEqual(test, maps:get(<<"atom">>, Restored)).
+```
+
+---
+
+### 3. encode_ao_types/2
+
+```erlang
+-spec encode_ao_types(TypesMap, Opts) -> Binary
+    when
+        TypesMap :: map(),
+        Opts :: map(),
+        Binary :: binary().
+```
+
+**Description:** Generate an `ao-types` structured field from a map of keys and their types.
+
+**Format:** HTTP Structured Field Dictionary (RFC 8941)
+
+**Test Code:**
+```erlang
+-module(encode_ao_types_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_ao_types_test() ->
+    Types = #{
+        <<"count">> => <<"integer">>,
+        <<"name">> => <<"atom">>
+    },
+    Encoded = dev_codec_structured:encode_ao_types(Types, #{}),
+    ?assert(is_binary(Encoded)),
+    % Should be a structured field dictionary
+    ?assert(byte_size(Encoded) > 0).
+
+encode_ao_types_empty_test() ->
+    Encoded = dev_codec_structured:encode_ao_types(#{}, #{}),
+    ?assert(is_binary(Encoded)).
+
+encode_ao_types_roundtrip_test() ->
+    Types = #{<<"x">> => <<"integer">>, <<"y">> => <<"float">>},
+    Encoded = dev_codec_structured:encode_ao_types(Types, #{}),
+    Decoded = dev_codec_structured:decode_ao_types(Encoded, #{}),
+    ?assertEqual(Types, Decoded).
+```
+
+---
+
+### 4. decode_ao_types/2
+
+```erlang
+-spec decode_ao_types(Msg | Binary, Opts) -> TypesMap
+    when
+        Msg :: map() | list() | binary(),
+        Opts :: map(),
+        TypesMap :: map().
+```
+
+**Description:** Parse the `ao-types` field of a TABM and return a map of keys to their types. Returns empty map if no `ao-types` field present.
+
+**Test Code:**
+```erlang
+-module(decode_ao_types_test).
+-include_lib("eunit/include/eunit.hrl").
+
+decode_ao_types_from_map_test() ->
+    Msg = #{
+        <<"data">> => <<"value">>,
+        <<"ao-types">> => <<"data=integer, name=atom">>
+    },
+    Types = dev_codec_structured:decode_ao_types(Msg, #{}),
+    ?assert(is_map(Types)),
+    ?assertEqual(<<"integer">>, maps:get(<<"data">>, Types)),
+    ?assertEqual(<<"atom">>, maps:get(<<"name">>, Types)).
+
+decode_ao_types_from_binary_test() ->
+    Binary = <<"key1=integer, key2=float">>,
+    Types = dev_codec_structured:decode_ao_types(Binary, #{}),
+    ?assertEqual(<<"integer">>, maps:get(<<"key1">>, Types)),
+    ?assertEqual(<<"float">>, maps:get(<<"key2">>, Types)).
+
+decode_ao_types_empty_test() ->
+    Types = dev_codec_structured:decode_ao_types(#{}, #{}),
+    ?assertEqual(#{}, Types).
+
+decode_ao_types_from_list_test() ->
+    Types = dev_codec_structured:decode_ao_types([1, 2, 3], #{}),
+    ?assertEqual(#{}, Types).
+```
+
+---
+
+### 5. is_list_from_ao_types/2
+
+```erlang
+-spec is_list_from_ao_types(Types, Opts) -> boolean()
+    when
+        Types :: map() | binary(),
+        Opts :: map().
+```
+
+**Description:** Determine if the `ao-types` field indicates that the message is a list (has `.=list` annotation).
+
+**Test Code:**
+```erlang
+-module(is_list_from_ao_types_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_list_true_test() ->
+    Types = #{<<".#">> => <<"list">>},
+    ?assert(dev_codec_structured:is_list_from_ao_types(Types, #{})).
+
+is_list_false_test() ->
+    Types = #{<<"key">> => <<"integer">>},
+    ?assertNot(dev_codec_structured:is_list_from_ao_types(Types, #{})).
+
+is_list_from_binary_test() ->
+    Binary = <<".=list">>,
+    ?assert(dev_codec_structured:is_list_from_ao_types(Binary, #{})).
+```
+
+---
+
+### 6. encode_value/1
+
+```erlang
+-spec encode_value(Value) -> {Type, EncodedBinary}
+    when
+        Value :: integer() | float() | atom() | list(),
+        Type :: binary(),
+        EncodedBinary :: binary().
+```
+
+**Description:** Convert a term to a binary representation and emit its type for serialization.
+
+**Test Code:**
+```erlang
+-module(encode_value_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_value_integer_test() ->
+    {Type, Encoded} = dev_codec_structured:encode_value(42),
+    ?assertEqual(<<"integer">>, Type),
+    ?assert(is_binary(Encoded)).
+
+encode_value_atom_test() ->
+    {Type, Encoded} = dev_codec_structured:encode_value(my_atom),
+    ?assertEqual(<<"atom">>, Type),
+    ?assert(is_binary(Encoded)).
+
+encode_value_float_test() ->
+    {Type, Encoded} = dev_codec_structured:encode_value(3.14),
+    ?assertEqual(<<"float">>, Type),
+    ?assert(is_binary(Encoded)).
+```
+
+---
+
+### 7. decode_value/2
+
+```erlang
+-spec decode_value(Type, Binary) -> DecodedValue
+    when
+        Type :: binary(),
+        Binary :: binary(),
+        DecodedValue :: term().
+```
+
+**Description:** Parse a binary value according to its type annotation.
+
+**Test Code:**
+```erlang
+-module(decode_value_test).
+-include_lib("eunit/include/eunit.hrl").
+
+decode_value_integer_test() ->
+    Value = dev_codec_structured:decode_value(<<"integer">>, <<"42">>),
+    ?assertEqual(42, Value).
+
+decode_value_atom_test() ->
+    Value = dev_codec_structured:decode_value(<<"atom">>, <<"my_atom">>),
+    ?assertEqual(my_atom, Value).
+
+decode_value_float_test() ->
+    Encoded = float_to_binary(3.14),
+    Value = dev_codec_structured:decode_value(<<"float">>, Encoded),
+    ?assert(is_float(Value)).
+```
+
+---
+
+### 8. implicit_keys/2
+
+```erlang
+-spec implicit_keys(Req, Opts) -> Keys
+    when
+        Req :: map(),
+        Opts :: map(),
+        Keys :: [binary()].
+```
+
+**Description:** Find keys in a TABM that have `empty-*` type annotations, indicating implicit/placeholder values.
+
+**Test Code:**
+```erlang
+-module(implicit_keys_test).
+-include_lib("eunit/include/eunit.hrl").
+
+implicit_keys_test() ->
+    Req = #{
+        <<"ao-types">> => <<"key1=empty-map, key2=integer">>
+    },
+    Keys = dev_codec_structured:implicit_keys(Req, #{}),
+    ?assert(lists:member(<<"key1">>, Keys)),
+    ?assertNot(lists:member(<<"key2">>, Keys)).
+```
+
+---
+
+### 9. commit/3, verify/3
+
+```erlang
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Msg, Req, Opts) -> {ok, boolean()}.
+```
+
+**Description:** Delegates to `dev_codec_httpsig` for message signing and verification.
+
+**Test Code:**
+```erlang
+-module(dev_codec_structured_commitment_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+commit_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => 42},
+    {ok, Signed} = dev_codec_structured:commit(
+        Msg,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    ?assert(maps:is_key(<<"commitments">>, Signed)).
+
+verify_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => 42},
+    {ok, Signed} = dev_codec_structured:commit(
+        Msg,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
+    {ok, IsValid} = dev_codec_structured:verify(Msg, Commitment, #{}),
+    ?assert(IsValid).
+```
+
+---
+
+## Type Encoding Format
+
+### ao-types Field Structure
+
+```erlang
+<<"ao-types">> => <<"key1=integer, key2=atom, key3=float">>
+```
+
+Uses HTTP Structured Field Dictionary syntax (RFC 8941).
+
+### Special Type Annotations
+
+**List Indicator:**
+```erlang
+<<".=list">>  % Indicates the message is a list
+```
+
+**Empty Placeholders:**
+```erlang
+<<"key=empty-map">>     % Empty map placeholder
+<<"key=empty-list">>    % Empty list placeholder
+<<"key=empty-message">> % Empty message placeholder
+```
+
+---
+
+## Supported Types
+
+### Integer
+```erlang
+% Input
+#{<<"count">> => 42}
+
+% TABM
+#{
+    <<"count">> => <<"42">>,
+    <<"ao-types">> => <<"count=integer">>
+}
+```
+
+### Float
+```erlang
+% Input
+#{<<"ratio">> => 3.14}
+
+% TABM
+#{
+    <<"ratio">> => <<"3.14">>,
+    <<"ao-types">> => <<"ratio=float">>
+}
+```
+
+### Atom
+```erlang
+% Input
+#{<<"module">> => my_module}
+
+% TABM
+#{
+    <<"module">> => <<"my_module">>,
+    <<"ao-types">> => <<"module=atom">>
+}
+```
+
+### List
+```erlang
+% Input
+[<<"a">>, <<"b">>, <<"c">>]
+
+% TABM (with list encoding enabled)
+#{
+    <<"1">> => <<"a">>,
+    <<"2">> => <<"b">>,
+    <<"3">> => <<"c">>,
+    <<"ao-types">> => <<".=list">>
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Encode rich types to TABM
+Structured = #{
+    <<"name">> => <<"Alice">>,
+    <<"age">> => 30,
+    <<"score">> => 95.5,
+    <<"module">> => my_app
+},
+{ok, TABM} = dev_codec_structured:from(Structured, #{}, #{}).
+
+%% Decode TABM to rich types
+{ok, Restored} = dev_codec_structured:to(TABM, #{}, #{}).
+% Restored: #{
+%   <<"name">> => <<"Alice">>,
+%   <<"age">> => 30,
+%   <<"score">> => 95.5,
+%   <<"module">> => my_app
+% }
+
+%% Use with hb_message:convert
+Msg = #{<<"count">> => 42},
+TABM = hb_message:convert(Msg, tabm, #{}),
+BackToStructured = hb_message:convert(TABM, <<"structured@1.0">>, #{}).
+
+%% Selective type encoding (only encode atoms)
+{ok, TABM} = dev_codec_structured:from(
+    #{<<"num">> => 42, <<"mod">> => my_mod},
+    #{<<"encode-types">> => [<<"atom">>]},
+    #{}
+).
+% TABM: #{
+%   <<"num">> => 42,           % Integer passes through
+%   <<"mod">> => <<"my_mod">>,
+%   <<"ao-types">> => <<"mod=atom">>
+% }
+
+%% Handle lists
+List = [1, 2, 3],
+{ok, TABM} = dev_codec_structured:from(
+    List,
+    #{<<"encode-types">> => [<<"list">>, <<"integer">>]},
+    #{}
+).
+{ok, RestoredList} = dev_codec_structured:to(TABM, #{}, #{}).
+% RestoredList: [1, 2, 3]
+
+%% Work with ao-types directly
+Types = #{<<"key1">> => <<"integer">>, <<"key2">> => <<"atom">>},
+Encoded = dev_codec_structured:encode_ao_types(Types, #{}),
+Decoded = dev_codec_structured:decode_ao_types(Encoded, #{}).
+
+%% Check for list type
+TABM = #{<<"ao-types">> => <<".=list, 1=integer">>},
+IsList = dev_codec_structured:is_list_from_ao_types(TABM, #{}).
+% Returns: true
+```
+
+---
+
+## Link Handling
+
+The codec integrates with HyperBEAM's link system:
+
+```erlang
+% Links are normalized based on linkify mode
+linkify_mode(Req, Opts) ->
+    case hb_maps:get(<<"bundle">>, Req, not_found, Opts) of
+        true -> false,    % Don't linkify in bundle mode
+        false -> true,    % Linkify in flat mode
+        not_found -> hb_opts:get(linkify_mode, offload, Opts)
+    end.
+```
+
+**Modes:**
+- **Bundle mode:** Keep nested data inline (no linkification)
+- **Flat mode:** Offload nested data to cache (linkify)
+- **Default:** Use `linkify_mode` option (default: `offload`)
+
+---
+
+## Private Keys and Commitments
+
+### Filtered During Encoding
+- Private keys (via `hb_private:is_private/1`)
+- `commitments` field
+- Regenerated keys (defined in `?REGEN_KEYS`)
+
+### Preserved During Decoding
+- `commitments` field copied from input to output
+- Private data not exposed in TABM
+
+---
+
+## Nested Structures
+
+Both encoding and decoding handle nested maps and lists recursively:
+
+```erlang
+% Input
+#{
+    <<"outer">> => #{
+        <<"inner">> => #{
+            <<"value">> => 42
+        }
+    }
+}
+
+% Each level processed independently
+% Inner structures get their own ao-types annotations
+```
+
+---
+
+## Function Support
+
+Functions are converted to binary string representations:
+
+```erlang
+Fun = fun(X) -> X + 1 end,
+Msg = #{<<"func">> => Fun},
+{ok, TABM} = dev_codec_structured:from(Msg, #{}, #{}).
+% Function converted to: <<"#Fun<module.name.N>">>
+```
+
+**Note:** This is for serialization only - functions cannot be restored.
+
+---
+
+## References
+
+- **RFC 8941** - Structured Field Values for HTTP
+- **HTTPSig Module** - `dev_codec_httpsig.erl`
+- **Link System** - `hb_link.erl`
+- **Structured Fields** - `hb_structured_fields.erl`
+- **Escape** - `hb_escape.erl`
+
+---
+
+## Notes
+
+1. **Type Preservation:** Maintains rich Erlang types through annotations
+2. **RFC 8941:** Uses Structured Fields for type encoding
+3. **Selective Encoding:** Can encode subset of types
+4. **List Support:** Special `.=list` annotation for array messages
+5. **Nested Processing:** Recursive handling of maps and lists
+6. **Link Integration:** Respects linkify mode for nested data
+7. **Private Filtering:** Removes private/internal keys
+8. **Commitment Preservation:** Maintains signatures during conversion
+9. **Binary Passthrough:** Binaries pass through unchanged
+10. **Escape Handling:** Uses `hb_escape` for special characters in keys
+11. **Sorted Keys:** Consistent ordering for deterministic output
+12. **Empty Placeholders:** Special types for empty containers
+13. **HTTPSig Delegation:** Uses httpsig for signatures
+14. **Function Serialization:** Converts functions to string refs
+15. **Default All Types:** Encodes all supported types by default

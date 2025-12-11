@@ -1,0 +1,556 @@
+# dev_router.erl - Message Routing Device
+
+## Overview
+
+**Purpose:** Route outbound messages to appropriate network recipients via HTTP  
+**Module:** `dev_router`  
+**Device Name:** `router@1.0`  
+**Load Balancing:** Supports multiple distribution strategies
+
+This device routes outbound messages from a node to their appropriate network recipients. Routes are defined in the node's configuration as a precedence-ordered list. The device supports multiple load distribution strategies including Random, By-Base, By-Weight, and Nearest.
+
+## Supported Operations
+
+- **Route Discovery:** Find the appropriate route for a message
+- **Route Registration:** Register routes with remote router nodes
+- **Route Management:** Get/add routes via API
+- **Request Preprocessing:** Re-route requests to remote peers
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_http`, `hb_cache`, `hb_maps`, `hb_opts`, `hb_util`, `hb_message`, `hb_path`, `hb_crypto`, `hb_singleton`, `hb_http_server`, `hb_name`
+- **Related:** `dev_relay` (message relay)
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info(Msg) -> InfoMap.
+-spec info(Msg1, Msg2, Opts) -> {ok, InfoBody}.
+
+%% Route Operations
+-spec routes(M1, M2, Opts) -> {ok, Routes} | {ok, <<"Route added.">>}.
+-spec route(Msg, Opts) -> {ok, Node} | {error, no_matches}.
+-spec route(Base, Msg, Opts) -> {ok, Node} | {error, no_matches}.
+
+%% Route Matching
+-spec match(Base, Req, Opts) -> {ok, Route} | {error, no_matching_route}.
+
+%% Route Registration
+-spec register(M1, M2, Opts) -> {ok, <<"Routes registered.">>}.
+
+%% Request Preprocessing
+-spec preprocess(Msg1, Msg2, Opts) -> {ok, RelayRequest}.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1, info/3
+
+```erlang
+-spec info(Msg) -> InfoMap
+    when
+        Msg :: map(),
+        InfoMap :: map().
+
+-spec info(Msg1, Msg2, Opts) -> {ok, InfoBody}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        InfoBody :: map().
+```
+
+**Description:** Returns device information and API documentation. The device exports: `info`, `routes`, `route`, `match`, `register`, `preprocess`.
+
+**Test Code:**
+```erlang
+-module(dev_router_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_exports_test() ->
+    Info = dev_router:info(#{}),
+    Exports = maps:get(exports, Info),
+    ?assert(lists:member(<<"routes">>, Exports)),
+    ?assert(lists:member(<<"route">>, Exports)),
+    ?assert(lists:member(<<"match">>, Exports)).
+
+info_api_test() ->
+    {ok, InfoBody} = dev_router:info(#{}, #{}, #{}),
+    ?assertMatch(#{<<"api">> := _}, InfoBody),
+    ?assertMatch(#{<<"version">> := <<"1.0">>}, InfoBody).
+```
+
+---
+
+### 2. routes/3
+
+```erlang
+-spec routes(M1, M2, Opts) -> {ok, Routes} | {ok, <<"Route added.">>} | {error, Reason}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        Routes :: [map()],
+        Reason :: term().
+```
+
+**Description:** Get all known routes (GET) or add a new route (POST). For POST requests, validates that the sender is an authorized operator before adding the route.
+
+**Test Code:**
+```erlang
+-module(dev_router_routes_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_routes_test() ->
+    Node = hb_http_server:start_node(#{
+        force_signed => false,
+        routes => [
+            #{
+                <<"template">> => <<"*">>,
+                <<"node">> => <<"our_node">>,
+                <<"priority">> => 10
+            }
+        ]
+    }),
+    {ok, Recvd} = hb_http:get(Node, <<"/~router@1.0/routes/1/node">>, #{}),
+    ?assertEqual(<<"our_node">>, Recvd).
+
+add_route_test() ->
+    Owner = ar_wallet:new(),
+    Node = hb_http_server:start_node(#{
+        force_signed => false,
+        routes => [
+            #{
+                <<"template">> => <<"/some/path">>,
+                <<"node">> => <<"old">>,
+                <<"priority">> => 10
+            }
+        ],
+        operator => hb_util:encode(ar_wallet:to_address(Owner))
+    }),
+    {ok, _} = hb_http:post(
+        Node,
+        hb_message:commit(
+            #{
+                <<"path">> => <<"/~router@1.0/routes">>,
+                <<"template">> => <<"/some/new/path">>,
+                <<"node">> => <<"new">>,
+                <<"priority">> => 15
+            },
+            Owner
+        ),
+        #{}
+    ),
+    {ok, Recvd} = hb_http:get(Node, <<"/~router@1.0/routes/2/node">>, #{}),
+    ?assertEqual(<<"new">>, Recvd).
+```
+
+---
+
+### 3. route/2, route/3
+
+```erlang
+-spec route(Msg, Opts) -> {ok, Node} | {error, no_matches}.
+-spec route(Base, Msg, Opts) -> {ok, Node} | {ok, Route} | {error, no_matches}
+    when
+        Base :: map() | undefined,
+        Msg :: map(),
+        Opts :: map(),
+        Node :: binary(),
+        Route :: map().
+```
+
+**Description:** Find the appropriate route for a given message. If the route resolves to a single host+path, returns that directly. Otherwise, returns the matching route with a list of nodes. Supports load distribution strategies for multi-node routes.
+
+**Load Distribution Strategies:**
+- `All` - Return all nodes (default)
+- `Random` - Distribute evenly, non-deterministically
+- `By-Base` - Route based on hashpath (same hashpath → same node)
+- `By-Weight` - Route based on node weights
+- `Nearest` - Route to nearest node by wallet distance
+
+**Test Code:**
+```erlang
+-module(dev_router_route_test).
+-include_lib("eunit/include/eunit.hrl").
+
+route_explicit_url_test() ->
+    Routes = [#{<<"template">> => <<"*">>, <<"node">> => <<"fallback">>}],
+    ?assertEqual(
+        {ok, <<"https://google.com">>},
+        dev_router:route(#{<<"path">> => <<"https://google.com">>}, #{routes => Routes})
+    ).
+
+route_template_match_test() ->
+    Routes = [
+        #{<<"template">> => <<"/api/*">>, <<"node">> => <<"api-server">>},
+        #{<<"template">> => <<"*">>, <<"node">> => <<"fallback">>}
+    ],
+    ?assertMatch(
+        {ok, _},
+        dev_router:route(#{<<"path">> => <<"/api/users">>}, #{routes => Routes})
+    ).
+
+route_with_strategy_test() ->
+    Routes = [
+        #{
+            <<"template">> => <<"/.*">>,
+            <<"strategy">> => <<"Random">>,
+            <<"nodes">> => [
+                #{<<"prefix">> => <<"http://node1">>},
+                #{<<"prefix">> => <<"http://node2">>}
+            ]
+        }
+    ],
+    {ok, Result} = dev_router:route(#{<<"path">> => <<"/test">>}, #{routes => Routes}),
+    ?assert(is_map(Result) orelse is_binary(Result)).
+```
+
+---
+
+### 4. match/3
+
+```erlang
+-spec match(Base, Req, Opts) -> {ok, Route} | {error, no_matching_route}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Route :: map().
+```
+
+**Description:** Find the first matching template in a list of known routes. Matches based on path templates which can be maps or path regexes.
+
+**Test Code:**
+```erlang
+-module(dev_router_match_test).
+-include_lib("eunit/include/eunit.hrl").
+
+match_route_test() ->
+    Routes = [#{<<"template">> => <<"/api/*">>, <<"node">> => <<"api">>}],
+    Base = #{<<"routes">> => Routes},
+    Req = #{<<"path">> => <<"/api/test">>},
+    {ok, Match} = dev_router:match(Base, Req, #{}),
+    ?assertMatch(#{<<"node">> := <<"api">>}, Match).
+
+match_no_route_test() ->
+    Routes = [#{<<"template">> => <<"/api/*">>, <<"node">> => <<"api">>}],
+    Base = #{<<"routes">> => Routes},
+    Req = #{<<"path">> => <<"/other/path">>},
+    ?assertEqual({error, no_matching_route}, dev_router:match(Base, Req, #{})).
+```
+
+---
+
+### 5. register/3
+
+```erlang
+-spec register(M1, M2, Opts) -> {ok, <<"Routes registered.">>}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map().
+```
+
+**Description:** Register routes with a remote router node. Reads route registration messages from `router_opts.offered` and posts them to the specified registration peer.
+
+**Test Code:**
+```erlang
+-module(dev_router_register_test).
+-include_lib("eunit/include/eunit.hrl").
+
+register_route_test() ->
+    RemoteRouter = hb_http_server:start_node(#{
+        operator => hb_util:encode(ar_wallet:to_address(hb:wallet()))
+    }),
+    Opts = #{
+        router_opts => #{
+            <<"offered">> => [
+                #{
+                    <<"registration-peer">> => RemoteRouter,
+                    <<"prefix">> => <<"http://localhost:8080">>,
+                    <<"template">> => <<"/my/service/*">>
+                }
+            ]
+        }
+    },
+    {ok, Result} = dev_router:register(#{}, #{}, Opts),
+    ?assertEqual(<<"Routes registered.">>, Result).
+```
+
+---
+
+### 6. preprocess/3
+
+```erlang
+-spec preprocess(Msg1, Msg2, Opts) -> {ok, RelayRequest}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        RelayRequest :: map().
+```
+
+**Description:** Preprocess a request to check if it should be relayed to a different node. If a matching route is found, constructs a relay request to `relay@1.0/call`. If no match, executes locally or returns error based on `router_preprocess_default` option.
+
+**Test Code:**
+```erlang
+-module(dev_router_preprocess_test).
+-include_lib("eunit/include/eunit.hrl").
+
+preprocess_reroute_test() ->
+    Peer1 = hb_http_server:start_node(#{priv_wallet => W1 = ar_wallet:new()}),
+    Address1 = hb_util:human_id(ar_wallet:to_address(W1)),
+    Node = hb_http_server:start_node(Opts = #{
+        priv_wallet => ar_wallet:new(),
+        routes => [
+            #{
+                <<"template">> => <<"/.*/.*/.*">>,
+                <<"strategy">> => <<"Nearest">>,
+                <<"nodes">> => [#{<<"prefix">> => Peer1, <<"wallet">> => Address1}]
+            }
+        ],
+        on => #{<<"request">> => #{<<"device">> => <<"relay@1.0">>}}
+    }),
+    {ok, Res} = hb_http:get(Node, <<"/~meta@1.0/info/address">>, Opts),
+    ?assertEqual(Address1, Res).
+```
+
+---
+
+## Route Configuration
+
+### Route Structure
+
+```erlang
+#{
+    <<"template">> => TemplatePattern,  % Path regex or message template
+    <<"node">> => NodeURL,              % Single node URL (optional)
+    <<"nodes">> => [NodeMaps],          % List of node configs (optional)
+    <<"strategy">> => Strategy,         % Load distribution strategy
+    <<"choose">> => N,                  % Number of nodes to select
+    <<"priority">> => Priority          % Route precedence (lower = higher)
+}
+```
+
+### Node Configuration
+
+```erlang
+#{
+    <<"prefix">> => <<"http://node.example.com">>,
+    <<"wallet">> => <<"encoded-wallet-address">>,
+    <<"weight">> => 1.0,  % For By-Weight strategy
+    <<"opts">> => #{}     % Additional options
+}
+```
+
+### Path Transformation
+
+Routes support path transformation via:
+
+- `prefix` - Prepend to path
+- `suffix` - Append to path
+- `match` / `with` - Regex replacement
+
+```erlang
+#{
+    <<"template">> => <<"/api/*">>,
+    <<"prefix">> => <<"https://backend.example.com">>,
+    <<"match">> => <<"^/api">>,
+    <<"with">> => <<"/v2">>
+}
+```
+
+---
+
+## Load Distribution Strategies
+
+### Random
+
+Distributes requests evenly across all nodes using random selection:
+
+```erlang
+#{
+    <<"strategy">> => <<"Random">>,
+    <<"nodes">> => [Node1, Node2, Node3]
+}
+```
+
+### By-Base
+
+Routes based on the message's hashpath, ensuring consistent routing for the same base message:
+
+```erlang
+#{
+    <<"strategy">> => <<"By-Base">>,
+    <<"nodes">> => [Node1, Node2, Node3]
+}
+```
+
+### By-Weight
+
+Routes based on node weights (higher weight = more traffic):
+
+```erlang
+#{
+    <<"strategy">> => <<"By-Weight">>,
+    <<"nodes">> => [
+        #{<<"prefix">> => Node1, <<"weight">> => 2.0},
+        #{<<"prefix">> => Node2, <<"weight">> => 1.0}
+    ]
+}
+```
+
+### Nearest
+
+Routes to the node whose wallet address is closest to the message's hashpath (using 256-bit field distance):
+
+```erlang
+#{
+    <<"strategy">> => <<"Nearest">>,
+    <<"nodes">> => [
+        #{<<"prefix">> => Node1, <<"wallet">> => Address1},
+        #{<<"prefix">> => Node2, <<"wallet">> => Address2}
+    ]
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Configure node with routes
+Node = hb_http_server:start_node(#{
+    routes => [
+        #{
+            <<"template">> => <<"/scheduler/*">>,
+            <<"node">> => <<"https://scheduler.example.com">>
+        },
+        #{
+            <<"template">> => <<"/.*">>,
+            <<"strategy">> => <<"Nearest">>,
+            <<"nodes">> => ClusterNodes
+        }
+    ]
+}).
+
+%% Find route for a message
+{ok, Route} = dev_router:route(
+    #{<<"path">> => <<"/scheduler/slot">>},
+    #{routes => Routes}
+).
+
+%% Register with remote router
+hb_ao:resolve(
+    #{<<"device">> => <<"router@1.0">>},
+    #{<<"path">> => <<"register">>},
+    #{router_opts => #{<<"offered">> => MyRoutes}}
+).
+
+%% Match route from base message
+{ok, Match} = dev_router:match(
+    BaseMsg,
+    #{<<"path">> => <<"/api/endpoint">>},
+    Opts
+).
+```
+
+---
+
+## Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `routes` | `[]` | List of route configurations |
+| `router_opts` | `#{}` | Router-specific options |
+| `router_opts.provider` | - | Dynamic route provider message |
+| `router_opts.registrar` | - | Route registrar message |
+| `router_opts.offered` | - | Routes to register with peers |
+| `router_preprocess_default` | `<<"local">>` | Default action when no route matches |
+| `route_owners` | `[operator]` | Addresses authorized to add routes |
+| `operator` | - | Node operator address |
+
+---
+
+## Request Preprocessing Flow
+
+```
+1. Extract request from Msg2
+2. Load template routes from configuration
+3. Convert message to HTTP request format
+4. Match against routes
+5. If no match:
+   - If router_preprocess_default = "local": execute locally
+   - If router_preprocess_default = "error": return 404
+6. If match found:
+   - Check commit-request option
+   - Prepare relay request to relay@1.0/call
+   - Include user message with commitment
+7. Return relay request body
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+**No Matching Route:**
+```erlang
+{error, no_matches}
+```
+
+**No Matching Route (preprocess):**
+```erlang
+{ok, #{
+    <<"body">> => [#{
+        <<"status">> => 404,
+        <<"message">> => <<"No matching template found in the given routes.">>
+    }]
+}}
+```
+
+**Not Authorized:**
+```erlang
+{error, not_authorized}
+```
+
+**Routes Provider Failed:**
+```erlang
+throw({routes, routes_provider_failed, Error})
+```
+
+---
+
+## References
+
+- **Relay Device** - `dev_relay.erl`
+- **HTTP Client** - `hb_http.erl`
+- **Message Format** - `hb_message.erl`
+- **Path Utilities** - `hb_path.erl`
+- **Template Matching** - `hb_util:template_matches/3`
+
+---
+
+## Notes
+
+1. **Precedence Order:** Routes are matched in order; first match wins
+2. **Explicit URLs:** HTTP/HTTPS URLs bypass routing table entirely
+3. **Dynamic Routes:** Routes can be loaded dynamically via `provider`
+4. **Registration:** Routes can be registered with remote routers
+5. **Field Distance:** Nearest strategy uses 256-bit wraparound distance
+6. **Weight Normalization:** Weights are automatically normalized
+7. **Choose N:** Select multiple nodes from cluster
+8. **Path Transformation:** Supports prefix, suffix, and regex replacement
+9. **Authorization:** Route addition requires operator signature
+10. **Caching:** Routes are loaded fresh for each request
+11. **Hashpath Routing:** By-Base ensures cache locality
+12. **Statistical Distribution:** Random/By-Weight provide even distribution
