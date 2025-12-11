@@ -153,9 +153,9 @@ export default defineConfig({
     "https://vocs.dev/api/og?logo=%logo&title=%title&description=%description",
   topNav: [
     { text: "Get Started", link: "/getting-started" },
-    { text: "HyperBEAM", link: "/hyperbeam/decoding-from-scratch" },
     { text: "Mobile", link: "/mobile" },
     { text: "SDK", link: "/api/ao" },
+    { text: "HyperBEAM", link: "/hyperbeam" },
   ],
   socials: [
     {
@@ -182,7 +182,7 @@ export default defineConfig({
     },
     {
       text: "HyperBEAM",
-      link: "/hyperbeam",
+      link: "/hb",
     },
     {
       text: "Decoding HyperBEAM",
@@ -350,6 +350,10 @@ export default defineConfig({
       text: "HyperBEAM Reference",
       collapsed: true,
       items: [
+        {
+          text: "Overview",
+          link: "/hyperbeam",
+        },
         {
           text: "AR Utils",
           collapsed: true,
