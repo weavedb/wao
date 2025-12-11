@@ -1,255 +1,293 @@
-# HyperBEAM
+# HyperBEAM Reference
 
-## Install WAO & HyperBEAM
+Complete API documentation for HyperBEAM's 141 modules, based on [v0.9-milestone-3-beta-3](https://github.com/permaweb/HyperBEAM/releases/tag/v0.9-milestone-3-beta-3). Each module page includes an overview, public function specifications with type signatures, internal function documentation, common usage patterns, and test code examples.
 
-```bash
-yarn add wao
-```
-In addition to the WAO SDK, you will need to [install HyperBEAM](https://permaweb.github.io/HyperBEAM/getting-started/requirements/) on your local computer (recommended) or a cloud server. The required systems are not the only ones you can install HyperBEAM on. I was, for example, able to install HyperBEAM on [Arch Linux](https://archlinux.org/) by installing the necessary dependencies. You could throw installation errors at LLMs like ChatGPT and Claude and likely be able to figure it out.
+The reference is organized into three categories:
 
-If you want to test Mainnet AOS modules, you need to install the WAO fork of HyperBEAM, which includes a custom helper device for testing.
+- **AR Utils** — Low-level Arweave integration (cryptography, transactions, bundles)
+- **HB Core** — Core infrastructure (messaging, caching, HTTP, storage, runtime)
+- **Devices** — Pluggable device implementations (codecs, scheduling, execution, payment)
 
-```bash
-git clone --branch wao https://github.com/weavedb/HyperBEAM.git
-```
+---
 
-Make sure you compiled it and are able to run `rebar3 shell`, but you don't need to have it running yet. You might need to add environment variables depending on how you installed it on your system. WAO SDK handles that too.
+## AR Utils
 
-```bash
-CMAKE_POLICY_VERSION_MINIMUM=3.5 CC=gcc-12 CXX=g++-12 rebar3 shell
-```
+| Module | Purpose |
+|--------|---------|
+| [rsa_pss](/src/rsa_pss) | RSA-PSS signatures (RFC 3447) |
+| [ar_wallet](/src/ar_wallet) | Key generation, signing, serialization |
+| [ar_bundles](/src/ar_bundles) | ANS-104 bundle creation and verification |
+| [ar_tx](/src/ar_tx) | L1 transaction creation and signing |
+| [ar_deep_hash](/src/ar_deep_hash) | SHA384 recursive hashing for signatures |
+| [ar_timestamp](/src/ar_timestamp) | Network timestamp caching |
+| [ar_rate_limiter](/src/ar_rate_limiter) | HTTP request throttling |
 
-## Create a Project
+---
 
-To create a project, you could use `npx wao create APP_NAME`,
+## HB Core
 
-```bash
-npx wao create myapp && cd myapp
-```
+### Entry Points & Configuration
 
-or you could manually install `wao` into your project.
+| Module | Purpose |
+|--------|---------|
+| [hb](/src/hb) | Main entry point and node startup |
+| [hb_app](/src/hb_app) | OTP application behavior |
+| [hb_sup](/src/hb_sup) | Supervisor tree management |
+| [hb_opts](/src/hb_opts) | Configuration management |
 
-```bash
-mkdir myapp && cd myapp && yarn init && yarn add wao
-mkdir test && touch test/test.js
-```
+### Computation Engine
 
-Make sure your `package.json` looks something like the following to enable ES6 and test commands with `wasm64`. The wasm64 flag is unnecessary for NodeJS v24 and later. Also, you need to disable concurrency so the test won't try to run multiple HyperBEAM nodes on duplicate ports.
+| Module | Purpose |
+|--------|---------|
+| [hb_ao](/src/hb_ao) | Core AO resolution engine |
+| [hb_ao_device](/src/hb_ao_device) | Device loading and function routing |
+| [hb_ao_test_vectors](/src/hb_ao_test_vectors) | AO resolution test suite |
 
-```json [/package.json]
-{
-  "name": "myapp",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
-    "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
-    "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js"
-  },
-  "dependencies": {
-    "wao": "^0.22.1"
-  }
-}
-```
+### HTTP Stack
 
-If your HyperBEAM installation requires environment variables, define them in `.env.hyperbeam`.
+| Module | Purpose |
+|--------|---------|
+| [hb_http](/src/hb_http) | High-level HTTP request API |
+| [hb_http_server](/src/hb_http_server) | Cowboy server integration |
+| [hb_http_client](/src/hb_http_client) | Connection pooling and retries |
+| [hb_http_client_sup](/src/hb_http_client_sup) | HTTP client supervisor |
+| [hb_http_multi](/src/hb_http_multi) | Multi-node parallel requests |
+| [hb_http_benchmark_tests](/src/hb_http_benchmark_tests) | HTTP performance benchmarks |
 
-```dotenv [/.env.hyperbeam]
-CC=gcc-12
-CXX=g++-12
-CMAKE_POLICY_VERSION_MINIMUM=3.5
-```
-## Write Tests
+### Caching & Storage
 
-`HyperBEAM` class let you create a HyperBEAM sandbox by starting a fresh HyperBEAM node before testing and shutting it down when tests are complete.
-You can interact with the HyperBEAM node with `HB` (`hbeam.hb`).
+| Module | Purpose |
+|--------|---------|
+| [hb_cache](/src/hb_cache) | High-level caching with commitments |
+| [hb_cache_control](/src/hb_cache_control) | Cache control heuristics |
+| [hb_cache_render](/src/hb_cache_render) | GraphViz cache visualization |
+| [hb_store](/src/hb_store) | Storage abstraction layer |
+| [hb_store_fs](/src/hb_store_fs) | Filesystem backend |
+| [hb_store_gateway](/src/hb_store_gateway) | Arweave gateway backend (read-only) |
+| [hb_store_lmdb](/src/hb_store_lmdb) | LMDB embedded database |
+| [hb_store_lru](/src/hb_store_lru) | LRU in-memory cache |
+| [hb_store_opts](/src/hb_store_opts) | Store options processing |
+| [hb_store_remote_node](/src/hb_store_remote_node) | Remote node proxy |
+| [hb_store_rocksdb](/src/hb_store_rocksdb) | RocksDB backend |
 
-```js [/test/hyperbeam.test.js]
-import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM } from "wao/test"
+### Message Handling
 
-/*
-  The link to your HyperBEAM node directory.
-  It's relative to your app root folder, not the test folder.
-*/
-const cwd = "../HyperBEAM"
+| Module | Purpose |
+|--------|---------|
+| [hb_message](/src/hb_message) | Format conversion and commitments |
+| [hb_message_test_vectors](/src/hb_message_test_vectors) | Message format test suite |
+| [hb_maps](/src/hb_maps) | Map operations with link resolution |
+| [hb_path](/src/hb_path) | Path routing and hashpath calculation |
+| [hb_link](/src/hb_link) | Link resolution and normalization |
+| [hb_singleton](/src/hb_singleton) | Singleton message conversion |
+| [hb_private](/src/hb_private) | Private message fields |
 
-describe("HyperBEAM", function () {
-  let hbeam, hb
+### WASM Runtime
 
-  // start a hyperbeam node and wait till it's ready, reset storage for test
-  before(async () => {
-    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
-  })
+| Module | Purpose |
+|--------|---------|
+| [hb_beamr](/src/hb_beamr) | WASM runtime wrapper |
+| [hb_beamr_io](/src/hb_beamr_io) | WASM memory I/O operations |
 
-  beforeEach(async () => (hb = hbeam.hb))
+### Utilities
 
-  // kill the node after testing
-  after(async () => hbeam.kill())
+| Module | Purpose |
+|--------|---------|
+| [hb_util](/src/hb_util) | Core utilities and type conversion |
+| [hb_crypto](/src/hb_crypto) | Hashing and key derivation |
+| [hb_json](/src/hb_json) | JSON encoding/decoding |
+| [hb_keccak](/src/hb_keccak) | Ethereum-compatible hashing |
+| [hb_escape](/src/hb_escape) | String escaping utilities |
+| [hb_format](/src/hb_format) | Pretty-printing and display |
+| [hb_structured_fields](/src/hb_structured_fields) | HTTP Structured Fields (RFC 9651) |
 
-  it("should run a HyperBEAM node", async () => {
-    // change config
-    await hb.post({ path: "/~meta@1.0/info", test_config: "abc" })
+### Networking & Routing
 
-    // get config
-    const { out } = await hb.get({ path: "/~meta@1.0/info" })
-    assert.equal(out.test_config, "abc")
-  })
-})
-```
+| Module | Purpose |
+|--------|---------|
+| [hb_client](/src/hb_client) | Remote node communication |
+| [hb_gateway_client](/src/hb_gateway_client) | Arweave GraphQL client |
+| [hb_router](/src/hb_router) | Node routing configuration |
 
-You can also skip the `HyperBEAM` class and connect with an already running remote node by specifying the node `url` to `HB`.
+### Process Management
 
-```js [/test/hb.test.js]
-import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
-import { acc } from "wao/test"
-import { HB } from "wao"
+| Module | Purpose |
+|--------|---------|
+| [hb_persistent](/src/hb_persistent) | Process grouping and workers |
+| [hb_name](/src/hb_name) | Named process registry |
+| [hb_process_monitor](/src/hb_process_monitor) | Process lifecycle monitoring |
 
-const cwd = "../HyperBEAM"
+### Debugging & Monitoring
 
-describe("HyperBEAM", function () {
-  let hb
+| Module | Purpose |
+|--------|---------|
+| [hb_debugger](/src/hb_debugger) | Interactive debugging |
+| [hb_event](/src/hb_event) | Event logging and counters |
+| [hb_logger](/src/hb_logger) | Structured logging |
+| [hb_tracer](/src/hb_tracer) | Execution tracing |
+| [hb_metrics_collector](/src/hb_metrics_collector) | Prometheus metrics |
+| [hb_features](/src/hb_features) | Feature flags |
 
-  // using one of the pre-generated accounts from acc for test
-  beforeEach(async () => {
-    hb = new HB({ jwk: acc[0].jwk, url: "http://localhost:10001" })
-  })
+### Testing & Examples
 
-  it("should connect to a HyperBEAM node", async () => {
-    // get build info
-    const build = await hb.g("/~meta@1.0/build")
-    assert.equal(build.node, "HyperBEAM")
-  })
-})
-```
-HyperBEAM has [a test device](https://github.com/permaweb/HyperBEAM/blob/main/src/dev_test.erl) to test basic features with the HB methods.
-- `spawn` : spawn a process
-- `schedule` : schedule a message to a process
-- `compute` : compute the result of a slot
-- `messages` : list messages in a process
+| Module | Purpose |
+|--------|---------|
+| [hb_test_utils](/src/hb_test_utils) | Test store generation, benchmarking |
+| [hb_examples](/src/hb_examples) | Integration examples |
+| [hb_volume](/src/hb_volume) | Disk and volume management |
 
-```js
-it("should test test-device@1.0", async () => {
-  const { pid } = await hb.spawn({ "execution-device": "test-device@1.0" })
-  const { slot } = await hb.schedule({ pid })
-  const res = await hb.compute({ pid, slot })
-  assert.equal(res.results["assignment-slot"], 1)
-  const {
-      edges: [ edge0, { node: { assignment, message } }]
-  } = await hb.messages({ pid, from: 0, to: 1 })
-  assert.equal(message.Target, pid)
-})
-```
+---
 
-## AO-Core Pathing and HTTP Message Signatures
+## Devices
 
-It is extremely important to understand [the pathing scheme](https://github.com/permaweb/HyperBEAM/blob/main/docs/introduction/pathing-in-ao-core.md) of AO-Core protocol and HTTP Message Signature ([RFC 9421](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-message-signatures)) when interacting with HyperBEAM nodes.
+### Signature & Codec Foundation
 
-`get` and `post` help you to construct complex messages and send signed requests to HyperBEAM nodes.
+| Module | Purpose |
+|--------|---------|
+| [dev_codec_httpsig](/src/dev_codec_httpsig) | HTTP Message Signatures (RFC-9421) |
+| [dev_codec_httpsig_conv](/src/dev_codec_httpsig_conv) | TABM ↔ HTTP conversion |
+| [dev_codec_httpsig_keyid](/src/dev_codec_httpsig_keyid) | Key material extraction |
+| [dev_codec_httpsig_siginfo](/src/dev_codec_httpsig_siginfo) | Signature header encoding |
+| [dev_codec_httpsig_proxy](/src/dev_codec_httpsig_proxy) | HMAC commitment proxy |
+| [dev_codec_flat](/src/dev_codec_flat) | Flat path-based representation |
+| [dev_codec_structured](/src/dev_codec_structured) | Rich typed messages (int, float, atom, list) |
 
-```js
-it("should interact with meta@1.0", async () => {
-  // change node configuration
-  await hb.post({ path: "/~meta@1.0/info", test_config: 123 })
-  
-  const { out } = await hb.get({ path: "/~meta@1.0/info" })
-  assert.equal(out.test_config, 123)
-})
-```
+### Message Codecs
 
-`g` and `p` are the shortcut methods for `get` and `post`.
+| Module | Purpose |
+|--------|---------|
+| [dev_codec_json](/src/dev_codec_json) | JSON interchange format |
+| [dev_codec_ans104](/src/dev_codec_ans104) | ANS-104 bundle format |
+| [dev_codec_ans104_from](/src/dev_codec_ans104_from) | ANS-104 → TABM extraction |
+| [dev_codec_ans104_to](/src/dev_codec_ans104_to) | TABM → ANS-104 conversion |
 
-```js
-it("should interact with meta@1.0 #2", async () => {
-  await hb.p("/~meta@1.0/info", { test_config2: "abc" })
-  
-  const out = await hb.g("/~meta@1.0/info")
-  assert.equal(out.test_config2, "abc")
-})
-```
+### Authentication Codecs
 
-## Spawn AOS Processes
+| Module | Purpose |
+|--------|---------|
+| [dev_codec_cookie](/src/dev_codec_cookie) | Cookie management and auth |
+| [dev_codec_cookie_auth](/src/dev_codec_cookie_auth) | Cookie commitment interface |
+| [dev_codec_cookie_test_vectors](/src/dev_codec_cookie_test_vectors) | Cookie test suite |
+| [dev_codec_http_auth](/src/dev_codec_http_auth) | HTTP Basic auth with PBKDF2 |
 
-You can also spawn and interact with AOS processes on HyperBEAM.
+### Core Message Operations
 
-```js
-const data = `
-local count = 0
-Handlers.add("Inc", "Inc", function (msg)
-  count = count + 1
-  msg.reply({ Data = "Count: "..tostring(count) })
-end)
+| Module | Purpose |
+|--------|---------|
+| [dev_message](/src/dev_message) | Default device, message manipulation |
+| [dev_stack](/src/dev_stack) | Device execution chaining |
+| [dev_multipass](/src/dev_multipass) | Multi-pass execution control |
+| [dev_apply](/src/dev_apply) | Dynamic path-based execution |
+| [dev_patch](/src/dev_patch) | Message reorganization |
+| [dev_dedup](/src/dev_dedup) | Message deduplication |
+| [dev_hook](/src/dev_hook) | Lifecycle event hooks |
 
-Handlers.add("Get", "Get", function (msg)
-  msg.reply({ Data = "Count: "..tostring(count) })
-end)`
+### Process Management
 
-it("should spawn a legacynet compatible AOS process", async () => {
-  const { pid } = await hb.spawnLegacy()
-  const { slot } = await hb.scheduleLegacy({ pid, data })
-  const r = await hb.computeLegacy({ pid, slot })
-  const { slot: slot2 } = await hb.scheduleLegacy({ pid, action: "Inc" })
-  const r2 = await hb.computeLegacy({ pid, slot: slot2 })
-  assert.equal(r2.Messages[0].Data, "Count: 1")
-  const { slot: slot3 } = await hb.scheduleLegacy({ pid, action: "Inc" })
-  const r4 = await hb.computeLegacy({ pid, slot: slot3 })
-  const r3 = await hb.dryrun({ pid, action: "Get" })
-  assert.equal(r3.Messages[0].Data, "Count: 2")
-})
-```
+| Module | Purpose |
+|--------|---------|
+| [dev_process](/src/dev_process) | Core process execution engine |
+| [dev_process_cache](/src/dev_process_cache) | Computation result caching |
+| [dev_process_worker](/src/dev_process_worker) | In-memory state optimization |
+| [dev_node_process](/src/dev_node_process) | Node-specific singleton processes |
+| [dev_meta](/src/dev_meta) | Node lifecycle and configuration |
+| [dev_monitor](/src/dev_monitor) | Process execution monitoring |
 
-## Create Custom Devices
+### Scheduling
 
-You can create your own custom devices in Erlang, Rust, and C++.
+| Module | Purpose |
+|--------|---------|
+| [dev_scheduler](/src/dev_scheduler) | Core scheduler device |
+| [dev_scheduler_cache](/src/dev_scheduler_cache) | Assignment caching |
+| [dev_scheduler_formats](/src/dev_scheduler_formats) | Bundle ↔ AOS2 conversion |
+| [dev_scheduler_registry](/src/dev_scheduler_registry) | Scheduler server registry |
+| [dev_scheduler_server](/src/dev_scheduler_server) | Long-lived scheduler servers |
+| [dev_cron](/src/dev_cron) | Scheduled message execution |
 
-Create your device under `/HyperBEAM/src`.
+### Storage & Caching
 
-```erlang [/HyperBEAM/src/dev_foo.erl]
-const data = `
-local count = 0
-Handlers.add("Inc", "Inc", function (msg)
-  count = count + 1
-  msg.reply({ Data = "Count: "..tostring(count) })
-end)
+| Module | Purpose |
+|--------|---------|
+| [dev_cache](/src/dev_cache) | Cache read/write operations |
+| [dev_lookup](/src/dev_lookup) | Resource lookup with format negotiation |
+| [dev_trie](/src/dev_trie) | Radix trie for efficient key-value |
+| [dev_volume](/src/dev_volume) | Volume management for state |
 
-Handlers.add("Get", "Get", function (msg)
-  msg.reply({ Data = "Count: "..tostring(count) })
-end)`
-``
-`
-Define it in `preloaded_devices` in `/HyperBEAM/src/hb_opts.erl`
+### Name Resolution
 
-```erlang [/HyperBEAM/src/hb_opts.erl]
-preloaded_devices => [
-  #{<<"name">> => <<"ans104@1.0">>, <<"module">> => dev_codec_ans104},
-  #{<<"name">> => <<"compute@1.0">>, <<"module">> => dev_cu},
-  ...
-  #{<<"name">> => <<"foo@1.0">>, <<"module">> => dev_foo}
-],
-```
+| Module | Purpose |
+|--------|---------|
+| [dev_name](/src/dev_name) | Name resolution via resolver chain |
+| [dev_local_name](/src/dev_local_name) | Local name registration |
+| [dev_manifest](/src/dev_manifest) | Arweave path manifest resolution |
 
-Test the device with WAO.
+### Arweave Integration
 
-```js
-import assert from "assert"
-import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM } from "wao"
+| Module | Purpose |
+|--------|---------|
+| [dev_arweave](/src/dev_arweave) | Arweave network access |
+| [dev_arweave_block_cache](/src/dev_arweave_block_cache) | Block caching with indexing |
+| [dev_poda](/src/dev_poda) | Proof of Distributed Authority |
 
-const cwd = "../HyperBEAM" // HyperBEAM directory
+### Network & Routing
 
-describe("Hyperbeam Custom Devices", function () {
-  let hbeam, hb
-  before(async () => {
-    hbeam = await new HyperBEAM({ cwd, reset: true }).ready()
-  })
-  beforeEach(async () => (hb = hbeam.hb))
-  after(async () => hbeam.kill())
+| Module | Purpose |
+|--------|---------|
+| [dev_router](/src/dev_router) | HTTP message routing |
+| [dev_relay](/src/dev_relay) | Message relay between nodes |
+| [dev_push](/src/dev_push) | Outbound message delivery |
+| [dev_whois](/src/dev_whois) | Network identity discovery |
 
-  it("should query a custom device", async () => {
-    const { version } = await hb.g("/~foo@1.0/info")
-	assert.equal("1.0", version)
-  })
-})
-```
+### Query & Indexing
+
+| Module | Purpose |
+|--------|---------|
+| [dev_query](/src/dev_query) | Data query interface |
+| [dev_query_arweave](/src/dev_query_arweave) | Arweave GraphQL queries |
+| [dev_query_graphql](/src/dev_query_graphql) | Full GraphQL interface |
+| [dev_query_test_vectors](/src/dev_query_test_vectors) | Query test suite |
+| [dev_copycat](/src/dev_copycat) | Data replication orchestration |
+| [dev_copycat_arweave](/src/dev_copycat_arweave) | Block-based indexing |
+| [dev_copycat_graphql](/src/dev_copycat_graphql) | Query-based indexing |
+
+### Execution Runtimes
+
+| Module | Purpose |
+|--------|---------|
+| [dev_wasm](/src/dev_wasm) | WebAssembly runtime (WAMR) |
+| [dev_wasi](/src/dev_wasi) | WASI interface implementation |
+| [dev_lua](/src/dev_lua) | Lua 5.3 execution with sandboxing |
+| [dev_lua_lib](/src/dev_lua_lib) | AO-Core functions for Lua |
+| [dev_lua_test](/src/dev_lua_test) | Lua test framework |
+| [dev_lua_test_ledgers](/src/dev_lua_test_ledgers) | Token ledger test suite |
+| [dev_json_iface](/src/dev_json_iface) | JSON interface for WASM |
+| [dev_delegated_compute](/src/dev_delegated_compute) | Remote CU execution |
+| [dev_genesis_wasm](/src/dev_genesis_wasm) | Legacy AO compatibility |
+| [dev_cu](/src/dev_cu) | Compute unit tracking |
+
+### Payment & Economics
+
+| Module | Purpose |
+|--------|---------|
+| [dev_p4](/src/dev_p4) | P4 payment orchestration |
+| [dev_simple_pay](/src/dev_simple_pay) | Flat-rate pricing and ledger |
+| [dev_faff](/src/dev_faff) | Friends & Family whitelist |
+
+### Security & Attestation
+
+| Module | Purpose |
+|--------|---------|
+| [dev_secret](/src/dev_secret) | Secret/wallet management |
+| [dev_auth_hook](/src/dev_auth_hook) | Authentication hooks |
+| [dev_snp](/src/dev_snp) | AMD SEV-SNP attestation |
+| [dev_snp_nif](/src/dev_snp_nif) | SNP NIF interface |
+| [dev_green_zone](/src/dev_green_zone) | Trusted execution zones |
+
+### Debugging & Tools
+
+| Module | Purpose |
+|--------|---------|
+| [dev_hyperbuddy](/src/dev_hyperbuddy) | Web REPL interface |
+| [dev_cacheviz](/src/dev_cacheviz) | Cache visualization |
+| [dev_profile](/src/dev_profile) | Performance profiling |
+| [dev_test](/src/dev_test) | Testing utilities |
