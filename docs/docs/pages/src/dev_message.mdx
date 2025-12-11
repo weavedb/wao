@@ -1,0 +1,606 @@
+# dev_message.erl - Identity Message Device
+
+## Overview
+
+**Purpose:** Core message device providing identity operations and commitment management  
+**Module:** `dev_message`  
+**Device Name:** `message@1.0`  
+**Type:** Identity device with cryptographic commitments
+
+This is the foundational device for HyperBEAM messages, providing direct access to message fields, ID calculation, cryptographic commitment management, and message manipulation operations. For non-reserved keys, it returns values directly from the message's Erlang map structure.
+
+## Reserved Keys
+
+The following keys have special behavior:
+
+- `id` - Message ID calculation with commitment options
+- `commitments` - Cryptographic commitment data
+- `committers` - List of commitment devices
+- `keys` - Public keys in message
+- `path` - Path routing
+- `set` - Set values in message
+- `remove` - Remove keys from message
+- `verify` - Verify message signatures
+- `index` - Generate index page
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_message`, `hb_maps`, `hb_private`, `hb_crypto`, `hb_util`, `hb_path`, `hb_cache`, `hb_opts`
+- **Device:** `hb_ao_device`
+- **Arweave:** `ar_wallet`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Information
+-spec info() -> DeviceInfo.
+
+%% Message ID Functions
+-spec id(Base) -> {ok, ID}.
+-spec id(Base, Req) -> {ok, ID}.
+-spec id(Base, Req, Opts) -> {ok, ID}.
+
+%% Key Management
+-spec keys(Msg) -> {ok, [Key]}.
+-spec keys(Msg, Opts) -> {ok, [Key]}.
+
+%% Value Access
+-spec get(Key, Msg, Opts) -> {ok, Value} | {error, not_found}.
+-spec get(Key, Msg, Req, Opts) -> {ok, Value} | {error, not_found}.
+
+%% Message Manipulation
+-spec set(Base, Req, Opts) -> {ok, UpdatedMsg}.
+-spec set_path(Base, Value, Opts) -> UpdatedMsg | {ok, UpdatedMsg}.
+-spec remove(Msg, Key) -> {ok, UpdatedMsg}.
+-spec remove(Msg, Req, Opts) -> {ok, UpdatedMsg}.
+
+%% Commitment Management
+-spec commit(Base, Req, Opts) -> {ok, CommittedMsg}.
+-spec committed(Base, Req, Opts) -> {ok, CommittedValue}.
+-spec committers(Msg) -> {ok, [Device]}.
+-spec committers(Msg, Opts) -> {ok, [Device]}.
+-spec committers(Msg, Req, Opts) -> {ok, [Device]}.
+-spec verify(Base, Req, Opts) -> {ok, boolean()}.
+
+%% Index Generation
+-spec index(Msg, Req, Opts) -> {ok, Index} | {error, Reason}.
+```
+
+---
+
+## ID Functions
+
+### 1. id/1, id/2, id/3
+
+```erlang
+-spec id(Base, Req, Opts) -> {ok, ID}
+    when
+        Base :: map() | binary(),
+        Req :: map(),
+        Opts :: map(),
+        ID :: binary().
+```
+
+**Description:** Calculate message ID based on commitment specification. The ID varies depending on which commitments are included.
+
+**Commitment Specifications:**
+- `all` / `signed` - ID including all commitments
+- `none` / `unsigned` / `uncommitted` - ID without any commitments
+- `[Device1, Device2]` - ID with specific commitment devices
+
+**ID Calculation:**
+- **Multiple Commitments**: IDs are combined via modular arithmetic (order-independent)
+- **Single Commitment**: Returns commitment ID directly
+- **No Commitments**: Calculates unsigned ID using ID device
+
+**Test Code:**
+```erlang
+-module(dev_message_id_test).
+-include_lib("eunit/include/eunit.hrl").
+
+unsigned_id_test() ->
+    Msg = #{ <<"data">> => <<"value">> },
+    {ok, ID} = dev_message:id(Msg, #{ <<"committers">> => <<"unsigned">> }, #{}),
+    ?assert(is_binary(ID)).
+
+signed_id_test() ->
+    Wallet = ar_wallet:new(),
+    Unsigned = #{ <<"data">> => <<"value">> },
+    Signed = hb_message:commit(Unsigned, Wallet),
+    {ok, SignedID} = dev_message:id(Signed, #{ <<"committers">> => <<"signed">> }, #{}),
+    {ok, UnsignedID} = dev_message:id(Signed, #{ <<"committers">> => <<"unsigned">> }, #{}),
+    ?assert(is_binary(SignedID)),
+    ?assert(is_binary(UnsignedID)),
+    ?assertNotEqual(SignedID, UnsignedID).
+
+binary_id_test() ->
+    Binary = <<"test data">>,
+    {ok, ID} = dev_message:id(Binary, #{}, #{}),
+    ?assert(is_binary(ID)).
+
+deterministic_id_test() ->
+    Msg = #{ <<"key">> => <<"value">> },
+    {ok, ID1} = dev_message:id(Msg, #{}, #{}),
+    {ok, ID2} = dev_message:id(Msg, #{}, #{}),
+    ?assertEqual(ID1, ID2).
+```
+
+---
+
+## Key Management Functions
+
+### 2. keys/1, keys/2
+
+```erlang
+-spec keys(Msg, Opts) -> {ok, [Key]}
+    when
+        Msg :: map(),
+        Opts :: map(),
+        Key :: binary().
+```
+
+**Description:** Return all public keys in a message. Filters out private keys (those starting with `priv` or `private`).
+
+**Test Code:**
+```erlang
+-module(dev_message_keys_test).
+-include_lib("eunit/include/eunit.hrl").
+
+keys_basic_test() ->
+    Msg = #{ <<"a">> => 1, <<"b">> => 2 },
+    {ok, Keys} = dev_message:keys(Msg, #{}),
+    ?assertEqual(2, length(Keys)),
+    ?assert(lists:member(<<"a">>, Keys)),
+    ?assert(lists:member(<<"b">>, Keys)).
+
+keys_filter_private_test() ->
+    Msg = #{
+        <<"public">> => 1,
+        <<"private">> => 2,
+        <<"priv_wallet">> => 3
+    },
+    {ok, Keys} = dev_message:keys(Msg, #{}),
+    ?assertEqual([<<"public">>], Keys).
+
+keys_via_ao_test() ->
+    Msg = #{ <<"a">> => 1 },
+    ?assertEqual({ok, [<<"a">>]}, hb_ao:resolve(Msg, keys, #{})).
+```
+
+---
+
+## Value Access Functions
+
+### 3. get/3, get/4
+
+```erlang
+-spec get(Key, Msg, Req, Opts) -> {ok, Value} | {error, not_found}
+    when
+        Key :: binary(),
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Value :: term().
+```
+
+**Description:** Retrieve value from message. Supports case-insensitive lookup for binary keys. Blocks access to private keys.
+
+**Lookup Order:**
+1. Exact key match
+2. Case-insensitive match (if key is binary)
+3. Return `{error, not_found}`
+
+**Test Code:**
+```erlang
+-module(dev_message_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_existing_key_test() ->
+    Msg = #{ <<"key">> => <<"value">> },
+    ?assertEqual({ok, <<"value">>}, dev_message:get(<<"key">>, Msg, #{})).
+
+get_case_insensitive_test() ->
+    Msg = #{ <<"content-type">> => <<"text/html">> },
+    ?assertEqual({ok, <<"text/html">>}, dev_message:get(<<"Content-Type">>, Msg, #{})),
+    ?assertEqual({ok, <<"text/html">>}, dev_message:get(<<"CONTENT-TYPE">>, Msg, #{})).
+
+get_not_found_test() ->
+    Msg = #{ <<"key">> => <<"value">> },
+    ?assertEqual({error, not_found}, dev_message:get(<<"missing">>, Msg, #{})).
+
+get_private_blocked_test() ->
+    Msg = #{ <<"private_key">> => <<"secret">> },
+    ?assertEqual({error, not_found}, dev_message:get(<<"private_key">>, Msg, #{})).
+
+get_via_ao_test() ->
+    Msg = #{ <<"a">> => 1 },
+    ?assertEqual({ok, 1}, hb_ao:resolve(Msg, <<"a">>, #{})).
+```
+
+---
+
+## Message Manipulation Functions
+
+### 4. set/3
+
+```erlang
+-spec set(Base, Req, Opts) -> {ok, UpdatedMsg}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        UpdatedMsg :: map().
+```
+
+**Description:** Set values in a message. Supports single key-value pairs, multiple updates, and deep path updates. Special value `unset` removes keys.
+
+**Update Modes:**
+- **Single Field**: `#{ <<"key">> => <<"value">> }`
+- **Multiple Fields**: Map of key-value pairs
+- **Deep Path**: `#{ <<"path/to/key">> => <<"value">> }`
+- **Unset**: `#{ <<"key">> => unset }` (removes key)
+
+**Test Code:**
+```erlang
+-module(dev_message_set_test).
+-include_lib("eunit/include/eunit.hrl").
+
+set_single_value_test() ->
+    Msg1 = #{ <<"existing">> => <<"old">> },
+    Msg2 = #{ <<"path">> => <<"set">>, <<"new">> => <<"value">> },
+    {ok, Result} = hb_ao:resolve(Msg1, Msg2, #{ hashpath => ignore }),
+    ?assertEqual(<<"value">>, maps:get(<<"new">>, Result)).
+
+set_multiple_values_test() ->
+    Msg1 = #{},
+    {ok, Result} = dev_message:set(
+        Msg1,
+        #{ <<"key1">> => <<"val1">>, <<"key2">> => <<"val2">> },
+        #{}
+    ),
+    ?assertEqual(<<"val1">>, maps:get(<<"key1">>, Result)),
+    ?assertEqual(<<"val2">>, maps:get(<<"key2">>, Result)).
+
+set_unset_value_test() ->
+    Msg1 = #{ <<"key">> => <<"value">> },
+    Msg2 = #{ <<"path">> => <<"set">>, <<"key">> => unset },
+    {ok, Result} = hb_ao:resolve(Msg1, Msg2, #{ hashpath => ignore }),
+    ?assertNot(maps:is_key(<<"key">>, Result)).
+
+set_deep_path_test() ->
+    Msg = #{ <<"deep">> => #{ <<"nested">> => <<"value">> } },
+    Result = hb_ao:set(Msg, <<"deep/nested">>, <<"updated">>, #{ hashpath => ignore }),
+    ?assertEqual(<<"updated">>, hb_ao:get(<<"deep/nested">>, Result, #{})).
+
+set_ignore_undefined_test() ->
+    Msg1 = #{ <<"key">> => <<"value">> },
+    Msg2 = #{ <<"path">> => <<"set">>, <<"key">> => undefined },
+    {ok, Result} = dev_message:set(Msg1, Msg2, #{ hashpath => ignore }),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, Result)).
+```
+
+---
+
+### 5. remove/2, remove/3
+
+```erlang
+-spec remove(Msg, Req, Opts) -> {ok, UpdatedMsg}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        UpdatedMsg :: map().
+```
+
+**Description:** Remove keys from a message. Supports single key or multiple keys.
+
+**Request Formats:**
+- `#{ <<"item">> => Key }` - Remove single key
+- `#{ <<"items">> => [Key1, Key2] }` - Remove multiple keys
+
+**Test Code:**
+```erlang
+-module(dev_message_remove_test).
+-include_lib("eunit/include/eunit.hrl").
+
+remove_single_key_test() ->
+    Msg = #{ <<"key1">> => <<"val1">>, <<"key2">> => <<"val2">> },
+    {ok, Result} = hb_ao:resolve(
+        Msg,
+        #{ <<"path">> => <<"remove">>, <<"item">> => <<"key1">> },
+        #{ hashpath => ignore }
+    ),
+    ?assertNot(maps:is_key(<<"key1">>, Result)),
+    ?assert(maps:is_key(<<"key2">>, Result)).
+
+remove_multiple_keys_test() ->
+    Msg = #{ <<"key1">> => <<"v1">>, <<"key2">> => <<"v2">>, <<"key3">> => <<"v3">> },
+    {ok, Result} = hb_ao:resolve(
+        Msg,
+        #{ <<"path">> => <<"remove">>, <<"items">> => [<<"key1">>, <<"key2">>] },
+        #{ hashpath => ignore }
+    ),
+    ?assertNot(maps:is_key(<<"key1">>, Result)),
+    ?assertNot(maps:is_key(<<"key2">>, Result)),
+    ?assert(maps:is_key(<<"key3">>, Result)).
+```
+
+---
+
+## Commitment Functions
+
+### 6. commit/3
+
+```erlang
+-spec commit(Base, Req, Opts) -> {ok, CommittedMsg}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        CommittedMsg :: map().
+```
+
+**Description:** Create cryptographic commitments for a message using specified commitment device.
+
+**Test Code:**
+```erlang
+-module(dev_message_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+
+commit_message_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{ <<"data">> => <<"value">> },
+    Committed = hb_message:commit(Msg, Wallet),
+    ?assert(maps:is_key(<<"commitments">>, Committed)).
+```
+
+---
+
+### 7. verify/3
+
+```erlang
+-spec verify(Base, Req, Opts) -> {ok, boolean()}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Verify cryptographic commitments in a message.
+
+**Test Code:**
+```erlang
+-module(dev_message_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+
+verify_valid_test() ->
+    Wallet = ar_wallet:new(),
+    Unsigned = #{ <<"data">> => <<"value">> },
+    Signed = hb_message:commit(Unsigned, Wallet),
+    ?assertEqual({ok, true},
+        hb_ao:resolve(
+            #{},
+            #{ <<"path">> => <<"verify">>, <<"body">> => Signed },
+            #{ hashpath => ignore }
+        )
+    ).
+
+verify_invalid_test() ->
+    Wallet = ar_wallet:new(),
+    Unsigned = #{ <<"data">> => <<"value">> },
+    Signed = hb_message:commit(Unsigned, Wallet),
+    Tampered = Signed#{ <<"data">> => <<"modified">> },
+    ?assertEqual(false, hb_message:verify(Tampered)).
+```
+
+---
+
+### 8. committers/1, committers/2, committers/3
+
+```erlang
+-spec committers(Msg, Req, Opts) -> {ok, [Device]}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Device :: binary().
+```
+
+**Description:** Return list of commitment devices that have signed the message.
+
+**Test Code:**
+```erlang
+-module(dev_message_committers_test).
+-include_lib("eunit/include/eunit.hrl").
+
+committers_test() ->
+    Wallet = ar_wallet:new(),
+    Unsigned = #{ <<"data">> => <<"value">> },
+    Signed = hb_message:commit(Unsigned, Wallet),
+    {ok, Committers} = dev_message:committers(Signed, #{}, #{}),
+    ?assert(is_list(Committers)),
+    ?assert(length(Committers) > 0).
+```
+
+---
+
+### 9. committed/3
+
+```erlang
+-spec committed(Base, Req, Opts) -> {ok, CommittedValue}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        CommittedValue :: term().
+```
+
+**Description:** Get the committed value for a specific key or device.
+
+---
+
+## Index Generation
+
+### 10. index/3
+
+```erlang
+-spec index(Msg, Req, Opts) -> {ok, Index} | {error, Reason}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Index :: term(),
+        Reason :: binary().
+```
+
+**Description:** Generate an index page when body and content-type are empty. Uses `default_index` configuration from options.
+
+**Process:**
+1. Get `default_index` from options
+2. Merge with message (if map) or use as device
+3. Execute `default_index_path` (default: `index`)
+
+**Test Code:**
+```erlang
+-module(dev_message_index_test).
+-include_lib("eunit/include/eunit.hrl").
+
+index_with_default_test() ->
+    DefaultIndex = #{ <<"content-type">> => <<"text/html">>, <<"body">> => <<"Index">> },
+    Opts = #{ default_index => DefaultIndex },
+    Msg = #{},
+    {ok, Result} = dev_message:index(Msg, #{}, Opts),
+    ?assert(is_map(Result)).
+
+index_no_default_test() ->
+    Msg = #{},
+    Result = dev_message:index(Msg, #{}, #{}),
+    ?assertMatch({error, _}, Result).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Get message ID
+{ok, ID} = dev_message:id(Message, #{}, #{}).
+
+%% Get signed ID
+{ok, SignedID} = dev_message:id(
+    SignedMessage,
+    #{ <<"committers">> => <<"signed">> },
+    #{}
+).
+
+%% List public keys
+{ok, Keys} = dev_message:keys(Message, #{}).
+
+%% Get value (case-insensitive)
+{ok, Value} = dev_message:get(<<"Content-Type">>, Message, #{}).
+
+%% Set single value
+{ok, Updated} = dev_message:set(
+    Message,
+    #{ <<"key">> => <<"value">> },
+    #{}
+).
+
+%% Set multiple values
+{ok, Updated} = dev_message:set(
+    Message,
+    #{ <<"key1">> => <<"val1">>, <<"key2">> => <<"val2">> },
+    #{}
+).
+
+%% Unset (remove) value
+{ok, Updated} = dev_message:set(
+    Message,
+    #{ <<"key">> => unset },
+    #{}
+).
+
+%% Remove keys
+{ok, Updated} = dev_message:remove(
+    Message,
+    #{ <<"items">> => [<<"key1">>, <<"key2">>] },
+    #{}
+).
+
+%% Verify signature
+{ok, IsValid} = dev_message:verify(SignedMessage, #{}, #{}).
+
+%% Deep path set
+Updated = hb_ao:set(Message, <<"path/to/key">>, <<"value">>, #{}).
+
+%% Deep path unset
+Updated = hb_ao:set(Message, <<"path/to/key">>, unset, #{}).
+```
+
+---
+
+## ID Device Configuration
+
+### Default ID Device
+
+```erlang
+-define(DEFAULT_ID_DEVICE, <<"httpsig@1.0">>).
+```
+
+### Custom ID Device
+
+```erlang
+Message = #{
+    <<"id-device">> => <<"ans104@1.0">>,
+    <<"data">> => <<"content">>
+}
+```
+
+---
+
+## Private Key Filtering
+
+Keys are considered private if they match:
+- Start with `private`
+- Start with `priv`
+
+**Examples:**
+- `<<"private">>` - Private
+- `<<"private_key">>` - Private
+- `<<"priv_wallet">>` - Private
+- `<<"public">>` - Public
+- `<<"privilege">>` - Public (doesn't start with `priv`)
+
+---
+
+## References
+
+- **hb_message.erl** - Message operations and commitment system
+- **hb_ao.erl** - AO-Core resolution
+- **hb_maps.erl** - Map operations
+- **hb_private.erl** - Private key management
+- **hb_crypto.erl** - Cryptographic operations
+- **ar_wallet.erl** - Wallet operations
+
+---
+
+## Notes
+
+1. **Identity Device**: Returns values directly from message map
+2. **Private Keys**: All keys starting with `priv` or `private` are hidden
+3. **Case Insensitive**: Binary key lookup is case-insensitive
+4. **Commitment Accumulation**: Multiple commitment IDs combined via modular arithmetic
+5. **Unset Special**: The atom `unset` removes keys (different from `undefined`)
+6. **Deep Paths**: Supports nested key access via path notation
+7. **ID Device**: Can be customized per message via `id-device` key
+8. **Reserved Keys**: Special handling for protocol-defined keys
+9. **Default Index**: Configurable index page generation
+10. **Verification**: Supports full cryptographic verification
+11. **Committer Filtering**: Can calculate IDs with specific commitments
+12. **HTTP Headers**: Case-insensitive matching follows RFC-9110
+13. **State Management**: All operations return new message (immutable)
+14. **Error Handling**: Consistent `{ok, Result}` | `{error, Reason}` pattern
+15. **AO-Core Integration**: Works seamlessly with HyperBEAM resolution system

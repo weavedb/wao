@@ -1,0 +1,213 @@
+# rsa_pss.erl - RSA-PSS Digital Signatures
+
+## Overview
+
+**Purpose:** RSA-PSS (Probabilistic Signature Scheme) implementation for digital signatures  
+**Module:** `rsa_pss`  
+**License:** Mozilla Public License v2.0  
+**Origin:** https://github.com/potatosalad/erlang-crypto_rsassa_pss  
+**Modified by:** The Arweave Team
+
+RSA-PSS is a modern signature scheme that provides provable security and is recommended over traditional RSA signatures (PKCS#1 v1.5).
+
+## Dependencies
+
+- **Erlang/OTP:** `crypto`, `public_key`
+- **External:** None
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Signing
+-spec sign(Message, DigestType, PrivateKey) -> Signature.
+-spec sign(Message, DigestType, Salt, PrivateKey) -> Signature.
+
+%% Verification
+-spec verify(Message, DigestType, Signature, PublicKey) -> boolean().
+-spec verify_legacy(Message, DigestType, Signature, PublicKey) -> boolean().
+```
+
+---
+
+## Public Functions
+
+### 1. sign/3 - Sign with Auto-Generated Salt
+
+```erlang
+-spec sign(Message, DigestType, PrivateKey) -> Signature
+    when
+        Message    :: binary() | {digest, binary()},
+        DigestType :: rsa_digest_type() | atom(),
+        PrivateKey :: rsa_private_key(),
+        Signature  :: binary().
+```
+
+**Description:** Signs a message using RSA-PSS with automatically generated random salt.
+
+**Test Code:**
+```erlang
+-module(rsa_pss_sign3_test).
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("public_key/include/public_key.hrl").
+
+setup() ->
+    #'RSAPrivateKey'{modulus = N, publicExponent = E, privateExponent = D} = 
+        public_key:generate_key({rsa, 2048, 65537}),
+    PrivKey = #'RSAPrivateKey'{modulus = N, publicExponent = E, privateExponent = D},
+    PubKey = #'RSAPublicKey'{modulus = N, publicExponent = E},
+    {PubKey, PrivKey}.
+
+sign_binary_test() ->
+    {PubKey, PrivKey} = setup(),
+    Message = <<"Hello, World!">>,
+    Signature = rsa_pss:sign(Message, sha256, PrivKey),
+    ?assert(is_binary(Signature)),
+    ?assert(rsa_pss:verify(Message, sha256, Signature, PubKey)).
+
+sign_digest_test() ->
+    {PubKey, PrivKey} = setup(),
+    Digest = crypto:hash(sha256, <<"Test">>),
+    Signature = rsa_pss:sign({digest, Digest}, sha256, PrivKey),
+    ?assert(rsa_pss:verify({digest, Digest}, sha256, Signature, PubKey)).
+```
+
+---
+
+### 2. sign/4 - Sign with Custom Salt
+
+```erlang
+-spec sign(Message, DigestType, Salt, PrivateKey) -> Signature
+    when
+        Message    :: binary() | {digest, binary()},
+        DigestType :: rsa_digest_type() | atom(),
+        Salt       :: binary(),
+        PrivateKey :: rsa_private_key(),
+        Signature  :: binary().
+```
+
+**Description:** Signs with a custom salt for deterministic signatures.
+
+**Test Code:**
+```erlang
+-module(rsa_pss_sign4_test).
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("public_key/include/public_key.hrl").
+
+setup() ->
+    #'RSAPrivateKey'{modulus = N, publicExponent = E, privateExponent = D} = 
+        public_key:generate_key({rsa, 2048, 65537}),
+    PrivKey = #'RSAPrivateKey'{modulus = N, publicExponent = E, privateExponent = D},
+    PubKey = #'RSAPublicKey'{modulus = N, publicExponent = E},
+    {PubKey, PrivKey}.
+
+deterministic_sign_test() ->
+    {PubKey, PrivKey} = setup(),
+    Message = <<"Test">>,
+    Salt = crypto:hash(sha256, <<>>),
+    Sig1 = rsa_pss:sign(Message, sha256, Salt, PrivKey),
+    Sig2 = rsa_pss:sign(Message, sha256, Salt, PrivKey),
+    ?assertEqual(Sig1, Sig2),
+    ?assert(rsa_pss:verify(Message, sha256, Sig1, PubKey)).
+```
+
+---
+
+### 3. verify/4 - Verify Signature
+
+```erlang
+-spec verify(Message, DigestType, Signature, PublicKey) -> boolean()
+    when
+        Message    :: binary() | {digest, binary()},
+        DigestType :: rsa_digest_type() | atom(),
+        Signature  :: binary(),
+        PublicKey  :: rsa_public_key().
+```
+
+**Description:** Verifies an RSA-PSS signature.
+
+**Test Code:**
+```erlang
+-module(rsa_pss_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("public_key/include/public_key.hrl").
+
+setup() ->
+    #'RSAPrivateKey'{modulus = N, publicExponent = E, privateExponent = D} = 
+        public_key:generate_key({rsa, 2048, 65537}),
+    PrivKey = #'RSAPrivateKey'{modulus = N, publicExponent = E, privateExponent = D},
+    PubKey = #'RSAPublicKey'{modulus = N, publicExponent = E},
+    {PubKey, PrivKey}.
+
+valid_signature_test() ->
+    {PubKey, PrivKey} = setup(),
+    Message = <<"Valid">>,
+    Signature = rsa_pss:sign(Message, sha256, PrivKey),
+    ?assertEqual(true, rsa_pss:verify(Message, sha256, Signature, PubKey)).
+
+invalid_signature_test() ->
+    {PubKey, PrivKey} = setup(),
+    Message = <<"Test">>,
+    Signature = rsa_pss:sign(Message, sha256, PrivKey),
+    <<First:8, Rest/binary>> = Signature,
+    Tampered = <<(First bxor 1), Rest/binary>>,
+    ?assertEqual(false, rsa_pss:verify(Message, sha256, Tampered, PubKey)).
+
+wrong_message_test() ->
+    {PubKey, PrivKey} = setup(),
+    Signature = rsa_pss:sign(<<"A">>, sha256, PrivKey),
+    ?assertEqual(false, rsa_pss:verify(<<"B">>, sha256, Signature, PubKey)).
+```
+
+---
+
+### 4. verify_legacy/4 - Legacy Verification
+
+```erlang
+-spec verify_legacy(Message, DigestType, Signature, PublicKey) -> boolean()
+```
+
+**Description:** Legacy verification with different bit size calculation.
+
+**Test Code:**
+```erlang
+-module(rsa_pss_verify_legacy_test).
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("public_key/include/public_key.hrl").
+
+setup() ->
+    #'RSAPrivateKey'{modulus = N, publicExponent = E, privateExponent = D} = 
+        public_key:generate_key({rsa, 2048, 65537}),
+    PrivKey = #'RSAPrivateKey'{modulus = N, publicExponent = E, privateExponent = D},
+    PubKey = #'RSAPublicKey'{modulus = N, publicExponent = E},
+    {PubKey, PrivKey}.
+
+legacy_verify_test() ->
+    {PubKey, PrivKey} = setup(),
+    Message = <<"Legacy">>,
+    Signature = rsa_pss:sign(Message, sha256, PrivKey),
+    ?assertEqual(true, rsa_pss:verify(Message, sha256, Signature, PubKey)),
+    ?assertEqual(true, rsa_pss:verify_legacy(Message, sha256, Signature, PubKey)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Sign and store
+sign_and_store(Message, PrivateKey) ->
+    Signature = rsa_pss:sign(Message, sha256, PrivateKey),
+    #{message => Message, signature => Signature}.
+
+%% Arweave transaction signing (SHA-384)
+sign_arweave_tx(TxData, PrivateKey) ->
+    DeepHash = crypto:hash(sha384, term_to_binary(TxData)),
+    rsa_pss:sign({digest, DeepHash}, sha384, PrivateKey).
+```
+
+## References
+
+- **RFC 8017** - PKCS #1: RSA Cryptography
+- **Original** - https://github.com/potatosalad/erlang-crypto_rsassa_pss

@@ -1,0 +1,657 @@
+# dev_codec_httpsig.erl - HTTP Message Signatures (RFC 9421)
+
+## Overview
+
+**Purpose:** HTTP Message Signatures as AO-Core commitment device  
+**Module:** `dev_codec_httpsig`  
+**Format:** `httpsig@1.0`  
+**Standard:** RFC 9421 (HTTP Message Signatures)  
+**Signature Types:** RSA-PSS-SHA512, HMAC-SHA256
+
+This module implements HTTP Message Signatures (RFC 9421) as both a codec (format conversion) and commitment device (signing/verification) for HyperBEAM. It provides cryptographic commitments using either RSA-PSS or HMAC signatures over structured message fields.
+
+## Signature Algorithms
+
+- **RSA-PSS-SHA512:** Asymmetric signatures with RSA-4096 keys
+- **HMAC-SHA256:** Symmetric signatures with secret keys
+
+## Dependencies
+
+- **Erlang/OTP:** `crypto`
+- **HyperBEAM:** `hb_message`, `hb_util`, `hb_crypto`, `hb_opts`, `hb_structured_fields`, `hb_cache`, `hb_link`, `hb_ao`, `hb_maps`
+- **Codecs:** `dev_codec_httpsig_conv`, `dev_codec_httpsig_siginfo`, `dev_codec_httpsig_keyid`
+- **Arweave:** `ar_wallet`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Codec Interface
+-spec to(Msg, Req, Opts) -> {ok, HTTPSigMsg}.
+-spec from(Msg, Req, Opts) -> {ok, TABM}.
+
+%% Commitment Interface
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}.
+-spec verify(Msg, Req, Opts) -> {ok, boolean()} | {failure, Info}.
+
+%% Serialization
+-spec serialize(Msg, Opts) -> {ok, Binary}.
+-spec serialize(Msg, Req, Opts) -> {ok, Binary | Components}.
+
+%% Utilities
+-spec add_content_digest(Msg, Opts) -> MsgWithDigest.
+-spec normalize_for_encoding(Msg, Commitment, Opts) -> {ok, EncMsg, EncComm, ModKeys}.
+```
+
+---
+
+## Public Functions
+
+### 1. to/3, from/3
+
+```erlang
+-spec to(Msg, Req, Opts) -> {ok, HTTPSigMsg}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        HTTPSigMsg :: map().
+
+-spec from(Msg, Req, Opts) -> {ok, TABM}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        TABM :: map().
+```
+
+**Description:** Convert between TABM and HTTP Signature message formats. Delegates to `dev_codec_httpsig_conv` module.
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_codec_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_httpsig_test() ->
+    TABM = #{<<"key">> => <<"value">>, <<"data">> => <<"test">>},
+    {ok, HTTPSig} = dev_codec_httpsig:to(TABM, #{}, #{}),
+    ?assert(is_map(HTTPSig)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, HTTPSig)).
+
+from_httpsig_test() ->
+    HTTPSig = #{<<"key">> => <<"value">>},
+    {ok, TABM} = dev_codec_httpsig:from(HTTPSig, #{}, #{}),
+    ?assert(is_map(TABM)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, TABM)).
+
+roundtrip_test() ->
+    Original = #{<<"x">> => <<"y">>, <<"a">> => <<"b">>},
+    {ok, HTTPSig} = dev_codec_httpsig:to(Original, #{}, #{}),
+    {ok, BackToTABM} = dev_codec_httpsig:from(HTTPSig, #{}, #{}),
+    ?assert(hb_message:match(Original, BackToTABM)).
+```
+
+---
+
+### 2. commit/3
+
+```erlang
+-spec commit(Msg, Req, Opts) -> {ok, SignedMsg}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        SignedMsg :: map().
+```
+
+**Description:** Sign a message using HTTP Message Signatures. Supports multiple signature types.
+
+**Signature Types:**
+- `<<"rsa-pss-sha512">>` - RSA-PSS with SHA-512 (default for `<<"signed">>`)
+- `<<"hmac-sha256">>` - HMAC with SHA-256 (default for `<<"unsigned">>`)
+- `<<"signed">>` - Alias for RSA-PSS-SHA512
+- `<<"unsigned">>` - Alias for HMAC-SHA256
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+commit_rsa_pss_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"test">>},
+    Req = #{<<"type">> => <<"rsa-pss-sha512">>},
+    Opts = #{priv_wallet => Wallet},
+    {ok, Signed} = dev_codec_httpsig:commit(Msg, Req, Opts),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    Commitments = maps:get(<<"commitments">>, Signed),
+    ?assert(maps:size(Commitments) > 0).
+
+commit_hmac_test() ->
+    Secret = crypto:strong_rand_bytes(64),
+    Msg = #{<<"data">> => <<"test">>},
+    Req = #{
+        <<"type">> => <<"hmac-sha256">>,
+        <<"keyid">> => <<"secret:test">>,
+        <<"secret">> => hb_util:encode(Secret)
+    },
+    {ok, Signed} = dev_codec_httpsig:commit(Msg, Req, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)).
+
+commit_signed_alias_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"test">>},
+    Req = #{<<"type">> => <<"signed">>},
+    Opts = #{priv_wallet => Wallet},
+    {ok, Signed} = dev_codec_httpsig:commit(Msg, Req, Opts),
+    ?assert(maps:is_key(<<"commitments">>, Signed)).
+
+commit_unsigned_alias_test() ->
+    Secret = crypto:strong_rand_bytes(64),
+    Msg = #{<<"data">> => <<"test">>},
+    Req = #{
+        <<"type">> => <<"unsigned">>,
+        <<"secret">> => hb_util:encode(Secret)
+    },
+    {ok, Signed} = dev_codec_httpsig:commit(Msg, Req, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)).
+
+commit_specific_keys_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>,
+        <<"key3">> => <<"value3">>
+    },
+    Req = #{
+        <<"type">> => <<"rsa-pss-sha512">>,
+        <<"committed">> => [<<"key1">>, <<"key3">>]
+    },
+    Opts = #{priv_wallet => Wallet},
+    {ok, Signed} = dev_codec_httpsig:commit(Msg, Req, Opts),
+    Commitments = maps:get(<<"commitments">>, Signed),
+    [CommitmentID] = maps:keys(Commitments),
+    Commitment = maps:get(CommitmentID, Commitments),
+    Committed = maps:get(<<"committed">>, Commitment),
+    % Should only commit to specified keys
+    ?assert(lists:member(<<"key1">>, Committed)),
+    ?assert(lists:member(<<"key3">>, Committed)).
+```
+
+---
+
+### 3. verify/3
+
+```erlang
+-spec verify(Msg, Req, Opts) -> {ok, boolean()} | {failure, Info}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Info :: term().
+```
+
+**Description:** Verify HTTP Message Signatures by regenerating the signature base and validating against the provided signature.
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+verify_rsa_pss_valid_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_httpsig:commit(
+        Msg,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    [CommitmentID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommitmentID, maps:get(<<"commitments">>, Signed)),
+    {ok, IsValid} = dev_codec_httpsig:verify(Msg, Commitment, #{}),
+    ?assert(IsValid).
+
+verify_hmac_valid_test() ->
+    Secret = crypto:strong_rand_bytes(64),
+    Msg = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_httpsig:commit(
+        Msg,
+        #{
+            <<"type">> => <<"hmac-sha256">>,
+            <<"secret">> => hb_util:encode(Secret)
+        },
+        #{}
+    ),
+    [CommitmentID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommitmentID, maps:get(<<"commitments">>, Signed)),
+    VerifyReq = Commitment#{<<"secret">> => hb_util:encode(Secret)},
+    {ok, IsValid} = dev_codec_httpsig:verify(Msg, VerifyReq, #{}),
+    ?assert(IsValid).
+
+verify_tampered_message_test() ->
+    Wallet = ar_wallet:new(),
+    Original = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_httpsig:commit(
+        Original,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    [CommitmentID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommitmentID, maps:get(<<"commitments">>, Signed)),
+    % Tamper with the message
+    Tampered = Original#{<<"data">> => <<"modified">>},
+    {ok, IsValid} = dev_codec_httpsig:verify(Tampered, Commitment, #{}),
+    ?assertNot(IsValid).
+
+verify_wrong_key_test() ->
+    Secret1 = crypto:strong_rand_bytes(64),
+    Secret2 = crypto:strong_rand_bytes(64),
+    Msg = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_httpsig:commit(
+        Msg,
+        #{
+            <<"type">> => <<"hmac-sha256">>,
+            <<"secret">> => hb_util:encode(Secret1)
+        },
+        #{}
+    ),
+    [CommitmentID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+    Commitment = maps:get(CommitmentID, maps:get(<<"commitments">>, Signed)),
+    % Verify with different secret
+    VerifyReq = Commitment#{<<"secret">> => hb_util:encode(Secret2)},
+    {ok, IsValid} = dev_codec_httpsig:verify(Msg, VerifyReq, #{}),
+    ?assertNot(IsValid).
+```
+
+---
+
+### 4. serialize/2, serialize/3
+
+```erlang
+-spec serialize(Msg, Req, Opts) -> {ok, Binary | Components}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Binary :: binary(),
+        Components :: #{
+            <<"body">> => binary(),
+            <<"headers">> => map()
+        }.
+```
+
+**Description:** Serialize a message to HTTP format. Supports two modes: binary (raw HTTP/1.1) and components (headers + body).
+
+**Formats:**
+- `<<"binary">>` - Raw HTTP/1.1 response (default)
+- `<<"components">>` - Separate headers and body
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_serialize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+serialize_binary_format_test() ->
+    Msg = #{
+        <<"key">> => <<"value">>,
+        <<"body">> => <<"content">>
+    },
+    {ok, Binary} = dev_codec_httpsig:serialize(Msg, #{}, #{}),
+    ?assert(is_binary(Binary)),
+    ?assert(byte_size(Binary) > 0).
+
+serialize_components_format_test() ->
+    Msg = #{
+        <<"key">> => <<"value">>,
+        <<"body">> => <<"content">>
+    },
+    {ok, Components} = dev_codec_httpsig:serialize(
+        Msg,
+        #{<<"format">> => <<"components">>},
+        #{}
+    ),
+    ?assert(is_map(Components)),
+    ?assertEqual(<<"content">>, maps:get(<<"body">>, Components)),
+    ?assert(maps:is_key(<<"headers">>, Components)).
+
+serialize_no_body_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    {ok, Components} = dev_codec_httpsig:serialize(
+        Msg,
+        #{<<"format">> => <<"components">>},
+        #{}
+    ),
+    ?assertEqual(<<>>, maps:get(<<"body">>, Components, <<>>)).
+```
+
+---
+
+### 5. add_content_digest/2
+
+```erlang
+-spec add_content_digest(Msg, Opts) -> MsgWithDigest
+    when
+        Msg :: map(),
+        Opts :: map(),
+        MsgWithDigest :: map().
+```
+
+**Description:** If the `body` key is present and binary, replace it with a SHA-256 content digest as a structured field.
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_digest_test).
+-include_lib("eunit/include/eunit.hrl").
+
+add_content_digest_test() ->
+    Msg = #{<<"body">> => <<"test data">>},
+    Result = dev_codec_httpsig:add_content_digest(Msg, #{}),
+    ?assertNot(maps:is_key(<<"body">>, Result)),
+    ?assert(maps:is_key(<<"content-digest">>, Result)),
+    Digest = maps:get(<<"content-digest">>, Result),
+    ?assert(is_binary(Digest)).
+
+add_content_digest_no_body_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    Result = dev_codec_httpsig:add_content_digest(Msg, #{}),
+    ?assertEqual(Msg, Result).
+
+add_content_digest_non_binary_body_test() ->
+    Msg = #{<<"body">> => #{<<"nested">> => <<"data">>}},
+    Result = dev_codec_httpsig:add_content_digest(Msg, #{}),
+    ?assertEqual(Msg, Result).
+```
+
+---
+
+### 6. normalize_for_encoding/3
+
+```erlang
+-spec normalize_for_encoding(Msg, Commitment, Opts) -> 
+    {ok, EncodedMsg, EncodedCommitment, ModifiedCommittedKeys}
+    when
+        Msg :: map(),
+        Commitment :: map(),
+        Opts :: map(),
+        EncodedMsg :: map(),
+        EncodedCommitment :: map(),
+        ModifiedCommittedKeys :: [binary()].
+```
+
+**Description:** Normalize a message and commitment for encoding. Extracts requested keys, encodes to HTTPSig format, and handles body→content-digest conversion.
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_for_encoding_test() ->
+    Msg = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>
+    },
+    Commitment = #{
+        <<"committed">> => [<<"key1">>, <<"key2">>]
+    },
+    {ok, EncMsg, EncComm, ModKeys} = 
+        dev_codec_httpsig:normalize_for_encoding(Msg, Commitment, #{}),
+    ?assert(is_map(EncMsg)),
+    ?assert(is_map(EncComm)),
+    ?assert(is_list(ModKeys)).
+
+normalize_with_body_test() ->
+    Msg = #{
+        <<"key">> => <<"value">>,
+        <<"body">> => <<"content">>
+    },
+    Commitment = #{
+        <<"committed">> => [<<"key">>, <<"body">>]
+    },
+    {ok, EncMsg, _EncComm, _ModKeys} = 
+        dev_codec_httpsig:normalize_for_encoding(Msg, Commitment, #{}),
+    % Body should be replaced with content-digest
+    ?assertNot(maps:is_key(<<"body">>, EncMsg)),
+    ?assert(maps:is_key(<<"content-digest">>, EncMsg)).
+```
+
+---
+
+## Signature Base Generation
+
+### signature_base/3
+
+```erlang
+-spec signature_base(EncodedMsg, Commitment, Opts) -> SignatureBase
+    when
+        EncodedMsg :: map(),
+        Commitment :: map(),
+        Opts :: map(),
+        SignatureBase :: binary().
+```
+
+**Description:** Generate the signature base string according to RFC 9421. This is the data that gets signed.
+
+**Format:**
+```
+"field1": value1
+"field2": value2
+...
+"@signature-params": (field1 field2 ...);keyid="...";created=...
+```
+
+**Test Code:**
+```erlang
+-module(signature_base_test).
+-include_lib("eunit/include/eunit.hrl").
+
+signature_base_format_test() ->
+    Msg = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>
+    },
+    Commitment = #{
+        <<"committed">> => [<<"key1">>, <<"key2">>],
+        <<"keyid">> => <<"test-key">>
+    },
+    SigBase = dev_codec_httpsig:signature_base(Msg, Commitment, #{}),
+    ?assert(is_binary(SigBase)),
+    ?assert(byte_size(SigBase) > 0),
+    % Should contain quoted field names
+    ?assert(binary:match(SigBase, <<"\"key1\":">>)  =/= nomatch),
+    ?assert(binary:match(SigBase, <<"\"key2\":">>)  =/= nomatch),
+    % Should contain signature params
+    ?assert(binary:match(SigBase, <<"\"@signature-params\":">>)  =/= nomatch).
+
+signature_base_deterministic_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    Commitment = #{<<"committed">> => [<<"key">>]},
+    SigBase1 = dev_codec_httpsig:signature_base(Msg, Commitment, #{}),
+    SigBase2 = dev_codec_httpsig:signature_base(Msg, Commitment, #{}),
+    ?assertEqual(SigBase1, SigBase2).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Sign with RSA-PSS
+Wallet = ar_wallet:new(),
+Msg = #{<<"data">> => <<"test">>},
+{ok, Signed} = dev_codec_httpsig:commit(
+    Msg,
+    #{<<"type">> => <<"rsa-pss-sha512">>},
+    #{priv_wallet => Wallet}
+).
+
+%% Sign with HMAC
+Secret = crypto:strong_rand_bytes(64),
+{ok, Signed} = dev_codec_httpsig:commit(
+    Msg,
+    #{
+        <<"type">> => <<"hmac-sha256">>,
+        <<"secret">> => hb_util:encode(Secret)
+    },
+    #{}
+).
+
+%% Verify signature
+[CommitmentID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+Commitment = maps:get(CommitmentID, maps:get(<<"commitments">>, Signed)),
+{ok, true} = dev_codec_httpsig:verify(Msg, Commitment, #{}).
+
+%% Sign specific keys only
+{ok, Signed} = dev_codec_httpsig:commit(
+    #{<<"a">> => <<"1">>, <<"b">> => <<"2">>, <<"c">> => <<"3">>},
+    #{
+        <<"type">> => <<"signed">>,
+        <<"committed">> => [<<"a">>, <<"c">>]
+    },
+    #{priv_wallet => Wallet}
+).
+
+%% Serialize to HTTP format
+{ok, Binary} = dev_codec_httpsig:serialize(Msg, #{}, #{}).
+
+%% Serialize to components
+{ok, #{
+    <<"headers">> := Headers,
+    <<"body">> := Body
+}} = dev_codec_httpsig:serialize(
+    Msg,
+    #{<<"format">> => <<"components">>},
+    #{}
+).
+
+%% Use with hb_message
+SignedMsg = hb_message:commit(
+    BaseMsg,
+    #{},
+    #{
+        <<"commitment-device">> => <<"httpsig@1.0">>,
+        <<"type">> => <<"rsa-pss-sha512">>,
+        priv_wallet => Wallet
+    }
+).
+
+%% Stack multiple commitments
+{ok, DoubleSigned} = dev_codec_httpsig:commit(
+    Signed,  % Already has one commitment
+    #{<<"type">> => <<"hmac-sha256">>, <<"secret">> => Secret2},
+    #{}
+).
+```
+
+---
+
+## Commitment Structure
+
+### RSA-PSS-SHA512 Commitment
+```erlang
+#{
+    <<"commitment-device">> => <<"httpsig@1.0">>,
+    <<"type">> => <<"rsa-pss-sha512">>,
+    <<"keyid">> => <<"publickey:{Base64PublicKey}">>,
+    <<"committer">> => <<"{Address}">>,
+    <<"signature">> => <<"{Base64Signature}">>,
+    <<"committed">> => [<<"key1">>, <<"key2">>, ...]
+}
+```
+
+### HMAC-SHA256 Commitment
+```erlang
+#{
+    <<"commitment-device">> => <<"httpsig@1.0">>,
+    <<"type">> => <<"hmac-sha256">>,
+    <<"keyid">> => <<"secret:{KeyID}">>,
+    <<"committer">> => <<"{Committer}">>,  % Optional
+    <<"signature">> => <<"{HMAC}">>,
+    <<"committed">> => [<<"key1">>, <<"key2">>, ...]
+}
+```
+
+---
+
+## Key Material Handling
+
+### KeyID Formats
+- **Public Key:** `publickey:{Base64(PublicKey)}`
+- **Secret Key:** `secret:{KeyID}`
+- **Custom:** Any string identifier
+
+### Key Derivation
+Handled by `dev_codec_httpsig_keyid:req_to_key_material/2`:
+- Extracts key from request
+- Derives committer address
+- Returns `{ok, Scheme, Key, KeyID}`
+
+---
+
+## Body Handling
+
+### Content Digest Conversion
+When `body` is present and binary:
+```erlang
+% Before
+#{<<"body">> => <<"Hello, World!">>}
+
+% After encoding
+#{<<"content-digest">> => <<"sha-256=:ZOyIygCyaOW6GjVnihtTFtIS9PNmskdyMlNKiuyjfzw=:">>}
+```
+
+The body is hashed with SHA-256 and encoded as a structured field dictionary.
+
+---
+
+## Options
+
+### opts/1
+```erlang
+opts(RawOpts) ->
+    RawOpts#{
+        hashpath => ignore,
+        cache_control => [<<"no-cache">>, <<"no-store">>],
+        force_message => false
+    }.
+```
+
+**Default Options:**
+- `hashpath` - Ignore hashpath in encoding
+- `cache_control` - No caching headers
+- `force_message` - Don't force message format
+
+---
+
+## References
+
+- **RFC 9421** - HTTP Message Signatures
+- **RFC 8017** - PKCS #1: RSA-PSS
+- **Conversion Module** - `dev_codec_httpsig_conv.erl`
+- **SigInfo Module** - `dev_codec_httpsig_siginfo.erl`
+- **KeyID Module** - `dev_codec_httpsig_keyid.erl`
+- **Structured Fields** - `hb_structured_fields.erl`
+- **Arweave Wallet** - `ar_wallet.erl`
+
+---
+
+## Notes
+
+1. **RFC 9421 Compliance:** Implements HTTP Message Signatures standard
+2. **Dual Algorithms:** Supports both asymmetric (RSA-PSS) and symmetric (HMAC) signing
+3. **Signature Base:** Generated according to RFC 9421 specification
+4. **Content Digest:** Binary body converted to SHA-256 digest
+5. **Key Flexibility:** Multiple key formats and derivation schemes
+6. **Stackable Commitments:** Multiple signatures can be added to same message
+7. **Selective Signing:** Can commit to specific keys only
+8. **Normalization:** Automatic message normalization for encoding
+9. **Link Support:** Handles `+link` key specifiers automatically
+10. **Commitment Stacking:** Supports multiple commitment devices on same message
+11. **Type Aliases:** `signed` → `rsa-pss-sha512`, `unsigned` → `hmac-sha256`
+12. **Bundle Support:** Optional bundle tag in commitments
+13. **Hashpath Integration:** Can include hashpath as commitment tag
+14. **Structured Fields:** Uses RFC 8941 structured fields for parameters
+15. **Component Lines:** Generates signature base from component identifiers

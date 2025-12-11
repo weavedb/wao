@@ -1,0 +1,551 @@
+# dev_codec_httpsig_keyid.erl - HTTP Signature Key Material Extraction
+
+## Overview
+
+**Purpose:** Extract and validate key material for HTTP signatures  
+**Module:** `dev_codec_httpsig_keyid`  
+**Supported Schemes:** `publickey`, `constant`, `secret`  
+**Pattern:** KeyID → Key Material + Committer Address
+
+This module provides a library for extracting and validating cryptographic key material from `httpsig@1.0` requests. It supports multiple keyid schemes for both asymmetric (public key) and symmetric (secret key) authentication.
+
+## KeyID Schemes
+
+### 1. publickey
+- **Format:** `publickey:{Base64(PublicKey)}`
+- **Key:** Decoded public key
+- **Committer:** SHA-256 hash of public key
+- **Use:** RSA-PSS-SHA512 signatures
+
+### 2. constant
+- **Format:** `constant:{KeyID}` or just `{KeyID}`
+- **Key:** The keyid itself (including prefix)
+- **Committer:** `undefined`
+- **Use:** Shared HMAC keys
+- **Default:** `constant:ao`
+
+### 3. secret
+- **Format:** `secret:{Hash(SecretKey)}`
+- **Key:** The actual secret from request
+- **Committer:** SHA-256 hash of secret
+- **Use:** Per-user HMAC keys
+
+## Dependencies
+
+- **HyperBEAM:** `hb_util`, `hb_crypto`
+- **Arweave:** `ar_wallet`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Key Material Extraction
+-spec req_to_key_material(Req, Opts) -> 
+    {ok, Scheme, Key, KeyID} | {error, Reason}.
+
+%% Committer Derivation
+-spec keyid_to_committer(KeyID) -> Committer | undefined.
+-spec keyid_to_committer(Scheme, KeyID) -> Committer | undefined.
+
+%% Secret Key Utilities
+-spec secret_key_to_committer(Key) -> Committer.
+-spec remove_scheme_prefix(KeyID) -> KeyWithoutPrefix.
+```
+
+---
+
+## Public Functions
+
+### 1. req_to_key_material/2
+
+```erlang
+-spec req_to_key_material(Req, Opts) -> 
+    {ok, Scheme, Key, KeyID} | {error, Reason}
+    when
+        Req :: map(),
+        Opts :: map(),
+        Scheme :: publickey | constant | secret,
+        Key :: binary(),
+        KeyID :: binary(),
+        Reason :: key_mismatch | unknown_scheme | unsupported_scheme | 
+                  no_request_type | undefined_scheme.
+```
+
+**Description:** Extract cryptographic key material and keyid from a request. Validates scheme consistency and derives appropriate key based on scheme type.
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_keyid_req_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+req_to_key_publickey_test() ->
+    PubKey = crypto:strong_rand_bytes(512),
+    Encoded = base64:encode(PubKey),
+    Req = #{
+        <<"keyid">> => <<"publickey:", Encoded/binary>>,
+        <<"type">> => <<"rsa-pss-sha512">>
+    },
+    {ok, Scheme, Key, KeyID} = dev_codec_httpsig_keyid:req_to_key_material(Req, #{}),
+    ?assertEqual(publickey, Scheme),
+    ?assertEqual(PubKey, Key),
+    ?assertEqual(<<"publickey:", Encoded/binary>>, KeyID).
+
+req_to_key_constant_test() ->
+    Req = #{
+        <<"keyid">> => <<"constant:ao">>,
+        <<"type">> => <<"hmac-sha256">>
+    },
+    {ok, Scheme, Key, KeyID} = dev_codec_httpsig_keyid:req_to_key_material(Req, #{}),
+    ?assertEqual(constant, Scheme),
+    ?assertEqual(<<"constant:ao">>, Key),
+    ?assertEqual(<<"constant:ao">>, KeyID).
+
+req_to_key_secret_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Req = #{
+        <<"secret">> => Secret,
+        <<"type">> => <<"hmac-sha256">>
+    },
+    {ok, Scheme, Key, KeyID} = dev_codec_httpsig_keyid:req_to_key_material(Req, #{}),
+    ?assertEqual(secret, Scheme),
+    ?assertEqual(Secret, Key),
+    ?assert(binary:match(KeyID, <<"secret:">>) =/= nomatch).
+
+req_to_key_default_constant_test() ->
+    % No keyid specified, should default to constant:ao
+    Req = #{<<"type">> => <<"hmac-sha256">>},
+    {ok, Scheme, Key, _KeyID} = dev_codec_httpsig_keyid:req_to_key_material(Req, #{}),
+    ?assertEqual(constant, Scheme),
+    ?assertEqual(<<"constant:ao">>, Key).
+
+req_to_key_scheme_from_type_test() ->
+    % Publickey scheme inferred from type
+    PubKey = crypto:strong_rand_bytes(512),
+    Encoded = base64:encode(PubKey),
+    Req = #{
+        <<"keyid">> => <<"publickey:", Encoded/binary>>,
+        <<"type">> => <<"rsa-pss-sha512">>
+    },
+    {ok, Scheme, _Key, _KeyID} = dev_codec_httpsig_keyid:req_to_key_material(Req, #{}),
+    ?assertEqual(publickey, Scheme).
+
+req_to_key_mismatch_error_test() ->
+    % KeyID in request doesn't match calculated KeyID
+    Req = #{
+        <<"keyid">> => <<"secret:wronghash">>,
+        <<"secret">> => <<"somekey">>,
+        <<"type">> => <<"hmac-sha256">>
+    },
+    Result = dev_codec_httpsig_keyid:req_to_key_material(Req, #{}),
+    ?assertEqual({error, key_mismatch}, Result).
+```
+
+---
+
+### 2. keyid_to_committer/1, keyid_to_committer/2
+
+```erlang
+-spec keyid_to_committer(KeyID) -> Committer | undefined
+    when
+        KeyID :: binary(),
+        Committer :: binary().
+
+-spec keyid_to_committer(Scheme, KeyID) -> Committer | undefined
+    when
+        Scheme :: publickey | constant | secret,
+        KeyID :: binary(),
+        Committer :: binary().
+```
+
+**Description:** Derive the committer address from a keyid. Returns `undefined` for constant scheme (no specific committer).
+
+**Committer Derivation:**
+- **publickey:** SHA-256 of public key (Arweave address format)
+- **secret:** SHA-256 of secret key
+- **constant:** `undefined` (shared key, no specific committer)
+
+**Test Code:**
+```erlang
+-module(keyid_to_committer_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+keyid_to_committer_publickey_test() ->
+    {_, PubKey} = ar_wallet:new(),
+    Encoded = base64:encode(element(2, PubKey)),
+    KeyID = <<"publickey:", Encoded/binary>>,
+    Committer = dev_codec_httpsig_keyid:keyid_to_committer(KeyID),
+    ExpectedCommitter = hb_util:human_id(ar_wallet:to_address(element(2, PubKey))),
+    ?assertEqual(ExpectedCommitter, Committer).
+
+keyid_to_committer_secret_test() ->
+    Secret = <<"my-secret-key">>,
+    Hash = hb_util:human_id(hb_crypto:sha256(Secret)),
+    KeyID = <<"secret:", Hash/binary>>,
+    Committer = dev_codec_httpsig_keyid:keyid_to_committer(KeyID),
+    ?assertEqual(Hash, Committer).
+
+keyid_to_committer_constant_test() ->
+    KeyID = <<"constant:ao">>,
+    Committer = dev_codec_httpsig_keyid:keyid_to_committer(KeyID),
+    ?assertEqual(undefined, Committer).
+
+keyid_to_committer_with_scheme_test() ->
+    Secret = <<"test">>,
+    Hash = hb_util:human_id(hb_crypto:sha256(Secret)),
+    KeyID = <<"secret:", Hash/binary>>,
+    Committer = dev_codec_httpsig_keyid:keyid_to_committer(secret, KeyID),
+    ?assertEqual(Hash, Committer).
+```
+
+---
+
+### 3. secret_key_to_committer/1
+
+```erlang
+-spec secret_key_to_committer(Key) -> Committer
+    when
+        Key :: binary(),
+        Committer :: binary().
+```
+
+**Description:** Generate the committer value for a secret key by computing SHA-256 hash and encoding as human-readable ID.
+
+**Test Code:**
+```erlang
+-module(secret_key_to_committer_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+secret_key_to_committer_test() ->
+    Secret = <<"my-secret">>,
+    Committer = dev_codec_httpsig_keyid:secret_key_to_committer(Secret),
+    Expected = hb_util:human_id(hb_crypto:sha256(Secret)),
+    ?assertEqual(Expected, Committer).
+
+secret_key_to_committer_deterministic_test() ->
+    Secret = crypto:strong_rand_bytes(64),
+    Committer1 = dev_codec_httpsig_keyid:secret_key_to_committer(Secret),
+    Committer2 = dev_codec_httpsig_keyid:secret_key_to_committer(Secret),
+    ?assertEqual(Committer1, Committer2).
+
+secret_key_to_committer_unique_test() ->
+    Secret1 = <<"key1">>,
+    Secret2 = <<"key2">>,
+    Committer1 = dev_codec_httpsig_keyid:secret_key_to_committer(Secret1),
+    Committer2 = dev_codec_httpsig_keyid:secret_key_to_committer(Secret2),
+    ?assertNotEqual(Committer1, Committer2).
+```
+
+---
+
+### 4. remove_scheme_prefix/1
+
+```erlang
+-spec remove_scheme_prefix(KeyID) -> KeyWithoutPrefix
+    when
+        KeyID :: binary(),
+        KeyWithoutPrefix :: binary().
+```
+
+**Description:** Remove the `scheme:` prefix from a keyid, returning just the key portion.
+
+**Test Code:**
+```erlang
+-module(remove_scheme_prefix_test).
+-include_lib("eunit/include/eunit.hrl").
+
+remove_scheme_prefix_with_prefix_test() ->
+    KeyID = <<"publickey:abc123">>,
+    Result = dev_codec_httpsig_keyid:remove_scheme_prefix(KeyID),
+    ?assertEqual(<<"abc123">>, Result).
+
+remove_scheme_prefix_no_prefix_test() ->
+    KeyID = <<"just-a-key">>,
+    Result = dev_codec_httpsig_keyid:remove_scheme_prefix(KeyID),
+    ?assertEqual(<<"just-a-key">>, Result).
+
+remove_scheme_prefix_multiple_colons_test() ->
+    KeyID = <<"scheme:key:with:colons">>,
+    Result = dev_codec_httpsig_keyid:remove_scheme_prefix(KeyID),
+    ?assertEqual(<<"key:with:colons">>, Result).
+```
+
+---
+
+## Internal Functions
+
+### find_scheme/3
+
+```erlang
+-spec find_scheme(KeyID, Req, Opts) -> {ok, Scheme} | {error, Reason}
+    when
+        KeyID :: binary() | undefined,
+        Req :: map(),
+        Opts :: map(),
+        Scheme :: publickey | constant | secret,
+        Reason :: undefined_scheme | scheme_mismatch | unknown_scheme.
+```
+
+**Description:** Find the scheme from a keyid or request. Validates that scheme in request matches scheme in keyid if both are present.
+
+---
+
+### req_to_default_scheme/2
+
+```erlang
+-spec req_to_default_scheme(Req, Opts) -> {ok, Scheme} | {error, Reason}
+    when
+        Req :: map(),
+        Opts :: map(),
+        Scheme :: publickey | constant,
+        Reason :: unsupported_scheme | no_request_type.
+```
+
+**Description:** Determine the default scheme based on the `type` of the request.
+
+**Defaults:**
+- `<<"rsa-pss-sha512">>` → `publickey`
+- `<<"hmac-sha256">>` → `constant`
+
+---
+
+### apply_scheme/3
+
+```erlang
+-spec apply_scheme(Scheme, KeyID, Req) -> {ok, Key, KeyID} | {error, Reason}
+    when
+        Scheme :: publickey | constant | secret,
+        KeyID :: binary() | undefined,
+        Req :: map(),
+        Key :: binary(),
+        Reason :: unsupported_scheme.
+```
+
+**Description:** Apply the requested scheme to generate the key material (key and keyid).
+
+---
+
+## Scheme Details
+
+### publickey Scheme
+
+**Format:**
+```erlang
+KeyID = <<"publickey:", (base64:encode(PublicKey))/binary>>
+```
+
+**Key Extraction:**
+```erlang
+PubKey = base64:decode(remove_scheme_prefix(KeyID))
+```
+
+**Committer:**
+```erlang
+Committer = hb_util:human_id(ar_wallet:to_address(PubKey))
+```
+
+**Use Case:** RSA-PSS-SHA512 asymmetric signatures
+
+---
+
+### constant Scheme
+
+**Format:**
+```erlang
+KeyID = <<"constant:ao">>  % Default
+% OR
+KeyID = <<"constant:custom-key">>
+% OR
+KeyID = <<"any-key-without-colon">>  % Implicit constant
+```
+
+**Key:**
+```erlang
+Key = KeyID  % The key is the keyid itself
+```
+
+**Committer:**
+```erlang
+Committer = undefined  % No specific committer
+```
+
+**Use Case:** Shared HMAC keys, system-level authentication
+
+**Default Key:** `<<"constant:ao">>`
+
+---
+
+### secret Scheme
+
+**Format:**
+```erlang
+KeyID = <<"secret:", (hb_util:human_id(crypto:hash(sha256, Secret)))/binary>>
+```
+
+**Key:**
+```erlang
+Key = maps:get(<<"secret">>, Req)  % Actual secret from request
+```
+
+**Committer:**
+```erlang
+Committer = hb_util:human_id(crypto:hash(sha256, Secret))
+```
+
+**Use Case:** Per-user HMAC keys, cookie authentication, HTTP basic auth
+
+---
+
+## Common Patterns
+
+```erlang
+%% Extract public key material
+Req = #{
+    <<"keyid">> => <<"publickey:", Base64PubKey/binary>>,
+    <<"type">> => <<"rsa-pss-sha512">>
+},
+{ok, publickey, PubKey, KeyID} = 
+    dev_codec_httpsig_keyid:req_to_key_material(Req, #{}).
+
+%% Use constant key (default)
+Req = #{<<"type">> => <<"hmac-sha256">>},
+{ok, constant, <<"constant:ao">>, <<"constant:ao">>} = 
+    dev_codec_httpsig_keyid:req_to_key_material(Req, #{}).
+
+%% Use secret key
+Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+Req = #{
+    <<"secret">> => Secret,
+    <<"type">> => <<"hmac-sha256">>
+},
+{ok, secret, Secret, SecretKeyID} = 
+    dev_codec_httpsig_keyid:req_to_key_material(Req, #{}).
+
+%% Derive committer from KeyID
+KeyID = <<"publickey:AAAA...">>,
+Committer = dev_codec_httpsig_keyid:keyid_to_committer(KeyID).
+% Returns: Base64url-encoded SHA-256 of public key
+
+%% Generate committer from secret
+Secret = <<"user-password-derived-key">>,
+Committer = dev_codec_httpsig_keyid:secret_key_to_committer(Secret).
+% Returns: Base64url-encoded SHA-256 of secret
+
+%% Remove scheme prefix
+KeyID = <<"secret:abc123">>,
+WithoutPrefix = dev_codec_httpsig_keyid:remove_scheme_prefix(KeyID).
+% Returns: <<"abc123">>
+
+%% Explicit scheme in request
+Req = #{
+    <<"scheme">> => <<"publickey">>,
+    <<"keyid">> => <<"publickey:...",>>,
+    <<"type">> => <<"rsa-pss-sha512">>
+},
+{ok, publickey, _Key, _KeyID} = 
+    dev_codec_httpsig_keyid:req_to_key_material(Req, #{}).
+```
+
+---
+
+## Scheme Selection Logic
+
+### Priority Order
+1. **Explicit `scheme` in request** - Highest priority
+2. **Scheme prefix in `keyid`** - e.g., `publickey:`, `secret:`
+3. **Default based on `type`** - Inferred from signature type
+4. **Error** - If none of the above
+
+### Validation
+- If both request scheme and keyid scheme exist, they must match
+- If keyid is provided but calculated keyid doesn't match, error
+- Unknown schemes trigger error
+
+---
+
+## Default Key
+
+```erlang
+-define(HMAC_DEFAULT_KEY, <<"constant:ao">>).
+```
+
+Used when:
+- `type` is `hmac-sha256`
+- No `keyid` specified
+- No `secret` in request
+
+---
+
+## Encoding Compatibility
+
+### Base64 vs Base64url
+
+The module uses `hb_util:decode/1` for decoding public keys, which handles both:
+- Standard Base64 (used by HTTPSig)
+- Base64url (used by ANS-104)
+
+This ensures cross-compatibility between different codecs.
+
+---
+
+## Error Handling
+
+### Error Types
+
+```erlang
+{error, key_mismatch}      % Calculated keyid doesn't match provided keyid
+{error, unknown_scheme}    % Scheme not in supported list
+{error, unsupported_scheme} % Scheme exists but not implemented
+{error, no_request_type}   % No 'type' field to infer default scheme
+{error, undefined_scheme}  % No scheme could be determined
+{error, scheme_mismatch}   % Request scheme doesn't match keyid scheme
+```
+
+---
+
+## Constants
+
+```erlang
+%% Supported keyid schemes
+-define(KEYID_SCHEMES, [constant, publickey, secret]).
+
+%% Default schemes by signature type
+-define(DEFAULT_SCHEMES_BY_TYPE, #{
+    <<"rsa-pss-sha512">> => publickey,
+    <<"hmac-sha256">> => constant
+}).
+
+%% Default HMAC key
+-define(HMAC_DEFAULT_KEY, <<"constant:ao">>).
+```
+
+---
+
+## References
+
+- **RFC 9421** - HTTP Message Signatures
+- **HTTPSig Module** - `dev_codec_httpsig.erl`
+- **Arweave Wallet** - `ar_wallet.erl`
+- **Crypto** - `hb_crypto.erl`
+- **Utilities** - `hb_util.erl`
+
+---
+
+## Notes
+
+1. **Scheme Abstraction:** Easy to add new schemes in the future
+2. **Validation:** Strict validation of scheme consistency
+3. **Default Inference:** Smart defaults based on signature type
+4. **Public Key Format:** Supports both base64 and base64url encoding
+5. **Secret Hashing:** SHA-256 for committer derivation from secrets
+6. **Constant Key:** Global default `constant:ao` for shared HMAC
+7. **No Committer:** Constant scheme has no specific committer (undefined)
+8. **Error Safety:** Clear error types for debugging
+9. **Prefix Handling:** Automatic scheme prefix parsing and removal
+10. **Type Mapping:** Maps signature types to appropriate key schemes
+11. **Extensibility:** Clean separation between scheme logic
+12. **Human IDs:** Committers encoded as human-readable base64url

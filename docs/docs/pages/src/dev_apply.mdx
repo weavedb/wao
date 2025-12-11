@@ -1,0 +1,393 @@
+# dev_apply.erl - AO Resolution Execution Device
+
+## Overview
+
+**Purpose:** Execute AO resolutions on messages with path-based request routing  
+**Module:** `dev_apply`  
+**Device Name:** `apply@1.0`  
+**Pattern:** Base + Request → Resolution
+
+This device executes AO resolutions by applying a request to a base message. It supports path-based execution with prefixes (`base:` and `request:`) to explicitly specify which message to retrieve data from, and can operate in two modes: single execution via a path key, or paired execution combining base and request messages.
+
+## Supported Modes
+
+- **Single Execution:** Apply a path from the request/base to execute
+- **Paired Execution:** Combine separate base and request messages via `pair` key
+- **Prefixed Paths:** Support `base:` and `request:` prefixes for explicit targeting
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_path`, `hb_util`, `hb_message`, `hb_http`, `hb_http_server`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Configuration
+-spec info(Opts) -> DeviceInfo.
+
+%% Request Handlers
+-spec default(Key, Base, Request, Opts) -> Result.
+-spec pair(Base, Request, Opts) -> Result.
+-spec pair(PathToSet, Base, Request, Opts) -> Result.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(Opts) -> DeviceInfo
+    when
+        Opts :: map(),
+        DeviceInfo :: map().
+```
+
+**Description:** Return device configuration. Excludes specific keys from default handler and provides the default resolution function.
+
+**Excluded Keys:**
+- `<<"keys">>` - Reserved for device introspection
+- `<<"set">>` - Reserved for setting operations
+- `<<"set_path">>` - Reserved for path setting
+- `<<"remove">>` - Reserved for removal operations
+
+**Test Code:**
+```erlang
+-module(dev_apply_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_structure_test() ->
+    Info = dev_apply:info(#{}),
+    ?assert(is_map(Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    ?assert(maps:is_key(default, Info)),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"keys">>, Excludes)),
+    ?assert(lists:member(<<"set">>, Excludes)).
+```
+
+---
+
+### 2. default/4
+
+```erlang
+-spec default(Key, Base, Request, Opts) -> Result
+    when
+        Key :: binary(),
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        Result :: {ok, term()} | {error, map()}.
+```
+
+**Description:** Default handler for key resolution. If both `base` and `request` keys are present in the request, delegates to `pair/4`. Otherwise, evaluates the key as an `apply-path`.
+
+**Test Code:**
+```erlang
+-module(dev_apply_default_test).
+-include_lib("eunit/include/eunit.hrl").
+
+default_single_execution_test() ->
+    hb:init(),
+    Base = #{
+        <<"device">> => <<"apply@1.0">>,
+        <<"body">> => <<"/~meta@1.0/build/node">>,
+        <<"other-key">> => <<"data">>
+    },
+    Request = #{
+        <<"path">> => <<"body">>
+    },
+    {ok, Result} = hb_ao:resolve(Base, Request, #{}),
+    ?assertEqual(<<"HyperBEAM">>, Result).
+
+default_pair_execution_test() ->
+    Base = #{
+        <<"device">> => <<"apply@1.0">>,
+        <<"container">> => #{ <<"value">> => <<"DATA">> },
+        <<"base">> => <<"container">>
+    },
+    Request = #{
+        <<"path-key">> => <<"value">>,
+        <<"request">> => <<"path-key">>
+    },
+    {ok, Result} = dev_apply:default(
+        <<"pair">>,
+        Base,
+        Request,
+        #{}
+    ),
+    ?assertEqual(<<"DATA">>, Result).
+```
+
+---
+
+### 3. pair/3, pair/4
+
+```erlang
+-spec pair(Base, Request, Opts) -> Result
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        Result :: {ok, term()} | {error, map()}.
+
+-spec pair(PathToSet, Base, Request, Opts) -> Result
+    when
+        PathToSet :: binary(),
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        Result :: {ok, term()} | {error, map()}.
+```
+
+**Description:** Apply a request message to a base message. Retrieves the `base` and `request` paths from the messages, then resolves the request against the base. Optional `PathToSet` parameter sets the `path` key in the prepared request.
+
+**Test Code:**
+```erlang
+-module(dev_apply_pair_test).
+-include_lib("eunit/include/eunit.hrl").
+
+pair_basic_test() ->
+    Base = #{
+        <<"device">> => <<"apply@1.0">>,
+        <<"data-container">> => #{ <<"key">> => <<"VALUE">> },
+        <<"base">> => <<"data-container">>
+    },
+    Request = #{
+        <<"path-spec">> => <<"key">>,
+        <<"request">> => <<"path-spec">>,
+        <<"path">> => <<"pair">>
+    },
+    {ok, Result} = hb_ao:resolve(Base, Request, #{}),
+    ?assertEqual(<<"VALUE">>, Result).
+
+pair_with_prefix_test() ->
+    {ok, Result} = hb_ao:resolve(
+        <<
+            "/~meta@1.0/build",
+            "/node~apply@1.0&node=TEST&base=request:&request=base:"
+        >>,
+        #{}
+    ),
+    ?assertEqual(<<"TEST">>, Result).
+
+pair_custom_path_test() ->
+    Base = #{
+        <<"data">> => #{ <<"nested">> => <<"RESULT">> },
+        <<"base">> => <<"data">>
+    },
+    Request = #{
+        <<"accessor">> => <<"nested">>,
+        <<"request">> => <<"accessor">>
+    },
+    {ok, Result} = dev_apply:pair(
+        <<"custom-path">>,
+        Base,
+        Request,
+        #{}
+    ),
+    ?assertEqual(<<"RESULT">>, Result).
+```
+
+---
+
+## Path Prefix System
+
+### Supported Prefixes
+
+**`base:` prefix:**
+- Targets the base message explicitly
+- Example: `base:key` retrieves `key` from base
+- Empty after colon: `base:` returns entire base message
+
+**`request:` or `req:` prefix:**
+- Targets the request message explicitly  
+- Example: `request:data` retrieves `data` from request
+- Empty after colon: `request:` returns entire request message
+
+**No prefix:**
+- Checks request first, then base
+- Falls back to base if not found in request
+
+### Path Examples
+
+```erlang
+% Get key from request first, then base
+<<"key">>
+
+% Get key explicitly from base
+<<"base:key">>
+
+% Get nested path from request
+<<"request:nested/path">>
+
+% Get entire base message
+<<"base:">>
+
+% Get entire request message
+<<"req:">>
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Single key execution
+Base = #{
+    <<"device">> => <<"apply@1.0">>,
+    <<"my-path">> => <<"/~meta@1.0/info/address">>,
+    <<"data">> => <<"other-data">>
+},
+Request = #{
+    <<"path">> => <<"my-path">>
+},
+{ok, Address} = hb_ao:resolve(Base, Request, #{}).
+
+%% Paired execution
+Base = #{
+    <<"device">> => <<"apply@1.0">>,
+    <<"storage">> => #{ <<"item">> => <<"VALUE">> },
+    <<"base">> => <<"storage">>
+},
+Request = #{
+    <<"accessor">> => <<"item">>,
+    <<"request">> => <<"accessor">>,
+    <<"path">> => <<"pair">>
+},
+{ok, Value} = hb_ao:resolve(Base, Request, #{}).
+
+%% Using path prefixes
+Base = #{
+    <<"device">> => <<"apply@1.0">>,
+    <<"base-data">> => <<"FROM-BASE">>
+},
+Request = #{
+    <<"source">> => <<"base:base-data">>,
+    <<"path">> => <<"source">>
+},
+{ok, Data} = hb_ao:resolve(Base, Request, #{}).
+
+%% HTTP-based execution
+Wallet = ar_wallet:new(),
+Msg = hb_message:commit(
+    #{
+        <<"device">> => <<"apply@1.0">>,
+        <<"user-path">> => <<"/user-data/key">>,
+        <<"user-data">> => #{ <<"key">> => <<"DATA">> }
+    },
+    #{ priv_wallet => Wallet }
+),
+Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+{ok, Result} = hb_http:request(
+    <<"GET">>,
+    Node,
+    <<"/user-path">>,
+    Msg,
+    #{ priv_wallet => Wallet }
+).
+```
+
+---
+
+## Execution Flow
+
+### Single Execution Mode
+
+```
+1. Find source path (or use entire base if not specified)
+2. Find apply-path from request or base
+3. Retrieve value at apply-path
+4. Execute resolution with path as singleton message
+```
+
+### Paired Execution Mode
+
+```
+1. Extract base path from request/base
+2. Extract request path from request/base
+3. Retrieve base source message
+4. Retrieve request source message
+5. Set path in request if PathToSet provided
+6. Resolve request against base
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+**Path Not Found:**
+```erlang
+{error, #{
+    <<"body">> => <<"Path `/invalid/path` to apply not found.">>
+}}
+```
+
+**Source Not Found:**
+```erlang
+{error, #{
+    <<"body">> => <<"Source path `/source` to apply not found.">>
+}}
+```
+
+**Invalid Path:**
+```erlang
+{error, #{
+    <<"body">> => <<"Path `/bad:path` is invalid.">>
+}}
+```
+
+---
+
+## Use Cases
+
+### 1. Dynamic Path Execution
+Execute different paths based on request parameters without hardcoding logic.
+
+### 2. Message Composition
+Combine data from multiple sources (base and request) for complex operations.
+
+### 3. Indirect Resolution
+Store paths in messages and execute them dynamically, enabling flexible routing.
+
+### 4. Prefix-Based Targeting
+Explicitly control which message (base or request) provides data, avoiding ambiguity.
+
+### 5. HTTP Request Routing
+Route HTTP requests through signed messages to user-specific paths.
+
+---
+
+## References
+
+- **AO Core** - `hb_ao.erl`
+- **Message Handling** - `hb_message.erl`
+- **Path Processing** - `hb_path.erl`
+- **HTTP Server** - `hb_http_server.erl`
+
+---
+
+## Notes
+
+1. **Path Resolution:** Checks request first, then base (unless prefixed)
+2. **Prefix Support:** `base:`, `request:`, and `req:` explicitly target messages
+3. **Empty Prefix:** Returns entire message (e.g., `base:` returns full base)
+4. **Excluded Keys:** Device reserves certain keys for system operations
+5. **Pair Mode:** Automatically invoked when both `base` and `request` keys present
+6. **Default Handler:** Routes to eval or pair based on message structure
+7. **Error Messages:** Descriptive errors include the problematic path
+8. **HTTP Integration:** Works seamlessly with HTTP server for web access
+9. **Signature Support:** Compatible with signed messages via `hb_message:commit`
+10. **Dynamic Execution:** Paths can reference other paths for multi-level resolution
+11. **Source Key:** Optional `source` key specifies base message location
+12. **Apply-Path Key:** Specifies which path to execute on the base
+13. **Normalization:** All paths normalized to binary format
+14. **Root Path:** Empty paths normalize to `/`
+15. **Testing:** Comprehensive test suite covers all execution modes

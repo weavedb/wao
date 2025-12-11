@@ -1,0 +1,435 @@
+# hb_http_benchmark_tests.erl - HTTP Performance Benchmarks
+
+## Overview
+
+**Purpose:** Performance benchmarking test suite for HTTP operations  
+**Module:** `hb_http_benchmark_tests`  
+**Framework:** EUnit  
+**Status:** Currently disabled (all tests commented out)
+
+This module provides benchmark tests for measuring HyperBEAM's HTTP performance across various scenarios including unsigned/signed message resolution, WASM computation, parallel processing, and AO-Core scheduling operations.
+
+## Performance Baseline
+
+All benchmarks are calibrated against a reference machine:
+- **Reference:** MacBook Pro M2 Max
+- **Divider:** Configurable via `?PERFORMANCE_DIVIDER` macro
+- **Default:** 1 (100% of reference performance)
+
+```erlang
+-define(PERFORMANCE_DIVIDER, 1).
+```
+
+**Adjustment Examples:**
+- `?PERFORMANCE_DIVIDER = 0.5` → Expect 200% performance (faster machine)
+- `?PERFORMANCE_DIVIDER = 2` → Expect 50% performance (slower machine)
+
+## Dependencies
+
+- **HyperBEAM:** `hb_http`, `hb_http_server`, `hb_test_utils`, `hb_formatter`, `hb_ao`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Benchmark Categories
+
+### 1. Message Resolution Benchmarks
+
+#### unsigned_resolve_benchmark_test (Disabled)
+
+```erlang
+% unsigned_resolve_benchmark_test() ->
+%     BenchTime = 1,
+%     URL = hb_http_server:start_node(#{force_signed => false}),
+%     Iterations = hb_test_utils:benchmark(
+%         fun() ->
+%             hb_http:post(URL,
+%                 #{
+%                     <<"path">> => <<"key1">>,
+%                     <<"key1">> => #{<<"key2">> => <<"value1">>}
+%                 },
+%                 #{}
+%             )
+%         end,
+%         BenchTime
+%     ),
+%     ?assert(Iterations > 400 / ?PERFORMANCE_DIVIDER).
+```
+
+**Description:** Benchmark unsigned message resolution via HTTP.
+
+**Expected Performance:**
+- **Target:** >400 messages/second (single-threaded)
+- **Benchmark Time:** 1 second
+- **Message Type:** Nested key-value resolution
+
+**Test Message:**
+```erlang
+#{
+    <<"path">> => <<"key1">>,
+    <<"key1">> => #{<<"key2">> => <<"value1">>}
+}
+```
+
+---
+
+#### parallel_unsigned_resolve_benchmark_test (Disabled)
+
+```erlang
+% parallel_unsigned_resolve_benchmark_test() ->
+%     BenchTime = 1,
+%     BenchWorkers = 16,
+%     URL = hb_http_server:start_node(#{force_signed => false}),
+%     Iterations = hb_test_utils:benchmark(
+%         fun(_Count) ->
+%             hb_http:post(URL, #{...}, #{})
+%         end,
+%         BenchTime,
+%         BenchWorkers
+%     ),
+%     ?assert(Iterations > 1000 / ?PERFORMANCE_DIVIDER).
+```
+
+**Description:** Benchmark parallel unsigned message resolution with multiple workers.
+
+**Expected Performance:**
+- **Target:** >1000 messages/second
+- **Workers:** 16 concurrent
+- **Benchmark Time:** 1 second
+- **Scalability:** ~2.5x single-threaded performance
+
+---
+
+### 2. WASM Computation Benchmarks
+
+#### run_wasm_unsigned_benchmark_test (Disabled)
+
+```erlang
+% run_wasm_unsigned_benchmark_test() ->
+%     BenchTime = 1,
+%     URL = hb_http_server:start_node(#{force_signed => false}),
+%     Msg = wasm_compute_request(<<"test/test-64.wasm">>, <<"fac">>, [10]),
+%     Iterations = hb_test_utils:benchmark(
+%         fun(_) ->
+%             case hb_http:post(URL, Msg, #{}) of
+%                 {ok, _} -> 1;
+%                 _ -> 0
+%             end
+%         end,
+%         BenchTime
+%     ),
+%     ?assert(Iterations > 100 / ?PERFORMANCE_DIVIDER).
+```
+
+**Description:** Benchmark WASM factorial computation without signature verification.
+
+**Expected Performance:**
+- **Target:** >100 invocations/second
+- **Function:** Factorial calculation (input: 10)
+- **WASM Module:** test-64.wasm
+- **Signature:** Disabled
+
+**WASM Request Structure:**
+```erlang
+wasm_compute_request(ImageFile, Func, Params) ->
+    {ok, Bin} = file:read_file(ImageFile),
+    #{
+        <<"path">> => <<"init/compute/results">>,
+        <<"device">> => <<"wasm-64@1.0">>,
+        <<"function">> => Func,
+        <<"parameters">> => Params,
+        <<"image">> => Bin
+    }.
+```
+
+---
+
+#### run_wasm_signed_benchmark_test (Disabled)
+
+```erlang
+% run_wasm_signed_benchmark_test_disabled() ->
+%     BenchTime = 1,
+%     URL = hb_http_server:start_node(#{force_signed => true}),
+%     Msg = wasm_compute_request(<<"test/test-64.wasm">>, <<"fac">>, [10]),
+%     Iterations = hb_test_utils:benchmark(...),
+%     ?assert(Iterations > 50 / ?PERFORMANCE_DIVIDER).
+```
+
+**Description:** Benchmark WASM computation with signature verification enabled.
+
+**Expected Performance:**
+- **Target:** >50 invocations/second
+- **Overhead:** ~50% slower than unsigned (signature verification cost)
+- **Security:** Full cryptographic validation
+
+---
+
+#### parallel_wasm_unsigned_benchmark_test (Disabled)
+
+```erlang
+% parallel_wasm_unsigned_benchmark_test_disabled() ->
+%     BenchTime = 1,
+%     BenchWorkers = 16,
+%     URL = hb_http_server:start_node(#{force_signed => false}),
+%     Msg = wasm_compute_request(<<"test/test-64.wasm">>, <<"fac">>, [10]),
+%     Iterations = hb_test_utils:benchmark(..., BenchWorkers),
+%     ?assert(Iterations > 200 / ?PERFORMANCE_DIVIDER).
+```
+
+**Description:** Benchmark parallel WASM execution with 16 concurrent workers.
+
+**Expected Performance:**
+- **Target:** >200 invocations/second
+- **Workers:** 16 concurrent
+- **Scalability:** ~2x single-threaded performance
+
+---
+
+#### parallel_wasm_signed_benchmark_test (Disabled)
+
+```erlang
+% parallel_wasm_signed_benchmark_test_disabled() ->
+%     BenchTime = 1,
+%     BenchWorkers = 16,
+%     URL = hb_http_server:start_node(#{force_signed => true}),
+%     Msg = wasm_compute_request(...),
+%     Iterations = hb_test_utils:benchmark(..., BenchWorkers),
+%     ?assert(Iterations > 100 / ?PERFORMANCE_DIVIDER).
+```
+
+**Description:** Benchmark parallel WASM execution with signature verification.
+
+**Expected Performance:**
+- **Target:** >100 invocations/second
+- **Workers:** 16 concurrent
+- **Overhead:** Signature verification in parallel context
+
+---
+
+### 3. Scheduler Benchmarks
+
+#### parallel_http_scheduling_benchmark_test (Disabled)
+
+```erlang
+% parallel_http_scheduling_benchmark_test() ->
+%     BenchTime = 3,
+%     BenchWorkers = 16,
+%     Msg1 = dev_scheduler:test_process(),
+%     Proc = hb_ao:get(process, Msg1, #{hashpath => ignore}),
+%     ProcID = hb_util:id(Proc),
+%     Iterations = hb_test_utils:benchmark(
+%         fun(X) ->
+%             MsgX = #{
+%                 <<"device">> => <<"Scheduler@1.0">>,
+%                 <<"path">> => <<"schedule">>,
+%                 <<"method">> => <<"POST">>,
+%                 <<"body">> => #{
+%                     <<"type">> => <<"body">>,
+%                     <<"test-val">> => X
+%                 }
+%             },
+%             case hb_http:post(URL, MsgX) of
+%                 {ok, _} -> 1;
+%                 _ -> 0
+%             end
+%         end,
+%         BenchTime,
+%         BenchWorkers
+%     ),
+%     ?assert(Iterations > 100).
+```
+
+**Description:** Benchmark AO-Core scheduler message processing with parallel workers.
+
+**Expected Performance:**
+- **Target:** >100 schedules/second
+- **Workers:** 16 concurrent
+- **Benchmark Time:** 3 seconds
+- **Validation:** Verify slot assignment after scheduling
+
+---
+
+## Benchmark Infrastructure
+
+### Test Utilities
+
+```erlang
+% Single-threaded benchmark
+Iterations = hb_test_utils:benchmark(Fun, BenchTimeSeconds)
+
+% Parallel benchmark
+Iterations = hb_test_utils:benchmark(Fun, BenchTimeSeconds, NumWorkers)
+```
+
+### Result Formatting
+
+```erlang
+hb_formatter:eunit_print(
+    "Resolved ~p messages through AO-Core via HTTP in ~p seconds (~.2f msg/s)",
+    [Iterations, BenchTime, Iterations / BenchTime]
+)
+```
+
+---
+
+## Performance Targets Summary
+
+| Benchmark | Workers | Target (ops/sec) | Notes |
+|-----------|---------|------------------|-------|
+| Unsigned Message | 1 | >400 | Simple resolution |
+| Unsigned Message | 16 | >1000 | 2.5x scaling |
+| WASM Unsigned | 1 | >100 | Computation heavy |
+| WASM Signed | 1 | >50 | Signature overhead |
+| WASM Unsigned | 16 | >200 | Parallel compute |
+| WASM Signed | 16 | >100 | Parallel with sig |
+| Scheduler | 16 | >100 | Complex operations |
+
+---
+
+## Enabling Benchmarks
+
+To enable any benchmark, uncomment the test function:
+
+```erlang
+% Before:
+% unsigned_resolve_benchmark_test() ->
+
+% After:
+unsigned_resolve_benchmark_test() ->
+```
+
+Run with:
+```bash
+rebar3 eunit --module=hb_http_benchmark_tests
+```
+
+---
+
+## Configuration
+
+### Performance Divider
+
+Adjust for your hardware:
+
+```erlang
+% Faster than M2 Max (expect 2x performance)
+-define(PERFORMANCE_DIVIDER, 0.5).
+
+% Slower than M2 Max (expect 50% performance)
+-define(PERFORMANCE_DIVIDER, 2).
+```
+
+### Benchmark Duration
+
+Modify benchmark time for longer/shorter runs:
+
+```erlang
+% Longer benchmark (more stable results)
+BenchTime = 5,
+
+% Shorter benchmark (faster tests)
+BenchTime = 1,
+```
+
+### Worker Count
+
+Adjust parallelism:
+
+```erlang
+% More workers (high-core systems)
+BenchWorkers = 32,
+
+% Fewer workers (low-core systems)
+BenchWorkers = 8,
+```
+
+---
+
+## Test Status
+
+**Current Status:** All benchmarks are disabled (commented out)
+
+**Reasons for Disabling:**
+- Performance characteristics may vary across environments
+- Benchmarks can cause CI/CD timeouts
+- Reference hardware not always available
+- Results sensitive to system load
+
+**When to Enable:**
+- Performance regression testing
+- Hardware capacity planning
+- Optimization validation
+- Release benchmarking
+
+---
+
+## Common Patterns
+
+```erlang
+%% Run single benchmark
+unsigned_resolve_benchmark_test() ->
+    BenchTime = 1,
+    URL = hb_http_server:start_node(#{force_signed => false}),
+    Iterations = hb_test_utils:benchmark(
+        fun() -> hb_http:post(URL, TestMsg, #{}) end,
+        BenchTime
+    ),
+    ?assert(Iterations > ExpectedMinimum).
+
+%% Run parallel benchmark
+parallel_benchmark_test() ->
+    BenchTime = 1,
+    Workers = 16,
+    URL = hb_http_server:start_node(),
+    Iterations = hb_test_utils:benchmark(
+        fun(_WorkerID) -> do_work(URL) end,
+        BenchTime,
+        Workers
+    ),
+    ?assert(Iterations > ExpectedMinimum).
+
+%% Benchmark with validation
+benchmark_with_check_test() ->
+    URL = hb_http_server:start_node(),
+    SuccessCount = hb_test_utils:benchmark(
+        fun(_) ->
+            case hb_http:post(URL, Msg, #{}) of
+                {ok, _} -> 1;  % Success
+                _ -> 0         % Failure
+            end
+        end,
+        BenchTime
+    ),
+    ?assert(SuccessCount > Threshold).
+```
+
+---
+
+## References
+
+- **HTTP Client** - `hb_http.erl`
+- **Test Server** - `hb_http_server.erl`
+- **Test Utilities** - `hb_test_utils.erl`
+- **Scheduler** - `dev_scheduler.erl`
+- **AO Core** - `hb_ao.erl`
+
+---
+
+## Notes
+
+1. **All Disabled:** Current implementation has all tests commented out
+2. **Reference Hardware:** Calibrated for MacBook Pro M2 Max
+3. **Performance Divider:** Adjust expectations based on hardware
+4. **Worker Count:** 16 workers standard for parallel tests
+5. **WASM Tests:** Use factorial computation as standard benchmark
+6. **Measurement:** Operations per second (ops/sec)
+7. **Success Rate:** Some benchmarks track success vs failure
+8. **Scheduler Test:** Longer duration (3s) due to complexity
+9. **Validation:** Post-benchmark validation of scheduler slot
+10. **Formatting:** Pretty-printed results with EUnit formatter
+11. **CI/CD:** Disabled to prevent flaky tests in automation
+12. **System Load:** Results affected by concurrent processes
+13. **Network:** Local node tests minimize network latency
+14. **Memory:** Large parallel tests may stress memory
+15. **Determinism:** Results vary between runs; multiple runs recommended

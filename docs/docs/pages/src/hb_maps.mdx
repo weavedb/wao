@@ -1,0 +1,653 @@
+# hb_maps.erl - Link-Resolving Map Operations
+
+## Overview
+
+**Purpose:** Map operations with automatic link resolution  
+**Module:** `hb_maps`  
+**Pattern:** Standard `maps` API + link loading from cache  
+**Warning:** Low-level module - use `hb_ao` for most cases
+
+This module provides a drop-in replacement for Erlang's `maps` module with automatic resolution of links as they are encountered. It transparently loads linked values from cache, supporting both TABM-encoded link format (`Key+link`) and structured link tuples.
+
+## Critical Warning
+
+⚠️ **USE WITH EXTREME CAUTION** ⚠️
+
+This module is **extremely** low-level and should **rarely** be used directly. In virtually all circumstances, use `hb_ao:resolve/3` or `hb_ao:get/3` instead, as they execute the full AO-Core protocol:
+
+- Normalize keys
+- Apply device functions  
+- Resolve links
+- Type conversions
+
+**Using this module directly assumes:**
+1. Message is in `~message@1.0` format
+2. You understand link resolution implications
+3. You don't need device-specific processing
+4. Performance is critical enough to skip AO-Core
+
+**If you don't understand the above, use `hb_ao` instead!**
+
+## Core Difference from `maps`
+
+**Standard `maps` module:**
+```erlang
+Map = #{key => {link, ID, #{}}},
+Value = maps:get(key, Map).
+% Result: {link, ID, #{}}
+```
+
+**`hb_maps` module:**
+```erlang
+Map = #{key => {link, ID, #{}}},
+Value = hb_maps:get(key, Map).
+% Result: <actual value loaded from cache>
+```
+
+## Dependencies
+
+- **HyperBEAM:** `hb_cache`
+- **Erlang/OTP:** `maps`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Basic Operations
+-spec get(Key, Map) -> Value.
+-spec get(Key, Map, Default) -> Value.
+-spec get(Key, Map, Default, Opts) -> Value.
+-spec find(Key, Map) -> {ok, Value} | error.
+-spec find(Key, Map, Opts) -> {ok, Value} | error.
+-spec put(Key, Value, Map) -> Map.
+-spec put(Key, Value, Map, Opts) -> Map.
+
+%% Queries
+-spec is_key(Key, Map) -> boolean().
+-spec is_key(Key, Map, Opts) -> boolean().
+-spec keys(Map) -> [Key].
+-spec keys(Map, Opts) -> [Key].
+-spec values(Map) -> [Value].
+-spec values(Map, Opts) -> [Value].
+-spec size(Map) -> non_neg_integer().
+-spec size(Map, Opts) -> non_neg_integer().
+
+%% Transformations
+-spec map(Fun, Map) -> Map.
+-spec map(Fun, Map, Opts) -> Map.
+-spec filter(Fun, Map) -> Map.
+-spec filter(Fun, Map, Opts) -> Map.
+-spec filtermap(Fun, Map) -> Map.
+-spec filtermap(Fun, Map, Opts) -> Map.
+-spec fold(Fun, Acc, Map) -> Acc.
+-spec fold(Fun, Acc, Map, Opts) -> Acc.
+
+%% Set Operations
+-spec merge(Map1, Map2) -> Map.
+-spec merge(Map1, Map2, Opts) -> Map.
+-spec with(Keys, Map) -> Map.
+-spec with(Keys, Map, Opts) -> Map.
+-spec without(Keys, Map) -> Map.
+-spec without(Keys, Map, Opts) -> Map.
+-spec remove(Key, Map) -> Map.
+-spec remove(Key, Map, Opts) -> Map.
+
+%% Updates
+-spec update_with(Key, Fun, Map) -> Map.
+-spec update_with(Key, Fun, Map, Opts) -> Map.
+-spec take(N, Map) -> Map.
+-spec take(N, Map, Opts) -> Map.
+
+%% Conversions
+-spec from_list(List) -> Map.
+-spec to_list(Map) -> List.
+-spec to_list(Map, Opts) -> List.
+```
+
+---
+
+## Public Functions
+
+### 1. get/2, get/3, get/4
+
+```erlang
+-spec get(Key, Map, Default, Opts) -> Value
+    when
+        Key :: term(),
+        Map :: map(),
+        Default :: term(),
+        Opts :: map(),
+        Value :: term().
+```
+
+**Description:** Get value from map, resolving links in both the map itself and the retrieved value.
+
+**Link Resolution Order:**
+1. Ensure map is loaded (if it's a link)
+2. Get value at key
+3. Ensure value is loaded (if it's a link)
+
+**Test Code:**
+```erlang
+-module(hb_maps_get_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_with_link_test() ->
+    Bin = <<"TEST DATA">>,
+    {ok, Location} = hb_cache:write(Bin, #{}),
+    Map = #{1 => 1, 2 => {link, Location, #{}}, 3 => 3},
+    ?assertEqual(Bin, hb_maps:get(2, Map)).
+
+get_with_typed_link_test() ->
+    Bin = <<"123">>,
+    {ok, Location} = hb_cache:write(Bin, #{}),
+    Map = #{1 => 1, 2 => {link, Location, #{<<"type">> => integer}}, 3 => 3},
+    ?assertEqual(123, hb_maps:get(2, Map, undefined)).
+
+get_default_test() ->
+    Map = #{key => value},
+    ?assertEqual(default, hb_maps:get(missing, Map, default)).
+```
+
+---
+
+### 2. find/2, find/3
+
+```erlang
+-spec find(Key, Map, Opts) -> {ok, Value} | error
+    when
+        Key :: term(),
+        Map :: map(),
+        Opts :: map(),
+        Value :: term().
+```
+
+**Description:** Search for key in map, resolving links. Returns `{ok, Value}` if found, `error` otherwise.
+
+**Test Code:**
+```erlang
+-module(hb_maps_find_test).
+-include_lib("eunit/include/eunit.hrl").
+
+find_existing_test() ->
+    Map = #{key => value},
+    ?assertEqual({ok, value}, hb_maps:find(key, Map)).
+
+find_missing_test() ->
+    Map = #{key => value},
+    ?assertEqual(error, hb_maps:find(missing, Map)).
+
+find_with_link_test() ->
+    Data = <<"test">>,
+    {ok, ID} = hb_cache:write(Data, #{}),
+    Map = #{key => {link, ID, #{}}},
+    ?assertEqual({ok, Data}, hb_maps:find(key, Map)).
+```
+
+---
+
+### 3. put/3, put/4
+
+```erlang
+-spec put(Key, Value, Map, Opts) -> Map
+    when
+        Key :: term(),
+        Value :: term(),
+        Map :: map(),
+        Opts :: map().
+```
+
+**Description:** Add or update key-value pair in map. Map is loaded before insertion.
+
+**Test Code:**
+```erlang
+-module(hb_maps_put_test).
+-include_lib("eunit/include/eunit.hrl").
+
+put_new_key_test() ->
+    Map = #{a => 1},
+    NewMap = hb_maps:put(b, 2, Map),
+    ?assertEqual(#{a => 1, b => 2}, NewMap).
+
+put_update_existing_test() ->
+    Map = #{a => 1},
+    NewMap = hb_maps:put(a, 2, Map),
+    ?assertEqual(#{a => 2}, NewMap).
+```
+
+---
+
+### 4. map/2, map/3
+
+```erlang
+-spec map(Fun, Map, Opts) -> Map
+    when
+        Fun :: fun((Key, Value) -> NewValue),
+        Map :: map(),
+        Opts :: map().
+```
+
+**Description:** Transform all values in map using function. Both map and each value are loaded before processing.
+
+**Test Code:**
+```erlang
+-module(hb_maps_map_test).
+-include_lib("eunit/include/eunit.hrl").
+
+map_with_link_test() ->
+    Bin = <<"TEST DATA">>,
+    {ok, Location} = hb_cache:write(Bin, #{}),
+    Map = #{1 => 1, 2 => {link, Location, #{}}, 3 => 3},
+    Result = hb_maps:map(fun(_K, V) -> V end, Map, #{}),
+    ?assertEqual(#{1 => 1, 2 => Bin, 3 => 3}, Result).
+
+map_transform_test() ->
+    Map = #{a => 1, b => 2, c => 3},
+    Result = hb_maps:map(fun(_K, V) -> V * 2 end, Map),
+    ?assertEqual(#{a => 2, b => 4, c => 6}, Result).
+```
+
+---
+
+### 5. filter/2, filter/3
+
+```erlang
+-spec filter(Fun, Map, Opts) -> Map
+    when
+        Fun :: fun((Key, Value) -> boolean()),
+        Map :: map(),
+        Opts :: map().
+```
+
+**Description:** Keep only key-value pairs where function returns `true`. Values are loaded before testing. **Important:** Loaded values are kept even if filtered out (passive loading).
+
+**Test Code:**
+```erlang
+-module(hb_maps_filter_test).
+-include_lib("eunit/include/eunit.hrl").
+
+filter_with_link_test() ->
+    Bin = <<"TEST DATA">>,
+    {ok, Location} = hb_cache:write(Bin, #{}),
+    Map = #{1 => 1, 2 => {link, Location, #{}}, 3 => 3},
+    Result = hb_maps:filter(fun(_, V) -> V =/= Bin end, Map),
+    ?assertEqual(#{1 => 1, 3 => 3}, Result).
+
+filter_passively_loads_test() ->
+    Bin = <<"TEST DATA">>,
+    {ok, Location} = hb_cache:write(Bin, #{}),
+    Map = #{1 => 1, 2 => {link, Location, #{}}, 3 => 3},
+    % Filter that keeps everything
+    Result = hb_maps:filter(fun(_, _) -> true end, Map),
+    % Link is resolved to actual value
+    ?assertEqual(#{1 => 1, 2 => <<"TEST DATA">>, 3 => 3}, Result).
+```
+
+---
+
+### 6. filtermap/2, filtermap/3
+
+```erlang
+-spec filtermap(Fun, Map, Opts) -> Map
+    when
+        Fun :: fun((Key, Value) -> {true, NewValue} | false),
+        Map :: map(),
+        Opts :: map().
+```
+
+**Description:** Filter and transform map simultaneously. Function returns `{true, NewValue}` to keep with transformation, or `false` to discard.
+
+**Test Code:**
+```erlang
+-module(hb_maps_filtermap_test).
+-include_lib("eunit/include/eunit.hrl").
+
+filtermap_with_link_test() ->
+    Bin = <<"TEST DATA">>,
+    {ok, Location} = hb_cache:write(Bin, #{}),
+    Map = #{1 => 1, 2 => {link, Location, #{}}, 3 => 3},
+    Result = hb_maps:filtermap(
+        fun(_, <<"TEST DATA">>) -> {true, <<"FOUND">>};
+           (_K, _V) -> false
+        end,
+        Map
+    ),
+    ?assertEqual(#{2 => <<"FOUND">>}, Result).
+
+filtermap_passively_loads_test() ->
+    Bin = <<"TEST DATA">>,
+    {ok, Location} = hb_cache:write(Bin, #{}),
+    Map = #{1 => 1, 2 => {link, Location, #{}}, 3 => 3},
+    Result = hb_maps:filtermap(fun(_, V) -> {true, V} end, Map),
+    ?assertEqual(#{1 => 1, 2 => <<"TEST DATA">>, 3 => 3}, Result).
+```
+
+---
+
+### 7. fold/3, fold/4
+
+```erlang
+-spec fold(Fun, Acc, Map, Opts) -> Acc
+    when
+        Fun :: fun((Key, Value, Acc) -> NewAcc),
+        Acc :: term(),
+        Map :: map(),
+        Opts :: map().
+```
+
+**Description:** Reduce map to single value by iterating over all key-value pairs. Values are loaded before processing.
+
+**Test Code:**
+```erlang
+-module(hb_maps_fold_test).
+-include_lib("eunit/include/eunit.hrl").
+
+fold_with_typed_link_test() ->
+    Bin = <<"123">>,
+    {ok, Location} = hb_cache:write(Bin, #{}),
+    Map = #{1 => 1, 2 => {link, Location, #{<<"type">> => integer}}, 3 => 3},
+    Sum = hb_maps:fold(fun(_, V, Acc) -> V + Acc end, 0, Map),
+    ?assertEqual(127, Sum).
+
+fold_count_test() ->
+    Map = #{a => 1, b => 2, c => 3},
+    Count = hb_maps:fold(fun(_, _, Acc) -> Acc + 1 end, 0, Map),
+    ?assertEqual(3, Count).
+```
+
+---
+
+### 8. merge/2, merge/3
+
+```erlang
+-spec merge(Map1, Map2, Opts) -> Map
+    when
+        Map1 :: map(),
+        Map2 :: map(),
+        Opts :: map().
+```
+
+**Description:** Merge two maps, with Map2 taking precedence. Both maps are loaded before merging.
+
+**Test Code:**
+```erlang
+-module(hb_maps_merge_test).
+-include_lib("eunit/include/eunit.hrl").
+
+merge_basic_test() ->
+    Map1 = #{a => 1, b => 2},
+    Map2 = #{b => 3, c => 4},
+    Result = hb_maps:merge(Map1, Map2),
+    ?assertEqual(#{a => 1, b => 3, c => 4}, Result).
+```
+
+---
+
+### 9. with/2, with/3, without/2, without/3
+
+```erlang
+-spec with(Keys, Map, Opts) -> Map
+    when
+        Keys :: [term()],
+        Map :: map(),
+        Opts :: map().
+
+-spec without(Keys, Map, Opts) -> Map
+    when
+        Keys :: [term()],
+        Map :: map(),
+        Opts :: map().
+```
+
+**Description:** Keep only specified keys (`with`) or remove specified keys (`without`). Map is loaded before filtering.
+
+**Test Code:**
+```erlang
+-module(hb_maps_with_without_test).
+-include_lib("eunit/include/eunit.hrl").
+
+with_test() ->
+    Map = #{a => 1, b => 2, c => 3},
+    Result = hb_maps:with([a, c], Map),
+    ?assertEqual(#{a => 1, c => 3}, Result).
+
+without_test() ->
+    Map = #{a => 1, b => 2, c => 3},
+    Result = hb_maps:without([b], Map),
+    ?assertEqual(#{a => 1, c => 3}, Result).
+```
+
+---
+
+## Link Resolution Behavior
+
+### Automatic Loading
+
+**All functions automatically load:**
+1. The map itself (if passed as link)
+2. Each value accessed/processed (if it's a link)
+
+```erlang
+% Map stored in cache
+{ok, MapID} = hb_cache:write(#{key => value}, #{}),
+MapLink = {link, MapID, #{}},
+
+% Value stored in cache  
+{ok, ValueID} = hb_cache:write(<<"data">>, #{}),
+ValueLink = {link, ValueID, #{}},
+
+% Both are loaded automatically
+ActualMap = #{key => ValueLink},
+hb_cache:write(ActualMap, #{}),
+
+% This resolves both links
+Value = hb_maps:get(key, MapLink).
+% Result: <<"data">>
+```
+
+---
+
+### Typed Links
+
+Links can specify type information for automatic conversion:
+
+```erlang
+% Binary "123" stored as integer type
+{ok, ID} = hb_cache:write(<<"123">>, #{}),
+Link = {link, ID, #{<<"type">> => integer}},
+
+Value = hb_maps:get(key, #{key => Link}).
+% Result: 123 (integer, not binary)
+```
+
+---
+
+### Passive Loading
+
+Filter operations load ALL values, even those not kept:
+
+```erlang
+Map = #{
+    a => {link, ID1, #{}},
+    b => {link, ID2, #{}},
+    c => {link, ID3, #{}}
+},
+
+% Loads ALL three values, keeps two
+Result = hb_maps:filter(fun(K, _) -> K =/= b end, Map).
+% All values loaded from cache, but only a and c kept in result
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic map operations with link resolution
+Map = #{key => {link, ID, #{}}},
+Value = hb_maps:get(key, Map),  % Loads from cache
+
+%% Transform values (all loaded)
+Transformed = hb_maps:map(
+    fun(_K, V) -> process(V) end,
+    Map
+),
+
+%% Filter with loaded values
+Filtered = hb_maps:filter(
+    fun(_K, V) -> is_binary(V) end,
+    Map
+),
+
+%% Accumulate over map
+Sum = hb_maps:fold(
+    fun(_K, V, Acc) -> V + Acc end,
+    0,
+    Numbers
+),
+
+%% Merge maps with link resolution
+Combined = hb_maps:merge(Map1, Map2),
+
+%% Project map to specific keys
+Subset = hb_maps:with([key1, key2], Map),
+
+%% Remove specific keys
+Cleaned = hb_maps:without([temp, debug], Map),
+
+%% Convert with loaded values
+List = hb_maps:to_list(Map),
+
+%% Check key existence (map loaded)
+Exists = hb_maps:is_key(key, Map),
+
+%% Get all keys/values (map loaded, values loaded)
+Keys = hb_maps:keys(Map),
+Values = hb_maps:values(Map),
+
+%% Map size (map loaded)
+Size = hb_maps:size(Map).
+```
+
+---
+
+## Performance Considerations
+
+1. **Cache Hits:** Each link resolution requires cache lookup
+2. **Recursive Loading:** Nested links load recursively
+3. **Passive Loading:** Filter operations load ALL values
+4. **No Lazy Evaluation:** All accessed values loaded immediately
+5. **Memory:** Loaded values kept in memory
+
+**Optimization Tips:**
+```erlang
+% Bad: Loads all values just to count
+Size = hb_maps:size(Map).
+
+% Good: Use maps:size directly if no links
+Size = maps:size(Map).
+
+% Bad: Filter loads everything
+Small = hb_maps:filter(fun(K, _) -> K < 10 end, HugeMap).
+
+% Good: Use maps:filter if values aren't links
+Small = maps:filter(fun(K, _) -> K < 10 end, HugeMap).
+```
+
+---
+
+## When to Use vs hb_ao
+
+**Use `hb_maps` when:**
+- ✅ Working with TABM format directly
+- ✅ Performance critical (skip device processing)
+- ✅ Message known to be `~message@1.0`
+- ✅ Only need link resolution, not full protocol
+
+**Use `hb_ao` when:**
+- ✅ Working with structured messages
+- ✅ Need device-specific behavior
+- ✅ Require key normalization
+- ✅ Want type conversions
+- ✅ **Most of the time (default choice)**
+
+---
+
+## Integration with hb_ao
+
+```erlang
+% hb_ao internally uses hb_maps for link resolution
+% but adds full protocol support:
+
+% Low-level (hb_maps)
+Value = hb_maps:get(<<"key">>, TABMMsg),
+
+% High-level (hb_ao) - preferred
+{ok, Value} = hb_ao:get(<<"key">>, StructuredMsg, Opts).
+
+% hb_ao adds:
+% - Key normalization
+% - Device function execution
+% - Type conversions
+% - Error handling
+```
+
+---
+
+## Error Handling
+
+```erlang
+% Missing key with default
+Value = hb_maps:get(missing, Map, default).
+% Result: default
+
+% Missing key without default
+Value = hb_maps:get(missing, Map).
+% Result: undefined
+
+% find returns error
+case hb_maps:find(key, Map) of
+    {ok, Value} -> process(Value);
+    error -> handle_missing()
+end.
+
+% Link not in cache
+% Throws exception from hb_cache:ensure_loaded
+try
+    Value = hb_maps:get(key, Map)
+catch
+    throw:{could_not_load_link, _} ->
+        {error, broken_link}
+end.
+```
+
+---
+
+## References
+
+- **Cache System** - `hb_cache.erl`
+- **AO Core** - `hb_ao.erl` (prefer this for most use cases)
+- **Links** - `hb_link.erl`
+- **Standard Maps** - `maps` module documentation
+
+---
+
+## Notes
+
+1. **Warning Repeated:** Rarely use this module directly - prefer `hb_ao`
+2. **Link Resolution:** Automatic for both maps and values
+3. **Passive Loading:** Filter operations load all values
+4. **No Lazy Eval:** All accessed values loaded immediately
+5. **Type Support:** Typed links convert automatically
+6. **Performance:** Faster than `hb_ao` but less safe
+7. **TABM Only:** Assumes messages in TABM format
+8. **No Device Logic:** Skips device-specific processing
+9. **Cache Dependent:** Requires all links in cache
+10. **Recursive:** Handles nested link structures
+11. **Drop-in Replacement:** Same API as `maps` module
+12. **Opts Parameter:** Most functions accept optional `Opts`
+13. **Default Values:** Supported like standard `maps`
+14. **Error Propagation:** Cache errors propagate up
+15. **Use Sparingly:** Only when performance critical and safe

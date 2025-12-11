@@ -1,0 +1,517 @@
+# hb_metrics_collector.erl - System Metrics Collector for Prometheus
+
+## Overview
+
+**Purpose:** Collect system-level metrics for Prometheus monitoring  
+**Module:** `hb_metrics_collector`  
+**Behavior:** `prometheus_collector`  
+**Metrics:** Process uptime and system load average
+
+This module implements a Prometheus collector that exposes Erlang VM and system metrics. It provides process uptime in seconds and system load average (5-minute) for monitoring HyperBEAM node health and performance.
+
+## Metrics Collected
+
+1. **process_uptime_seconds** - Erlang process uptime
+2. **system_load** - 5-minute system load average
+
+## Dependencies
+
+- **Prometheus:** `prometheus`, `prometheus_model_helpers`
+- **Erlang/OTP:** `erlang` (statistics), `cpu_sup`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Prometheus Collector Callbacks
+-spec deregister_cleanup(Registry) -> ok.
+-spec collect_mf(Registry, Callback) -> ok.
+-spec collect_metrics(MetricName, Data) -> Metrics.
+```
+
+---
+
+## Public Functions
+
+### 1. deregister_cleanup/1
+
+```erlang
+-spec deregister_cleanup(Registry) -> ok
+    when
+        Registry :: atom().
+```
+
+**Description:** Cleanup callback when collector is deregistered. Currently no-op.
+
+**Implementation:**
+```erlang
+deregister_cleanup(_) -> ok.
+```
+
+---
+
+### 2. collect_mf/2
+
+```erlang
+-spec collect_mf(Registry, Callback) -> ok
+    when
+        Registry :: atom(),
+        Callback :: fun((MetricFamily) -> ok).
+```
+
+**Description:** Main collection function called by Prometheus. Collects all metrics and invokes callback for each metric family.
+
+**Metrics Collected:**
+
+#### Process Uptime
+
+```erlang
+{Uptime, _} = erlang:statistics(wall_clock),
+Callback(
+    create_gauge(
+        process_uptime_seconds,
+        "The number of seconds the Erlang process has been up.",
+        Uptime
+    )
+)
+```
+
+**Source:** `erlang:statistics(wall_clock)`  
+**Type:** Gauge  
+**Unit:** Milliseconds (converted to seconds in collect_metrics)
+
+---
+
+#### System Load
+
+```erlang
+SystemLoad = cpu_sup:avg5(),
+Callback(
+    create_gauge(
+        system_load,
+        "The load values are proportional to how long time a runnable Unix process has to spend in the run queue before it is scheduled. Accordingly, higher values mean more system load",
+        SystemLoad
+    )
+)
+```
+
+**Source:** `cpu_sup:avg5()` (5-minute load average)  
+**Type:** Gauge  
+**Unit:** Load average value
+
+**Test Code:**
+```erlang
+-module(hb_metrics_collector_test).
+-include_lib("eunit/include/eunit.hrl").
+
+collect_mf_test() ->
+    % Mock callback to capture metrics
+    Metrics = [],
+    Callback = fun(Metric) ->
+        Metrics = [Metric | Metrics]
+    end,
+    
+    % Collect metrics
+    ok = hb_metrics_collector:collect_mf(default, Callback),
+    
+    % Should have collected metrics
+    ?assert(length(Metrics) >= 2).
+```
+
+---
+
+### 3. collect_metrics/2
+
+```erlang
+-spec collect_metrics(MetricName, Data) -> Metrics
+    when
+        MetricName :: system_load | process_uptime_seconds,
+        Data :: number(),
+        Metrics :: [prometheus_model_helpers:gauge_metric()].
+```
+
+**Description:** Format collected data into Prometheus gauge metrics.
+
+**System Load:**
+```erlang
+collect_metrics(system_load, SystemLoad) ->
+    prometheus_model_helpers:gauge_metrics([{[], SystemLoad}]).
+```
+
+**Process Uptime:**
+```erlang
+collect_metrics(process_uptime_seconds, Uptime) ->
+    UptimeSeconds = Uptime / 1000,  % Convert ms to seconds
+    prometheus_model_helpers:gauge_metrics([{[], UptimeSeconds}]).
+```
+
+**Return Format:**
+- Empty label list `[]` (no labels for these metrics)
+- Single value per metric
+
+**Test Code:**
+```erlang
+-module(hb_metrics_format_test).
+-include_lib("eunit/include/eunit.hrl").
+
+collect_metrics_uptime_test() ->
+    Uptime = 120000,  % 120 seconds in milliseconds
+    Metrics = hb_metrics_collector:collect_metrics(process_uptime_seconds, Uptime),
+    ?assert(is_list(Metrics)),
+    % Verify conversion to seconds
+    [{Labels, Value}] = Metrics,
+    ?assertEqual([], Labels),
+    ?assertEqual(120.0, Value).
+
+collect_metrics_load_test() ->
+    Load = 2.5,
+    Metrics = hb_metrics_collector:collect_metrics(system_load, Load),
+    [{Labels, Value}] = Metrics,
+    ?assertEqual([], Labels),
+    ?assertEqual(2.5, Value).
+```
+
+---
+
+## Helper Functions
+
+### create_gauge/3
+
+```erlang
+-spec create_gauge(Name, Help, Data) -> MetricFamily
+    when
+        Name :: atom(),
+        Help :: string(),
+        Data :: number(),
+        MetricFamily :: prometheus_model_helpers:metric_family().
+```
+
+**Description:** Create a Prometheus gauge metric family.
+
+**Implementation:**
+```erlang
+create_gauge(Name, Help, Data) ->
+    prometheus_model_helpers:create_mf(Name, Help, gauge, ?MODULE, Data).
+```
+
+**Parameters:**
+- `Name` - Metric name (atom)
+- `Help` - Description string
+- `gauge` - Metric type
+- `?MODULE` - Collector module
+- `Data` - Metric value
+
+---
+
+## Metric Details
+
+### process_uptime_seconds
+
+**Type:** Gauge  
+**Description:** Duration the Erlang VM has been running  
+**Unit:** Seconds (float)  
+**Source:** `erlang:statistics(wall_clock)`  
+**Update Frequency:** On each scrape
+
+**Calculation:**
+```erlang
+{UptimeMs, _} = erlang:statistics(wall_clock),
+UptimeSeconds = UptimeMs / 1000.
+```
+
+**Use Cases:**
+- Detect node restarts
+- Monitor uptime SLAs
+- Correlate issues with restart times
+- Track deployment times
+
+**Example PromQL:**
+```promql
+# Node uptime in hours
+process_uptime_seconds / 3600
+
+# Nodes restarted in last hour
+process_uptime_seconds < 3600
+
+# Average uptime across cluster
+avg(process_uptime_seconds)
+```
+
+---
+
+### system_load
+
+**Type:** Gauge  
+**Description:** 5-minute system load average  
+**Unit:** Load value (float)  
+**Source:** `cpu_sup:avg5()`  
+**Update Frequency:** On each scrape
+
+**Interpretation:**
+- **< 1.0** - System underutilized
+- **≈ CPU count** - Optimal load
+- **> CPU count** - System overloaded
+
+**Use Cases:**
+- Detect CPU saturation
+- Auto-scaling decisions
+- Performance degradation alerts
+- Capacity planning
+
+**Example PromQL:**
+```promql
+# High load alert
+system_load > 8
+
+# Load per CPU core (assuming 8 cores)
+system_load / 8
+
+# Load spike detection
+rate(system_load[5m]) > 2
+```
+
+---
+
+## Prometheus Integration
+
+### Registration
+
+The collector is registered with Prometheus on application startup:
+
+```erlang
+% In application startup
+prometheus:register_collector(hb_metrics_collector).
+```
+
+---
+
+### Scrape Endpoint
+
+Metrics exposed at standard Prometheus endpoint:
+
+```
+GET /metrics
+
+# Response excerpt:
+# TYPE process_uptime_seconds gauge
+# HELP process_uptime_seconds The number of seconds the Erlang process has been up.
+process_uptime_seconds 3600.5
+
+# TYPE system_load gauge
+# HELP system_load The load values are proportional to how long time...
+system_load 2.3
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Register collector in application
+application:ensure_all_started([prometheus, prometheus_cowboy]),
+prometheus:register_collector(hb_metrics_collector).
+
+%% Query metrics programmatically
+Metrics = prometheus_text_format:format(),
+% Returns all metrics in Prometheus text format
+
+%% Check if collector is registered
+Collectors = prometheus_registry:collectors(default),
+IsRegistered = lists:member(hb_metrics_collector, Collectors).
+
+%% Deregister collector
+prometheus:deregister_collector(hb_metrics_collector).
+```
+
+---
+
+## Monitoring Dashboard
+
+### Grafana Queries
+
+**Uptime Panel:**
+```promql
+# Display uptime in human-readable format
+process_uptime_seconds
+```
+
+**System Load Panel:**
+```promql
+# Current load
+system_load
+
+# With threshold lines
+system_load{job="hyperbeam"}
+```
+
+**Combined View:**
+```promql
+# Load vs Uptime correlation
+system_load / (process_uptime_seconds / 3600)
+```
+
+---
+
+## Alerting Rules
+
+### High Load Alert
+
+```yaml
+groups:
+  - name: hyperbeam
+    rules:
+      - alert: HighSystemLoad
+        expr: system_load > 8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High system load on {{ $labels.instance }}"
+          description: "Load average is {{ $value }}"
+```
+
+---
+
+### Recent Restart Alert
+
+```yaml
+- alert: RecentRestart
+  expr: process_uptime_seconds < 300
+  for: 1m
+  labels:
+    severity: info
+  annotations:
+    summary: "Node {{ $labels.instance }} recently restarted"
+    description: "Uptime is only {{ $value }} seconds"
+```
+
+---
+
+## CPU Supervisor
+
+### cpu_sup Requirements
+
+The `system_load` metric requires `cpu_sup` application:
+
+```erlang
+% Ensure cpu_sup is started
+application:ensure_all_started(os_mon).
+
+% cpu_sup is part of os_mon application
+```
+
+**Platform Support:**
+- Linux: ✅ Full support
+- macOS: ✅ Full support  
+- Windows: ⚠️ Limited support
+- FreeBSD: ✅ Full support
+
+---
+
+## Performance Impact
+
+**Collection Overhead:**
+- `erlang:statistics(wall_clock)` - Negligible (~µs)
+- `cpu_sup:avg5()` - Low (~ms)
+
+**Scrape Frequency:** Typically 15-60 seconds (Prometheus default)
+
+**Memory:** Minimal - no historical data stored
+
+---
+
+## Extending the Collector
+
+### Adding New Metrics
+
+```erlang
+collect_mf(_Registry, Callback) ->
+    % Existing metrics...
+    
+    % Add new metric
+    MemoryUsed = erlang:memory(total),
+    Callback(
+        create_gauge(
+            erlang_memory_bytes_total,
+            "Total memory used by Erlang VM",
+            MemoryUsed
+        )
+    ),
+    
+    ok.
+
+% Add corresponding collect_metrics clause
+collect_metrics(erlang_memory_bytes_total, Memory) ->
+    prometheus_model_helpers:gauge_metrics([{[], Memory}]).
+```
+
+---
+
+### Adding Labels
+
+```erlang
+collect_metrics(metric_with_labels, Data) ->
+    prometheus_model_helpers:gauge_metrics([
+        {[{node, node()}], Data}
+    ]).
+```
+
+---
+
+## Troubleshooting
+
+### cpu_sup not available
+
+```erlang
+% Check if cpu_sup is running
+case whereis(cpu_sup) of
+    undefined ->
+        application:start(os_mon);
+    _ -> ok
+end.
+```
+
+---
+
+### Metrics not appearing
+
+```erlang
+% Verify collector is registered
+Collectors = prometheus_registry:collectors(default),
+case lists:member(hb_metrics_collector, Collectors) of
+    true -> io:format("Collector registered~n");
+    false ->
+        prometheus:register_collector(hb_metrics_collector),
+        io:format("Collector registered now~n")
+end.
+```
+
+---
+
+## References
+
+- **Prometheus** - [Prometheus Documentation](https://prometheus.io/docs/)
+- **Erlang Prometheus** - [prometheus.erl](https://github.com/deadtrickster/prometheus.erl)
+- **CPU Supervisor** - [cpu_sup module](https://www.erlang.org/doc/man/cpu_sup.html)
+- **Metrics** - [Prometheus Metric Types](https://prometheus.io/docs/concepts/metric_types/)
+
+---
+
+## Notes
+
+1. **Gauge Metrics:** Both metrics are gauges (point-in-time values)
+2. **No Labels:** Metrics have no labels (simplest form)
+3. **Wall Clock:** Uptime from VM wall clock, not OS uptime
+4. **5-min Average:** System load is 5-minute average, not instant
+5. **Unit Conversion:** Uptime converted from ms to seconds
+6. **Minimal Overhead:** Very lightweight collection
+7. **Standard Integration:** Follows prometheus_collector behavior
+8. **No State:** Stateless collector (no internal state)
+9. **Platform Dependent:** cpu_sup availability varies by OS
+10. **Scrape Interval:** Collection happens on Prometheus scrape
+11. **No Caching:** Fresh values on each scrape
+12. **Extensible:** Easy to add more system metrics
+13. **Production Ready:** Minimal, reliable metrics
+14. **No Filtering:** All registered collectors scraped together
+15. **Standard Format:** Prometheus text format output

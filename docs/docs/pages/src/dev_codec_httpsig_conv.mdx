@@ -1,0 +1,521 @@
+# dev_codec_httpsig_conv.erl - HTTP Message Structure Codec
+
+## Overview
+
+**Purpose:** Convert between TABM and HTTP message structures (RFC 7578)  
+**Module:** `dev_codec_httpsig_conv`  
+**Format:** HTTP multipart messages  
+**Pattern:** TABM ↔ HTTP headers + body
+
+This module marshals TABM-encoded messages to and from HTTP message structures. Every HTTP message is treated as an HTTP multipart message (RFC 7578), with intelligent encoding rules for headers vs body parts based on content size and type.
+
+## Encoding Rules
+
+### Key Mapping
+- **`signature` / `signature-input`** → HTTP Signature headers (Structured Field Dictionary)
+- **`body`** → Multipart body or inline content
+- **Other keys** → Headers (if ≤4KB) or multipart body parts (if >4KB)
+
+### Body Handling
+- **Map:** Recursively encode as nested HyperBEAM message
+- **Binary:** Encode as normal field or inline body
+
+## Dependencies
+
+- **HyperBEAM:** `hb_message`, `hb_util`, `hb_maps`, `hb_ao`, `hb_cache`, `hb_private`, `hb_structured_fields`, `hb_link`
+- **Codecs:** `dev_codec_httpsig_siginfo`, `dev_codec_flat`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Codec Interface
+-spec to(TABM, Req, Opts) -> {ok, HTTPMsg}.
+-spec from(HTTPMsg, Req, Opts) -> {ok, TABM}.
+
+%% HTTP Encoding
+-spec encode_http_msg(HTTPMsg, Opts) -> Binary.
+```
+
+---
+
+## Public Functions
+
+### 1. from/3
+
+```erlang
+-spec from(HTTPMsg, Req, Opts) -> {ok, TABM}
+    when
+        HTTPMsg :: map() | binary(),
+        Req :: map(),
+        Opts :: map(),
+        TABM :: map() | binary().
+```
+
+**Description:** Convert an HTTP message structure into a TABM. Parses headers, multipart body, and reconstructs commitments from signature headers.
+
+**Processing Steps:**
+1. Parse headers (excluding signature-related headers)
+2. Parse multipart body parts
+3. Decode `ao-ids` key for literal binary IDs
+4. Remove signature headers
+5. Reconstruct commitments from signature/signature-input
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_conv_from_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_simple_headers_test() ->
+    HTTP = #{
+        <<"key1">> => <<"value1">>,
+        <<"key2">> => <<"value2">>
+    },
+    {ok, TABM} = dev_codec_httpsig_conv:from(HTTP, #{}, #{}),
+    ?assertEqual(<<"value1">>, maps:get(<<"key1">>, TABM)),
+    ?assertEqual(<<"value2">>, maps:get(<<"key2">>, TABM)).
+
+from_with_body_test() ->
+    HTTP = #{
+        <<"content-type">> => <<"text/plain">>,
+        <<"body">> => <<"test content">>
+    },
+    {ok, TABM} = dev_codec_httpsig_conv:from(HTTP, #{}, #{}),
+    ?assert(maps:is_key(<<"body">>, TABM)),
+    ?assertEqual(<<"test content">>, maps:get(<<"body">>, TABM)).
+
+from_binary_passthrough_test() ->
+    Binary = <<"raw data">>,
+    {ok, Result} = dev_codec_httpsig_conv:from(Binary, #{}, #{}),
+    ?assertEqual(Binary, Result).
+
+from_multipart_body_test() ->
+    Boundary = <<"boundary123">>,
+    Body = 
+        <<"--", Boundary/binary, "\r\n",
+          "Content-Disposition: inline\r\n",
+          "\r\n",
+          "inline content\r\n",
+          "--", Boundary/binary, "--\r\n">>,
+    HTTP = #{
+        <<"content-type">> => <<"multipart/form-data; boundary=", Boundary/binary>>,
+        <<"body">> => Body
+    },
+    {ok, TABM} = dev_codec_httpsig_conv:from(HTTP, #{}, #{}),
+    ?assert(is_map(TABM)).
+```
+
+---
+
+### 2. to/3
+
+```erlang
+-spec to(TABM, Req, Opts) -> {ok, HTTPMsg}
+    when
+        TABM :: map() | binary(),
+        Req :: map(),
+        Opts :: map(),
+        HTTPMsg :: map().
+```
+
+**Description:** Convert a TABM into an HTTP message structure. Encodes commitments as signature headers and handles multipart body generation.
+
+**Size Thresholds:**
+- Headers: Values ≤ 4KB
+- Body parts: Values > 4KB
+
+**Test Code:**
+```erlang
+-module(dev_codec_httpsig_conv_to_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_simple_message_test() ->
+    TABM = #{
+        <<"key">> => <<"value">>,
+        <<"data">> => <<"content">>
+    },
+    {ok, HTTP} = dev_codec_httpsig_conv:to(TABM, #{}, #{}),
+    ?assert(is_map(HTTP)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, HTTP)).
+
+to_with_commitments_test() ->
+    TABM = #{
+        <<"data">> => <<"test">>,
+        <<"commitments">> => #{
+            <<"sig1">> => #{
+                <<"signature">> => <<"abc123">>,
+                <<"committed">> => [<<"data">>]
+            }
+        }
+    },
+    {ok, HTTP} = dev_codec_httpsig_conv:to(TABM, #{}, #{}),
+    ?assert(maps:is_key(<<"signature">>, HTTP)),
+    ?assert(maps:is_key(<<"signature-input">>, HTTP)).
+
+to_binary_passthrough_test() ->
+    Binary = <<"raw data">>,
+    {ok, Result} = dev_codec_httpsig_conv:to(Binary, #{}, #{}),
+    ?assertEqual(Binary, Result).
+
+to_with_index_test() ->
+    TABM = #{
+        <<"key">> => <<"value">>,
+        <<"index">> => <<"Hello from index">>
+    },
+    {ok, HTTP} = dev_codec_httpsig_conv:to(
+        TABM,
+        #{<<"index">> => true},
+        #{}
+    ),
+    ?assert(is_map(HTTP)).
+```
+
+---
+
+### 3. encode_http_msg/2
+
+```erlang
+-spec encode_http_msg(HTTPMsg, Opts) -> Binary
+    when
+        HTTPMsg :: map(),
+        Opts :: map(),
+        Binary :: binary().
+```
+
+**Description:** Encode an HTTP message map to a raw HTTP/1.1 binary format suitable for transmission.
+
+**Test Code:**
+```erlang
+-module(encode_http_msg_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_http_msg_simple_test() ->
+    HTTP = #{
+        <<"key">> => <<"value">>,
+        <<"body">> => <<"content">>
+    },
+    Binary = dev_codec_httpsig_conv:encode_http_msg(HTTP, #{}),
+    ?assert(is_binary(Binary)),
+    ?assert(byte_size(Binary) > 0),
+    % Should contain HTTP headers
+    ?assert(binary:match(Binary, <<"key: value">>) =/= nomatch).
+
+encode_http_msg_with_crlf_test() ->
+    HTTP = #{<<"header">> => <<"value">>},
+    Binary = dev_codec_httpsig_conv:encode_http_msg(HTTP, #{}),
+    % Should use CRLF line endings
+    ?assert(binary:match(Binary, <<"\r\n">>) =/= nomatch).
+```
+
+---
+
+## Internal Functions
+
+### body_to_tabm/2
+
+```erlang
+-spec body_to_tabm(HTTP, Opts) -> {OrderedBodyKeys, BodyTABM}
+    when
+        HTTP :: map(),
+        Opts :: map(),
+        OrderedBodyKeys :: [binary()],
+        BodyTABM :: map().
+```
+
+**Description:** Generate the body TABM from the `body` key of the HTTP message. Handles both simple bodies and multipart content.
+
+---
+
+### body_to_parts/3
+
+```erlang
+-spec body_to_parts(ContentType, Body, Opts) -> 
+    no_body | {normal, Binary} | {multipart, Parts}
+    when
+        ContentType :: binary() | undefined,
+        Body :: binary() | no_body,
+        Opts :: map(),
+        Parts :: [binary()].
+```
+
+**Description:** Split the body into parts if it's a multipart message, otherwise return as normal body.
+
+---
+
+### from_body_part/3
+
+```erlang
+-spec from_body_part(InlinedKey, Part, Opts) -> {PartName, ParsedPart}
+    when
+        InlinedKey :: binary(),
+        Part :: binary(),
+        Opts :: map(),
+        PartName :: binary(),
+        ParsedPart :: term().
+```
+
+**Description:** Parse a single multipart body part into a TABM entry with its associated key.
+
+**Content-Disposition Types:**
+- `inline` - Uses the inlined key (typically `body`)
+- Other - Extracts name from Content-Disposition parameters
+
+---
+
+### ungroup_ids/2
+
+```erlang
+-spec ungroup_ids(Msg, Opts) -> MsgWithIDs
+    when
+        Msg :: map(),
+        Opts :: map(),
+        MsgWithIDs :: map().
+```
+
+**Description:** Decode the `ao-ids` key into individual binary ID fields. Used for literal binary keys that cannot be distributed as HTTP headers.
+
+---
+
+### inline_key/1
+
+```erlang
+-spec inline_key(HTTP) -> {boolean(), KeyName}
+    when
+        HTTP :: map(),
+        KeyName :: binary().
+```
+
+**Description:** Determine the key name for inline body content, checking for `ao-body-key` header.
+
+---
+
+## HTTP Multipart Format
+
+### Multipart Structure
+```
+--boundary
+Content-Disposition: inline
+[optional headers]
+
+[body content]
+--boundary
+Content-Disposition: form-data; name="fieldname"
+[optional headers]
+
+[field content]
+--boundary--
+```
+
+### Part Headers
+- **Content-Disposition:** Required for each part
+- **Content-Type:** Optional, describes part content
+- **ao-types:** Optional, type annotations
+- **Custom headers:** Preserved in TABM
+
+---
+
+## Header vs Body Decision
+
+### Small Values (≤ 4KB)
+Encoded as HTTP headers:
+```erlang
+#{<<"key">> => <<"value">>}
+% →
+<<"key: value\r\n">>
+```
+
+### Large Values (> 4KB)
+Encoded as multipart body parts:
+```erlang
+#{<<"large-data">> => LargeBinary}
+% →
+<<"--boundary\r\n",
+  "Content-Disposition: form-data; name=\"large-data\"\r\n",
+  "\r\n",
+  LargeBinary/binary,
+  "\r\n">>
+```
+
+---
+
+## Signature Integration
+
+### Commitments to HTTP Signatures
+```erlang
+% TABM with commitment
+#{
+    <<"data">> => <<"test">>,
+    <<"commitments">> => #{
+        <<"sig-id">> => #{
+            <<"signature">> => <<"abc">>,
+            <<"committed">> => [<<"data">>]
+        }
+    }
+}
+
+% Converts to HTTP with signature headers
+#{
+    <<"data">> => <<"test">>,
+    <<"signature">> => <<"comm-xyz=:abc:">>,
+    <<"signature-input">> => <<"comm-xyz=(\"data\");keyid=\"...\"">>
+}
+```
+
+### HTTP Signatures to Commitments
+The reverse process reconstructs commitments from signature/signature-input headers using `dev_codec_httpsig_siginfo:siginfo_to_commitments/3`.
+
+---
+
+## Index Resolution
+
+When `<<"index">> => true` is specified in the request:
+
+1. Convert message to HTTPSig format
+2. Check if `body` and `content-type` are set
+3. If not set, resolve `path = index` on the message
+4. Merge index result with original HTTPSig message
+5. Prefer original keys in case of conflicts
+
+**Use Case:** Automatically generate index pages for messages without explicit bodies.
+
+---
+
+## Common Patterns
+
+```erlang
+%% Convert TABM to HTTP
+TABM = #{
+    <<"header1">> => <<"value1">>,
+    <<"body">> => <<"content">>
+},
+{ok, HTTP} = dev_codec_httpsig_conv:to(TABM, #{}, #{}).
+
+%% Convert HTTP to TABM
+HTTP = #{
+    <<"content-type">> => <<"text/plain">>,
+    <<"body">> => <<"Hello, World!">>
+},
+{ok, TABM} = dev_codec_httpsig_conv:from(HTTP, #{}, #{}).
+
+%% Encode to raw HTTP/1.1
+Binary = dev_codec_httpsig_conv:encode_http_msg(HTTP, #{}).
+
+%% With index resolution
+{ok, HTTPWithIndex} = dev_codec_httpsig_conv:to(
+    TABM,
+    #{<<"index">> => true},
+    #{}
+).
+
+%% Multipart message
+Multipart = #{
+    <<"content-type">> => <<"multipart/form-data; boundary=abc">>,
+    <<"body">> => <<
+        "--abc\r\n",
+        "Content-Disposition: form-data; name=\"field1\"\r\n",
+        "\r\n",
+        "value1\r\n",
+        "--abc--\r\n"
+    >>
+},
+{ok, ParsedTABM} = dev_codec_httpsig_conv:from(Multipart, #{}, #{}).
+
+%% Round-trip conversion
+{ok, HTTP} = dev_codec_httpsig_conv:to(OriginalTABM, #{}, #{}),
+{ok, TABM} = dev_codec_httpsig_conv:from(HTTP, #{}, #{}),
+% TABM should match OriginalTABM (modulo signature normalization)
+```
+
+---
+
+## Content-Digest Handling
+
+When a body is present, it may be replaced with a content-digest:
+
+```erlang
+% Input
+#{<<"body">> => <<"Hello">>}
+
+% May become
+#{<<"content-digest">> => <<"sha-256=:...::">>}
+```
+
+This is handled by `dev_codec_httpsig:add_content_digest/2` during encoding.
+
+---
+
+## Key Normalization
+
+### ao-ids Grouping
+Binary IDs that cannot be headers are grouped:
+```erlang
+% Before
+#{
+    <<"id1">> => <<binary_id_1>>,
+    <<"id2">> => <<binary_id_2>>
+}
+
+% Grouped in HTTP
+#{
+    <<"ao-ids">> => <<"id1=..., id2=...">>
+}
+
+% Ungrouped back to TABM
+#{
+    <<"id1">> => <<binary_id_1>>,
+    <<"id2">> => <<binary_id_2>>
+}
+```
+
+### ao-body-key
+Custom body key override:
+```erlang
+#{
+    <<"ao-body-key">> => <<"custom-key">>,
+    <<"custom-key">> => <<"body content">>
+}
+```
+
+---
+
+## Constants
+
+```erlang
+-define(MAX_HEADER_LENGTH, 4096).  % 4KB header size limit
+-define(CRLF, <<"\r\n">>).         % HTTP line ending
+-define(DOUBLE_CRLF, <<"\r\n\r\n">>). % Header/body separator
+```
+
+---
+
+## References
+
+- **RFC 7578** - Multipart Form Data
+- **RFC 7231** - HTTP/1.1 Semantics (CRLF)
+- **RFC 9421** - HTTP Message Signatures
+- **SigInfo Module** - `dev_codec_httpsig_siginfo.erl`
+- **Flat Codec** - `dev_codec_flat.erl`
+- **Structured Fields** - `hb_structured_fields.erl`
+
+---
+
+## Notes
+
+1. **Multipart Default:** Every HTTP message treated as potential multipart
+2. **Size-Based Routing:** Headers vs body parts based on 4KB threshold
+3. **Signature Conversion:** Automatic conversion between commitments and HTTP signatures
+4. **Index Resolution:** Optional automatic index page generation
+5. **Binary Passthrough:** Binary and link types pass through unchanged
+6. **Content-Disposition:** Required for each multipart body part
+7. **CRLF Line Endings:** Strict HTTP/1.1 compliance with CRLF
+8. **Nested Bodies:** Recursive encoding for map-valued bodies
+9. **Header Filtering:** Removes signature/commitment keys during conversion
+10. **Type Preservation:** Uses `ao-types` header for type annotations
+11. **Empty Messages:** Special handling for empty message markers
+12. **Boundary Parsing:** Automatic multipart boundary detection
+13. **Path Splitting:** Supports nested paths in multipart part names
+14. **Commitment Reconstruction:** Rebuilds full commitment structure from headers
+15. **Cache Integration:** Can resolve and merge index pages dynamically

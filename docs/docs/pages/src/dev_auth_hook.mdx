@@ -1,0 +1,607 @@
+# dev_auth_hook.erl - Authentication Hook for Node-Hosted Wallets
+
+## Overview
+
+**Purpose:** On-request hook that signs incoming messages with node-hosted wallets  
+**Module:** `dev_auth_hook`  
+**Device Name:** `auth-hook@1.0`  
+**Pattern:** Generator → Wallet → Signature → Finalize
+
+This device provides automatic request signing for environments where users have intrinsic trust in the node (e.g., Trusted Execution Environments, personal nodes, or trusted third-party nodes). It uses a generator interface to create/retrieve secrets, maps them to wallets, and signs requests accordingly.
+
+## Trust Model
+
+**Intended Deployments:**
+- Nodes running in Trusted Execution Environments (e.g., with `~snp@1.0`)
+- User-operated personal nodes
+- Trusted third-party operated nodes
+- Nodes with out-of-band trust relationships
+
+**Warning:** This device should NOT be used on untrusted public nodes where the node operator could abuse signing capabilities.
+
+## Generator Interface
+
+Devices implementing the `generator` interface may provide:
+
+**`generate` (optional):**
+- Generate/retrieve a secret based on user request
+- Returns either the secret directly or a message with `secret` key
+- If message returned, it's used for further processing
+
+**`finalize` (optional):**
+- Post-process the message sequence after signing
+- Takes the message sequence and returns modified version
+- Useful for adding cookies, headers, or other metadata
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_message`, `hb_util`, `hb_opts`, `hb_http`, `hb_http_server`
+- **Arweave:** `ar_wallet`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Hook Handler
+-spec request(Base, HookReq, Opts) -> {ok, ProcessedReq} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. request/3
+
+```erlang
+-spec request(Base, HookReq, Opts) -> {ok, ProcessedReq} | {error, Reason}
+    when
+        Base :: map(),
+        HookReq :: map(),
+        Opts :: map(),
+        ProcessedReq :: map(),
+        Reason :: term().
+```
+
+**Description:** Process an incoming request through the authentication hook. Checks relevance criteria, generates secrets via provider, creates wallets, signs requests and individual messages, then finalizes the response.
+
+**Hook Request Structure:**
+```erlang
+#{
+    <<"request">> => UserRequest,
+    <<"body">> => MessageSequence
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_auth_hook_request_test).
+-include_lib("eunit/include/eunit.hrl").
+
+cookie_secret_signing_test() ->
+    Node = hb_http_server:start_node(
+        #{
+            priv_wallet => ServerWallet = ar_wallet:new(),
+            on => #{
+                <<"request">> => #{
+                    <<"device">> => <<"auth-hook@1.0">>,
+                    <<"path">> => <<"request">>,
+                    <<"secret-provider">> =>
+                        #{ <<"device">> => <<"cookie-secret@1.0">> }
+                }
+            }
+        }
+    ),
+    {ok, Resp} = hb_http:get(
+        Node,
+        #{
+            <<"path">> => <<"commitments">>,
+            <<"body">> => <<"Test">>
+        },
+        #{}
+    ),
+    Signers = extract_signers(Resp, ServerWallet),
+    ?assertEqual(1, length(Signers)).
+
+http_auth_basic_test() ->
+    Node = hb_http_server:start_node(
+        #{
+            priv_wallet => ServerWallet = ar_wallet:new(),
+            on => #{
+                <<"request">> => #{
+                    <<"device">> => <<"auth-hook@1.0">>,
+                    <<"path">> => <<"request">>,
+                    <<"secret-provider">> =>
+                        #{
+                            <<"device">> => <<"http-auth@1.0">>,
+                            <<"access-control">> =>
+                                #{ <<"device">> => <<"http-auth@1.0">> }
+                        }
+                }
+            }
+        }
+    ),
+    % First request without auth should fail
+    {error, #{<<"status">> := 401}} = hb_http:get(
+        Node,
+        #{
+            <<"path">> => <<"commitments">>,
+            <<"body">> => <<"Test">>
+        },
+        #{}
+    ),
+    % Second request with auth should succeed
+    AuthStr = <<"Basic ", (base64:encode(<<"user:pass">>))/binary>>,
+    {ok, Resp} = hb_http:get(
+        Node,
+        #{
+            <<"path">> => <<"commitments">>,
+            <<"body">> => <<"Test">>,
+            <<"authorization">> => AuthStr
+        },
+        #{}
+    ),
+    Signers = extract_signers(Resp, ServerWallet),
+    ?assertEqual(1, length(Signers)).
+```
+
+---
+
+## Hook Configuration
+
+### Basic Configuration
+
+```erlang
+#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"cookie-secret@1.0">>
+            }
+        }
+    }
+}
+```
+
+### Configuration with Access Control
+
+```erlang
+#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"http-auth@1.0">>,
+                <<"access-control">> =>
+                    #{ <<"device">> => <<"http-auth@1.0">> }
+            }
+        }
+    }
+}
+```
+
+### Configuration with Conditions
+
+```erlang
+#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"when">> => #{
+                <<"keys">> => [<<"authorization">>],
+                <<"committers">> => <<"uncommitted">>
+            },
+            <<"secret-provider">> => #{
+                <<"device">> => <<"http-auth@1.0">>
+            }
+        }
+    }
+}
+```
+
+---
+
+## Activation Conditions
+
+### Committer Conditions
+
+**`always`:**
+- Hook activates for all requests regardless of signatures
+
+**`uncommitted`:**
+- Hook activates only for unsigned requests
+- Default behavior if not specified
+
+**List of Committers:**
+- Hook activates if request is signed by any listed committer
+- Example: `[<<"committer1">>, <<"committer2">>]`
+
+### Key Conditions
+
+**`always`:**
+- Hook activates regardless of keys present
+
+**List of Keys:**
+- Hook activates if any listed key is present in request or messages
+- Example: `[<<"authorization">>, <<"api-key">>]`
+
+### Combined Conditions
+
+Both conditions are AND-ed together:
+```erlang
+% Must be uncommitted AND have authorization header
+#{
+    <<"when">> => #{
+        <<"keys">> => [<<"authorization">>],
+        <<"committers">> => <<"uncommitted">>
+    }
+}
+```
+
+---
+
+## Processing Flow
+
+### Complete Request Flow
+
+```
+1. Extract request and message sequence from HookReq
+2. Check relevance against when conditions
+3. If not relevant → Return HookReq unchanged
+4. Call secret-provider's generate function
+5. Normalize authentication (create/retrieve secret)
+6. Generate wallet from secret via ~proxy-wallet@1.0
+7. Sign the request message
+8. Process and sign individual messages in sequence
+9. Call secret-provider's finalize function
+10. Return processed result with signed messages
+```
+
+### Secret Generation
+
+```
+1. Resolve generate-path on secret-provider (default: "generate")
+2. Pass user request to generator
+3. Receive secret or modified request with secret
+4. Use secret for wallet generation
+```
+
+### Wallet Generation
+
+```
+1. Take normalized secret
+2. Call ~proxy-wallet@1.0 device
+3. Receive deterministic wallet for that secret
+4. Wallet used for all signing operations
+```
+
+### Message Signing
+
+```
+1. Check each message for commit marker (!)
+2. If message should be committed:
+   - Filter ignored keys
+   - Sign with generated wallet
+3. Update message with signature
+```
+
+---
+
+## Ignored Keys
+
+### Default Ignored Keys
+
+These keys are never included in signatures:
+
+- `<<"secret">>` - Authentication secret
+- `<<"cookie">>` - Cookie data
+- `<<"set-cookie">>` - Cookie setting instructions
+- `<<"path">>` - Request path
+- `<<"method">>` - HTTP method
+- `<<"authorization">>` - Auth header
+- `<<"!">>` - Commit marker
+
+### Custom Ignored Keys
+
+Configure via `ignored-keys` in secret-provider:
+
+```erlang
+#{
+    <<"secret-provider">> => #{
+        <<"device">> => <<"cookie-secret@1.0">>,
+        <<"ignored-keys">> => [
+            <<"custom-key1">>,
+            <<"custom-key2">>
+        ]
+    }
+}
+```
+
+---
+
+## Commit Marker
+
+### Purpose
+
+Individual messages in a sequence can be marked for signing with the `!` key.
+
+### Usage
+
+```erlang
+Messages = [
+    #{
+        <<"data">> => <<"unsigned">>,
+        <<"!">> => false  % Not signed
+    },
+    #{
+        <<"data">> => <<"signed">>,
+        <<"!">> => true  % Will be signed
+    }
+]
+```
+
+---
+
+## Generator Implementations
+
+### 1. Cookie Secret (`~cookie-secret@1.0`)
+
+**Features:**
+- Generates secrets based on cookies
+- Automatic cookie management
+- Persistent user sessions
+
+**Configuration:**
+```erlang
+#{
+    <<"secret-provider">> => #{
+        <<"device">> => <<"cookie-secret@1.0">>
+    }
+}
+```
+
+### 2. HTTP Auth (`~http-auth@1.0`)
+
+**Features:**
+- Basic HTTP authentication
+- Username/password based secrets
+- 401 challenges for unauthenticated requests
+
+**Configuration:**
+```erlang
+#{
+    <<"secret-provider">> => #{
+        <<"device">> => <<"http-auth@1.0">>,
+        <<"access-control">> =>
+            #{ <<"device">> => <<"http-auth@1.0">> }
+    }
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Cookie-based authentication
+NodeConfig = #{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"secret-provider">> =>
+                #{ <<"device">> => <<"cookie-secret@1.0">> }
+        }
+    }
+},
+Node = hb_http_server:start_node(NodeConfig).
+
+%% HTTP Basic authentication
+NodeConfig = #{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"http-auth@1.0">>,
+                <<"access-control">> =>
+                    #{ <<"device">> => <<"http-auth@1.0">> }
+            }
+        }
+    }
+},
+Node = hb_http_server:start_node(NodeConfig).
+
+%% Conditional signing (only with auth header)
+NodeConfig = #{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"when">> => #{
+                <<"keys">> => [<<"authorization">>]
+            },
+            <<"secret-provider">> =>
+                #{ <<"device">> => <<"http-auth@1.0">> }
+        }
+    }
+},
+Node = hb_http_server:start_node(NodeConfig).
+
+%% Chained with other hooks
+NodeConfig = #{
+    on => #{
+        <<"request">> => [
+            #{
+                <<"device">> => <<"auth-hook@1.0">>,
+                <<"path">> => <<"request">>,
+                <<"secret-provider">> =>
+                    #{ <<"device">> => <<"http-auth@1.0">> }
+            },
+            #{
+                <<"device">> => <<"router@1.0">>,
+                <<"path">> => <<"preprocess">>,
+                <<"commit-request">> => true
+            }
+        ]
+    }
+},
+Node = hb_http_server:start_node(NodeConfig).
+
+%% Mark specific messages for signing
+Messages = [
+    #{ <<"data">> => <<"public">> },  % Not signed
+    #{ <<"data">> => <<"private">>, <<"!">> => true }  % Signed
+],
+Request = #{
+    <<"path">> => <<"process">>,
+    <<"body">> => Messages
+}.
+```
+
+---
+
+## Secret Provider Interface
+
+### Required Functions
+
+**None required** - All functions are optional
+
+### Optional Functions
+
+**`generate`:**
+```erlang
+-spec generate(Base, Request, Opts) -> 
+    {ok, Secret :: binary()} | 
+    {ok, Request :: map()}.
+```
+
+**`finalize`:**
+```erlang
+-spec finalize(Base, Request, MessageSequence, Opts) -> 
+    {ok, FinalSequence :: list()}.
+```
+
+---
+
+## Security Considerations
+
+### Trust Requirements
+
+1. **Node Operator Trust:** Users must trust the node operator
+2. **Environment Security:** Consider TEE or isolated deployment
+3. **Secret Management:** Secrets must be securely generated/stored
+4. **Wallet Determinism:** Same secret always produces same wallet
+
+### Best Practices
+
+1. **Use TEEs:** Deploy in Trusted Execution Environments when possible
+2. **Limit Scope:** Use `when` conditions to limit signing scope
+3. **Monitor Usage:** Log all signing operations for audit
+4. **Rotate Secrets:** Implement secret rotation policies
+5. **Access Control:** Use authentication mechanisms appropriately
+
+---
+
+## Error Handling
+
+### Common Errors
+
+**No Secret Provider:**
+```erlang
+{skip, {committers, _}, {keys, _}}
+```
+
+**Authentication Failed:**
+```erlang
+{error, #{
+    <<"status">> => 401,
+    <<"www-authenticate">> => <<"Basic realm=\"...\"">}
+}}
+```
+
+**Authorization Failed:**
+```erlang
+{error, #{
+    <<"status">> => 403,
+    <<"body">> => <<"Not authorized">>
+}}
+```
+
+---
+
+## Integration Examples
+
+### With Router
+
+```erlang
+#{
+    on => #{
+        <<"request">> => [
+            #{
+                <<"device">> => <<"auth-hook@1.0">>,
+                <<"secret-provider">> => ...
+            },
+            #{
+                <<"device">> => <<"router@1.0">>,
+                <<"commit-request">> => true
+            }
+        ]
+    }
+}
+```
+
+### With Rate Limiting
+
+```erlang
+#{
+    on => #{
+        <<"request">> => [
+            #{
+                <<"device">> => <<"auth-hook@1.0">>,
+                <<"secret-provider">> => ...
+            },
+            #{
+                <<"device">> => <<"rate-limit@1.0">>,
+                <<"limit">> => 100
+            }
+        ]
+    }
+}
+```
+
+---
+
+## References
+
+- **Proxy Wallet** - `~proxy-wallet@1.0`
+- **Cookie Secret** - `~cookie-secret@1.0`
+- **HTTP Auth** - `~http-auth@1.0`
+- **Message Signing** - `hb_message.erl`
+- **Hook System** - Node configuration documentation
+
+---
+
+## Notes
+
+1. **Generator Interface:** Flexible system for authentication providers
+2. **Optional Operations:** All generator functions are optional
+3. **Deterministic Wallets:** Same secret always produces same address
+4. **Ignored Keys:** Authentication data excluded from signatures
+5. **Commit Marker:** Selective signing with `!` key
+6. **Condition System:** Flexible activation rules via `when`
+7. **Default Uncommitted:** Only signs unsigned requests by default
+8. **Key Detection:** Checks all messages for relevant keys
+9. **AND Logic:** Both committer and key conditions must match
+10. **Skip Behavior:** Returns request unchanged if not relevant
+11. **Finalization:** Post-processing after all signing complete
+12. **Secret Normalization:** Handles both direct secrets and messages
+13. **Options Propagation:** Wallet generation updates options map
+14. **Testing Support:** Comprehensive test helpers included
+15. **Trust Model:** Designed for trusted environment deployment

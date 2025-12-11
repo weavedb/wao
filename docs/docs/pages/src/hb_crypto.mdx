@@ -1,0 +1,450 @@
+# hb_crypto.erl - Cryptographic Primitives & HashPath Algorithms
+
+## Overview
+
+**Purpose:** Cryptographic functions and hash chain algorithms for HyperBEAM  
+**Module:** `hb_crypto`  
+**Algorithms:** SHA-256 chaining, accumulation-based commitment  
+**Safety:** Carefully managed cryptographic primitives wrapper
+
+This module implements the cryptographic foundations of HyperBEAM, providing hash chain algorithms for message resolution tracking and secure commitment generation. It wraps dangerous low-level crypto operations with type-safe interfaces.
+
+## HashPath Algorithms
+
+HyperBEAM implements two distinct hashpath algorithms:
+
+1. **`sha-256-chain`**: Sequential SHA-256 hash chaining that preserves order
+2. **`accumulate-256`**: Order-independent SHA-256 accumulation for commitment
+
+The accumulate algorithm is experimental and exists to test multiple HashPath strategies.
+
+## Dependencies
+
+- **Erlang/OTP:** `crypto` (OpenSSL backend)
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Hash Chain Operations
+-spec sha256(Data) -> Hash.
+-spec sha256_chain(ID1, ID2) -> ChainedHash.
+
+%% Accumulation Operations
+-spec accumulate(IDs) -> Commitment.
+-spec accumulate(ID1, ID2) -> Commitment.
+
+%% Key Derivation
+-spec pbkdf2(Alg, Password, Salt, Iterations, KeyLength) -> {ok, Key} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. sha256/1
+
+```erlang
+-spec sha256(Data) -> Hash
+    when
+        Data :: binary() | iolist(),
+        Hash :: binary().
+```
+
+**Description:** Compute SHA-256 hash of data. Wraps Erlang's `crypto:hash/2` with OpenSSL backend.
+
+**Test Code:**
+```erlang
+-module(hb_crypto_sha256_test).
+-include_lib("eunit/include/eunit.hrl").
+
+sha256_basic_test() ->
+    Data = <<"hello world">>,
+    Hash = hb_crypto:sha256(Data),
+    ?assert(is_binary(Hash)),
+    ?assertEqual(32, byte_size(Hash)).
+
+sha256_deterministic_test() ->
+    Data = <<"test data">>,
+    Hash1 = hb_crypto:sha256(Data),
+    Hash2 = hb_crypto:sha256(Data),
+    ?assertEqual(Hash1, Hash2).
+
+sha256_empty_test() ->
+    Hash = hb_crypto:sha256(<<>>),
+    ?assert(is_binary(Hash)),
+    ?assertEqual(32, byte_size(Hash)).
+
+sha256_iolist_test() ->
+    Data = [<<"hello">>, <<" ">>, <<"world">>],
+    Hash = hb_crypto:sha256(Data),
+    ?assert(is_binary(Hash)),
+    ?assertEqual(32, byte_size(Hash)).
+```
+
+---
+
+### 2. sha256_chain/2
+
+```erlang
+-spec sha256_chain(ID1, ID2) -> ChainedHash
+    when
+        ID1 :: binary(),
+        ID2 :: binary(),
+        ChainedHash :: binary().
+```
+
+**Description:** Chain two IDs together using SHA-256. ID1 must be exactly 32 bytes. Creates a hash of the concatenation: `SHA256(ID1 || ID2)`. Preserves ordering information.
+
+**Test Code:**
+```erlang
+-module(hb_crypto_sha256_chain_test).
+-include_lib("eunit/include/eunit.hrl").
+
+sha256_chain_basic_test() ->
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    Hash = hb_crypto:sha256_chain(ID1, ID2),
+    ?assert(is_binary(Hash)),
+    ?assertEqual(32, byte_size(Hash)).
+
+sha256_chain_matches_hash_test() ->
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    ChainHash = hb_crypto:sha256_chain(ID1, ID2),
+    DirectHash = crypto:hash(sha256, <<ID1/binary, ID2/binary>>),
+    ?assertEqual(ChainHash, DirectHash).
+
+sha256_chain_order_matters_test() ->
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    Hash1 = hb_crypto:sha256_chain(ID1, ID2),
+    Hash2 = hb_crypto:sha256_chain(ID2, ID1),
+    ?assertNotEqual(Hash1, Hash2).
+
+sha256_chain_entropy_test() ->
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    Hash = hb_crypto:sha256_chain(ID1, ID2),
+    % Basic entropy check - count zeros
+    Zeroes = count_leading_zeroes(Hash),
+    Avg = Zeroes / 256,
+    ?assert(Avg > 0.4),
+    ?assert(Avg < 0.6).
+
+sha256_chain_bad_id1_throws_test() ->
+    ID1 = <<1:128>>,  % Too short
+    ID2 = <<2:256>>,
+    ?assertThrow({cannot_chain_bad_ids, _, _}, 
+        hb_crypto:sha256_chain(ID1, ID2)).
+
+count_leading_zeroes(Bin) ->
+    count_zeroes(Bin, 0).
+count_zeroes(<<>>, Acc) -> Acc;
+count_zeroes(<<0:1, Rest/bitstring>>, Acc) ->
+    count_zeroes(Rest, Acc + 1);
+count_zeroes(<<_:1, Rest/bitstring>>, Acc) ->
+    count_zeroes(Rest, Acc).
+```
+
+---
+
+### 3. accumulate/1, accumulate/2
+
+```erlang
+-spec accumulate(IDs) -> Commitment
+    when
+        IDs :: [binary()],
+        Commitment :: binary().
+
+-spec accumulate(ID1, ID2) -> Commitment
+    when
+        ID1 :: binary(),
+        ID2 :: binary(),
+        Commitment :: binary().
+```
+
+**Description:** Accumulate cryptographically-secure 256-bit IDs into a single commitment by addition. No ordering information is preserved. Both IDs must be exactly 32 bytes. For lists, folds over IDs starting from `<<0:256>>`.
+
+**Test Code:**
+```erlang
+-module(hb_crypto_accumulate_test).
+-include_lib("eunit/include/eunit.hrl").
+
+accumulate_basic_test() ->
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    Result = hb_crypto:accumulate(ID1, ID2),
+    ?assert(is_binary(Result)),
+    ?assertEqual(32, byte_size(Result)).
+
+accumulate_addition_test() ->
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    <<Result:256>> = hb_crypto:accumulate(ID1, ID2),
+    ?assertEqual(3, Result).
+
+accumulate_order_independent_test() ->
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    Result1 = hb_crypto:accumulate(ID1, ID2),
+    Result2 = hb_crypto:accumulate(ID2, ID1),
+    ?assertEqual(Result1, Result2).
+
+accumulate_list_test() ->
+    IDs = [<<1:256>>, <<2:256>>, <<3:256>>],
+    Result = hb_crypto:accumulate(IDs),
+    ?assert(is_binary(Result)),
+    ?assertEqual(32, byte_size(Result)),
+    <<ResultInt:256>> = Result,
+    ?assertEqual(6, ResultInt).
+
+accumulate_empty_list_test() ->
+    Result = hb_crypto:accumulate([]),
+    ?assertEqual(<<0:256>>, Result).
+
+accumulate_single_test() ->
+    ID = <<5:256>>,
+    Result = hb_crypto:accumulate([ID]),
+    ?assertEqual(ID, Result).
+
+accumulate_bad_id_throws_test() ->
+    ID1 = <<1:128>>,  % Too short
+    ID2 = <<2:256>>,
+    ?assertThrow({cannot_accumulate_bad_ids, _, _},
+        hb_crypto:accumulate(ID1, ID2)).
+
+accumulate_large_values_test() ->
+    % Test with large values to ensure proper overflow handling
+    ID1 = <<16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:256>>,
+    ID2 = <<1:256>>,
+    Result = hb_crypto:accumulate(ID1, ID2),
+    ?assert(is_binary(Result)),
+    ?assertEqual(32, byte_size(Result)),
+    % Result should overflow and wrap
+    ?assertEqual(<<0:256>>, Result).
+```
+
+---
+
+### 4. pbkdf2/5
+
+```erlang
+-spec pbkdf2(Alg, Password, Salt, Iterations, KeyLength) -> {ok, Key} | {error, Reason}
+    when
+        Alg :: atom(),
+        Password :: binary(),
+        Salt :: binary(),
+        Iterations :: integer(),
+        KeyLength :: integer(),
+        Key :: binary(),
+        Reason :: term().
+```
+
+**Description:** Password-Based Key Derivation Function 2 (PBKDF2) wrapper. Uses HMAC with specified algorithm to derive a key from a password.
+
+**Test Code:**
+```erlang
+-module(hb_crypto_pbkdf2_test).
+-include_lib("eunit/include/eunit.hrl").
+
+pbkdf2_basic_test() ->
+    Password = <<"password">>,
+    Salt = <<"salt">>,
+    Iterations = 1000,
+    KeyLength = 32,
+    
+    {ok, Key} = hb_crypto:pbkdf2(sha256, Password, Salt, Iterations, KeyLength),
+    ?assert(is_binary(Key)),
+    ?assertEqual(KeyLength, byte_size(Key)).
+
+pbkdf2_deterministic_test() ->
+    Password = <<"password">>,
+    Salt = <<"salt">>,
+    Iterations = 1000,
+    KeyLength = 32,
+    
+    {ok, Key1} = hb_crypto:pbkdf2(sha256, Password, Salt, Iterations, KeyLength),
+    {ok, Key2} = hb_crypto:pbkdf2(sha256, Password, Salt, Iterations, KeyLength),
+    ?assertEqual(Key1, Key2).
+
+pbkdf2_different_passwords_test() ->
+    Password1 = <<"password1">>,
+    Password2 = <<"password2">>,
+    Salt = <<"salt">>,
+    Iterations = 1000,
+    KeyLength = 32,
+    
+    {ok, Key1} = hb_crypto:pbkdf2(sha256, Password1, Salt, Iterations, KeyLength),
+    {ok, Key2} = hb_crypto:pbkdf2(sha256, Password2, Salt, Iterations, KeyLength),
+    ?assertNotEqual(Key1, Key2).
+
+pbkdf2_different_salts_test() ->
+    Password = <<"password">>,
+    Salt1 = <<"salt1">>,
+    Salt2 = <<"salt2">>,
+    Iterations = 1000,
+    KeyLength = 32,
+    
+    {ok, Key1} = hb_crypto:pbkdf2(sha256, Password, Salt1, Iterations, KeyLength),
+    {ok, Key2} = hb_crypto:pbkdf2(sha256, Password, Salt2, Iterations, KeyLength),
+    ?assertNotEqual(Key1, Key2).
+
+pbkdf2_variable_length_test() ->
+    Password = <<"password">>,
+    Salt = <<"salt">>,
+    Iterations = 1000,
+    
+    {ok, Key16} = hb_crypto:pbkdf2(sha256, Password, Salt, Iterations, 16),
+    {ok, Key32} = hb_crypto:pbkdf2(sha256, Password, Salt, Iterations, 32),
+    {ok, Key64} = hb_crypto:pbkdf2(sha256, Password, Salt, Iterations, 64),
+    
+    ?assertEqual(16, byte_size(Key16)),
+    ?assertEqual(32, byte_size(Key32)),
+    ?assertEqual(64, byte_size(Key64)).
+
+pbkdf2_different_algorithms_test() ->
+    Password = <<"password">>,
+    Salt = <<"salt">>,
+    Iterations = 1000,
+    KeyLength = 32,
+    
+    {ok, KeySHA256} = hb_crypto:pbkdf2(sha256, Password, Salt, Iterations, KeyLength),
+    {ok, KeySHA512} = hb_crypto:pbkdf2(sha512, Password, Salt, Iterations, KeyLength),
+    ?assertNotEqual(KeySHA256, KeySHA512).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Hash data
+Data = <<"important data">>,
+Hash = hb_crypto:sha256(Data).
+
+%% Chain IDs to track computation
+ID1 = <<1:256>>,
+ID2 = <<2:256>>,
+ChainedID = hb_crypto:sha256_chain(ID1, ID2),
+ID3 = <<3:256>>,
+FinalChain = hb_crypto:sha256_chain(ChainedID, ID3).
+
+%% Accumulate IDs (order-independent)
+ID1 = <<1:256>>,
+ID2 = <<2:256>>,
+Commitment = hb_crypto:accumulate(ID1, ID2).
+
+%% Accumulate list of IDs
+IDs = [<<1:256>>, <<2:256>>, <<3:256>>],
+TotalCommitment = hb_crypto:accumulate(IDs).
+
+%% Derive encryption key from password
+Password = <<"user_password">>,
+Salt = crypto:strong_rand_bytes(16),
+Iterations = 100000,
+KeyLength = 32,
+{ok, EncryptionKey} = hb_crypto:pbkdf2(sha256, Password, Salt, Iterations, KeyLength).
+
+%% Use in message resolution tracking
+BaseID = hb_crypto:sha256(Message),
+Step1ID = hb_crypto:sha256_chain(BaseID, Resolution1),
+Step2ID = hb_crypto:sha256_chain(Step1ID, Resolution2).
+```
+
+---
+
+## HashPath Comparison
+
+### SHA-256 Chain
+
+**Properties:**
+- Order-dependent
+- Sequential processing
+- Preserves computation sequence
+- Used for message resolution tracking
+
+**Example:**
+```erlang
+ID1 = <<1:256>>,
+ID2 = <<2:256>>,
+Chain1 = hb_crypto:sha256_chain(ID1, ID2),  % Hash(ID1 || ID2)
+Chain2 = hb_crypto:sha256_chain(ID2, ID1),  % Hash(ID2 || ID1)
+% Chain1 =/= Chain2 (order matters)
+```
+
+### Accumulate-256
+
+**Properties:**
+- Order-independent
+- Parallel processing friendly
+- No sequence information
+- Experimental commitment scheme
+
+**Example:**
+```erlang
+ID1 = <<1:256>>,
+ID2 = <<2:256>>,
+Acc1 = hb_crypto:accumulate(ID1, ID2),  % ID1 + ID2
+Acc2 = hb_crypto:accumulate(ID2, ID1),  % ID2 + ID1
+% Acc1 == Acc2 (order doesn't matter)
+```
+
+---
+
+## Security Considerations
+
+### ID Requirements
+
+Both chain and accumulate functions require **cryptographically-secure 256-bit IDs**:
+- Must be exactly 32 bytes (256 bits)
+- Should be generated from secure hash functions
+- Must have high entropy
+
+### Invalid Input Handling
+
+```erlang
+%% Bad ID1 in chain - throws exception
+BadID = <<1:128>>,
+GoodID = <<2:256>>,
+hb_crypto:sha256_chain(BadID, GoodID).
+% Throws: {cannot_chain_bad_ids, BadID, GoodID}
+
+%% Bad ID in accumulate - throws exception
+hb_crypto:accumulate(BadID, GoodID).
+% Throws: {cannot_accumulate_bad_ids, BadID, GoodID}
+```
+
+### PBKDF2 Recommendations
+
+- **Iterations**: Use at least 100,000 for new applications
+- **Salt**: Always use unique, random salt per password
+- **Key Length**: Match your encryption algorithm requirements
+- **Algorithm**: SHA-256 minimum, SHA-512 preferred for high security
+
+---
+
+## References
+
+- **OpenSSL Crypto** - Erlang `crypto` module backend
+- **SHA-256 Specification** - FIPS 180-4
+- **PBKDF2 Specification** - RFC 2898
+- **HyperBEAM HashPath** - Message resolution tracking
+- **AO-Core Protocol** - Cryptographic message chaining
+
+---
+
+## Notes
+
+1. **OpenSSL Backend**: All operations use Erlang's `crypto` module backed by OpenSSL
+2. **Type Safety**: Functions throw on invalid input to prevent silent failures
+3. **ID Length**: Strict 32-byte requirement for chain and accumulate operations
+4. **Entropy**: Output has approximately 50% bit distribution (high entropy)
+5. **Experimental**: Accumulate algorithm is experimental and may change
+6. **Order Independence**: Accumulate useful for parallel message processing
+7. **Overflow Handling**: Accumulate wraps on overflow (256-bit addition)
+8. **Performance**: SHA-256 chain is the production-ready algorithm
+9. **PBKDF2 Errors**: Returns `{error, Reason}` instead of throwing
+10. **Process Dictionary**: No state stored, all functions pure and thread-safe

@@ -1,0 +1,686 @@
+# hb_structured_fields.erl - HTTP Structured Fields Parser (RFC-9651)
+
+## Overview
+
+**Purpose:** Parse and convert between Erlang terms and HTTP Structured Fields  
+**Module:** `hb_structured_fields`  
+**Standard:** RFC-9651 (Structured Field Values for HTTP)
+
+This module implements RFC-9651 for parsing and serializing HTTP Structured Fields, providing bidirectional conversion between Erlang data structures and standardized HTTP header formats. Supports dictionaries, lists, items, parameters, and all bare item types including integers, decimals, strings, tokens, byte sequences, and booleans.
+
+## Dependencies
+
+- **Erlang/OTP:** `base64`, `binary`, `lists`, `maps`, `string`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Type Mappings
+
+### Erlang to Structured Fields
+
+| Erlang Type | SF Type | Example |
+|------------|---------|---------|
+| `list()` | List | `[Item1, Item2]` |
+| `{list, [item()], params()}` | Inner List | `{list, [1, 2], [{key, val}]}` |
+| `[{binary(), item()}]` | Dictionary | `[{<<"key">>, {item, 1, []}}]` |
+| `{item, bare_item(), params()}` | Item | `{item, 42, [{<<"param">>, true}]}` |
+| `integer()` | Integer | `42` |
+| `{decimal, {integer(), integer()}}` | Decimal | `{decimal, {123, -2}}` → `1.23` |
+| `{string, binary()}` | String | `{string, <<"hello">>}` |
+| `{token, binary()}` | Token | `{token, <<"Bearer">>}` |
+| `{binary, binary()}` | Byte Sequence | `{binary, <<1,2,3>>}` |
+| `boolean()` | Boolean | `true` → `?1`, `false` → `?0` |
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Parsing
+-spec parse_dictionary(binary()) -> sh_dictionary().
+-spec parse_list(binary()) -> sh_list().
+-spec parse_item(binary()) -> sh_item().
+-spec parse_bare_item(binary()) -> {sh_bare_item(), Rest}.
+-spec parse_binary(binary()) -> term().
+
+%% Serialization
+-spec dictionary([{binary(), term()}]) -> iolist().
+-spec list([term()]) -> iolist().
+-spec item(term()) -> iolist().
+-spec bare_item(term()) -> iolist().
+
+%% Conversion
+-spec to_dictionary(map() | [{term(), term()}]) -> {ok, sh_dictionary()} | {too_deep, term()}.
+-spec to_list([term()]) -> {ok, sh_list()} | {too_deep, term()}.
+-spec to_item(term()) -> {ok, sh_item()}.
+-spec to_item(term(), params()) -> {ok, sh_item()}.
+-spec from_bare_item(sh_bare_item()) -> term().
+```
+
+---
+
+## Public Functions
+
+### 1. parse_dictionary/1
+
+```erlang
+-spec parse_dictionary(binary()) -> sh_dictionary()
+    when
+        sh_dictionary() :: [{binary(), sh_item() | sh_inner_list()}].
+```
+
+**Description:** Parse a binary representing an HTTP Structured Fields dictionary into an Erlang term. Returns a list of key-value pairs where keys are binaries and values are items or inner lists.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_parse_dict_test).
+-include_lib("eunit/include/eunit.hrl").
+
+parse_dictionary_basic_test() ->
+    Dict = hb_structured_fields:parse_dictionary(<<"foo=bar, fizz=buzz">>),
+    ?assertMatch([{<<"foo">>, _}, {<<"fizz">>, _}], Dict),
+    {<<"foo">>, {item, FooVal, _}} = lists:keyfind(<<"foo">>, 1, Dict),
+    ?assertEqual({token, <<"bar">>}, FooVal).
+
+parse_dictionary_with_params_test() ->
+    Dict = hb_structured_fields:parse_dictionary(<<"key=value;param1;param2=123">>),
+    {<<"key">>, {item, _, Params}} = lists:keyfind(<<"key">>, 1, Dict),
+    ?assertEqual([{<<"param1">>, true}, {<<"param2">>, 123}], Params).
+
+parse_dictionary_empty_test() ->
+    ?assertEqual([], hb_structured_fields:parse_dictionary(<<>>)).
+
+parse_dictionary_inner_list_test() ->
+    Dict = hb_structured_fields:parse_dictionary(<<"key=(1 2 3)">>),
+    {<<"key">>, {list, Items, _}} = lists:keyfind(<<"key">>, 1, Dict),
+    ?assertEqual(3, length(Items)).
+```
+
+---
+
+### 2. parse_list/1
+
+```erlang
+-spec parse_list(binary()) -> sh_list()
+    when
+        sh_list() :: [sh_item() | sh_inner_list()].
+```
+
+**Description:** Parse a binary representing an HTTP Structured Fields list. Returns a list of items and inner lists.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_parse_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+parse_list_basic_test() ->
+    List = hb_structured_fields:parse_list(<<"1, 2, 3">>),
+    ?assertEqual(3, length(List)),
+    [{item, 1, []}, {item, 2, []}, {item, 3, []}] = List.
+
+parse_list_mixed_test() ->
+    List = hb_structured_fields:parse_list(<<"123, \"hello\", ?1">>),
+    ?assertMatch([{item, 123, []}, {item, {string, _}, []}, {item, true, []}], List).
+
+parse_list_inner_list_test() ->
+    List = hb_structured_fields:parse_list(<<"(1 2), 3">>),
+    ?assertMatch([{list, _, _}, {item, 3, []}], List).
+
+parse_list_empty_test() ->
+    ?assertEqual([], hb_structured_fields:parse_list(<<>>)).
+```
+
+---
+
+### 3. parse_item/1
+
+```erlang
+-spec parse_item(binary()) -> sh_item()
+    when
+        sh_item() :: {item, sh_bare_item(), sh_params()}.
+```
+
+**Description:** Parse a binary representing a single HTTP Structured Fields item. Returns an item tuple with the bare value and parameters.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_parse_item_test).
+-include_lib("eunit/include/eunit.hrl").
+
+parse_item_integer_test() ->
+    {item, 42, []} = hb_structured_fields:parse_item(<<"42">>).
+
+parse_item_string_test() ->
+    {item, {string, <<"hello">>}, []} = 
+        hb_structured_fields:parse_item(<<"\"hello\"">>).
+
+parse_item_with_params_test() ->
+    {item, {token, <<"value">>}, Params} = 
+        hb_structured_fields:parse_item(<<"value;key=123">>),
+    ?assertEqual([{<<"key">>, 123}], Params).
+
+parse_item_boolean_test() ->
+    ?assertEqual({item, true, []}, hb_structured_fields:parse_item(<<"?1">>)),
+    ?assertEqual({item, false, []}, hb_structured_fields:parse_item(<<"?0">>)).
+```
+
+---
+
+### 4. parse_bare_item/1
+
+```erlang
+-spec parse_bare_item(binary()) -> {sh_bare_item(), Rest}
+    when
+        sh_bare_item() :: integer() | sh_decimal() | boolean() | 
+                         {string | token | binary, binary()},
+        Rest :: binary().
+```
+
+**Description:** Parse a bare item from a binary, returning the item and remaining unparsed binary. Handles all bare item types defined in RFC-9651.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_parse_bare_test).
+-include_lib("eunit/include/eunit.hrl").
+
+parse_bare_item_integer_test() ->
+    {42, <<>>} = hb_structured_fields:parse_bare_item(<<"42">>),
+    {-99, <<", rest">>} = hb_structured_fields:parse_bare_item(<<"-99, rest">>).
+
+parse_bare_item_decimal_test() ->
+    {{decimal, _}, <<>>} = hb_structured_fields:parse_bare_item(<<"3.14">>).
+
+parse_bare_item_string_test() ->
+    {{string, <<"hello world">>}, <<>>} = 
+        hb_structured_fields:parse_bare_item(<<"\"hello world\"">>).
+
+parse_bare_item_token_test() ->
+    {{token, <<"Bearer">>}, <<>>} = 
+        hb_structured_fields:parse_bare_item(<<"Bearer">>).
+
+parse_bare_item_binary_test() ->
+    {{binary, Data}, <<>>} = 
+        hb_structured_fields:parse_bare_item(<<":aGVsbG8=:">>),
+    ?assertEqual(<<"hello">>, Data).
+```
+
+---
+
+### 5. dictionary/1
+
+```erlang
+-spec dictionary(sh_dictionary()) -> iolist()
+    when
+        sh_dictionary() :: [{binary(), sh_item() | sh_inner_list()}].
+```
+
+**Description:** Serialize an Erlang structured fields dictionary to binary format. Output conforms to RFC-9651 dictionary syntax.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_dict_test).
+-include_lib("eunit/include/eunit.hrl").
+
+dictionary_basic_test() ->
+    Dict = [
+        {<<"foo">>, {item, {token, <<"bar">>}, []}},
+        {<<"key">>, {item, 123, []}}
+    ],
+    Result = iolist_to_binary(hb_structured_fields:dictionary(Dict)),
+    Parsed = hb_structured_fields:parse_dictionary(Result),
+    ?assertEqual(Dict, Parsed).
+
+dictionary_with_params_test() ->
+    Dict = [
+        {<<"key">>, {item, {string, <<"value">>}, [{<<"p1">>, true}, {<<"p2">>, 42}]}}
+    ],
+    Result = iolist_to_binary(hb_structured_fields:dictionary(Dict)),
+    ?assert(is_binary(Result)).
+```
+
+---
+
+### 6. list/1
+
+```erlang
+-spec list(sh_list()) -> iolist()
+    when
+        sh_list() :: [sh_item() | sh_inner_list()].
+```
+
+**Description:** Serialize an Erlang structured fields list to binary format. Output conforms to RFC-9651 list syntax.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+list_basic_test() ->
+    List = [
+        {item, 1, []},
+        {item, 2, []},
+        {item, 3, []}
+    ],
+    Result = iolist_to_binary(hb_structured_fields:list(List)),
+    Parsed = hb_structured_fields:parse_list(Result),
+    ?assertEqual(List, Parsed).
+
+list_mixed_test() ->
+    List = [
+        {item, {string, <<"hello">>}, []},
+        {item, true, []},
+        {list, [{item, 1, []}, {item, 2, []}], []}
+    ],
+    Result = iolist_to_binary(hb_structured_fields:list(List)),
+    ?assert(is_binary(Result)).
+```
+
+---
+
+### 7. item/1
+
+```erlang
+-spec item(sh_item()) -> iolist()
+    when
+        sh_item() :: {item, sh_bare_item(), sh_params()}.
+```
+
+**Description:** Serialize an item to binary format with parameters.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_item_test).
+-include_lib("eunit/include/eunit.hrl").
+
+item_simple_test() ->
+    Item = {item, 42, []},
+    Result = iolist_to_binary(hb_structured_fields:item(Item)),
+    ?assertEqual(<<"42">>, Result).
+
+item_with_params_test() ->
+    Item = {item, {token, <<"value">>}, [{<<"key">>, 123}]},
+    Result = iolist_to_binary(hb_structured_fields:item(Item)),
+    Parsed = hb_structured_fields:parse_item(Result),
+    ?assertEqual(Item, Parsed).
+```
+
+---
+
+### 8. bare_item/1
+
+```erlang
+-spec bare_item(sh_bare_item()) -> iolist()
+    when
+        sh_bare_item() :: integer() | sh_decimal() | boolean() | 
+                         {string | token | binary, binary()}.
+```
+
+**Description:** Serialize a bare item to binary format without parameters.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_bare_item_test).
+-include_lib("eunit/include/eunit.hrl").
+
+bare_item_integer_test() ->
+    ?assertEqual(<<"42">>, iolist_to_binary(hb_structured_fields:bare_item(42))).
+
+bare_item_decimal_test() ->
+    Result = iolist_to_binary(hb_structured_fields:bare_item({decimal, {314, -2}})),
+    ?assertEqual(<<"3.14">>, Result).
+
+bare_item_string_test() ->
+    Result = iolist_to_binary(hb_structured_fields:bare_item({string, <<"hello">>})),
+    ?assertEqual(<<"\"hello\"">>, Result).
+
+bare_item_token_test() ->
+    Result = iolist_to_binary(hb_structured_fields:bare_item({token, <<"Bearer">>})),
+    ?assertEqual(<<"Bearer">>, Result).
+
+bare_item_binary_test() ->
+    Result = iolist_to_binary(hb_structured_fields:bare_item({binary, <<"hello">>})),
+    Expected = iolist_to_binary([$:, base64:encode(<<"hello">>), $:]),
+    ?assertEqual(Expected, Result).
+
+bare_item_boolean_test() ->
+    ?assertEqual(<<"?1">>, iolist_to_binary(hb_structured_fields:bare_item(true))),
+    ?assertEqual(<<"?0">>, iolist_to_binary(hb_structured_fields:bare_item(false))).
+```
+
+---
+
+### 9. to_dictionary/1
+
+```erlang
+-spec to_dictionary(map() | [{term(), term()}]) -> {ok, sh_dictionary()} | {too_deep, term()}
+    when
+        sh_dictionary() :: [{binary(), sh_item() | sh_inner_list()}].
+```
+
+**Description:** Convert an Erlang map or key-value list to a structured fields dictionary. Automatically converts types and validates structure depth (max 2 levels).
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_to_dict_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_dictionary_from_map_test() ->
+    {ok, Dict} = hb_structured_fields:to_dictionary(#{
+        foo => bar,
+        <<"key">> => <<"value">>,
+        int => 123
+    }),
+    ?assert(lists:keymember(<<"foo">>, 1, Dict)),
+    ?assert(lists:keymember(<<"key">>, 1, Dict)),
+    ?assert(lists:keymember(<<"int">>, 1, Dict)).
+
+to_dictionary_with_items_test() ->
+    {ok, Dict} = hb_structured_fields:to_dictionary(#{
+        <<"key">> => {item, <<"value">>, [{param, true}]}
+    }),
+    {<<"key">>, {item, {string, <<"value">>}, _}} = lists:keyfind(<<"key">>, 1, Dict).
+
+to_dictionary_inner_list_test() ->
+    {ok, Dict} = hb_structured_fields:to_dictionary(#{
+        <<"list">> => [1, 2, 3]
+    }),
+    {<<"list">>, {list, _, _}} = lists:keyfind(<<"list">>, 1, Dict).
+
+to_dictionary_depth_error_test() ->
+    {too_deep, _} = hb_structured_fields:to_dictionary(#{
+        foo => #{bar => baz}
+    }).
+```
+
+---
+
+### 10. to_list/1
+
+```erlang
+-spec to_list([term()]) -> {ok, sh_list()} | {too_deep, term()}
+    when
+        sh_list() :: [sh_item() | sh_inner_list()].
+```
+
+**Description:** Convert an Erlang list to a structured fields list. Validates depth and converts types automatically.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_to_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_list_basic_test() ->
+    {ok, List} = hb_structured_fields:to_list([1, 2, <<"three">>]),
+    ?assertEqual(3, length(List)),
+    ?assertMatch([{item, 1, []}, {item, 2, []}, {item, {string, _}, []}], List).
+
+to_list_nested_test() ->
+    {ok, List} = hb_structured_fields:to_list([
+        1,
+        [2, 3],
+        {list, [4, 5], [{param, true}]}
+    ]),
+    ?assertEqual(3, length(List)).
+
+to_list_depth_error_test() ->
+    {too_deep, _} = hb_structured_fields:to_list([1, 2, [3, [4]]]).
+```
+
+---
+
+### 11. to_item/1, to_item/2
+
+```erlang
+-spec to_item(term()) -> {ok, sh_item()}.
+-spec to_item(term(), params()) -> {ok, sh_item()}
+    when
+        params() :: [{binary(), sh_bare_item()}].
+```
+
+**Description:** Convert an Erlang term to a structured fields item, optionally with parameters.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_to_item_test).
+-include_lib("eunit/include/eunit.hrl").
+
+to_item_integer_test() ->
+    ?assertEqual({ok, {item, 42, []}}, hb_structured_fields:to_item(42)).
+
+to_item_string_test() ->
+    {ok, {item, {string, <<"hello">>}, []}} = 
+        hb_structured_fields:to_item(<<"hello">>).
+
+to_item_atom_test() ->
+    {ok, {item, {token, <<"test">>}, []}} = 
+        hb_structured_fields:to_item(test).
+
+to_item_with_params_test() ->
+    {ok, Item} = hb_structured_fields:to_item(123, [{key, value}]),
+    ?assertMatch({item, 123, [{<<"key">>, {token, <<"value">>}}]}, Item).
+```
+
+---
+
+### 12. from_bare_item/1
+
+```erlang
+-spec from_bare_item(sh_bare_item()) -> term()
+    when
+        sh_bare_item() :: integer() | sh_decimal() | boolean() | 
+                         {string | token | binary, binary()}.
+```
+
+**Description:** Convert a structured fields bare item back to a simple Erlang term. Decimals become floats, tokens become atoms (if they exist), strings become binaries.
+
+**Test Code:**
+```erlang
+-module(hb_structured_fields_from_bare_test).
+-include_lib("eunit/include/eunit.hrl").
+
+from_bare_item_integer_test() ->
+    ?assertEqual(42, hb_structured_fields:from_bare_item(42)).
+
+from_bare_item_boolean_test() ->
+    ?assertEqual(true, hb_structured_fields:from_bare_item(true)),
+    ?assertEqual(false, hb_structured_fields:from_bare_item(false)).
+
+from_bare_item_decimal_test() ->
+    Result = hb_structured_fields:from_bare_item({decimal, {314, -2}}),
+    ?assert(is_float(Result)),
+    ?assert(abs(Result - 3.14) < 0.01).
+
+from_bare_item_string_test() ->
+    ?assertEqual(<<"hello">>, 
+        hb_structured_fields:from_bare_item({string, <<"hello">>})).
+
+from_bare_item_token_test() ->
+    % Returns binary if atom doesn't exist
+    ?assertEqual(<<"nonexistent">>, 
+        hb_structured_fields:from_bare_item({token, <<"nonexistent">>})).
+
+from_bare_item_binary_test() ->
+    ?assertEqual(<<1,2,3>>, 
+        hb_structured_fields:from_bare_item({binary, <<1,2,3>>})).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Parse HTTP header value
+AuthHeader = <<"Bearer;realm=\"example\", Basic;realm=\"admin\"">>
+Dict = hb_structured_fields:parse_dictionary(AuthHeader).
+
+%% Create and serialize dictionary
+Msg = #{
+    <<"type">> => message,
+    <<"id">> => 12345,
+    <<"tags">> => [<<"urgent">>, <<"system">>]
+},
+{ok, SFDict} = hb_structured_fields:to_dictionary(Msg),
+Binary = iolist_to_binary(hb_structured_fields:dictionary(SFDict)).
+
+%% Round-trip conversion
+Original = [1, 2, {list, [3, 4], [{param, true}]}],
+{ok, SFList} = hb_structured_fields:to_list(Original),
+Serialized = iolist_to_binary(hb_structured_fields:list(SFList)),
+Parsed = hb_structured_fields:parse_list(Serialized).
+
+%% Working with items
+Item = {item, {string, <<"value">>}, [{<<"key">>, 123}]},
+Bin = iolist_to_binary(hb_structured_fields:item(Item)),
+ParsedItem = hb_structured_fields:parse_item(Bin).
+
+%% Convert Erlang types
+{ok, IntItem} = hb_structured_fields:to_item(42),
+{ok, StrItem} = hb_structured_fields:to_item(<<"hello">>),
+{ok, AtomItem} = hb_structured_fields:to_item(my_token),
+{ok, BoolItem} = hb_structured_fields:to_item(true).
+
+%% Extract values from parsed structures
+{item, BareValue, Params} = hb_structured_fields:parse_item(<<"123;key=value">>),
+SimpleValue = hb_structured_fields:from_bare_item(BareValue).
+```
+
+---
+
+## Decimal Representation
+
+Decimals use a two-integer tuple `{Base, Exponent}`:
+
+```erlang
+% 3.14 = 314 * 10^(-2)
+{decimal, {314, -2}}
+
+% 12.0 = 12 * 10^0
+{decimal, {12, 0}}
+
+% 0.001 = 1 * 10^(-3)
+{decimal, {1, -3}}
+
+% Serialize
+<<"3.14">> = iolist_to_binary(bare_item({decimal, {314, -2}})).
+
+% Parse
+{{decimal, {314, -2}}, <<>>} = parse_bare_item(<<"3.14">>).
+
+% Convert to float
+3.14 = from_bare_item({decimal, {314, -2}}).
+```
+
+---
+
+## String Escaping
+
+Strings are automatically escaped per RFC-9651:
+
+```erlang
+% Input with special characters
+Input = {string, <<"hello \"world\"">>},
+
+% Serialized with escapes
+<<"\"hello \\\"world\\\"\"">> = iolist_to_binary(bare_item(Input)).
+
+% Backslashes are also escaped
+{string, <<"path\\to\\file">>} → "\"path\\\\to\\\\file\"".
+```
+
+---
+
+## Depth Limitations
+
+Structured fields limit nesting to prevent complexity:
+
+```erlang
+% OK: Flat dictionary
+{ok, _} = to_dictionary(#{key => value}).
+
+% OK: Dictionary with inner list
+{ok, _} = to_dictionary(#{key => [1, 2, 3]}).
+
+% ERROR: Too deep (nested maps)
+{too_deep, _} = to_dictionary(#{outer => #{inner => value}}).
+
+% ERROR: Too deep (nested lists)
+{too_deep, _} = to_list([1, 2, [3, [4]]]).
+```
+
+---
+
+## Type Conversion Rules
+
+### Automatic Conversions in `to_*` Functions
+
+```erlang
+% Atoms → Tokens
+atom → {token, <<"atom">>}
+
+% Binaries/Strings → Strings
+<<"text">> → {string, <<"text">>}
+"text" → {string, <<"text">>}
+
+% Integers → Integers (validated for length)
+42 → 42
+
+% Floats → Decimals
+3.14 → {decimal, {314, -2}}
+
+% Booleans → Booleans
+true → true
+false → false
+
+% Already-parsed tuples → Pass-through
+{decimal, {1, -1}} → {decimal, {1, -1}}
+```
+
+---
+
+## RFC-9651 Compliance
+
+### Supported Features
+
+- ✅ Dictionaries
+- ✅ Lists
+- ✅ Inner Lists
+- ✅ Items with Parameters
+- ✅ All Bare Item Types
+  - ✅ Integers (15 digits max)
+  - ✅ Decimals (3 fractional digits)
+  - ✅ Strings
+  - ✅ Tokens
+  - ✅ Byte Sequences (base64)
+  - ✅ Booleans
+
+### Validation
+
+The module enforces RFC limits:
+- Integer max length: 15 digits
+- Decimal precision: 3 fractional digits
+- String escaping: `\` and `"`
+- Token characters: alphanumeric + allowed symbols
+
+---
+
+## References
+
+- **RFC-9651** - Structured Field Values for HTTP
+- **HTTP Headers** - Standard header syntax
+- **Base64** - Byte sequence encoding
+
+---
+
+## Notes
+
+1. **Empty Structures**: Empty list and empty dictionary are indistinguishable
+2. **Parameter Order**: Preserved during parsing and serialization
+3. **Token Validation**: Should validate characters (not currently enforced)
+4. **Decimal Rounding**: Decimals rounded to 3 fractional digits on serialization
+5. **Key Normalization**: Dictionary keys converted to binaries
+6. **Atom Safety**: `from_bare_item` only converts to existing atoms
+7. **Depth Limit**: Maximum 2 levels of nesting
+8. **Whitespace**: Properly handled in parsing per RFC
+9. **Case Sensitivity**: Tokens and keys are case-sensitive
+10. **Iolist Output**: Serialization functions return iolists for efficiency

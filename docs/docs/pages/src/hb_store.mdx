@@ -1,0 +1,622 @@
+# hb_store.erl - Storage Abstraction Layer
+
+## Overview
+
+**Purpose:** Abstract key-value store operations across multiple storage backends  
+**Module:** `hb_store`  
+**Pattern:** Behavior-based pluggable storage with access control and fallback chains
+
+This module provides a unified interface for storage operations, allowing node operators to use different storage backends (filesystem, LMDB, remote, etc.) interchangeably. Supports store chains for fallback, access control policies, and scope-based filtering.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_opts`, `hb_maps`, `hb_util`, `hb_path`
+- **Erlang/OTP:** `persistent_term`, `timer`
+- **Records:** Store-specific implementations
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lifecycle
+-spec start(Stores) -> ok.
+-spec stop(Stores) -> ok | not_found.
+-spec reset(Stores) -> ok | not_found.
+
+%% Store Management
+-spec find(StoreOpts) -> Instance.
+-spec filter(Stores, FilterFun) -> FilteredStores.
+-spec scope(OptsOrStores, Scope) -> FilteredStores.
+-spec sort(Stores, SortFun) -> SortedStores.
+
+%% Data Operations
+-spec read(Stores, Key) -> {ok, Value} | not_found.
+-spec write(Stores, Key, Value) -> ok | not_found.
+-spec type(Stores, Key) -> simple | composite | not_found.
+-spec list(Stores, Key) -> {ok, [Key]} | not_found.
+-spec match(Stores, Pattern) -> {ok, [Key]} | not_found.
+
+%% Group Operations
+-spec make_group(Stores, Key) -> ok | not_found.
+-spec make_link(Stores, Existing, New) -> ok | not_found.
+-spec resolve(Stores, Key) -> ResolvedKey.
+
+%% Path Operations
+-spec path(Key) -> NormalizedPath.
+-spec path(Stores, Key) -> NormalizedPath.
+-spec add_path(Base, Part) -> JoinedPath.
+-spec add_path(Stores, Base, Part) -> JoinedPath.
+-spec join(PathParts) -> JoinedPath.
+```
+
+---
+
+## Public Functions
+
+### 1. start/1, stop/1, reset/1
+
+```erlang
+-spec start(Stores) -> ok
+    when
+        Stores :: map() | [map()].
+
+-spec stop(Stores) -> ok | not_found
+    when
+        Stores :: map() | [map()].
+
+-spec reset(Stores) -> ok | not_found
+    when
+        Stores :: map() | [map()].
+```
+
+**Description:** Lifecycle management for stores. `start/1` initializes stores, `stop/1` shuts them down, `reset/1` clears all data.
+
+**Test Code:**
+```erlang
+-module(hb_store_lifecycle_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_single_store_test() ->
+    Store = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-store">>
+    },
+    ?assertEqual(ok, hb_store:start(Store)).
+
+start_multiple_stores_test() ->
+    Stores = [
+        #{<<"store-module">> => hb_store_fs, <<"name">> => <<"store1">>},
+        #{<<"store-module">> => hb_store_fs, <<"name">> => <<"store2">>}
+    ],
+    ?assertEqual(ok, hb_store:start(Stores)).
+
+reset_store_test() ->
+    Store = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-reset">>
+    },
+    hb_store:start(Store),
+    hb_store:write(Store, <<"key">>, <<"value">>),
+    ?assertMatch({ok, _}, hb_store:read(Store, <<"key">>)),
+    hb_store:reset(Store),
+    hb_store:start(Store),
+    ?assertEqual(not_found, hb_store:read(Store, <<"key">>)).
+```
+
+---
+
+### 2. read/2, write/3
+
+```erlang
+-spec read(Stores, Key) -> {ok, Value} | not_found
+    when
+        Stores :: map() | [map()],
+        Key :: binary() | list(),
+        Value :: binary() | map().
+
+-spec write(Stores, Key, Value) -> ok | not_found
+    when
+        Stores :: map() | [map()],
+        Key :: binary() | list(),
+        Value :: binary() | map().
+```
+
+**Description:** Read and write operations. Tries each store in the chain until one succeeds. Respects access control policies.
+
+**Test Code:**
+```erlang
+-module(hb_store_rw_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_write_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs),
+    Key = <<"test-key">>,
+    Value = <<"test-value">>,
+    
+    ?assertEqual(ok, hb_store:write(Store, Key, Value)),
+    ?assertMatch({ok, Value}, hb_store:read(Store, Key)).
+
+read_not_found_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs),
+    ?assertEqual(not_found, hb_store:read(Store, <<"nonexistent">>)).
+
+write_fallback_chain_test() ->
+    ReadOnlyStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"ro">>,
+        <<"access">> => [<<"read">>]
+    },
+    WriteStore = hb_test_utils:test_store(hb_store_fs),
+    Chain = [ReadOnlyStore, WriteStore],
+    
+    % Write falls through to WriteStore
+    ?assertEqual(ok, hb_store:write(Chain, <<"key">>, <<"val">>)),
+    % Value only in WriteStore
+    ?assertEqual(not_found, hb_store:read([ReadOnlyStore], <<"key">>)),
+    ?assertMatch({ok, _}, hb_store:read([WriteStore], <<"key">>)).
+```
+
+---
+
+### 3. type/2, list/2
+
+```erlang
+-spec type(Stores, Key) -> simple | composite | not_found
+    when
+        Stores :: map() | [map()],
+        Key :: binary() | list().
+
+-spec list(Stores, Key) -> {ok, [Key]} | not_found
+    when
+        Stores :: map() | [map()],
+        Key :: binary() | list().
+```
+
+**Description:** `type/2` returns whether a key contains a simple value or composite (group). `list/2` lists keys in a composite group.
+
+**Test Code:**
+```erlang
+-module(hb_store_type_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+type_simple_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs),
+    hb_store:write(Store, <<"key">>, <<"value">>),
+    ?assertEqual(simple, hb_store:type(Store, <<"key">>)).
+
+type_composite_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs),
+    hb_store:make_group(Store, <<"group">>),
+    hb_store:write(Store, [<<"group">>, <<"item">>], <<"value">>),
+    ?assertEqual(composite, hb_store:type(Store, <<"group">>)).
+
+list_group_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs),
+    Group = <<"test-group">>,
+    hb_store:make_group(Store, Group),
+    hb_store:write(Store, [Group, <<"item1">>], <<"val1">>),
+    hb_store:write(Store, [Group, <<"item2">>], <<"val2">>),
+    
+    {ok, Items} = hb_store:list(Store, Group),
+    ?assertEqual(2, length(Items)),
+    ?assert(lists:member(<<"item1">>, Items)),
+    ?assert(lists:member(<<"item2">>, Items)).
+```
+
+---
+
+### 4. make_group/2, make_link/3
+
+```erlang
+-spec make_group(Stores, Key) -> ok | not_found
+    when
+        Stores :: map() | [map()],
+        Key :: binary() | list().
+
+-spec make_link(Stores, Existing, New) -> ok | not_found
+    when
+        Stores :: map() | [map()],
+        Existing :: binary() | list(),
+        New :: binary() | list().
+```
+
+**Description:** `make_group/2` creates a composite key (directory/group). `make_link/3` creates a symbolic link from `New` to `Existing`.
+
+**Test Code:**
+```erlang
+-module(hb_store_group_link_test).
+-include_lib("eunit/include/eunit.hrl").
+
+make_group_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs),
+    ?assertEqual(ok, hb_store:make_group(Store, <<"mygroup">>)),
+    ?assertEqual(composite, hb_store:type(Store, <<"mygroup">>)).
+
+make_link_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs),
+    Target = <<"target-key">>,
+    Link = <<"link-key">>,
+    Value = <<"linked-value">>,
+    
+    hb_store:write(Store, Target, Value),
+    hb_store:make_link(Store, Target, Link),
+    
+    {ok, ReadValue} = hb_store:read(Store, Link),
+    ?assertEqual(Value, ReadValue).
+
+nested_links_test() ->
+    Store = hb_test_utils:test_store(hb_store_fs),
+    hb_store:write(Store, <<"final">>, <<"value">>),
+    hb_store:make_link(Store, <<"final">>, <<"link1">>),
+    hb_store:make_link(Store, <<"link1">>, <<"link2">>),
+    
+    {ok, Value} = hb_store:read(Store, <<"link2">>),
+    ?assertEqual(<<"value">>, Value).
+```
+
+---
+
+### 5. scope/2, filter/2
+
+```erlang
+-spec scope(OptsOrStores, Scope) -> FilteredStores
+    when
+        OptsOrStores :: map() | [map()],
+        Scope :: atom() | [atom()],
+        FilteredStores :: [map()].
+
+-spec filter(Stores, FilterFun) -> FilteredStores
+    when
+        Stores :: map() | [map()],
+        FilterFun :: function(),
+        FilteredStores :: [map()].
+```
+
+**Description:** Filter stores by scope or custom criteria. Scopes include `in_memory`, `local`, `remote`, `arweave`.
+
+**Test Code:**
+```erlang
+-module(hb_store_filter_test).
+-include_lib("eunit/include/eunit.hrl").
+
+scope_local_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"local">>,
+        <<"scope">> => local
+    },
+    RemoteStore = #{
+        <<"store-module">> => hb_store_gateway,
+        <<"scope">> => remote
+    },
+    Stores = [LocalStore, RemoteStore],
+    
+    LocalOnly = hb_store:scope(#{store => Stores}, local),
+    ?assertEqual(1, length(LocalOnly)),
+    ?assertEqual(hb_store_fs, maps:get(<<"store-module">>, hd(LocalOnly))).
+
+filter_custom_test() ->
+    Stores = [
+        #{<<"store-module">> => hb_store_fs, <<"priority">> => 1},
+        #{<<"store-module">> => hb_store_fs, <<"priority">> => 2}
+    ],
+    HighPriority = hb_store:filter(Stores, 
+        fun(_Scope, Store) ->
+            maps:get(<<"priority">>, Store, 0) >= 2
+        end
+    ),
+    ?assertEqual(1, length(HighPriority)).
+```
+
+---
+
+### 6. path/1, path/2, join/1
+
+```erlang
+-spec path(Key) -> NormalizedPath
+    when
+        Key :: binary() | list(),
+        NormalizedPath :: binary() | list().
+
+-spec path(Stores, Key) -> NormalizedPath
+    when
+        Stores :: map() | [map()],
+        Key :: binary() | list(),
+        NormalizedPath :: binary() | list().
+
+-spec join(PathParts) -> JoinedPath
+    when
+        PathParts :: [binary() | list()],
+        JoinedPath :: binary() | list().
+```
+
+**Description:** Path manipulation utilities. `path/` normalizes paths, `join/1` combines path parts.
+
+**Test Code:**
+```erlang
+-module(hb_store_path_test).
+-include_lib("eunit/include/eunit.hrl").
+
+join_list_test() ->
+    Parts = [<<"a">>, <<"b">>, <<"c">>],
+    ?assertEqual(<<"a/b/c">>, hb_store:join(Parts)).
+
+join_mixed_test() ->
+    Parts = [<<"a">>, "b", <<"c">>],
+    Result = hb_store:join(Parts),
+    ?assert(is_binary(Result) orelse is_list(Result)).
+
+path_normalization_test() ->
+    ?assertEqual(<<"a/b">>, hb_store:path([<<"a">>, <<"b">>])),
+    ?assertEqual(<<"a/b">>, hb_store:path(<<"a/b">>)).
+```
+
+---
+
+## Store Behavior
+
+### Required Callbacks
+
+```erlang
+-callback start(StoreOpts) -> ok | {ok, Instance} | {error, Reason}.
+-callback stop(StoreOpts) -> ok.
+-callback reset(StoreOpts) -> ok.
+-callback read(StoreOpts, Key) -> {ok, Value} | not_found.
+-callback write(StoreOpts, Key, Value) -> ok.
+-callback type(StoreOpts, Key) -> simple | composite | not_found.
+-callback list(StoreOpts, Key) -> {ok, [Key]} | not_found.
+-callback make_group(StoreOpts, Key) -> ok.
+-callback make_link(StoreOpts, Existing, New) -> ok.
+-callback path(StoreOpts, Key) -> NormalizedPath.
+-callback add_path(StoreOpts, Base, Part) -> JoinedPath.
+```
+
+### Optional Callbacks
+
+```erlang
+-callback scope() -> Scope.
+-callback scope(StoreOpts) -> Scope.
+-callback match(StoreOpts, Pattern) -> {ok, [Key]} | not_found.
+-callback resolve(StoreOpts, Key) -> ResolvedKey.
+```
+
+---
+
+## Access Control
+
+### Access Policies
+
+```erlang
+% Policy definitions
+#{
+    <<"read">> => [read, resolve, list, type, path, add_path, join],
+    <<"write">> => [write, make_link, make_group, reset, path, add_path, join],
+    <<"admin">> => [start, stop, reset]
+}
+```
+
+### Configuration
+
+```erlang
+% Read-only store
+#{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"readonly">>,
+    <<"access">> => [<<"read">>]
+}
+
+% Write-only store
+#{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"writeonly">>,
+    <<"access">> => [<<"write">>]
+}
+
+% Full access (default)
+#{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"fullaccess">>,
+    <<"access">> => [<<"read">>, <<"write">>, <<"admin">>]
+}
+
+% No access restrictions (no access key)
+#{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"unrestricted">>
+}
+```
+
+### Test Code:**
+```erlang
+-module(hb_store_access_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_only_store_test() ->
+    ReadOnly = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"ro">>,
+        <<"access">> => [<<"read">>]
+    },
+    WriteStore = hb_test_utils:test_store(hb_store_fs),
+    Chain = [ReadOnly, WriteStore],
+    
+    hb_store:start(Chain),
+    % Write bypasses ReadOnly, goes to WriteStore
+    ?assertEqual(ok, hb_store:write(Chain, <<"key">>, <<"val">>)),
+    % Read works through chain
+    ?assertMatch({ok, <<"val">>}, hb_store:read(Chain, <<"key">>)),
+    % ReadOnly doesn't have the value
+    ?assertEqual(not_found, hb_store:read([ReadOnly], <<"key">>)).
+```
+
+---
+
+## Store Chains
+
+### Fallback Pattern
+
+```erlang
+% Try stores in order until one succeeds
+Stores = [
+    FastStore,      % Try fastest first
+    LocalStore,     % Then local
+    RemoteStore     % Finally remote
+],
+
+{ok, Value} = hb_store:read(Stores, Key).
+% Reads from first store that has the key
+```
+
+### Tiered Storage
+
+```erlang
+% Memory -> Local -> Remote
+Stores = [
+    #{<<"store-module">> => hb_store_memory, <<"scope">> => in_memory},
+    #{<<"store-module">> => hb_store_fs, <<"scope">> => local},
+    #{<<"store-module">> => hb_store_gateway, <<"scope">> => remote}
+],
+
+% Read checks in order
+{ok, Value} = hb_store:read(Stores, Key).
+
+% Write goes to first writable store
+ok = hb_store:write(Stores, Key, Value).
+```
+
+### Specialized Chains
+
+```erlang
+% Cache + Archive
+ReadChain = [CacheStore, ArchiveStore],
+WriteChain = [CacheStore],  % Only cache writes
+
+{ok, Value} = hb_store:read(ReadChain, Key),
+ok = hb_store:write(WriteChain, Key, NewValue).
+```
+
+---
+
+## Store Scopes
+
+### Scope Types
+
+| Scope | Description | Use Case |
+|-------|-------------|----------|
+| `in_memory` | RAM-based storage | Cache, temporary data |
+| `local` | Local disk storage | Persistent local data |
+| `remote` | Network storage | Distributed data |
+| `arweave` | Arweave network | Permanent storage |
+
+### Scope Filtering
+
+```erlang
+% Get only local stores
+LocalStores = hb_store:scope(Opts, local),
+
+% Get local and remote
+Stores = hb_store:scope(Opts, [local, remote]),
+
+% Custom filter
+FastStores = hb_store:filter(Stores,
+    fun(Scope, _Store) ->
+        lists:member(Scope, [in_memory, local])
+    end
+).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple read/write
+Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"data">>},
+hb_store:start(Store),
+ok = hb_store:write(Store, <<"key">>, <<"value">>),
+{ok, <<"value">>} = hb_store:read(Store, <<"key">>).
+
+%% Nested keys
+ok = hb_store:make_group(Store, <<"group">>),
+ok = hb_store:write(Store, [<<"group">>, <<"item">>], <<"data">>),
+{ok, [<<"item">>]} = hb_store:list(Store, <<"group">>).
+
+%% Symbolic links
+ok = hb_store:write(Store, <<"target">>, <<"value">>),
+ok = hb_store:make_link(Store, <<"target">>, <<"alias">>),
+{ok, <<"value">>} = hb_store:read(Store, <<"alias">>).
+
+%% Store chains with fallback
+Stores = [FastCache, SlowDisk, RemoteBackup],
+case hb_store:read(Stores, Key) of
+    {ok, Value} -> Value;
+    not_found -> default_value()
+end.
+
+%% Scope-filtered stores
+Opts = #{store => [MemStore, FSStore, GatewayStore]},
+LocalOnly = hb_store:scope(Opts, [in_memory, local]),
+{ok, Value} = hb_store:read(LocalOnly, Key).
+
+%% Access-controlled stores
+PublicRead = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"public">>,
+    <<"access">> => [<<"read">>]
+},
+PrivateWrite = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"private">>,
+    <<"access">> => [<<"write">>]
+},
+Chain = [PublicRead, PrivateWrite],
+% Reads from public, writes to private
+ok = hb_store:write(Chain, Key, Value).
+```
+
+---
+
+## Performance Benchmarking
+
+### Benchmark Functions
+
+```erlang
+% Run comprehensive benchmarks
+hb_store:generate_test_suite(StoreModule).
+
+% Custom benchmarks
+hb_store:generate_test_suite(StoreModule, CustomOpts).
+```
+
+### Metrics Measured
+
+- Write operations per second
+- Read operations per second  
+- List operations performance
+- Large message handling
+- Storage overhead
+
+---
+
+## References
+
+- **Filesystem Store** - `hb_store_fs.erl`
+- **Gateway Store** - `hb_store_gateway.erl`
+- **LMDB Store** - `hb_store_lmdb.erl`
+- **Cache System** - `hb_cache.erl`
+
+---
+
+## Notes
+
+1. **Pluggable:** Easy to add new storage backends
+2. **Chain Support:** Multiple stores with automatic fallback
+3. **Access Control:** Fine-grained permission policies
+4. **Scope Filtering:** Filter by storage location/type
+5. **Path Abstraction:** Unified path handling across stores
+6. **Link Support:** Symbolic links for key aliasing
+7. **Instance Caching:** Store instances cached in persistent_term
+8. **Composite Keys:** Support for hierarchical/grouped keys
+9. **Not Found Handling:** Consistent not_found return across stores
+10. **Behavior-Based:** Clean callback interface for implementations

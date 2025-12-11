@@ -1,0 +1,207 @@
+# hb_cache_control.erl - Cache Control Logic
+
+## Overview
+
+**Purpose:** Derive and apply cache settings for AO-Core resolver  
+**Module:** `hb_cache_control`  
+**Pattern:** HTTP-style cache control with precedence rules  
+**Defaults:** Store=false, Lookup=true
+
+This module manages cache control logic for the AO-Core resolver, deriving settings from requests, responses, and node options with clear precedence rules.
+
+## Cache Control Directives
+
+- **`always`**: Always store and lookup
+- **`store`**: Enable storing
+- **`no-store`**: Disable storing
+- **`cache`**: Enable lookup
+- **`no-cache`**: Disable lookup
+- **`only-if-cached`**: Return error if not cached
+
+## Precedence Order
+
+1. **Opts** (node operator final say)
+2. **Msg3** (result message from device)
+3. **Msg2** (user request message)
+
+## Dependencies
+
+- **HyperBEAM:** `hb_cache`, `hb_opts`, `hb_maps`, `hb_ao`, `hb_path`, `hb_store`
+
+---
+
+## Public Functions
+
+### 1. maybe_store/4
+
+```erlang
+-spec maybe_store(Msg1, Msg2, Msg3, Opts) -> ok | not_caching.
+```
+
+**Description:** Conditionally write Msg3 result to cache based on cache control settings from Msg2, Msg3, and Opts.
+
+**Test Code:**
+```erlang
+maybe_store_enabled_test() ->
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = #{<<"cache-control">> => [<<"store">>]},
+    Msg3 = <<"result">>,
+    Opts = #{store => hb_test_utils:test_store()},
+    
+    Result = hb_cache_control:maybe_store(Msg1, Msg2, Msg3, Opts),
+    ?assertEqual(ok, Result).
+
+maybe_store_disabled_test() ->
+    Msg1 = #{},
+    Msg2 = #{<<"cache-control">> => [<<"no-store">>]},
+    Msg3 = <<"result">>,
+    
+    Result = hb_cache_control:maybe_store(Msg1, Msg2, Msg3, #{}),
+    ?assertEqual(not_caching, Result).
+```
+
+---
+
+### 2. maybe_lookup/3
+
+```erlang
+-spec maybe_lookup(Msg1, Msg2, Opts) -> 
+    {ok, Result} | {continue, Msg1, Msg2} | {error, Reason}.
+```
+
+**Description:** Check cache for Msg1/Msg2 result. Returns cached result, continues to compute, or errors if `only-if-cached` misses.
+
+**Test Code:**
+```erlang
+maybe_lookup_hit_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = #{<<"path">> => <<"key">>},
+    Result = <<"value">>,
+    
+    % Cache result
+    hb_cache:write(Msg1, Opts),
+    hb_cache:write(Msg2, Opts),
+    Hashpath = hb_path:hashpath(Msg1, Msg2, Opts),
+    hb_cache:write_binary(Hashpath, Result, Opts),
+    
+    % Lookup
+    {ok, Cached} = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts),
+    ?assertEqual(Result, Cached).
+
+maybe_lookup_miss_test() ->
+    Store = hb_test_utils:test_store(),
+    Opts = #{store => Store},
+    
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = #{<<"path">> => <<"key">>},
+    
+    Result = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts),
+    ?assertMatch({continue, _, _}, Result).
+
+maybe_lookup_only_if_cached_miss_test() ->
+    Msg1 = #{},
+    Msg2 = #{<<"cache-control">> => [<<"only-if-cached">>]},
+    Opts = #{store => hb_test_utils:test_store()},
+    
+    Result = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts),
+    ?assertMatch({error, #{<<"status">> := 504}}, Result).
+```
+
+---
+
+## Cache Control Settings
+
+```erlang
+% Derive settings from sources
+Settings = #{
+    <<"store">> => true | false,
+    <<"lookup">> => true | false,
+    <<"only-if-cached">> => true | undefined
+}.
+
+% Directives
+Directives = [
+    <<"always">>,      % Store and lookup
+    <<"store">>,       % Enable store
+    <<"no-store">>,    % Disable store
+    <<"cache">>,       % Enable lookup
+    <<"no-cache">>,    % Disable lookup
+    <<"only-if-cached">> % Error on miss
+].
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Store result if requested
+Opts = #{cache_control => [<<"store">>]},
+{ok, Result} = hb_ao:resolve(Msg1, Msg2, Opts),
+hb_cache_control:maybe_store(Msg1, Msg2, Result, Opts).
+
+%% Only use cached results
+Opts = #{cache_control => [<<"only-if-cached">>]},
+case hb_cache_control:maybe_lookup(Msg1, Msg2, Opts) of
+    {ok, Cached} -> {cached, Cached};
+    {error, #{<<"status">> := 504}} -> {error, not_cached}
+end.
+
+%% Force computation
+Opts = #{cache_control => [<<"no-cache">>]},
+{continue, Msg1, Msg2} = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts).
+
+%% Always cache
+Opts = #{cache_control => [<<"always">>]},
+{ok, Result} = hb_ao:resolve(Msg1, Msg2, Opts).
+% Automatically stored
+
+%% Async caching
+Opts = #{async_cache => true},
+hb_cache_control:maybe_store(Msg1, Msg2, Result, Opts).
+% Returns immediately, caches in background
+```
+
+---
+
+## Async Caching
+
+```erlang
+% Enable async caching
+Opts = #{async_cache => true}.
+
+% Worker process spawned per-process
+Worker = find_or_spawn_async_writer(Opts),
+Worker ! {write, Msg1, Msg2, Msg3, Opts}.
+
+% Caching happens in background
+% Main process continues immediately
+```
+
+---
+
+## References
+
+- **Cache System** - `hb_cache.erl`
+- **HTTP Cache-Control** - RFC 7234
+- **AO-Core Resolution** - `hb_ao.erl`
+
+---
+
+## Notes
+
+1. **Precedence**: Opts > Msg3 > Msg2
+2. **Defaults**: Store=false, Lookup=true
+3. **Hashpath Ignore**: Prevents storage with incorrect hashpath
+4. **Async Option**: Background caching for performance
+5. **only-if-cached**: Returns 504 on miss
+6. **Heuristics**: Skip cache for explicit key lookups
+7. **Binary Results**: Stored at hashpath
+8. **Map Results**: Stored as full message
+9. **Multi-Source**: Merges settings from all sources
+10. **HTTP-Compatible**: Follows HTTP cache-control semantics
+11. **Message Control**: Via `cache-control` key
+12. **Performance**: Heuristics improve common cases

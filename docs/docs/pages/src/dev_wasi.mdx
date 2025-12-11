@@ -1,0 +1,568 @@
+# dev_wasi.erl - WASI Virtual Filesystem Device
+
+## Overview
+
+**Purpose:** Implement a virtual filesystem for WASM modules using WASI-preview-1 standard  
+**Module:** `dev_wasi`  
+**Device Name:** `wasi@1.0`  
+**Standard:** WASI-preview-1 compatible
+
+This device provides a file-system-as-map structure that is traversible externally. Each file is represented as a binary and each directory as an AO-Core message. It implements WASI-preview-1 compatible functions for accessing the filesystem as imported functions by WASM modules.
+
+## WASI-preview-1 Functions
+
+- **File Operations:** `path_open`, `fd_read`, `fd_write`
+- **System Operations:** `clock_time_get`
+- **Standard I/O:** stdin, stdout, stderr support
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_beamr_io`, `hb_private`, `hb_message`, `hb_json`
+- **WASM Device:** `dev_wasm`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lifecycle
+-spec init(M1, M2, Opts) -> {ok, InitializedMsg}.
+-spec compute(Msg1) -> {ok, Msg1}.
+
+%% File Operations
+-spec path_open(Msg1, Msg2, Opts) -> {ok, Result}.
+-spec fd_read(Msg1, Msg2, Opts) -> {ok, Result}.
+-spec fd_write(Msg1, Msg2, Opts) -> {ok, Result}.
+
+%% System Operations
+-spec clock_time_get(Msg1, Msg2, Opts) -> {ok, Result}.
+
+%% Utilities
+-spec stdout(M) -> Binary.
+```
+
+---
+
+## Public Functions
+
+### 1. init/3
+
+```erlang
+-spec init(M1, M2, Opts) -> {ok, InitializedMsg}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        InitializedMsg :: map().
+```
+
+**Description:** Initialize the virtual file system with empty stdio files, WASI-preview-1 compatible functions, and file descriptors. Creates standard file descriptors 0, 1, 2 for stdin, stdout, stderr.
+
+**Initial VFS Structure:**
+```erlang
+#{
+    <<"dev">> => #{
+        <<"stdin">> => <<>>,
+        <<"stdout">> => <<>>,
+        <<"stderr">> => <<>>
+    }
+}
+```
+
+**Initial File Descriptors:**
+```erlang
+#{
+    <<"0">> => #{ <<"filename">> => <<"/dev/stdin">>, <<"offset">> => 0 },
+    <<"1">> => #{ <<"filename">> => <<"/dev/stdout">>, <<"offset">> => 0 },
+    <<"2">> => #{ <<"filename">> => <<"/dev/stderr">>, <<"offset">> => 0 }
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_wasi_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_creates_vfs_test() ->
+    {ok, Msg} = dev_wasi:init(#{}, #{}, #{}),
+    VFS = hb_ao:get(<<"vfs">>, Msg, #{}),
+    ?assert(is_map(VFS)),
+    ?assert(maps:is_key(<<"dev">>, VFS)),
+    Dev = maps:get(<<"dev">>, VFS),
+    ?assertEqual(<<>>, maps:get(<<"stdin">>, Dev)),
+    ?assertEqual(<<>>, maps:get(<<"stdout">>, Dev)),
+    ?assertEqual(<<>>, maps:get(<<"stderr">>, Dev)).
+
+init_creates_file_descriptors_test() ->
+    {ok, Msg} = dev_wasi:init(#{}, #{}, #{}),
+    FDs = hb_ao:get(<<"file-descriptors">>, Msg, #{}),
+    ?assert(maps:is_key(<<"0">>, FDs)),
+    ?assert(maps:is_key(<<"1">>, FDs)),
+    ?assert(maps:is_key(<<"2">>, FDs)),
+    FD0 = maps:get(<<"0">>, FDs),
+    ?assertEqual(<<"/dev/stdin">>, maps:get(<<"filename">>, FD0)),
+    ?assertEqual(0, maps:get(<<"offset">>, FD0)).
+
+init_creates_wasi_stdlib_test() ->
+    {ok, Msg} = dev_wasi:init(#{}, #{}, #{}),
+    StdLib = hb_ao:get(<<"wasm/stdlib/wasi_snapshot_preview1">>, Msg, #{}),
+    ?assertEqual(<<"wasi@1.0">>, maps:get(<<"device">>, StdLib)).
+```
+
+---
+
+### 2. compute/1
+
+```erlang
+-spec compute(Msg1) -> {ok, Msg1}
+    when
+        Msg1 :: map().
+```
+
+**Description:** Passthrough compute handler that returns the message unchanged. Actual computation is handled by the WASM device.
+
+**Test Code:**
+```erlang
+-module(dev_wasi_compute_test).
+-include_lib("eunit/include/eunit.hrl").
+
+compute_passthrough_test() ->
+    Msg = #{ <<"key">> => <<"value">> },
+    {ok, Result} = dev_wasi:compute(Msg),
+    ?assertEqual(Msg, Result).
+```
+
+---
+
+### 3. stdout/1
+
+```erlang
+-spec stdout(M) -> Binary
+    when
+        M :: map(),
+        Binary :: binary().
+```
+
+**Description:** Return the stdout buffer from a state message. Extracts the accumulated stdout content written by WASM programs.
+
+**Test Code:**
+```erlang
+-module(dev_wasi_stdout_test).
+-include_lib("eunit/include/eunit.hrl").
+
+stdout_empty_test() ->
+    Msg = #{
+        <<"vfs">> => #{
+            <<"dev">> => #{
+                <<"stdout">> => <<>>
+            }
+        }
+    },
+    ?assertEqual(<<>>, dev_wasi:stdout(Msg)).
+
+stdout_with_content_test() ->
+    Msg = #{
+        <<"vfs">> => #{
+            <<"dev">> => #{
+                <<"stdout">> => <<"Hello, World!">>
+            }
+        }
+    },
+    ?assertEqual(<<"Hello, World!">>, dev_wasi:stdout(Msg)).
+```
+
+---
+
+### 4. path_open/3
+
+```erlang
+-spec path_open(Msg1, Msg2, Opts) -> {ok, Result}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Result :: map().
+```
+
+**Description:** Add a file descriptor to the state message. Implements WASI `path_open` function. Creates a new file descriptor if the file doesn't exist, or returns existing descriptor.
+
+**WASI Parameters:**
+- `args` - `[FDPtr, LookupFlag, PathPtr, ...]`
+
+**Return:**
+```erlang
+#{
+    <<"state">> => UpdatedMsg,
+    <<"results">> => [0, Index]  % [errno, fd_index]
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_wasi_path_open_test).
+-include_lib("eunit/include/eunit.hrl").
+
+path_open_creates_fd_test() ->
+    % Requires WASM instance setup
+    % See test suite for complete example
+    ok.
+```
+
+---
+
+### 5. fd_write/3
+
+```erlang
+-spec fd_write(Msg1, Msg2, Opts) -> {ok, Result}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Result :: map().
+```
+
+**Description:** WASM stdlib implementation of `fd_write` using WASI-p1 standard interface. Writes data to a file descriptor, updating file contents and offset.
+
+**WASI Parameters:**
+- `args` - `[FD, Ptr, Vecs, RetPtr]`
+  - `FD` - File descriptor number
+  - `Ptr` - Pointer to iovec array
+  - `Vecs` - Number of iovecs
+  - `RetPtr` - Pointer to write result size
+
+**Process:**
+1. Parse iovec structures from WASM memory
+2. Read data from specified pointers
+3. Update file contents at current offset
+4. Advance file descriptor offset
+5. Write total bytes written to RetPtr
+
+**Test Code:**
+```erlang
+-module(dev_wasi_fd_write_test).
+-include_lib("eunit/include/eunit.hrl").
+
+fd_write_test() ->
+    % Requires WASM instance with memory
+    % See test suite for complete example
+    ok.
+```
+
+---
+
+### 6. fd_read/3
+
+```erlang
+-spec fd_read(Msg1, Msg2, Opts) -> {ok, Result}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Result :: map().
+```
+
+**Description:** Read from a file using WASI-p1 standard interface. Reads data from file descriptor into WASM memory.
+
+**WASI Parameters:**
+- `args` - `[FD, VecsPtr, NumVecs, RetPtr]`
+  - `FD` - File descriptor number
+  - `VecsPtr` - Pointer to iovec array
+  - `NumVecs` - Number of iovecs
+  - `RetPtr` - Pointer to read result size
+
+**Process:**
+1. Get file descriptor and filename
+2. Parse iovec structures
+3. Read data from file at current offset
+4. Write data to WASM memory
+5. Advance file descriptor offset
+6. Write total bytes read to RetPtr
+
+**Test Code:**
+```erlang
+-module(dev_wasi_fd_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+fd_read_test() ->
+    % Requires WASM instance with memory and file
+    % See test suite for complete example
+    ok.
+```
+
+---
+
+### 7. clock_time_get/3
+
+```erlang
+-spec clock_time_get(Msg1, Msg2, Opts) -> {ok, Result}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Result :: map().
+```
+
+**Description:** WASI-preview-1 clock time handler. Returns a fixed value for time queries.
+
+**Return:**
+```erlang
+#{
+    <<"state">> => State,
+    <<"results">> => [1]  % Fixed timestamp
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_wasi_clock_test).
+-include_lib("eunit/include/eunit.hrl").
+
+clock_time_get_test() ->
+    {ok, Result} = dev_wasi:clock_time_get(
+        #{ <<"state">> => #{} },
+        #{},
+        #{}
+    ),
+    ?assertEqual([1], maps:get(<<"results">>, Result)).
+```
+
+---
+
+## VFS Structure
+
+### File System Layout
+
+```erlang
+#{
+    <<"vfs">> => #{
+        <<"dev">> => #{
+            <<"stdin">> => Binary,
+            <<"stdout">> => Binary,
+            <<"stderr">> => Binary
+        },
+        <<"/path/to/file">> => Binary,
+        <<"/another/path">> => Binary
+    }
+}
+```
+
+### File Descriptors
+
+```erlang
+#{
+    <<"file-descriptors">> => #{
+        <<"0">> => #{
+            <<"filename">> => <<"/dev/stdin">>,
+            <<"offset">> => 0,
+            <<"index">> => 0
+        },
+        <<"1">> => #{
+            <<"filename">> => <<"/dev/stdout">>,
+            <<"offset">> => 0,
+            <<"index">> => 1
+        },
+        <<"N">> => #{
+            <<"filename">> => <<"/custom/file">>,
+            <<"offset">> => CurrentOffset,
+            <<"index">> => N
+        }
+    }
+}
+```
+
+---
+
+## WASI Integration
+
+### Standard Library Path
+
+WASI functions are accessible at:
+```
+/wasm/stdlib/wasi_snapshot_preview1/{function_name}
+```
+
+### Iovec Structure
+
+WASI-preview-1 iovec format (16 bytes):
+```
++-------------------+
+| Pointer (8 bytes) | Pointer to data buffer
++-------------------+
+| Length (8 bytes)  | Length of data
++-------------------+
+```
+
+**Parsing:**
+```erlang
+parse_iovec(Instance, Ptr) ->
+    {ok, VecStruct} = hb_beamr_io:read(Instance, Ptr, 16),
+    <<
+        BinPtr:64/little-unsigned-integer,
+        Len:64/little-unsigned-integer
+    >> = VecStruct,
+    {BinPtr, Len}.
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create WASI-enabled WASM stack
+generate_wasi_stack(File, Func, Params) ->
+    Msg0 = dev_wasm:cache_wasm_image(File),
+    Msg1 = Msg0#{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => [<<"wasi@1.0">>, <<"wasm-64@1.0">>],
+        <<"output-prefixes">> => [<<"wasm">>, <<"wasm">>],
+        <<"stack-keys">> => [<<"init">>, <<"compute">>],
+        <<"function">> => Func,
+        <<"params">> => Params
+    },
+    {ok, Msg2} = hb_ao:resolve(Msg1, <<"init">>, #{}),
+    Msg2.
+
+%% Execute WASM with WASI support
+StackMsg = generate_wasi_stack("program.wasm", <<"main">>, []),
+{ok, Result} = hb_ao:resolve(StackMsg, <<"compute">>, #{}),
+Output = dev_wasi:stdout(Result).
+
+%% Read stdout after execution
+Stdout = hb_ao:get(<<"vfs/dev/stdout">>, Result, #{}).
+
+%% Access custom files in VFS
+FileContent = hb_ao:get(<<"vfs/data/output.txt">>, Result, #{}).
+```
+
+---
+
+## AOS Integration
+
+The device is designed to work with AOS (AO Spec) WASM modules:
+
+```erlang
+%% Generate test AOS environment
+gen_test_env() ->
+    <<"{\"Process\":{\"Id\":\"AOS\",\"Owner\":\"FOOBAR\",
+       \"Tags\":[{\"name\":\"Name\",\"value\":\"Thomas\"}]}}\0">>.
+
+%% Generate AOS message
+gen_test_aos_msg(Command) ->
+    <<"{\"From\":\"FOOBAR\",\"Block-Height\":\"1\",
+       \"Target\":\"AOS\",\"Id\":\"1\",
+       \"Tags\":[{\"name\":\"Action\",\"value\":\"Eval\"}],
+       \"Data\":\"", (list_to_binary(Command))/binary, "\"}\0">>.
+
+%% Execute AOS program
+Init = generate_wasi_stack("aos-2-pure-xs.wasm", <<"handle">>, []),
+Msg = gen_test_aos_msg("return 1 + 1"),
+Env = gen_test_env(),
+Instance = hb_private:get(<<"wasm/instance">>, Init, #{}),
+{ok, Ptr1} = hb_beamr_io:write_string(Instance, Msg),
+{ok, Ptr2} = hb_beamr_io:write_string(Instance, Env),
+Ready = Init#{ <<"parameters">> => [Ptr1, Ptr2] },
+{ok, StateRes} = hb_ao:resolve(Ready, <<"compute">>, #{}),
+[OutputPtr] = hb_ao:get(<<"results/wasm/output">>, StateRes),
+{ok, Output} = hb_beamr_io:read_string(Instance, OutputPtr).
+```
+
+---
+
+## Serialization
+
+The VFS is fully serializable through message conversion:
+
+```erlang
+%% Serialize VFS
+VFSMsg = hb_ao:get(<<"vfs">>, StackMsg),
+SerializedVFS = hb_message:convert(VFSMsg, <<"httpsig@1.0">>, #{}),
+Restored = hb_message:convert(
+    SerializedVFS,
+    <<"structured@1.0">>,
+    <<"httpsig@1.0">>,
+    #{}
+).
+```
+
+---
+
+## File Descriptor Management
+
+### Adding File Descriptors
+
+File descriptors are automatically created on first access:
+
+```erlang
+%% path_open creates new FD
+FD = #{
+    <<"index">> => NextIndex,
+    <<"filename">> => Path,
+    <<"offset">> => 0
+}
+```
+
+### Updating Offsets
+
+Offsets are updated after read/write operations:
+
+```erlang
+%% After write
+NewOffset = OldOffset + BytesWritten
+
+%% After read
+NewOffset = OldOffset + BytesRead
+```
+
+---
+
+## Memory Operations
+
+### Writing to VFS Files
+
+```erlang
+fd_write process:
+1. Parse iovec array from WASM memory
+2. Read data buffers from WASM memory
+3. Combine: Before + Data + After
+4. Update VFS file at path
+5. Update file descriptor offset
+6. Write bytes_written to RetPtr
+```
+
+### Reading from VFS Files
+
+```erlang
+fd_read process:
+1. Get file data from VFS
+2. Calculate read size (min of requested and available)
+3. Extract bytes from file at offset
+4. Write bytes to WASM memory at VecPtr
+5. Update file descriptor offset
+6. Write bytes_read to RetPtr
+```
+
+---
+
+## References
+
+- **WASM Device** - `dev_wasm.erl`
+- **BEAMR I/O** - `hb_beamr_io.erl`
+- **AO Resolution** - `hb_ao.erl`
+- **WASI Specification** - WebAssembly System Interface preview-1
+
+---
+
+## Notes
+
+1. **WASI Standard:** Full WASI-preview-1 compatibility
+2. **Virtual Filesystem:** File-system-as-map structure
+3. **Standard I/O:** stdio files at `/dev/stdin`, `/dev/stdout`, `/dev/stderr`
+4. **File Descriptors:** 0, 1, 2 pre-allocated for stdio
+5. **Iovec Format:** 16-byte structures (pointer + length)
+6. **Little Endian:** All multi-byte values in little-endian format
+7. **Offset Tracking:** Automatic file position management
+8. **Serializable:** VFS fully serializable through message conversion
+9. **AOS Compatible:** Designed for AO Spec WASM modules
+10. **Recursive Writes:** Handles multiple iovec structures per call

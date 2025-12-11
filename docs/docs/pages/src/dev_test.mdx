@@ -1,0 +1,556 @@
+# dev_test.erl - Test Device for AO-Core
+
+## Overview
+
+**Purpose:** Test device for validating AO-Core framework functionality  
+**Module:** `dev_test`  
+**Device Name:** `test-device@1.0`  
+**Type:** Development/Testing utility
+
+This module provides a simple test device for AO-Core, enabling testing of functionality that depends on Erlang's module system. It implements standard device handlers (compute, init, restore, snapshot) and utility functions for testing inter-process communication and state management.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_private`, `hb_name`, `hb_http_server`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info(Msg) -> InfoMap.
+-spec info(Msg1, Msg2, Opts) -> {ok, Response}.
+
+%% Device Loading
+-spec load(Base, Req, Opts) -> {ok, ModifiedBase}.
+
+%% Standard Handlers
+-spec test_func(Msg) -> {ok, binary()}.
+-spec compute(Msg1, Msg2, Opts) -> {ok, UpdatedMsg}.
+-spec init(Msg, Msg2, Opts) -> {ok, InitializedMsg}.
+-spec restore(Msg, Msg2, Opts) -> {ok, RestoredMsg} | {error, Reason}.
+-spec snapshot(Msg1, Msg2, Opts) -> {ok, map()}.
+
+%% Utility Handlers
+-spec index(Msg, Req, Opts) -> {ok, Response}.
+-spec mul(Msg1, Msg2) -> {ok, Result}.
+-spec delay(Msg1, Req, Opts) -> {ok, Response}.
+
+%% State Management
+-spec update_state(Msg, Msg2, Opts) -> {ok, pid()} | {error, Reason}.
+-spec increment_counter(Msg1, Msg2, Opts) -> {ok, pid()} | {error, Reason}.
+
+%% Postprocessing
+-spec postprocess(Msg, Response, Opts) -> {ok, Msgs}.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1, info/3
+
+```erlang
+-spec info(Msg) -> InfoMap
+    when
+        Msg :: term(),
+        InfoMap :: map().
+
+-spec info(Msg1, Msg2, Opts) -> {ok, Response}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Response :: map().
+```
+
+**Description:** Returns device information. The arity-1 version returns handler configuration, while arity-3 returns a structured info response with paths and description.
+
+**info/1 Return:**
+```erlang
+#{
+    <<"default">> => dev_message,
+    handlers => #{
+        <<"info">> => fun info/3,
+        <<"update_state">> => fun update_state/3,
+        <<"increment_counter">> => fun increment_counter/3
+    }
+}
+```
+
+**info/3 Return:**
+```erlang
+#{
+    <<"status">> => 200,
+    <<"body">> => #{
+        <<"description">> => <<"Test device for testing the AO-Core framework">>,
+        <<"version">> => <<"1.0">>,
+        <<"paths">> => #{
+            <<"info">> => <<"Get device info">>,
+            <<"test_func">> => <<"Test function">>,
+            ...
+        }
+    }
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_test_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_arity1_test() ->
+    Info = dev_test:info(#{}),
+    ?assert(maps:is_key(handlers, Info)),
+    ?assertEqual(dev_message, maps:get(<<"default">>, Info)).
+
+info_arity3_test() ->
+    {ok, Response} = dev_test:info(#{}, #{}, #{}),
+    ?assertEqual(200, maps:get(<<"status">>, Response)),
+    Body = maps:get(<<"body">>, Response),
+    ?assertEqual(<<"1.0">>, maps:get(<<"version">>, Body)).
+```
+
+---
+
+### 2. load/3
+
+```erlang
+-spec load(Base, Req, Opts) -> {ok, ModifiedBase}
+    when
+        Base :: map(),
+        Req :: term(),
+        Opts :: map(),
+        ModifiedBase :: map().
+```
+
+**Description:** Returns a message with the device set to this module (`test-device@1.0`).
+
+**Test Code:**
+```erlang
+-module(dev_test_load_test).
+-include_lib("eunit/include/eunit.hrl").
+
+load_test() ->
+    {ok, Result} = dev_test:load(#{<<"key">> => <<"value">>}, #{}, #{}),
+    ?assertEqual(<<"test-device@1.0">>, maps:get(<<"device">>, Result)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, Result)).
+```
+
+---
+
+### 3. test_func/1
+
+```erlang
+-spec test_func(Msg) -> {ok, binary()}
+    when
+        Msg :: term().
+```
+
+**Description:** Simple test function that returns a fixed value. Used to test device function resolution.
+
+**Test Code:**
+```erlang
+-module(dev_test_func_test).
+-include_lib("eunit/include/eunit.hrl").
+
+test_func_test() ->
+    ?assertEqual({ok, <<"GOOD_FUNCTION">>}, dev_test:test_func(#{})).
+
+device_resolution_test() ->
+    Msg = #{ <<"device">> => <<"test-device@1.0">> },
+    ?assertEqual({ok, <<"GOOD_FUNCTION">>}, hb_ao:resolve(Msg, test_func, #{})).
+```
+
+---
+
+### 4. compute/3
+
+```erlang
+-spec compute(Msg1, Msg2, Opts) -> {ok, UpdatedMsg}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        UpdatedMsg :: map().
+```
+
+**Description:** Example compute handler. Maintains a running list of computed slots in the state message and places the new slot number in results.
+
+**State Updates:**
+- Adds `assignment-slot` to results
+- Appends slot to `already-seen` list
+- Sets `random-key` to `random-value`
+
+**Test Code:**
+```erlang
+-module(dev_test_compute_test).
+-include_lib("eunit/include/eunit.hrl").
+
+compute_test() ->
+    Msg0 = #{ <<"device">> => <<"test-device@1.0">> },
+    {ok, Msg1} = hb_ao:resolve(Msg0, init, #{}),
+    Msg2 = hb_ao:set(
+        #{ <<"path">> => <<"compute">> },
+        #{ <<"slot">> => 1 },
+        #{}
+    ),
+    {ok, Msg3} = hb_ao:resolve(Msg1, Msg2, #{}),
+    ?assertEqual(1, hb_ao:get(<<"results/assignment-slot">>, Msg3, #{})),
+    Msg4 = hb_ao:set(
+        #{ <<"path">> => <<"compute">> },
+        #{ <<"slot">> => 2 },
+        #{}
+    ),
+    {ok, Msg5} = hb_ao:resolve(Msg3, Msg4, #{}),
+    ?assertEqual(2, hb_ao:get(<<"results/assignment-slot">>, Msg5, #{})),
+    ?assertEqual([2, 1], hb_ao:get(<<"already-seen">>, Msg5, #{})).
+```
+
+---
+
+### 5. init/3
+
+```erlang
+-spec init(Msg, Msg2, Opts) -> {ok, InitializedMsg}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        InitializedMsg :: map().
+```
+
+**Description:** Example init handler. Sets the `already-seen` key to an empty list.
+
+**Test Code:**
+```erlang
+-module(dev_test_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_test() ->
+    Msg = #{ <<"device">> => <<"test-device@1.0">> },
+    {ok, Result} = hb_ao:resolve(Msg, init, #{}),
+    ?assertEqual([], hb_ao:get(<<"already-seen">>, Result, #{})).
+```
+
+---
+
+### 6. restore/3
+
+```erlang
+-spec restore(Msg, Msg2, Opts) -> {ok, RestoredMsg} | {error, Reason}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        RestoredMsg :: map(),
+        Reason :: binary().
+```
+
+**Description:** Example restore handler. Sets the hidden key `test-key/started-state` to the value of `already-seen`. Returns error if no viable state exists.
+
+**Test Code:**
+```erlang
+-module(dev_test_restore_test).
+-include_lib("eunit/include/eunit.hrl").
+
+restore_success_test() ->
+    Msg = #{
+        <<"device">> => <<"test-device@1.0">>,
+        <<"already-seen">> => [1, 2, 3]
+    },
+    {ok, Result} = hb_ao:resolve(Msg, <<"restore">>, #{}),
+    ?assertEqual([1, 2, 3], hb_private:get(<<"test-key/started-state">>, Result, #{})).
+
+restore_failure_test() ->
+    Msg = #{ <<"device">> => <<"test-device@1.0">> },
+    Result = hb_ao:resolve(Msg, <<"restore">>, #{}),
+    ?assertMatch({error, <<"No viable state to restore.">>}, Result).
+```
+
+---
+
+### 7. mul/2
+
+```erlang
+-spec mul(Msg1, Msg2) -> {ok, Result}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Result :: map().
+```
+
+**Description:** Example imported function for WASM executor. Multiplies two arguments and returns result with state preserved.
+
+**Expected Input:**
+- `Msg1` contains `state`
+- `Msg2` contains `args` as list of two numbers
+
+**Test Code:**
+```erlang
+-module(dev_test_mul_test).
+-include_lib("eunit/include/eunit.hrl").
+
+mul_test() ->
+    Msg1 = #{ <<"state">> => <<"preserved">> },
+    Msg2 = #{ <<"args">> => [6, 7] },
+    {ok, Result} = dev_test:mul(Msg1, Msg2),
+    ?assertEqual(<<"preserved">>, maps:get(<<"state">>, Result)),
+    ?assertEqual([42], maps:get(<<"results">>, Result)).
+```
+
+---
+
+### 8. snapshot/3
+
+```erlang
+-spec snapshot(Msg1, Msg2, Opts) -> {ok, map()}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map().
+```
+
+**Description:** Do nothing when asked to snapshot. Returns empty map.
+
+**Test Code:**
+```erlang
+-module(dev_test_snapshot_test).
+-include_lib("eunit/include/eunit.hrl").
+
+snapshot_test() ->
+    {ok, Result} = dev_test:snapshot(#{}, #{}, #{}),
+    ?assertEqual(#{}, Result).
+```
+
+---
+
+### 9. index/3
+
+```erlang
+-spec index(Msg, Req, Opts) -> {ok, Response}
+    when
+        Msg :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Response :: map().
+```
+
+**Description:** Example index handler. Returns an HTML response with a customizable name.
+
+**Test Code:**
+```erlang
+-module(dev_test_index_test).
+-include_lib("eunit/include/eunit.hrl").
+
+index_default_test() ->
+    {ok, Response} = dev_test:index(#{}, #{}, #{}),
+    ?assertEqual(<<"text/html">>, maps:get(<<"content-type">>, Response)),
+    ?assertEqual(<<"i like turtles!">>, maps:get(<<"body">>, Response)).
+
+index_custom_name_test() ->
+    Msg = #{ <<"name">> => <<"cats">> },
+    {ok, Response} = dev_test:index(Msg, #{}, #{}),
+    ?assertEqual(<<"i like cats!">>, maps:get(<<"body">>, Response)).
+```
+
+---
+
+### 10. update_state/3
+
+```erlang
+-spec update_state(Msg, Msg2, Opts) -> {ok, pid()} | {error, Reason}
+    when
+        Msg :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Reason :: binary().
+```
+
+**Description:** Find a test worker's PID and send it an update message. Requires `test-id` in Msg2.
+
+**Test Code:**
+```erlang
+-module(dev_test_update_state_test).
+-include_lib("eunit/include/eunit.hrl").
+
+update_state_no_id_test() ->
+    Result = dev_test:update_state(#{}, #{}, #{}),
+    ?assertMatch({error, <<"No test ID found in message.">>}, Result).
+
+update_state_no_worker_test() ->
+    Msg2 = #{ <<"test-id">> => <<"nonexistent">> },
+    Result = dev_test:update_state(#{}, Msg2, #{}),
+    ?assertMatch({error, <<"No test worker found.">>}, Result).
+```
+
+---
+
+### 11. increment_counter/3
+
+```erlang
+-spec increment_counter(Msg1, Msg2, Opts) -> {ok, pid()} | {error, Reason}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Reason :: binary().
+```
+
+**Description:** Find a test worker's PID and send it an increment message. Requires `test-id` in Msg2.
+
+**Test Code:**
+```erlang
+-module(dev_test_increment_test).
+-include_lib("eunit/include/eunit.hrl").
+
+increment_counter_no_id_test() ->
+    Result = dev_test:increment_counter(#{}, #{}, #{}),
+    ?assertMatch({error, <<"No test ID found in message.">>}, Result).
+```
+
+---
+
+### 12. delay/3
+
+```erlang
+-spec delay(Msg1, Req, Opts) -> {ok, Response}
+    when
+        Msg1 :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Response :: map() | term().
+```
+
+**Description:** Sleeps for a specified duration (default 750ms) and returns appropriate response for hook usage.
+
+**Duration Source:**
+1. `duration` in Msg1
+2. `duration` in Req
+3. Default: 750ms
+
+**Test Code:**
+```erlang
+-module(dev_test_delay_test).
+-include_lib("eunit/include/eunit.hrl").
+
+delay_default_test() ->
+    Start = erlang:monotonic_time(millisecond),
+    {ok, _} = dev_test:delay(#{}, #{}, #{}),
+    Elapsed = erlang:monotonic_time(millisecond) - Start,
+    ?assert(Elapsed >= 750).
+
+delay_custom_test() ->
+    Msg1 = #{ <<"duration">> => 100 },
+    Start = erlang:monotonic_time(millisecond),
+    {ok, _} = dev_test:delay(Msg1, #{}, #{}),
+    Elapsed = erlang:monotonic_time(millisecond) - Start,
+    ?assert(Elapsed >= 100),
+    ?assert(Elapsed < 200).
+```
+
+---
+
+### 13. postprocess/3
+
+```erlang
+-spec postprocess(Msg, Response, Opts) -> {ok, Msgs}
+    when
+        Msg :: map(),
+        Response :: map(),
+        Opts :: map(),
+        Msgs :: term().
+```
+
+**Description:** Sets `postprocessor-called` to true in the HTTP server options. Used as a postprocessor hook.
+
+**Test Code:**
+```erlang
+-module(dev_test_postprocess_test).
+-include_lib("eunit/include/eunit.hrl").
+
+postprocess_test() ->
+    Response = #{ <<"body">> => [<<"msg1">>, <<"msg2">>] },
+    {ok, Msgs} = dev_test:postprocess(#{}, Response, #{}),
+    ?assertEqual([<<"msg1">>, <<"msg2">>], Msgs).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Use as a test device
+Msg = #{ <<"device">> => <<"test-device@1.0">> },
+{ok, <<"GOOD_FUNCTION">>} = hb_ao:resolve(Msg, test_func, #{}).
+
+%% Test compute workflow
+Msg0 = #{ <<"device">> => <<"test-device@1.0">> },
+{ok, Msg1} = hb_ao:resolve(Msg0, init, #{}),
+{ok, Msg2} = hb_ao:resolve(Msg1, #{
+    <<"path">> => <<"compute">>,
+    <<"slot">> => 1
+}, #{}),
+Slot = hb_ao:get(<<"results/assignment-slot">>, Msg2, #{}).
+
+%% Use delay as hook
+HookMsg = #{
+    <<"device">> => <<"test-device@1.0">>,
+    <<"duration">> => 500,
+    <<"return">> => #{ <<"status">> => <<"delayed">> }
+},
+{ok, Result} = dev_test:delay(HookMsg, #{}, #{}).
+
+%% Register and communicate with test worker
+hb_name:register({<<"test">>, TestId}, self()),
+dev_test:update_state(#{}, #{ <<"test-id">> => TestId }, #{}),
+receive {update, Msg} -> process(Msg) end.
+```
+
+---
+
+## Handler Resolution
+
+The device uses a default handler pattern:
+
+```erlang
+info(_) ->
+    #{
+        <<"default">> => dev_message,  % Fallback to dev_message
+        handlers => #{
+            <<"info">> => fun info/3,
+            <<"update_state">> => fun update_state/3,
+            <<"increment_counter">> => fun increment_counter/3
+        }
+    }.
+```
+
+Functions not in `handlers` are resolved via module exports.
+
+---
+
+## References
+
+- **AO Resolution** - `hb_ao.erl`
+- **Message Device** - `dev_message.erl`
+- **Private Data** - `hb_private.erl`
+- **Name Registry** - `hb_name.erl`
+- **HTTP Server** - `hb_http_server.erl`
+
+---
+
+## Notes
+
+1. **Testing Purpose:** Designed specifically for AO-Core framework testing
+2. **Module Resolution:** Tests Erlang module system integration
+3. **State Tracking:** Compute handler tracks slot history
+4. **Private Keys:** Restore uses hidden keys via `hb_private`
+5. **Worker Communication:** Supports test worker messaging
+6. **Hook Compatible:** Delay function usable as execution hook
+7. **Default Handler:** Falls back to `dev_message` for unknown keys
+8. **Postprocessor:** Can modify HTTP server options
+9. **WASM Integration:** Mul function demonstrates imported function pattern
+10. **Name Labeling:** Device labeled `test-device@1.0` to avoid conflicts

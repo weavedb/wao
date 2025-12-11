@@ -1,0 +1,601 @@
+# hb_store_opts.erl - Store Configuration Defaults Manager
+
+## Overview
+
+**Purpose:** Apply default configuration values to store options based on store type  
+**Module:** `hb_store_opts`  
+**Pattern:** Recursive map merger with module-specific defaults
+
+This module takes store options and store defaults, applying type-specific default properties based on the `store-module` field. Supports recursive application to nested store configurations, allowing complex multi-layered store hierarchies to inherit appropriate defaults.
+
+## Dependencies
+
+- **Erlang/OTP:** `lists`, `maps`
+- **Records:** None
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Configuration Management
+-spec apply(StoreOpts, Defaults) -> UpdatedStoreOpts
+    when
+        StoreOpts :: [map()],
+        Defaults :: map(),
+        UpdatedStoreOpts :: [map()].
+```
+
+---
+
+## Public Functions
+
+### 1. apply/2
+
+```erlang
+-spec apply(StoreOpts, Defaults) -> UpdatedStoreOpts
+    when
+        StoreOpts :: [map()],
+        Defaults :: map(),
+        UpdatedStoreOpts :: [map()].
+```
+
+**Description:** Apply store defaults to a list of store configuration maps. For each store in the list, applies defaults based on its `store-module` type and recursively processes any nested stores in the `<<"store">>` field.
+
+**Supported Store Modules:**
+- `hb_store_lmdb` → Uses `<<"lmdb">>` defaults
+- `hb_store_fs` → Uses `<<"fs">>` defaults
+- `hb_store_rocksdb` → Uses `<<"rocksdb">>` defaults
+- `hb_store_gateway` → Uses `<<"gateway">>` defaults
+
+**Test Code:**
+```erlang
+-module(hb_store_opts_apply_test).
+-include_lib("eunit/include/eunit.hrl").
+
+apply_basic_test() ->
+    StoreOpts = [
+        #{
+            <<"name">> => <<"cache-mainnet/lmdb">>,
+            <<"store-module">> => hb_store_lmdb
+        }
+    ],
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 1073741824
+        }
+    },
+    Expected = [
+        #{
+            <<"name">> => <<"cache-mainnet/lmdb">>,
+            <<"store-module">> => hb_store_lmdb,
+            <<"capacity">> => 1073741824
+        }
+    ],
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    ?assertEqual(Expected, Result).
+
+apply_empty_defaults_test() ->
+    StoreOpts = [
+        #{
+            <<"name">> => <<"cache-mainnet/lmdb">>,
+            <<"store-module">> => hb_store_lmdb
+        }
+    ],
+    Defaults = #{},
+    Expected = [
+        #{
+            <<"name">> => <<"cache-mainnet/lmdb">>,
+            <<"store-module">> => hb_store_lmdb
+        }
+    ],
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    ?assertEqual(Expected, Result).
+
+apply_empty_store_opts_test() ->
+    StoreOpts = [],
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 1073741824
+        }
+    },
+    Expected = [],
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    ?assertEqual(Expected, Result).
+
+apply_multiple_stores_test() ->
+    StoreOpts = [
+        #{
+            <<"name">> => <<"lmdb1">>,
+            <<"store-module">> => hb_store_lmdb
+        },
+        #{
+            <<"name">> => <<"lmdb2">>,
+            <<"store-module">> => hb_store_lmdb
+        },
+        #{
+            <<"name">> => <<"fs1">>,
+            <<"store-module">> => hb_store_fs
+        }
+    ],
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 5000
+        },
+        <<"fs">> => #{
+            <<"buffer-size">> => 1024
+        }
+    },
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    [Lmdb1, Lmdb2, Fs1] = Result,
+    
+    ?assertEqual(5000, maps:get(<<"capacity">>, Lmdb1)),
+    ?assertEqual(5000, maps:get(<<"capacity">>, Lmdb2)),
+    ?assertEqual(1024, maps:get(<<"buffer-size">>, Fs1)),
+    ?assertEqual(false, maps:is_key(<<"capacity">>, Fs1)).
+```
+
+---
+
+## Internal Functions
+
+### apply_defaults_to_store/2
+
+```erlang
+-spec apply_defaults_to_store(StoreOpt, Defaults) -> UpdatedStoreOpt
+    when
+        StoreOpt :: map(),
+        Defaults :: map(),
+        UpdatedStoreOpt :: map().
+```
+
+**Description:** Apply defaults to a single store configuration by first applying module-type defaults, then recursively processing any sub-stores.
+
+---
+
+### apply_defaults_by_module_type/2
+
+```erlang
+-spec apply_defaults_by_module_type(StoreOpt, Defaults) -> UpdatedStoreOpt
+    when
+        StoreOpt :: map(),
+        Defaults :: map(),
+        UpdatedStoreOpt :: map().
+```
+
+**Description:** Apply type-specific defaults based on the `<<"store-module">>` field. If the module type has defaults defined, merges them with the store options (store options take precedence).
+
+**Test Code:**
+```erlang
+-module(hb_store_opts_module_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+module_type_lmdb_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 1000,
+            <<"sync">> => true
+        }
+    },
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(1000, maps:get(<<"capacity">>, Updated)),
+    ?assertEqual(true, maps:get(<<"sync">>, Updated)).
+
+module_type_fs_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => hb_store_fs
+    },
+    Defaults = #{
+        <<"fs">> => #{
+            <<"buffer-size">> => 2048
+        }
+    },
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(2048, maps:get(<<"buffer-size">>, Updated)).
+
+module_type_unknown_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => unknown_module
+    },
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 1000
+        }
+    },
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(StoreOpt, Updated).
+```
+
+---
+
+### apply_type_defaults/3
+
+```erlang
+-spec apply_type_defaults(StoreOpt, TypeKey, Defaults) -> UpdatedStoreOpt
+    when
+        StoreOpt :: map(),
+        TypeKey :: binary(),
+        Defaults :: map(),
+        UpdatedStoreOpt :: map().
+```
+
+**Description:** Apply defaults for a specific type key by merging type-specific defaults with the store options. Store options take precedence over defaults.
+
+---
+
+### apply_defaults_to_substores/2
+
+```erlang
+-spec apply_defaults_to_substores(StoreOpt, Defaults) -> UpdatedStoreOpt
+    when
+        StoreOpt :: map(),
+        Defaults :: map(),
+        UpdatedStoreOpt :: map().
+```
+
+**Description:** Recursively apply defaults to nested stores found in the `<<"store">>` field. Processes each sub-store independently.
+
+**Test Code:**
+```erlang
+-module(hb_store_opts_nested_test).
+-include_lib("eunit/include/eunit.hrl").
+
+nested_stores_test() ->
+    StoreOpts = [
+        #{
+            <<"store-module">> => hb_store_gateway,
+            <<"store">> => [
+                #{
+                    <<"name">> => <<"cache-mainnet/lmdb">>,
+                    <<"store-module">> => hb_store_lmdb
+                }
+            ]
+        }
+    ],
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 1073741824
+        }
+    },
+    Expected = [
+        #{
+            <<"store-module">> => hb_store_gateway,
+            <<"store">> => [
+                #{
+                    <<"name">> => <<"cache-mainnet/lmdb">>,
+                    <<"store-module">> => hb_store_lmdb,
+                    <<"capacity">> => 1073741824
+                }
+            ]
+        }
+    ],
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    ?assertEqual(Expected, Result).
+
+deeply_nested_stores_test() ->
+    StoreOpts = [
+        #{
+            <<"store-module">> => hb_store_gateway,
+            <<"store">> => [
+                #{
+                    <<"store-module">> => hb_store_lru,
+                    <<"store">> => [
+                        #{
+                            <<"name">> => <<"lmdb">>,
+                            <<"store-module">> => hb_store_lmdb
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 5000
+        }
+    },
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    [Gateway] = Result,
+    [Lru] = maps:get(<<"store">>, Gateway),
+    [Lmdb] = maps:get(<<"store">>, Lru),
+    ?assertEqual(5000, maps:get(<<"capacity">>, Lmdb)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic store defaults application
+DefaultStoreOpts = [
+    #{
+        <<"name">> => <<"cache-mainnet/lmdb">>,
+        <<"store-module">> => hb_store_lmdb
+    }
+],
+StoreDefaults = #{
+    <<"lmdb">> => #{
+        <<"capacity">> => 16_000_000_000
+    }
+},
+UpdatedStoreOpts = hb_store_opts:apply(DefaultStoreOpts, StoreDefaults).
+
+%% Multiple store types with different defaults
+MultiStoreOpts = [
+    #{
+        <<"name">> => <<"cache/lmdb">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    #{
+        <<"name">> => <<"cache/fs">>,
+        <<"store-module">> => hb_store_fs
+    },
+    #{
+        <<"name">> => <<"cache/rocks">>,
+        <<"store-module">> => hb_store_rocksdb
+    }
+],
+Defaults = #{
+    <<"lmdb">> => #{
+        <<"capacity">> => 16_000_000_000,
+        <<"no-sync">> => true
+    },
+    <<"fs">> => #{
+        <<"buffer-size">> => 4096
+    },
+    <<"rocksdb">> => #{
+        <<"block-size">> => 8192
+    }
+},
+UpdatedMultiStoreOpts = hb_store_opts:apply(MultiStoreOpts, Defaults).
+
+%% Nested store configuration (gateway → lmdb)
+NestedStoreOpts = [
+    #{
+        <<"store-module">> => hb_store_gateway,
+        <<"gateway">> => <<"https://arweave.net">>,
+        <<"store">> => [
+            #{
+                <<"name">> => <<"cache-mainnet/lmdb">>,
+                <<"store-module">> => hb_store_lmdb
+            }
+        ]
+    }
+],
+NestedDefaults = #{
+    <<"lmdb">> => #{
+        <<"capacity">> => 10_000_000_000
+    },
+    <<"gateway">> => #{
+        <<"timeout">> => 30000
+    }
+},
+UpdatedNestedOpts = hb_store_opts:apply(NestedStoreOpts, NestedDefaults).
+
+%% Complex multi-layer hierarchy (gateway → lru → lmdb)
+ComplexStoreOpts = [
+    #{
+        <<"store-module">> => hb_store_gateway,
+        <<"store">> => [
+            #{
+                <<"store-module">> => hb_store_lru,
+                <<"name">> => <<"main-cache">>,
+                <<"store">> => [
+                    #{
+                        <<"name">> => <<"persistent">>,
+                        <<"store-module">> => hb_store_lmdb
+                    }
+                ]
+            }
+        ]
+    }
+],
+ComplexDefaults = #{
+    <<"lmdb">> => #{<<"capacity">> => 5_000_000_000},
+    <<"lru">> => #{<<"capacity">> => 1_000_000_000}
+},
+UpdatedComplexOpts = hb_store_opts:apply(ComplexStoreOpts, ComplexDefaults).
+
+%% Integration with hb_http_server configuration
+LoadedConfig = #{
+    <<"store_defaults">> => #{
+        <<"lmdb">> => #{<<"capacity">> => 5000}
+    }
+},
+DefaultStores = [
+    #{
+        <<"name">> => <<"cache-mainnet/lmdb">>,
+        <<"store-module">> => hb_store_lmdb
+    }
+],
+MergedConfig = maps:merge(
+    #{<<"store">> => DefaultStores},
+    LoadedConfig
+),
+FinalStoreOpts = hb_store_opts:apply(
+    maps:get(<<"store">>, MergedConfig),
+    maps:get(<<"store_defaults">>, MergedConfig, #{})
+).
+```
+
+---
+
+## Module Type Mappings
+
+### Supported Mappings
+
+| Store Module | Default Key | Example Defaults |
+|-------------|-------------|------------------|
+| `hb_store_lmdb` | `<<"lmdb">>` | `#{<<"capacity">> => 16GB}` |
+| `hb_store_fs` | `<<"fs">>` | `#{<<"buffer-size">> => 4096}` |
+| `hb_store_rocksdb` | `<<"rocksdb">>` | `#{<<"block-size">> => 8192}` |
+| `hb_store_gateway` | `<<"gateway">>` | `#{<<"timeout">> => 30000}` |
+| Other modules | None | No defaults applied |
+
+---
+
+## Merge Behavior
+
+### Priority Rules
+
+When merging defaults with store options:
+```erlang
+% Store options take precedence over defaults
+StoreOpt = #{
+    <<"name">> => <<"test">>,
+    <<"capacity">> => 1000  % User-specified
+},
+Defaults = #{
+    <<"lmdb">> => #{
+        <<"capacity">> => 5000,  % Default value
+        <<"sync">> => true       % Additional default
+    }
+},
+% Result:
+#{
+    <<"name">> => <<"test">>,
+    <<"capacity">> => 1000,  % Kept from StoreOpt
+    <<"sync">> => true       % Added from Defaults
+}
+```
+
+### Recursive Application
+
+```
+Level 1: Gateway Store
+  ├─ Apply gateway defaults
+  └─ Process <<"store">> field recursively
+      │
+      Level 2: LRU Store
+        ├─ Apply lru defaults
+        └─ Process <<"store">> field recursively
+            │
+            Level 3: LMDB Store
+              └─ Apply lmdb defaults
+```
+
+---
+
+## Configuration Examples
+
+### Typical Server Configuration
+
+```erlang
+% In hb_http_server.erl
+DefaultStoreOpts = [
+    #{
+        <<"name">> => <<"cache-mainnet/lmdb">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-mainnet">>
+    }
+],
+
+StoreDefaults = #{
+    <<"lmdb">> => #{
+        <<"capacity">> => 16 * 1024 * 1024 * 1024
+    },
+    <<"fs">> => #{
+        <<"buffer-size">> => 4096
+    }
+},
+
+FinalStoreOpts = hb_store_opts:apply(DefaultStoreOpts, StoreDefaults).
+```
+
+### Custom Capacity Configuration
+
+```erlang
+% Load from configuration file
+LoadedDefaults = #{
+    <<"store_defaults">> => #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 5_000_000_000  % 5GB custom
+        }
+    }
+},
+
+% Apply to store options
+UpdatedOpts = hb_store_opts:apply(
+    StoreOpts,
+    maps:get(<<"store_defaults">>, LoadedDefaults, #{})
+).
+```
+
+---
+
+## Integration Tests
+
+### Full Server Flow
+
+```erlang
+full_integration_flow_test() ->
+    LoadedConfig = #{
+        <<"store_defaults">> => #{
+            <<"lmdb">> => #{<<"capacity">> => 5000}
+        }
+    },
+    DefaultStoreOpts = [
+        #{
+            <<"name">> => <<"cache-mainnet/lmdb">>,
+            <<"store-module">> => hb_store_lmdb
+        },
+        #{
+            <<"store-module">> => hb_store_gateway,
+            <<"store">> => [
+                #{
+                    <<"store-module">> => hb_store_lmdb,
+                    <<"name">> => <<"cache-mainnet/lmdb">>
+                }
+            ]
+        }
+    ],
+    MergedConfig = maps:merge(
+        #{<<"store">> => DefaultStoreOpts},
+        LoadedConfig
+    ),
+    StoreOpts = maps:get(<<"store">>, MergedConfig),
+    StoreDefaults = maps:get(<<"store_defaults">>, MergedConfig, #{}),
+    UpdatedStoreOpts = hb_store_opts:apply(StoreOpts, StoreDefaults),
+    
+    [LmdbStore, GatewayStore] = UpdatedStoreOpts,
+    ?assertEqual(5000, maps:get(<<"capacity">>, LmdbStore)),
+    
+    NestedStores = maps:get(<<"store">>, GatewayStore),
+    [NestedLmdb] = NestedStores,
+    ?assertEqual(5000, maps:get(<<"capacity">>, NestedLmdb)).
+```
+
+---
+
+## References
+
+- **hb_store** - HyperBEAM store interface
+- **hb_http_server** - Uses this module for configuration
+- **Store Modules** - hb_store_lmdb, hb_store_fs, hb_store_rocksdb, etc.
+
+---
+
+## Notes
+
+1. **No Auto-Import**: Module disables auto-import for `apply/2` to avoid conflicts
+2. **Recursive Processing**: Handles arbitrarily nested store hierarchies
+3. **Type-Based Defaults**: Different stores get different default configurations
+4. **Merge Strategy**: Store options always take precedence over defaults
+5. **Unknown Modules**: Silently skips modules without defined defaults
+6. **List Processing**: Always operates on lists of store configurations
+7. **Immutable Operations**: Returns new maps, doesn't modify originals
+8. **Empty Handling**: Gracefully handles empty store lists and default maps
+9. **Configuration Files**: Designed for integration with external configuration
+10. **Server Integration**: Used by hb_http_server during initialization

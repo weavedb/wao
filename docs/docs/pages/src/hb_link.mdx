@@ -1,0 +1,752 @@
+# hb_link.erl - Message Link Management & Normalization
+
+## Overview
+
+**Purpose:** Manage lazy-loadable message links and submessage offloading  
+**Module:** `hb_link`  
+**Pattern:** Structured messages ↔ Link-based TABM format  
+**Core Concept:** Convert nested maps to cached references
+
+This module handles the transformation between structured messages with nested maps and TABM (Text-Addressable Binary Message) format where submessages are replaced with links. It enables efficient storage and transmission by offloading large nested structures to cache while maintaining references.
+
+## Link Concept
+
+**Link Tuple Format:**
+```erlang
+{link, ID, #{
+    <<"type">> => <<"link">>,
+    <<"lazy">> => true | false
+}}
+```
+
+**Types:**
+- **Greedy Link:** ID directly references the message
+- **Lazy Link:** ID references another ID that must be resolved
+
+## Use Cases
+
+- **Cache Offloading:** Store nested messages separately, reference by ID
+- **Lazy Loading:** Defer loading of large submessages until needed
+- **Space Efficiency:** Avoid duplicating nested structures
+- **Network Optimization:** Transfer only required submessages
+
+## Dependencies
+
+- **HyperBEAM:** `hb_util`, `hb_opts`, `hb_cache`, `hb_message`, `hb_format`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Normalization
+-spec normalize(Msg, Opts) -> NormalizedMsg.
+-spec normalize(Msg, Mode, Opts) -> NormalizedMsg.
+
+%% Link Detection
+-spec is_link_key(Key) -> boolean().
+-spec remove_link_specifier(Key) -> CleanKey.
+
+%% Link Decoding
+-spec decode_all_links(Msg) -> MsgWithLinks.
+
+%% Formatting
+-spec format(Link) -> FormattedString.
+-spec format(Link, Opts) -> FormattedString.
+-spec format(Link, Opts, Indent) -> FormattedString.
+
+-spec format_unresolved(Link) -> FormattedString.
+-spec format_unresolved(Link, Opts) -> FormattedString.
+-spec format_unresolved(Link, Opts, Indent) -> FormattedString.
+```
+
+---
+
+## Public Functions
+
+### 1. normalize/2, normalize/3
+
+```erlang
+-spec normalize(Msg, Opts) -> NormalizedMsg
+    when
+        Msg :: map() | list(),
+        Opts :: map(),
+        NormalizedMsg :: map() | list().
+
+-spec normalize(Msg, Mode, Opts) -> NormalizedMsg
+    when
+        Msg :: map() | list(),
+        Mode :: offload | discard | false,
+        Opts :: map(),
+        NormalizedMsg :: map() | list().
+```
+
+**Description:** Convert structured message with nested maps to TABM format with links. Nested submessages are optionally offloaded to cache and replaced with `Key+link` references.
+
+**Modes:**
+- `offload` - Write submessages to cache, return links
+- `discard` - Generate IDs but don't cache (for dry runs)
+- `false` - No normalization (passthrough)
+
+**Normalization Process:**
+```erlang
+Input: #{
+    <<"data">> => <<"value">>,
+    <<"nested">> => #{
+        <<"deep">> => <<"data">>
+    }
+}
+
+↓ normalize(Msg, offload, Opts)
+
+Output: #{
+    <<"data">> => <<"value">>,
+    <<"nested+link">> => <<"ID-of-nested-message">>
+}
+
+Cache: ID-of-nested-message → #{<<"deep">> => <<"data">>}
+```
+
+**Test Code:**
+```erlang
+-module(hb_link_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+offload_linked_message_test() ->
+    Opts = #{},
+    Msg = #{
+        <<"immediate-key">> => <<"immediate-value">>,
+        <<"link-key">> => #{
+            <<"immediate-key-2">> => <<"link-value">>,
+            <<"link-key-2">> => #{
+                <<"immediate-key-3">> => <<"link-value-2">>
+            }
+        }
+    },
+    % Normalize and offload
+    Offloaded = hb_link:normalize(Msg, offload, Opts),
+    
+    % Convert to structured format
+    Structured = hb_message:convert(Offloaded, <<"structured@1.0">>, tabm, Opts),
+    
+    % Load all links back
+    Loaded = hb_cache:ensure_all_loaded(Structured, Opts),
+    
+    % Should match original
+    ?assertEqual(Msg, Loaded).
+
+offload_list_test() ->
+    Opts = #{},
+    Msg = #{<<"list-key">> => [1.0, 2.0, 3.0]},
+    TABM = hb_message:convert(Msg, tabm, <<"structured@1.0">>, Opts),
+    Linkified = hb_link:normalize(TABM, offload, Opts),
+    Msg2 = hb_message:convert(Linkified, <<"structured@1.0">>, tabm, Opts),
+    Res = hb_cache:ensure_all_loaded(Msg2, Opts),
+    ?assertEqual(Msg, Res).
+
+normalize_false_test() ->
+    Msg = #{<<"key">> => #{<<"nested">> => <<"value">>}},
+    Result = hb_link:normalize(Msg, false, #{}),
+    ?assertEqual(Msg, Result).
+
+discard_mode_test() ->
+    Msg = #{<<"nested">> => #{<<"data">> => <<"value">>}},
+    Result = hb_link:normalize(Msg, discard, #{}),
+    % Links generated but not cached
+    ?assert(maps:is_key(<<"nested+link">>, Result)),
+    % Cache should not contain the submessage
+    ID = maps:get(<<"nested+link">>, Result),
+    ?assertEqual({error, not_found}, hb_cache:read(ID, #{})).
+```
+
+---
+
+### 2. is_link_key/1
+
+```erlang
+-spec is_link_key(Key) -> boolean()
+    when
+        Key :: binary().
+```
+
+**Description:** Determine if a key represents an encoded link by checking for `+link` suffix.
+
+**Implementation:**
+```erlang
+is_link_key(Key) when byte_size(Key) >= 5 ->
+    binary:part(Key, byte_size(Key) - 5, 5) =:= <<"+link">>;
+is_link_key(_) -> false.
+```
+
+**Test Code:**
+```erlang
+-module(hb_link_is_link_key_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_link_key_true_test() ->
+    ?assert(hb_link:is_link_key(<<"data+link">>)),
+    ?assert(hb_link:is_link_key(<<"nested-message+link">>)),
+    ?assert(hb_link:is_link_key(<<"+link">>)).
+
+is_link_key_false_test() ->
+    ?assertNot(hb_link:is_link_key(<<"data">>)),
+    ?assertNot(hb_link:is_link_key(<<"link">>)),
+    ?assertNot(hb_link:is_link_key(<<"+lin">>)),
+    ?assertNot(hb_link:is_link_key(<<>>)).
+```
+
+---
+
+### 3. remove_link_specifier/1
+
+```erlang
+-spec remove_link_specifier(Key) -> CleanKey
+    when
+        Key :: binary(),
+        CleanKey :: binary().
+```
+
+**Description:** Remove `+link` suffix from a key, returning the base key name.
+
+**Implementation:**
+```erlang
+remove_link_specifier(Key) ->
+    case is_link_key(Key) of
+        true -> binary:part(Key, 0, byte_size(Key) - 5);
+        false -> Key
+    end.
+```
+
+**Test Code:**
+```erlang
+-module(hb_link_remove_specifier_test).
+-include_lib("eunit/include/eunit.hrl").
+
+remove_link_specifier_test() ->
+    ?assertEqual(<<"data">>, hb_link:remove_link_specifier(<<"data+link">>)),
+    ?assertEqual(<<"nested">>, hb_link:remove_link_specifier(<<"nested+link">>)),
+    ?assertEqual(<<"data">>, hb_link:remove_link_specifier(<<"data">>)),
+    ?assertEqual(<<>>, hb_link:remove_link_specifier(<<"+link">>)).
+```
+
+---
+
+### 4. decode_all_links/1
+
+```erlang
+-spec decode_all_links(Msg) -> MsgWithLinks
+    when
+        Msg :: map() | list(),
+        MsgWithLinks :: map() | list().
+```
+
+**Description:** Convert all `Key+link` entries in a message to link tuples. Recursively processes nested structures.
+
+**Transformation:**
+```erlang
+Input: #{
+    <<"data+link">> => <<"message-id-123">>,
+    <<"normal-key">> => <<"value">>
+}
+
+↓ decode_all_links(Input)
+
+Output: #{
+    <<"data">> => {link, <<"message-id-123">>, #{
+        <<"type">> => <<"link">>,
+        <<"lazy">> => false
+    }},
+    <<"normal-key">> => <<"value">>
+}
+```
+
+**Test Code:**
+```erlang
+-module(hb_link_decode_test).
+-include_lib("eunit/include/eunit.hrl").
+
+decode_all_links_test() ->
+    Input = #{
+        <<"data+link">> => <<"id-123">>,
+        <<"nested+link">> => <<"id-456">>,
+        <<"normal">> => <<"value">>
+    },
+    Result = hb_link:decode_all_links(Input),
+    
+    ?assertMatch({link, <<"id-123">>, _}, maps:get(<<"data">>, Result)),
+    ?assertMatch({link, <<"id-456">>, _}, maps:get(<<"nested">>, Result)),
+    ?assertEqual(<<"value">>, maps:get(<<"normal">>, Result)).
+
+decode_nested_list_test() ->
+    Input = [
+        #{<<"key+link">> => <<"id-1">>},
+        #{<<"key+link">> => <<"id-2">>}
+    ],
+    Result = hb_link:decode_all_links(Input),
+    
+    [First, Second] = Result,
+    ?assertMatch({link, <<"id-1">>, _}, maps:get(<<"key">>, First)),
+    ?assertMatch({link, <<"id-2">>, _}, maps:get(<<"key">>, Second)).
+```
+
+---
+
+### 5. format/1, format/2, format/3
+
+```erlang
+-spec format(Link, Opts, Indent) -> FormattedString
+    when
+        Link :: {link, binary(), map()},
+        Opts :: map(),
+        Indent :: non_neg_integer(),
+        FormattedString :: binary().
+```
+
+**Description:** Format a link for display. If `debug_resolve_links` option is `true`, attempts to load and format the linked message. Otherwise, formats the unresolved link.
+
+**Implementation:**
+```erlang
+format(Link, Opts, Indent) ->
+    case hb_opts:get(debug_resolve_links, false, Opts) of
+        true ->
+            try
+                hb_format:message(
+                    hb_cache:ensure_all_loaded(Link, Opts),
+                    Opts,
+                    Indent
+                )
+            catch
+                _:_ -> <<"!UNRESOLVABLE! ", (format_unresolved(Link, Opts))/binary>>
+            end;
+        false -> format_unresolved(Link, Opts, Indent)
+    end.
+```
+
+**Test Code:**
+```erlang
+-module(hb_link_format_test).
+-include_lib("eunit/include/eunit.hrl").
+
+format_unresolved_test() ->
+    Link = {link, <<"id-123">>, #{<<"type">> => <<"link">>, <<"lazy">> => false}},
+    Formatted = hb_link:format(Link, #{}),
+    ?assert(is_binary(Formatted)),
+    ?assert(binary:match(Formatted, <<"id-123">>) =/= nomatch).
+
+format_with_resolve_test() ->
+    % Create and cache a message
+    Msg = #{<<"data">> => <<"value">>},
+    ID = hb_message:id(Msg, all, #{}),
+    hb_cache:write(Msg, #{}),
+    
+    Link = {link, ID, #{<<"type">> => <<"link">>, <<"lazy">> => false}},
+    Formatted = hb_link:format(Link, #{debug_resolve_links => true}),
+    
+    ?assert(is_binary(Formatted)),
+    ?assert(binary:match(Formatted, <<"data">>) =/= nomatch).
+```
+
+---
+
+### 6. format_unresolved/1, format_unresolved/2, format_unresolved/3
+
+```erlang
+-spec format_unresolved(Link, Opts, Indent) -> FormattedString
+    when
+        Link :: {link, binary(), map()},
+        Opts :: map(),
+        Indent :: non_neg_integer(),
+        FormattedString :: binary().
+```
+
+**Description:** Format a link without attempting to resolve it. Shows link type (lazy/greedy) and target ID.
+
+**Output Format:**
+```
+Link (to <type>): <id>
+% or
+Lazy link (to <type>): <id>
+```
+
+**Implementation:**
+```erlang
+format_unresolved({link, ID, Opts}, BaseOpts, Indent) ->
+    hb_util:bin(
+        hb_format:indent(
+            "~s~s: ~s",
+            [
+                case maps:get(<<"lazy">>, Opts, false) of
+                    true -> <<"Lazy link">>;
+                    false -> <<"Link">>
+                end,
+                case maps:get(<<"type">>, Opts, no_type) of
+                    no_type -> <<>>;
+                    Type -> <<" (to ", (hb_util:bin(Type))/binary, ")">>
+                end,
+                ID
+            ],
+            BaseOpts,
+            Indent
+        )
+    ).
+```
+
+**Test Code:**
+```erlang
+-module(hb_link_format_unresolved_test).
+-include_lib("eunit/include/eunit.hrl").
+
+format_unresolved_greedy_test() ->
+    Link = {link, <<"id-123">>, #{<<"type">> => <<"message">>, <<"lazy">> => false}},
+    Formatted = hb_link:format_unresolved(Link, #{}, 0),
+    ?assert(binary:match(Formatted, <<"Link">>) =/= nomatch),
+    ?assert(binary:match(Formatted, <<"message">>) =/= nomatch),
+    ?assert(binary:match(Formatted, <<"id-123">>) =/= nomatch).
+
+format_unresolved_lazy_test() ->
+    Link = {link, <<"id-456">>, #{<<"type">> => <<"data">>, <<"lazy">> => true}},
+    Formatted = hb_link:format_unresolved(Link, #{}, 0),
+    ?assert(binary:match(Formatted, <<"Lazy link">>) =/= nomatch),
+    ?assert(binary:match(Formatted, <<"data">>) =/= nomatch).
+```
+
+---
+
+## Normalization Details
+
+### Processing Rules
+
+**For Maps:**
+```erlang
+#{
+    <<"immediate-key">> => <<"value">>,           % Keep as-is
+    <<"nested-map">> => #{...},                   % Convert to link
+    <<"existing-link">> => {link, ID, Opts},      % Ensure loaded/normalized
+    <<"primitive">> => 123                        % Keep as-is
+}
+```
+
+**For Lists:**
+```erlang
+[
+    <<"string">>,         % Keep as-is
+    #{...},               % Recursively normalize
+    {link, ID, Opts},     % Keep as-is
+    123                   % Keep as-is
+]
+```
+
+**Special Keys:**
+- `<<"commitments">>` - Preserved without modification
+- `<<"priv">>` - Preserved without modification
+
+---
+
+### Lazy vs Greedy Links
+
+#### Greedy Link
+
+```erlang
+{link, ActualMessageID, #{
+    <<"type">> => <<"link">>,
+    <<"lazy">> => false
+}}
+```
+
+**Behavior:** ID directly references the message in cache
+
+---
+
+#### Lazy Link
+
+```erlang
+{link, IndirectionID, #{
+    <<"type">> => <<"link">>,
+    <<"lazy">> => true
+}}
+```
+
+**Behavior:** ID references another ID that must be resolved first
+
+**Resolution:**
+```erlang
+IndirectionID → ActualMessageID → Message
+```
+
+---
+
+## Link Key Encoding
+
+### Encoding Convention
+
+**Original Key:** `<<"data">>`  
+**Link Key:** `<<"data+link">>`
+
+**Benefits:**
+- Clear distinction from regular keys
+- Simple string operations
+- No collision with existing keys
+- Easy to detect and process
+
+---
+
+### Decoding Process
+
+```erlang
+% Encoded TABM message
+Encoded = #{
+    <<"metadata+link">> => <<"id-123">>,
+    <<"body">> => <<"content">>
+}
+
+↓ decode_all_links(Encoded)
+
+% Decoded message with link tuples
+Decoded = #{
+    <<"metadata">> => {link, <<"id-123">>, #{
+        <<"type">> => <<"link">>,
+        <<"lazy">> => false
+    }},
+    <<"body">> => <<"content">>
+}
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Offload nested message to cache
+Msg = #{
+    <<"data">> => <<"value">>,
+    <<"nested">> => #{<<"large">> => <<"structure">>}
+},
+Normalized = hb_link:normalize(Msg, offload, #{}),
+% Result: #{<<"data">> => <<"value">>, <<"nested+link">> => ID}
+
+%% Normalize without caching (dry run)
+Normalized = hb_link:normalize(Msg, discard, #{}),
+% Links generated but not written to cache
+
+%% Check if key is a link
+Key = <<"data+link">>,
+case hb_link:is_link_key(Key) of
+    true -> process_link(Key);
+    false -> process_normal_key(Key)
+end.
+
+%% Remove link suffix
+LinkKey = <<"metadata+link">>,
+BaseKey = hb_link:remove_link_specifier(LinkKey),
+% Result: <<"metadata">>
+
+%% Decode TABM message with links
+TABM = #{<<"message+link">> => <<"id-123">>},
+WithLinks = hb_link:decode_all_links(TABM),
+% Result: #{<<"message">> => {link, <<"id-123">>, Opts}}
+
+%% Format link for debugging
+Link = {link, <<"id-123">>, #{<<"type">> => <<"message">>, <<"lazy">> => false}},
+Formatted = hb_link:format(Link, #{debug_resolve_links => false}),
+io:format("~s~n", [Formatted]).
+% Output: "Link (to message): id-123"
+
+%% Fully load linked message
+LinkedMsg = #{<<"data+link">> => ID},
+Decoded = hb_link:decode_all_links(LinkedMsg),
+FullyLoaded = hb_cache:ensure_all_loaded(Decoded, #{}),
+% Result: #{<<"data">> => #{...actual nested message...}}
+
+%% Recursive normalization
+DeepNested = #{
+    <<"level1">> => #{
+        <<"level2">> => #{
+            <<"level3">> => <<"value">>
+        }
+    }
+},
+Normalized = hb_link:normalize(DeepNested, offload, #{}),
+% All levels converted to links and cached
+```
+
+---
+
+## Link Resolution Flow
+
+### Encoding Flow
+
+```erlang
+Structured Message
+    ↓
+normalize(Msg, offload, Opts)
+    ↓
+For each nested map:
+    1. Recursively normalize
+    2. Generate ID
+    3. Write to cache
+    4. Replace with Key+link => ID
+    ↓
+TABM Message with Links
+```
+
+---
+
+### Decoding Flow
+
+```erlang
+TABM Message with Links
+    ↓
+decode_all_links(Msg)
+    ↓
+For each Key+link entry:
+    1. Remove +link suffix
+    2. Create link tuple
+    3. Replace in message
+    ↓
+Message with Link Tuples
+    ↓
+hb_cache:ensure_all_loaded(Msg, Opts)
+    ↓
+For each link tuple:
+    1. Read from cache
+    2. Recursively load nested links
+    3. Replace with actual message
+    ↓
+Fully Loaded Structured Message
+```
+
+---
+
+## Optimization Strategies
+
+### Selective Offloading
+
+```erlang
+% Only offload messages above size threshold
+normalize_if_large(Msg, Opts) ->
+    case byte_size(term_to_binary(Msg)) > 1024 of
+        true -> hb_link:normalize(Msg, offload, Opts);
+        false -> Msg  % Keep inline
+    end.
+```
+
+---
+
+### Lazy Loading
+
+```erlang
+% Create lazy links for expensive-to-load data
+create_lazy_link(ID, Opts) ->
+    LazyID = hb_cache:write(ID, Opts),
+    {link, LazyID, #{
+        <<"type">> => <<"link">>,
+        <<"lazy">> => true
+    }}.
+```
+
+---
+
+### Batch Loading
+
+```erlang
+% Collect all link IDs first, then batch load
+collect_link_ids(Msg) ->
+    collect_link_ids(Msg, []).
+
+collect_link_ids(#{}, Acc) when is_map(Msg) ->
+    maps:fold(
+        fun(K, V, AccIn) ->
+            case is_link_key(K) of
+                true -> [V | AccIn];
+                false -> collect_link_ids(V, AccIn)
+            end
+        end,
+        Acc,
+        Msg
+    );
+collect_link_ids(List, Acc) when is_list(List) ->
+    lists:foldl(fun(X, AccIn) -> collect_link_ids(X, AccIn) end, Acc, List);
+collect_link_ids(_, Acc) ->
+    Acc.
+```
+
+---
+
+## Integration with Message System
+
+### Message Conversion
+
+```erlang
+% Structured to TABM with links
+Structured = #{<<"data">> => #{<<"nested">> => <<"value">>}},
+TABM = hb_message:convert(Structured, tabm, <<"structured@1.0">>, #{}),
+Normalized = hb_link:normalize(TABM, offload, #{}),
+
+% TABM with links to Structured
+WithLinks = hb_link:decode_all_links(Normalized),
+Loaded = hb_cache:ensure_all_loaded(WithLinks, #{}),
+BackToStructured = hb_message:convert(Loaded, <<"structured@1.0">>, tabm, #{}).
+```
+
+---
+
+## Performance Considerations
+
+1. **Cache Access:** Each link resolution requires cache read
+2. **Recursive Processing:** Deep nesting = multiple cache operations
+3. **ID Generation:** Hash computation for each submessage
+4. **Memory:** Offloading reduces in-memory footprint
+5. **Network:** Allows partial message transmission
+
+---
+
+## Error Handling
+
+```erlang
+% Handle missing linked messages
+try
+    Loaded = hb_cache:ensure_all_loaded(LinkedMsg, Opts)
+catch
+    throw:{could_not_read_lazy_link, Details} ->
+        io:format("Failed to load lazy link: ~p~n", [Details]),
+        {error, missing_link}
+end.
+
+% Verify link integrity
+case hb_cache:read(LinkID, Opts) of
+    {ok, Data} -> process(Data);
+    {error, not_found} -> {error, broken_link}
+end.
+```
+
+---
+
+## References
+
+- **Cache System** - `hb_cache.erl`
+- **Message System** - `hb_message.erl`
+- **Formatting** - `hb_format.erl`
+- **TABM Format** - Binary message representation
+- **Structured Codec** - `dev_codec_structured.erl`
+
+---
+
+## Notes
+
+1. **Recursive Processing:** Handles arbitrarily nested structures
+2. **Cache Integration:** Depends on `hb_cache` for storage
+3. **Mode Selection:** `offload` for production, `discard` for testing
+4. **Special Keys:** `commitments` and `priv` never linkified
+5. **Link Encoding:** `+link` suffix convention for TABM format
+6. **Lazy Links:** Support indirection for optimization
+7. **Format Options:** Can resolve links during formatting
+8. **Type Preservation:** Non-map/list values preserved unchanged
+9. **ID Generation:** Uses message ID calculation from `hb_message`
+10. **Roundtrip Safe:** normalize → load → denormalize = original
+11. **Memory Efficient:** Large nested structures stored separately
+12. **Debugging Support:** Format functions for inspection
+13. **Error Recovery:** Graceful handling of missing links
+14. **List Support:** Recursively processes list elements
+15. **Deterministic:** Same message always produces same links

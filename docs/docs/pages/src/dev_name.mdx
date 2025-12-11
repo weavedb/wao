@@ -1,0 +1,564 @@
+# dev_name.erl - Name Resolution Device
+
+## Overview
+
+**Purpose:** Resolve names to values through configurable resolver interfaces  
+**Module:** `dev_name`  
+**Device Name:** `name@1.0`  
+**Pattern:** Chain-of-responsibility with lazy loading
+
+This device resolves human-readable names to their corresponding values by querying a chain of resolver messages. Each resolver can lookup names and return associated values, which can optionally be loaded from cache.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_opts`, `hb_util`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Information
+-spec info(M1) -> DeviceInfo.
+
+%% Name Resolution
+-spec resolve(Key, Base, Req, Opts) -> {ok, Value} | not_found.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(M1) -> DeviceInfo
+    when
+        M1 :: map(),
+        DeviceInfo :: #{
+            default => HandlerFun,
+            excludes => [binary()]
+        },
+        HandlerFun :: fun((Key, Base, Req, Opts) -> Result).
+```
+
+**Description:** Configure device to proxy all requests (except `keys` and `set`) to the resolve function.
+
+**Test Code:**
+```erlang
+-module(dev_name_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_structure_test() ->
+    Info = dev_name:info(#{}),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    ?assert(is_function(maps:get(default, Info))),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"keys">>, Excludes)),
+    ?assert(lists:member(<<"set">>, Excludes)).
+```
+
+---
+
+### 2. resolve/4
+
+```erlang
+-spec resolve(Key, Base, Req, Opts) -> {ok, Value} | not_found
+    when
+        Key :: binary(),
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Value :: term().
+```
+
+**Description:** Resolve a name to its corresponding value using configured resolvers. The key is the name to resolve (e.g., `/~name@1.0/hello` resolves `hello`).
+
+**Resolution Process:**
+1. Get `name_resolvers` list from options
+2. Try each resolver in order
+3. Return value from first successful resolver
+4. Optionally load value from cache if it's an ID
+
+**Loading Behavior:**
+- `load=true` (default): Treat value as ID and load from cache
+- `load=false`: Return raw value without loading
+
+**Test Code:**
+```erlang
+-module(dev_name_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+simple_resolver_test() ->
+    Resolver = #{
+        <<"device">> => #{
+            <<"lookup">> => fun(_, Req, Opts) ->
+                Key = hb_ao:get(<<"key">>, Req, Opts),
+                case Key of
+                    <<"hello">> -> {ok, <<"world">>};
+                    _ -> {error, not_found}
+                end
+            end
+        }
+    },
+    Result = dev_name:resolve(
+        <<"hello">>,
+        #{},
+        #{ <<"load">> => false },
+        #{ name_resolvers => [Resolver] }
+    ),
+    ?assertEqual({ok, <<"world">>}, Result).
+
+no_resolvers_test() ->
+    Result = dev_name:resolve(
+        <<"hello">>,
+        #{},
+        #{},
+        #{ only => local }
+    ),
+    ?assertEqual(not_found, Result).
+
+multiple_resolvers_test() ->
+    Resolver1 = #{
+        <<"device">> => #{
+            <<"lookup">> => fun(_, _, _) -> {error, not_found} end
+        }
+    },
+    Resolver2 = #{
+        <<"device">> => #{
+            <<"lookup">> => fun(_, Req, Opts) ->
+                Key = hb_ao:get(<<"key">>, Req, Opts),
+                case Key of
+                    <<"test">> -> {ok, <<"found">>};
+                    _ -> {error, not_found}
+                end
+            end
+        }
+    },
+    Result = dev_name:resolve(
+        <<"test">>,
+        #{},
+        #{ <<"load">> => false },
+        #{ name_resolvers => [Resolver1, Resolver2] }
+    ),
+    ?assertEqual({ok, <<"found">>}, Result).
+
+load_from_cache_test() ->
+    Data = #{ <<"content">> => <<"test data">> },
+    {ok, ID} = hb_cache:write(Data, #{}),
+    Resolver = #{
+        <<"device">> => #{
+            <<"lookup">> => fun(_, Req, Opts) ->
+                Key = hb_ao:get(<<"key">>, Req, Opts),
+                case Key of
+                    <<"mydata">> -> {ok, ID};
+                    _ -> {error, not_found}
+                end
+            end
+        }
+    },
+    {ok, Loaded} = dev_name:resolve(
+        <<"mydata">>,
+        #{},
+        #{ <<"load">> => true },
+        #{ name_resolvers => [Resolver] }
+    ),
+    ?assertEqual(Data, hb_cache:ensure_all_loaded(Loaded, #{})).
+```
+
+---
+
+## Resolver Interface
+
+### Resolver Structure
+
+A resolver is a message that implements a `lookup` function:
+
+```erlang
+#{
+    <<"device">> => #{
+        <<"lookup">> => fun(Base, Req, Opts) ->
+            Key = hb_ao:get(<<"key">>, Req, Opts),
+            % Lookup logic here
+            {ok, Value} | {error, not_found}
+        end
+    }
+}
+```
+
+### Resolver Request Format
+
+Resolvers receive a request with:
+```erlang
+#{
+    <<"path">> => <<"lookup">>,
+    <<"key">> => KeyToResolve
+}
+```
+
+### Resolver Response
+
+**Success:**
+```erlang
+{ok, Value}
+```
+
+**Not Found:**
+```erlang
+{error, not_found}
+```
+
+---
+
+## Configuration
+
+### Setting Resolvers
+
+Resolvers are configured via the `name_resolvers` option:
+
+```erlang
+Opts = #{
+    name_resolvers => [
+        Resolver1,
+        Resolver2,
+        Resolver3
+    ]
+}
+```
+
+### Resolver Priority
+
+Resolvers are tried in order. The first resolver to return `{ok, Value}` wins.
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple map-based resolver
+MapResolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Key = hb_ao:get(<<"key">>, Req, Opts),
+            Map = #{ 
+                <<"alice">> => <<"Alice's ID">>,
+                <<"bob">> => <<"Bob's ID">>
+            },
+            case maps:get(Key, Map, not_found) of
+                not_found -> {error, not_found};
+                Value -> {ok, Value}
+            end
+        end
+    }
+}.
+
+%% Database-backed resolver
+DbResolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Key = hb_ao:get(<<"key">>, Req, Opts),
+            case db:lookup(Key) of
+                {ok, Value} -> {ok, Value};
+                not_found -> {error, not_found}
+            end
+        end
+    }
+}.
+
+%% Configure multiple resolvers
+Opts = #{
+    name_resolvers => [
+        LocalCacheResolver,    % Try local cache first
+        DatabaseResolver,      % Then database
+        RemoteResolver        % Finally remote
+    ]
+}.
+
+%% Resolve a name
+{ok, Value} = hb_ao:resolve(
+    #{ <<"device">> => <<"name@1.0">> },
+    <<"alice">>,
+    Opts
+).
+
+%% Resolve and load from cache
+{ok, Message} = hb_ao:resolve(
+    #{ <<"device">> => <<"name@1.0">> },
+    #{ <<"path">> => <<"config">>, <<"load">> => true },
+    Opts
+).
+
+%% Resolve without loading (get raw ID)
+{ok, ID} = hb_ao:resolve(
+    #{ <<"device">> => <<"name@1.0">> },
+    #{ <<"path">> => <<"config">>, <<"load">> => false },
+    Opts
+).
+
+%% Chain resolution with further processing
+{ok, Result} = hb_ao:resolve_many(
+    [
+        #{ <<"device">> => <<"name@1.0">> },
+        #{ <<"path">> => <<"myprocess">> },  % Resolve name
+        #{ <<"path">> => <<"compute">> }      % Call on result
+    ],
+    Opts
+).
+```
+
+---
+
+## HTTP Usage
+
+### URL Pattern
+
+```
+GET /~name@1.0/{NAME}
+GET /~name@1.0/{NAME}?load=false
+```
+
+### Examples
+
+```bash
+# Resolve name and load from cache
+GET /~name@1.0/hello
+
+# Resolve name without loading
+GET /~name@1.0/hello?load=false
+
+# Resolve and access nested path
+GET /~name@1.0/config/database/host
+```
+
+---
+
+## Use Cases
+
+### 1. Service Discovery
+
+```erlang
+ServiceResolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Key = hb_ao:get(<<"key">>, Req, Opts),
+            Services = #{
+                <<"database">> => <<"db-process-id">>,
+                <<"cache">> => <<"cache-process-id">>,
+                <<"api">> => <<"api-process-id">>
+            },
+            case maps:get(Key, Services, not_found) of
+                not_found -> {error, not_found};
+                ID -> {ok, ID}
+            end
+        end
+    }
+},
+Opts = #{ name_resolvers => [ServiceResolver] }.
+```
+
+### 2. User Directory
+
+```erlang
+UserResolver = #{
+    <<"device">> => <<"local-name@1.0">>  % Use existing name device
+},
+Opts = #{ name_resolvers => [UserResolver] }.
+
+% Register user
+dev_local_name:direct_register(
+    #{ <<"key">> => <<"alice">>, <<"value">> => AliceProcessID },
+    Opts
+).
+
+% Resolve user
+{ok, AliceProcess} = hb_ao:resolve(
+    #{ <<"device">> => <<"name@1.0">> },
+    <<"alice">>,
+    Opts
+).
+```
+
+### 3. Configuration Management
+
+```erlang
+ConfigResolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Key = hb_ao:get(<<"key">>, Req, Opts),
+            case Key of
+                <<"prod-config">> -> {ok, ProductionConfigID};
+                <<"dev-config">> -> {ok, DevelopmentConfigID};
+                _ -> {error, not_found}
+            end
+        end
+    }
+}.
+```
+
+### 4. DNS-like Resolution
+
+```erlang
+DomainResolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Domain = hb_ao:get(<<"key">>, Req, Opts),
+            case dns_lookup(Domain) of
+                {ok, ManifestID} -> {ok, ManifestID};
+                not_found -> {error, not_found}
+            end
+        end
+    }
+}.
+```
+
+---
+
+## Resolver Chaining
+
+### Fallback Pattern
+
+```erlang
+Resolvers = [
+    PrimaryResolver,      % Try primary first
+    SecondaryResolver,    % Fallback to secondary
+    DefaultResolver       % Final fallback
+]
+```
+
+### Hierarchical Resolution
+
+```erlang
+Resolvers = [
+    LocalCacheResolver,   % Local cache (fastest)
+    ClusterResolver,      % Cluster-wide cache
+    DatabaseResolver,     % Database lookup
+    DiscoveryResolver    % Service discovery
+]
+```
+
+---
+
+## Load Parameter
+
+### Default Behavior (load=true)
+
+```erlang
+% Value is treated as ID and loaded
+{ok, LoadedMessage} = hb_ao:resolve(
+    #{ <<"device">> => <<"name@1.0">> },
+    <<"config">>,
+    Opts
+)
+```
+
+### Raw ID (load=false)
+
+```erlang
+% Value returned as-is (ID not loaded)
+{ok, ID} = hb_ao:resolve(
+    #{ <<"device">> => <<"name@1.0">> },
+    #{ <<"path">> => <<"config">>, <<"load">> => false },
+    Opts
+)
+```
+
+---
+
+## Error Handling
+
+### Not Found
+
+```erlang
+case dev_name:resolve(<<"unknown">>, #{}, #{}, Opts) of
+    {ok, Value} -> use_value(Value);
+    not_found -> use_default_value()
+end
+```
+
+### Resolver Errors
+
+```erlang
+% If resolver returns error, try next resolver
+Resolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, _, _) ->
+            {error, <<"Database unavailable">>}
+        end
+    }
+}
+% Next resolver in chain will be tried
+```
+
+---
+
+## Testing Patterns
+
+### Mock Resolver
+
+```erlang
+mock_resolver(Mappings) ->
+    #{
+        <<"device">> => #{
+            <<"lookup">> => fun(_, Req, Opts) ->
+                Key = hb_ao:get(<<"key">>, Req, Opts),
+                case maps:get(Key, Mappings, not_found) of
+                    not_found -> {error, not_found};
+                    Value -> {ok, Value}
+                end
+            end
+        }
+    }.
+
+% Usage
+Resolver = mock_resolver(#{
+    <<"test">> => <<"test-value">>,
+    <<"foo">> => <<"bar">>
+}),
+Opts = #{ name_resolvers => [Resolver] }.
+```
+
+### Test Helper
+
+```erlang
+resolve_test_helper(Name, ExpectedValue) ->
+    Resolver = mock_resolver(#{ Name => ExpectedValue }),
+    Opts = #{ name_resolvers => [Resolver] },
+    {ok, Value} = dev_name:resolve(
+        Name,
+        #{},
+        #{ <<"load">> => false },
+        Opts
+    ),
+    ?assertEqual(ExpectedValue, Value).
+```
+
+---
+
+## References
+
+- **dev_local_name.erl** - Local name storage and registration
+- **hb_cache.erl** - Cache read operations
+- **hb_ao.erl** - AO-Core resolution system
+- **hb_opts.erl** - Options handling
+
+---
+
+## Notes
+
+1. **Chain of Responsibility**: Tries resolvers in order until one succeeds
+2. **Lazy Loading**: Values can be IDs that are loaded from cache
+3. **Load Control**: `load` parameter controls whether to load from cache
+4. **Flexible Resolvers**: Any message implementing `lookup` can be a resolver
+5. **Priority Order**: First resolver to return `{ok, Value}` wins
+6. **Error Isolation**: Resolver errors cause fallback to next resolver
+7. **Not Found**: Returns `not_found` if no resolver succeeds
+8. **HTTP Compatible**: Works with HTTP GET requests
+9. **Path Integration**: Resolved values can have paths accessed on them
+10. **Excludes Keys**: Does not intercept `keys` or `set` operations
+11. **Cache Integration**: Seamless integration with HyperBEAM cache
+12. **Service Discovery**: Perfect for DNS-like service resolution
+13. **Configuration**: Resolvers configured via options
+14. **Composability**: Works with AO-Core resolution chain
+15. **Testing**: Easy to mock with simple map-based resolvers

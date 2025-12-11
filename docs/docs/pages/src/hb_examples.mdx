@@ -1,0 +1,592 @@
+# hb_examples.erl - End-to-End Integration Tests
+
+## Overview
+
+**Purpose:** Comprehensive HTTP interface tests and usage examples  
+**Module:** `hb_examples`  
+**Pattern:** Real-world scenario testing via HTTP  
+**Scope:** Payment relays, WASM execution, ANS-104 scheduling
+
+This module contains end-to-end integration tests for HyperBEAM, demonstrating real-world usage patterns through the HTTP interface. These tests serve dual purposes: validating system functionality and providing practical examples for developers integrating with HyperBEAM nodes.
+
+## Test Scenarios
+
+The module covers several key integration patterns:
+
+1. **Payment-gated Relay**: Message relaying with balance management
+2. **Paid WASM Execution**: Verifiable computation with payment deduction
+3. **ANS-104 Scheduling**: Process creation and message scheduling
+4. **Multi-Node Routing**: Relay servers coordinating multiple nodes
+
+## Dependencies
+
+- **Testing:** `eunit`
+- **HyperBEAM:** `hb_http`, `hb_http_server`, `hb_message`, `hb_util`, `hb_ao`, `hb_test_utils`, `hb_maps`
+- **Arweave:** `ar_wallet`
+- **Devices:** `dev_scheduler_cache`, `simple-pay`, `wasm-64`, `scheduler`, `router`, `process`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Test Functions
+
+### 1. relay_with_payments_test_/0
+
+```erlang
+-spec relay_with_payments_test_() -> {timeout, Seconds, Fun}.
+-spec relay_with_payments() -> ok.
+```
+
+**Description:** Test message relaying through a node with simple payment device. Validates: (1) relay fails without balance, (2) operator can topup client, (3) balance reflects correctly, (4) relay succeeds with sufficient funds, (5) response is signed and verifies.
+
+**Test Flow:**
+```erlang
+% 1. Setup: Create wallets and node with payment processor
+HostWallet = ar_wallet:new(),
+ClientWallet = ar_wallet:new(),
+ProcessorMsg = #{
+    <<"device">> => <<"p4@1.0">>,
+    <<"ledger-device">> => <<"simple-pay@1.0">>,
+    <<"pricing-device">> => <<"simple-pay@1.0">>
+},
+HostNode = hb_http_server:start_node(#{
+    operator => ar_wallet:to_address(HostWallet),
+    on => #{
+        <<"request">> => ProcessorMsg,
+        <<"response">> => ProcessorMsg
+    }
+}).
+
+% 2. Test: Relay without funds fails
+ClientMessage = hb_message:commit(
+    #{<<"path">> => <<"/~relay@1.0/call?relay-path=https://www.google.com">>},
+    ClientWallet
+),
+{error, #{<<"body">> := <<"Insufficient funds">>}} = 
+    hb_http:get(HostNode, ClientMessage, #{}).
+
+% 3. Topup: Operator adds balance
+TopupMessage = hb_message:commit(
+    #{
+        <<"path">> => <<"/~simple-pay@1.0/topup">>,
+        <<"recipient">> => ClientAddress,
+        <<"amount">> => 100
+    },
+    HostWallet
+),
+{ok, _} = hb_http:get(HostNode, TopupMessage, #{}).
+
+% 4. Verify: Relay succeeds with balance
+{ok, Resp} = hb_http:get(HostNode, ClientMessage, #{}),
+true = hb_message:verify(Resp, all, #{}).
+```
+
+**Assertions:**
+- Initial relay fails with "Insufficient funds"
+- Topup succeeds
+- Retry relay returns large body (>10KB from Google)
+- Response has valid signatures
+- All signatures verify correctly
+
+---
+
+### 2. paid_wasm_test_/0
+
+```erlang
+-spec paid_wasm_test_() -> {timeout, Seconds, Fun}.
+-spec paid_wasm() -> ok.
+```
+
+**Description:** Test WASM execution with payment deduction. Validates: (1) client starts with balance, (2) WASM function executes successfully, (3) response is signed by host, (4) result is correct, (5) balance is deducted properly.
+
+**Test Flow:**
+```erlang
+% 1. Setup: Create node with pre-funded client
+HostNode = hb_http_server:start_node(#{
+    simple_pay_ledger => #{ClientAddress => 100},
+    simple_pay_price => 10,
+    operator => ar_wallet:to_address(HostWallet),
+    on => #{
+        <<"request">> => ProcessorMsg,
+        <<"response">> => ProcessorMsg
+    }
+}).
+
+% 2. Execute: Run WASM factorial function
+{ok, WASMFile} = file:read_file(<<"test/test-64.wasm">>),
+ClientMessage = hb_message:commit(
+    #{
+        <<"path">> => <<"/~wasm-64@1.0/init/compute/results?function=fac">>,
+        <<"body">> => WASMFile,
+        <<"parameters+list">> => <<"3.0">>
+    },
+    Opts#{priv_wallet => ClientWallet}
+),
+{ok, Res} = hb_http:post(HostNode, ClientMessage, Opts).
+
+% 3. Verify: Result and balance
+6.0 = hb_ao:get(<<"output/1">>, Res, Opts),
+true = hb_message:verify(Res, all, Opts).
+
+% 4. Check balance deduction
+{ok, Res2} = hb_http:get(HostNode, BalanceQuery, Opts),
+60 = Res2.  % 100 - (10 * 4 operations)
+```
+
+**Assertions:**
+- Response is signed by host node
+- All signatures verify
+- WASM factorial(3.0) returns 6.0
+- Client balance reduced from 100 to 60
+
+---
+
+### 3. relay_schedule_ans104_test/0
+
+```erlang
+-spec relay_schedule_ans104_test() -> ok.
+```
+
+**Description:** Test scheduling ANS-104 data items through a relay server. Creates a three-node setup (scheduler, compute, relay) and validates message routing and process scheduling.
+
+**Test Architecture:**
+```
+Client → Relay Node → {Scheduler Node, Compute Node}
+         (Router)       (Schedule)     (Execute)
+```
+
+**Test Flow:**
+```erlang
+% 1. Setup: Three-node architecture
+Scheduler = hb_http_server:start_node(#{
+    on => #{
+        <<"start">> => #{
+            <<"device">> => <<"scheduler@1.0">>,
+            <<"require-codec">> => <<"ans104@1.0">>
+        }
+    }
+}),
+
+Compute = hb_http_server:start_node(#{
+    store => [
+        LocalStore,
+        #{
+            <<"store-module">> => hb_store_remote_node,
+            <<"node">> => Scheduler
+        }
+    ]
+}),
+
+Relay = hb_http_server:start_node(#{
+    routes => [
+        #{<<"template">> => <<"^/push">>, <<"nodes">> => [Scheduler]},
+        #{<<"template">> => <<"^/.*">>, <<"nodes">> => [Compute]}
+    ],
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"router@1.0">>,
+            <<"path">> => <<"preprocess">>
+        }
+    }
+}).
+
+% 2. Create process
+Process = hb_message:commit(
+    #{
+        <<"device">> => <<"process@1.0">>,
+        <<"execution-device">> => <<"test-device@1.0">>,
+        <<"scheduler">> => hb_util:human_id(SchedulerWallet),
+        <<"module">> => <<"URgYpPQzvxxfYQtjrIQ116bl3YBfcImo3JEnNo8Hlrk">>
+    },
+    ClientOpts,
+    #{<<"commitment-device">> => <<"ans104@1.0">>}
+).
+
+% 3. Schedule process
+ScheduleRes = hb_http:post(
+    Relay,
+    Process#{
+        <<"path">> => <<"push">>,
+        <<"codec-device">> => <<"ans104@1.0">>
+    },
+    ClientOpts
+),
+{ok, #{<<"status">> := 200, <<"slot">> := 0}} = ScheduleRes.
+
+% 4. Push message to process
+ProcID = hb_message:id(Process, all, ClientOpts),
+ToPush = hb_message:commit(
+    #{
+        <<"test-key">> => <<"value">>,
+        <<"rand-key">> => hb_util:encode(crypto:strong_rand_bytes(32))
+    },
+    ClientOpts,
+    #{<<"commitment-device">> => <<"ans104@1.0">>}
+),
+PushRes = hb_http:post(
+    Relay,
+    ToPush#{
+        <<"path">> => <<ProcID/binary, "/push">>,
+        <<"codec-device">> => <<"ans104@1.0">>
+    },
+    ClientOpts
+),
+{ok, #{<<"status">> := 200, <<"slot">> := 1}} = PushRes.
+```
+
+**Assertions:**
+- Process scheduling returns status 200, slot 0
+- Message push returns status 200, slot 1
+- Relay correctly routes to scheduler/compute nodes
+- ANS-104 codec properly deserializes at each hop
+
+---
+
+### 4. schedule/2, schedule/3, schedule/4
+
+```erlang
+-spec schedule(ProcMsg, Target) -> {ok | error, Result}.
+-spec schedule(ProcMsg, Target, Wallet) -> {ok | error, Result}.
+-spec schedule(ProcMsg, Target, Wallet, Node) -> {ok | error, Result}.
+```
+
+**Description:** Helper functions to schedule a process on a scheduler node. Commits the scheduling request with a wallet and posts to the scheduler endpoint.
+
+**Test Code:**
+```erlang
+-module(hb_examples_schedule_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+schedule_basic_test() ->
+    Node = hb_http_server:start_node(#{}),
+    Wallet = ar_wallet:new(),
+    ProcMsg = #{
+        <<"data-protocol">> => <<"ao">>,
+        <<"type">> => <<"Process">>,
+        <<"module">> => <<"test-module-id">>
+    },
+    Target = crypto:strong_rand_bytes(32),
+    
+    Result = hb_examples:schedule(ProcMsg, Target, Wallet, Node),
+    ?assertMatch({ok, _} | {error, _}, Result).
+
+schedule_creates_signed_request_test() ->
+    ProcMsg = #{<<"test">> => <<"data">>},
+    Target = hb_util:human_id(crypto:strong_rand_bytes(32)),
+    Wallet = ar_wallet:new(),
+    
+    % Schedule creates a signed request
+    SignedReq = hb_message:commit(
+        #{
+            <<"path">> => <<"/~scheduler@1.0/schedule">>,
+            <<"target">> => Target,
+            <<"body">> => ProcMsg
+        },
+        Wallet
+    ),
+    
+    ?assert(length(hb_message:signers(SignedReq, #{})) > 0).
+```
+
+**Usage:**
+```erlang
+% Simple schedule with defaults
+{ok, _} = hb_examples:schedule(ProcMsg, TargetID).
+
+% With custom wallet
+{ok, _} = hb_examples:schedule(ProcMsg, TargetID, MyWallet).
+
+% With custom node
+{ok, _} = hb_examples:schedule(ProcMsg, TargetID, MyWallet, CustomNode).
+```
+
+---
+
+## Common Test Patterns
+
+```erlang
+%% Start test node with payment processor
+HostNode = hb_http_server:start_node(#{
+    operator => OperatorAddress,
+    on => #{
+        <<"request">> => ProcessorMsg,
+        <<"response">> => ProcessorMsg
+    }
+}).
+
+%% Create committed message
+Message = hb_message:commit(
+    #{<<"path">> => Path, <<"data">> => Data},
+    Wallet
+).
+
+%% Make HTTP request
+{ok, Response} = hb_http:get(HostNode, Message, #{}).
+
+%% Verify signatures
+true = hb_message:verify(Response, all, #{}).
+
+%% Check balance
+BalanceQuery = hb_message:commit(
+    #{<<"path">> => <<"/~p4@1.0/balance">>},
+    Wallet
+),
+{ok, Balance} = hb_http:get(HostNode, BalanceQuery, #{}).
+
+%% Multi-node relay setup
+RelayNode = hb_http_server:start_node(#{
+    routes => [
+        #{
+            <<"template">> => <<"^/push">>,
+            <<"strategy">> => <<"Nearest">>,
+            <<"nodes">> => [SchedulerConfig]
+        }
+    ],
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"router@1.0">>,
+            <<"path">> => <<"preprocess">>
+        }
+    }
+}).
+```
+
+---
+
+## Payment System Integration
+
+### Simple Pay Device
+
+The `simple-pay@1.0` device provides basic payment functionality:
+
+**Ledger Management:**
+```erlang
+Opts = #{
+    simple_pay_ledger => #{
+        ClientAddress1 => 100,
+        ClientAddress2 => 50
+    },
+    simple_pay_price => 10  % Cost per operation
+}.
+```
+
+**Topup Operation:**
+```erlang
+TopupMsg = hb_message:commit(
+    #{
+        <<"path">> => <<"/~simple-pay@1.0/topup">>,
+        <<"recipient">> => Address,
+        <<"amount">> => Amount
+    },
+    OperatorWallet
+).
+```
+
+**Balance Query:**
+```erlang
+BalanceMsg = hb_message:commit(
+    #{<<"path">> => <<"/~p4@1.0/balance">>},
+    ClientWallet
+).
+```
+
+---
+
+## Processor Device (p4@1.0)
+
+The `p4@1.0` device coordinates payment processing:
+
+**Configuration:**
+```erlang
+ProcessorMsg = #{
+    <<"device">> => <<"p4@1.0">>,
+    <<"ledger-device">> => <<"simple-pay@1.0">>,  % Balance tracking
+    <<"pricing-device">> => <<"simple-pay@1.0">>  % Price calculation
+}.
+```
+
+**Applied to Requests:**
+```erlang
+HostNode = hb_http_server:start_node(#{
+    on => #{
+        <<"request">> => ProcessorMsg,   % Check/deduct before processing
+        <<"response">> => ProcessorMsg   % Sign response
+    }
+}).
+```
+
+---
+
+## WASM Execution
+
+### WASM Device Configuration
+
+```erlang
+Path = <<"/~wasm-64@1.0/init/compute/results?function=fac">>.
+```
+
+**Path Structure:**
+- `/~wasm-64@1.0` - WASM device (64-bit)
+- `/init` - Initialize WASM module
+- `/compute` - Execute function
+- `/results` - Return results
+- `?function=fac` - Call `fac` function
+
+**Parameters:**
+```erlang
+Message = #{
+    <<"path">> => Path,
+    <<"body">> => WASMBinary,
+    <<"parameters+list">> => <<"3.0">>  % Function arguments
+}.
+```
+
+**Result Access:**
+```erlang
+% Results stored in output/N keys
+Result1 = hb_ao:get(<<"output/1">>, Response, Opts),
+Result2 = hb_ao:get(<<"output/2">>, Response, Opts).
+```
+
+---
+
+## ANS-104 Scheduling
+
+### Process Creation
+
+```erlang
+Process = hb_message:commit(
+    #{
+        <<"device">> => <<"process@1.0">>,
+        <<"execution-device">> => <<"wasm-64@1.0">>,
+        <<"push-device">> => <<"push@1.0">>,
+        <<"scheduler">> => SchedulerAddress,
+        <<"scheduler-device">> => <<"scheduler@1.0">>,
+        <<"module">> => ModuleID
+    },
+    ClientOpts,
+    #{<<"commitment-device">> => <<"ans104@1.0">>}
+).
+```
+
+### Message Pushing
+
+```erlang
+% Get process ID
+ProcID = hb_message:id(Process, all, Opts).
+
+% Create message to push
+Message = hb_message:commit(
+    #{<<"data">> => <<"message content">>},
+    ClientOpts,
+    #{<<"commitment-device">> => <<"ans104@1.0">>}
+).
+
+% Push to process
+Result = hb_http:post(
+    Node,
+    Message#{
+        <<"path">> => <<ProcID/binary, "/push">>,
+        <<"codec-device">> => <<"ans104@1.0">>
+    },
+    Opts
+).
+```
+
+---
+
+## Routing Configuration
+
+### Route Structure
+
+```erlang
+Route = #{
+    <<"template">> => <<"^/push">>,      % Regex pattern
+    <<"strategy">> => <<"Nearest">>,     % Selection strategy
+    <<"nodes">> => [
+        #{
+            <<"wallet">> => NodeAddress,
+            <<"prefix">> => NodeURL
+        }
+    ]
+}.
+```
+
+### Multi-Route Setup
+
+```erlang
+routes => [
+    % Scheduler routes
+    #{
+        <<"template">> => <<"^/push">>,
+        <<"nodes">> => [SchedulerNode]
+    },
+    % Compute routes (catch-all)
+    #{
+        <<"template">> => <<"^/.*">>,
+        <<"nodes">> => [ComputeNode]
+    }
+]
+```
+
+---
+
+## Test Utilities
+
+### Node Startup
+
+```erlang
+% Basic node
+Node = hb_http_server:start_node(#{}).
+
+% With store
+Node = hb_http_server:start_node(#{
+    store => [hb_test_utils:test_store()]
+}).
+
+% With wallet
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new()
+}).
+```
+
+### Wallet Creation
+
+```erlang
+HostWallet = ar_wallet:new(),
+ClientWallet = ar_wallet:new(),
+ClientAddress = hb_util:human_id(ar_wallet:to_address(ClientWallet)).
+```
+
+---
+
+## References
+
+- **HTTP Server** - `hb_http_server.erl`
+- **HTTP Client** - `hb_http.erl`
+- **Message System** - `hb_message.erl`
+- **Payment Devices** - `simple-pay@1.0`, `p4@1.0`
+- **WASM Device** - `wasm-64@1.0`
+- **Scheduler Device** - `scheduler@1.0`
+- **Router Device** - `router@1.0`
+
+---
+
+## Notes
+
+1. **Timeouts**: All test functions have 30-second timeouts
+2. **Real HTTP**: Tests use actual HTTP requests over localhost
+3. **Signed Messages**: All client messages must be committed (signed)
+4. **Balance Tracking**: Simple-pay tracks balances per address
+5. **Price Per Operation**: WASM tests charge 10 units per operation
+6. **Multi-Node**: Relay test demonstrates three-node coordination
+7. **ANS-104 Codec**: Scheduling requires ans104@1.0 commitment
+8. **Signature Verification**: All responses verify with host signatures
+9. **Store Setup**: Compute nodes need remote store for scheduler location
+10. **Router Device**: Relay nodes use router@1.0 for request preprocessing
+11. **Payment Processor**: p4@1.0 wraps request/response with payment logic
+12. **Test Stores**: Use `hb_test_utils:test_store()` for temporary storage
+13. **Address Format**: Always use `hb_util:human_id()` for wallet addresses
+14. **WASM Files**: Test WASM binaries located in `test/` directory
+15. **Slot Numbers**: Scheduler assigns sequential slot numbers (0, 1, 2...)

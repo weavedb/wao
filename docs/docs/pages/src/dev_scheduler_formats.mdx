@@ -1,0 +1,470 @@
+# dev_scheduler_formats.erl - Scheduler Output Format Conversion
+
+## Overview
+
+**Purpose:** Convert scheduler outputs between different AO client formats  
+**Module:** `dev_scheduler_formats`  
+**Formats Supported:** `application/json` (AOS2), `application/http` (HTTP-sig bundles)  
+**Protocol Versions:** `ao.N.1` (mainnet), `ao.TN.1` (legacynet)
+
+This module handles the conversion of scheduler assignments between different output formats required by various AO clients. It supports both the modern HTTP-sig bundle format and the legacy JSON format used by older AO implementations.
+
+## Supported Operations
+
+- **Bundle Format:** Convert assignments to HTTP-sig bundles
+- **AOS2 Format:** Convert assignments to legacy JSON format
+- **Format Parsing:** Parse incoming AOS2 responses to assignments
+- **Type Normalization:** Normalize field names and types for compatibility
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_util`, `hb_maps`, `hb_cache`, `hb_json`, `hb_gateway_client`
+- **Arweave:** `ar_timestamp`
+- **JSON Interface:** `dev_json_iface`
+- **Testing:** `eunit`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Output Formatting
+-spec assignments_to_bundle(ProcID, Assignments, More, Opts) -> {ok, BundleMsg}.
+-spec assignments_to_aos2(ProcID, Assignments, More, Opts) -> {ok, JSONMsg}.
+
+%% Input Parsing
+-spec aos2_to_assignments(ProcID, Body, Opts) -> {ok, BundleMsg}.
+-spec aos2_to_assignment(Assignment, Opts) -> NormalizedAssignment.
+
+%% Type Normalization
+-spec aos2_normalize_types(Msg) -> NormalizedMsg.
+```
+
+---
+
+## Public Functions
+
+### 1. assignments_to_bundle/4
+
+```erlang
+-spec assignments_to_bundle(ProcID, Assignments, More, Opts) -> {ok, BundleMsg}
+    when
+        ProcID :: binary(),
+        Assignments :: list() | map(),
+        More :: boolean(),
+        Opts :: map(),
+        BundleMsg :: map().
+```
+
+**Description:** Generate a `GET /schedule` response as HTTP-sig bundles. This is the modern format used by mainnet (`ao.N.1`) implementations.
+
+**Response Structure:**
+```erlang
+#{
+    <<"type">> => <<"schedule">>,
+    <<"process">> => ProcessID,
+    <<"continues">> => boolean(),
+    <<"timestamp">> => ArweaveTimestamp,
+    <<"block-height">> => BlockHeight,
+    <<"block-hash">> => BlockHash,
+    <<"assignments">> => #{ Slot => Assignment, ... }
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_scheduler_formats_bundle_test).
+-include_lib("eunit/include/eunit.hrl").
+
+bundle_empty_test() ->
+    ProcID = <<"test-process-id">>,
+    {ok, Result} = dev_scheduler_formats:assignments_to_bundle(
+        ProcID,
+        [],
+        false,
+        #{}
+    ),
+    ?assertEqual(<<"schedule">>, maps:get(<<"type">>, Result)),
+    ?assertEqual(ProcID, maps:get(<<"process">>, Result)),
+    ?assertEqual(false, maps:get(<<"continues">>, Result)).
+
+bundle_with_assignments_test() ->
+    ProcID = <<"test-process">>,
+    Assignments = [
+        #{ <<"slot">> => 0, <<"body">> => <<"msg0">> },
+        #{ <<"slot">> => 1, <<"body">> => <<"msg1">> },
+        #{ <<"slot">> => 2, <<"body">> => <<"msg2">> }
+    ],
+    {ok, Result} = dev_scheduler_formats:assignments_to_bundle(
+        ProcID,
+        Assignments,
+        true,
+        #{}
+    ),
+    ?assertEqual(true, maps:get(<<"continues">>, Result)),
+    AssignmentsMap = maps:get(<<"assignments">>, Result),
+    ?assertEqual(3, maps:size(AssignmentsMap)),
+    ?assert(maps:is_key(0, AssignmentsMap)),
+    ?assert(maps:is_key(1, AssignmentsMap)).
+```
+
+---
+
+### 2. assignments_to_aos2/4
+
+```erlang
+-spec assignments_to_aos2(ProcID, Assignments, More, Opts) -> {ok, JSONMsg}
+    when
+        ProcID :: binary(),
+        Assignments :: list() | map(),
+        More :: boolean(),
+        Opts :: map(),
+        JSONMsg :: map().
+```
+
+**Description:** Generate a legacy AOS2-compatible JSON response. Returns a response with `application/json` content type containing GraphQL-style edges and page_info structure.
+
+**Response Structure:**
+```erlang
+#{
+    <<"content-type">> => <<"application/json">>,
+    <<"body">> => JSONEncodedBinary
+}
+```
+
+**JSON Body Structure:**
+```json
+{
+    "page_info": {
+        "process": "process-id",
+        "has_next_page": true/false,
+        "timestamp": "1234567890",
+        "block-height": "1234567",
+        "block-hash": "base64-hash"
+    },
+    "edges": [
+        {
+            "cursor": "slot-number",
+            "node": {
+                "message": { ... },
+                "assignment": { ... }
+            }
+        }
+    ]
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_scheduler_formats_aos2_test).
+-include_lib("eunit/include/eunit.hrl").
+
+aos2_empty_test() ->
+    ProcID = <<"test-process-id">>,
+    {ok, Result} = dev_scheduler_formats:assignments_to_aos2(
+        ProcID,
+        [],
+        false,
+        #{}
+    ),
+    ?assertEqual(<<"application/json">>, maps:get(<<"content-type">>, Result)),
+    Body = hb_json:decode(maps:get(<<"body">>, Result)),
+    PageInfo = maps:get(<<"page_info">>, Body),
+    ?assertEqual(ProcID, maps:get(<<"process">>, PageInfo)),
+    ?assertEqual(false, maps:get(<<"has_next_page">>, PageInfo)).
+
+aos2_with_assignments_test() ->
+    ProcID = <<"test-process">>,
+    Assignments = [
+        #{
+            <<"slot">> => 0,
+            <<"body">> => #{ <<"data">> => <<"test">> }
+        },
+        #{
+            <<"slot">> => 1,
+            <<"body">> => #{ <<"data">> => <<"test2">> }
+        }
+    ],
+    {ok, Result} = dev_scheduler_formats:assignments_to_aos2(
+        ProcID,
+        Assignments,
+        true,
+        #{}
+    ),
+    Body = hb_json:decode(maps:get(<<"body">>, Result)),
+    Edges = maps:get(<<"edges">>, Body),
+    ?assertEqual(2, length(Edges)),
+    [Edge1 | _] = Edges,
+    ?assertEqual(0, maps:get(<<"cursor">>, Edge1)),
+    Node = maps:get(<<"node">>, Edge1),
+    ?assert(maps:is_key(<<"message">>, Node)),
+    ?assert(maps:is_key(<<"assignment">>, Node)).
+```
+
+---
+
+### 3. aos2_to_assignments/3
+
+```erlang
+-spec aos2_to_assignments(ProcID, Body, Opts) -> {ok, BundleMsg}
+    when
+        ProcID :: binary(),
+        Body :: map(),
+        Opts :: map(),
+        BundleMsg :: map().
+```
+
+**Description:** Convert an AOS2-style JSON structure to a normalized HyperBEAM bundle response. Parses the edges array and converts each assignment to canonical format.
+
+**Test Code:**
+```erlang
+-module(dev_scheduler_formats_parse_test).
+-include_lib("eunit/include/eunit.hrl").
+
+aos2_to_assignments_test() ->
+    ProcID = <<"test-process">>,
+    Body = #{
+        <<"page_info">> => #{
+            <<"process">> => ProcID,
+            <<"has_next_page">> => false
+        },
+        <<"edges">> => [
+            #{
+                <<"cursor">> => <<"0">>,
+                <<"node">> => #{
+                    <<"assignment">> => #{
+                        <<"slot">> => <<"0">>,
+                        <<"timestamp">> => <<"1234567890">>,
+                        <<"data">> => <<>>
+                    },
+                    <<"message">> => #{
+                        <<"data">> => <<"test message">>
+                    }
+                }
+            }
+        ]
+    },
+    {ok, Result} = dev_scheduler_formats:aos2_to_assignments(ProcID, Body, #{}),
+    ?assertEqual(<<"schedule">>, maps:get(<<"type">>, Result)),
+    Assignments = maps:get(<<"assignments">>, Result),
+    ?assertEqual(1, maps:size(Assignments)).
+```
+
+---
+
+### 4. aos2_to_assignment/2
+
+```erlang
+-spec aos2_to_assignment(Assignment, Opts) -> NormalizedAssignment
+    when
+        Assignment :: map(),
+        Opts :: map(),
+        NormalizedAssignment :: map().
+```
+
+**Description:** Create and normalize a single assignment from AOS2-style JSON structure. Extracts both the assignment metadata and the message body, converting to canonical format.
+
+**Note:** This method is destructive to the verifiability of the assignment. It's necessary for compatibility with the AOS2-style scheduling API.
+
+**Test Code:**
+```erlang
+-module(dev_scheduler_formats_single_test).
+-include_lib("eunit/include/eunit.hrl").
+
+aos2_to_assignment_test() ->
+    Input = #{
+        <<"node">> => #{
+            <<"assignment">> => #{
+                <<"nonce">> => <<"5">>,
+                <<"timestamp">> => <<"1234567890">>,
+                <<"epoch">> => <<"0">>,
+                <<"data">> => <<>>
+            },
+            <<"message">> => #{
+                <<"data">> => <<"test body">>,
+                <<"tags">> => []
+            }
+        }
+    },
+    Result = dev_scheduler_formats:aos2_to_assignment(Input, #{}),
+    ?assertEqual(5, maps:get(<<"slot">>, Result)),
+    ?assertEqual(1234567890, maps:get(<<"timestamp">>, Result)),
+    ?assert(maps:is_key(<<"body">>, Result)).
+
+aos2_to_assignment_direct_node_test() ->
+    % Can also pass the node directly without wrapper
+    Input = #{
+        <<"assignment">> => #{
+            <<"slot">> => <<"10">>,
+            <<"data">> => <<>>
+        },
+        <<"message">> => #{
+            <<"data">> => <<"content">>
+        }
+    },
+    Result = dev_scheduler_formats:aos2_to_assignment(Input, #{}),
+    ?assertEqual(10, maps:get(<<"slot">>, Result)).
+```
+
+---
+
+### 5. aos2_normalize_types/1
+
+```erlang
+-spec aos2_normalize_types(Msg) -> NormalizedMsg
+    when
+        Msg :: map(),
+        NormalizedMsg :: map().
+```
+
+**Description:** Normalize field names and types in an AOS2 formatted message. Converts string timestamps to integers, maps `nonce` to `slot`, and ensures required fields exist.
+
+**Normalizations Applied:**
+- `timestamp` (binary) → integer
+- `nonce` (binary) → `slot` (integer)
+- `epoch` (binary) → integer
+- `slot` (binary) → integer
+- Adds default `block-hash` if missing
+
+**Test Code:**
+```erlang
+-module(dev_scheduler_formats_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_timestamp_test() ->
+    Msg = #{ <<"timestamp">> => <<"1234567890">> },
+    Result = dev_scheduler_formats:aos2_normalize_types(Msg),
+    ?assertEqual(1234567890, maps:get(<<"timestamp">>, Result)).
+
+normalize_nonce_to_slot_test() ->
+    Msg = #{ <<"nonce">> => <<"42">> },
+    Result = dev_scheduler_formats:aos2_normalize_types(Msg),
+    ?assertEqual(42, maps:get(<<"slot">>, Result)),
+    ?assert(maps:is_key(<<"nonce">>, Result)).
+
+normalize_slot_test() ->
+    Msg = #{ <<"slot">> => <<"100">> },
+    Result = dev_scheduler_formats:aos2_normalize_types(Msg),
+    ?assertEqual(100, maps:get(<<"slot">>, Result)).
+
+normalize_epoch_test() ->
+    Msg = #{ <<"epoch">> => <<"5">> },
+    Result = dev_scheduler_formats:aos2_normalize_types(Msg),
+    ?assertEqual(5, maps:get(<<"epoch">>, Result)).
+
+normalize_adds_block_hash_test() ->
+    Msg = #{ <<"slot">> => 1 },
+    Result = dev_scheduler_formats:aos2_normalize_types(Msg),
+    ?assert(maps:is_key(<<"block-hash">>, Result)).
+
+normalize_passthrough_test() ->
+    Msg = #{
+        <<"slot">> => 10,
+        <<"timestamp">> => 999,
+        <<"block-hash">> => <<"existing">>
+    },
+    Result = dev_scheduler_formats:aos2_normalize_types(Msg),
+    ?assertEqual(Msg, Result).
+```
+
+---
+
+## Format Comparison
+
+| Feature | Bundle Format | AOS2 Format |
+|---------|--------------|-------------|
+| Content-Type | N/A (structured) | `application/json` |
+| Protocol | `ao.N.1` | `ao.TN.1` |
+| Pagination | `continues` boolean | `has_next_page` |
+| Assignments | Map by slot | Array of edges |
+| Cursor | Slot number | String slot |
+| Timestamps | Integer | String |
+| Verifiable | Yes | No (normalized) |
+
+---
+
+## Common Patterns
+
+```erlang
+%% Generate response based on Accept header
+generate_response(ProcID, Assignments, More, Opts) ->
+    Accept = hb_ao:get(<<"accept">>, Opts, <<"application/http">>, Opts),
+    case Accept of
+        <<"application/aos-2">> ->
+            dev_scheduler_formats:assignments_to_aos2(
+                ProcID, Assignments, More, Opts
+            );
+        <<"application/json">> ->
+            dev_scheduler_formats:assignments_to_aos2(
+                ProcID, Assignments, More, Opts
+            );
+        _ ->
+            dev_scheduler_formats:assignments_to_bundle(
+                ProcID, Assignments, More, Opts
+            )
+    end.
+
+%% Parse incoming schedule from remote SU
+parse_remote_schedule(ProcID, JSONBody, Opts) ->
+    Decoded = hb_json:decode(JSONBody),
+    dev_scheduler_formats:aos2_to_assignments(ProcID, Decoded, Opts).
+
+%% Normalize a single assignment
+normalize_assignment(RawAssignment, Opts) ->
+    Assignment = dev_scheduler_formats:aos2_to_assignment(RawAssignment, Opts),
+    dev_scheduler_formats:aos2_normalize_types(Assignment).
+```
+
+---
+
+## Cursor Generation
+
+The cursor for pagination is derived from the slot number:
+
+```erlang
+cursor(Assignment, Opts) ->
+    hb_ao:get(<<"slot">>, Assignment, Opts).
+```
+
+For mainnet `ao.N.1` assignments, this is the slot number directly. For legacynet `ao.TN.1` assignments, this may be the assignment ID.
+
+---
+
+## Format Options
+
+The module uses specific options to optimize format operations:
+
+```erlang
+format_opts(Opts) ->
+    Opts#{
+        hashpath => ignore,          % Skip hashpath calculation
+        cache_control => [<<"no-cache">>, <<"no-store">>],
+        await_inprogress => false    % Don't wait for pending results
+    }.
+```
+
+---
+
+## References
+
+- **Main Scheduler** - `dev_scheduler.erl`
+- **JSON Interface** - `dev_json_iface.erl`
+- **Gateway Client** - `hb_gateway_client.erl`
+- **JSON Encoding** - `hb_json.erl`
+- **Arweave Timestamps** - `ar_timestamp.erl`
+
+---
+
+## Notes
+
+1. **Verifiability Loss:** AOS2 format conversion destroys cryptographic verifiability
+2. **Nonce Mapping:** Legacy `nonce` field maps to `slot` in canonical format
+3. **Timestamp Types:** Binary timestamps are converted to integers automatically
+4. **Block Hash Default:** Missing `block-hash` fields get a zero-hash default
+5. **Edge Structure:** AOS2 uses GraphQL-style edges with cursor and node
+6. **JSON Encoding:** Uses `hb_json:encode/1` for consistent JSON output
+7. **Map Conversion:** Handles both list and map input for assignments
+8. **Gateway Integration:** Uses `hb_gateway_client` for message parsing
+9. **Missing Messages:** Falls back to cache if scheduler doesn't provide message body
+10. **Time Info:** Extracts timestamp info from last assignment for bundle header

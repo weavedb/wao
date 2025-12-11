@@ -1,0 +1,697 @@
+# dev_poda.erl - Proof of Delegated Authority (PoDA) Consensus
+
+## Overview
+
+**Purpose:** Decentralized proof of authority consensus for AO processes  
+**Module:** `dev_poda`  
+**Pattern:** Authority Quorum → Message Validation → Commitment Aggregation  
+**Device Tag:** `PODA`
+
+This device implements a simple exemplar decentralized proof of authority consensus algorithm for AO processes. It validates incoming messages through a quorum of trusted authorities before execution and aggregates commitments from authorities when producing results.
+
+## Architecture
+
+### Two-Flow Design
+
+**Execution Flow:**
+1. Initialization - Extract authority list and quorum
+2. Pre-execution validation - Verify authority commitments
+
+**Commitment Flow:**
+1. Result commitment - Add authority signatures to outbound messages
+
+---
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_util`, `hb_cache`, `hb_router`, `hb_client`
+- **Arweave:** `ar_bundles`, `ar_wallet`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Configuration
+
+### Process Definition Tags
+
+```erlang
+Process#tx.tags = [
+    {<<"device">>, <<"PODA">>},
+    {<<"authority">>, Address1},
+    {<<"authority">>, Address2},
+    {<<"authority">>, Address3},
+    {<<"quorum">>, <<"2">>}  % Binary integer
+]
+```
+
+**Required Tags:**
+- `authority` - Trusted validator addresses (multiple)
+- `quorum` - Minimum number of authority signatures required
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Execution Flow
+-spec init(State, Params) -> {ok, State, Opts}.
+-spec execute(Message, State, Opts) -> {ok, NewState} | {skip, ErrorState}.
+
+%% Commitment Flow
+-spec push(Item, State, Opts) -> {ok, StateWithCommitments}.
+
+%% Validation
+-spec is_user_signed(Message) -> boolean().
+```
+
+---
+
+## Public Functions
+
+### 1. init/2
+
+```erlang
+-spec init(State, Params) -> {ok, State, Opts}
+    when
+        State :: map(),
+        Params :: [{Key, Value}],
+        Opts :: #{
+            authorities => [Address],
+            quorum => integer()
+        }.
+```
+
+**Description:** Initialize PoDA device by extracting authority addresses and quorum from process tags.
+
+**Parameters Extraction:**
+- Filters `authority` tags into list
+- Extracts `quorum` tag as binary integer
+- Returns configuration map
+
+**Test Code:**
+```erlang
+-module(dev_poda_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_basic_test() ->
+    Params = [
+        {<<"authority">>, <<"addr1">>},
+        {<<"authority">>, <<"addr2">>},
+        {<<"authority">>, <<"addr3">>},
+        {<<"quorum">>, <<"2">>}
+    ],
+    {ok, State, Opts} = dev_poda:init(#{}, Params),
+    ?assertEqual([<<"addr1">>, <<"addr2">>, <<"addr3">>], maps:get(authorities, Opts)),
+    ?assertEqual(2, maps:get(quorum, Opts)).
+
+init_minimum_quorum_test() ->
+    Params = [
+        {<<"authority">>, <<"addr1">>},
+        {<<"quorum">>, <<"1">>}
+    ],
+    {ok, _, Opts} = dev_poda:init(#{}, Params),
+    ?assertEqual(1, maps:get(quorum, Opts)).
+```
+
+---
+
+### 2. execute/3
+
+```erlang
+-spec execute(Outer, State, Opts) -> {ok, NewState} | {skip, ErrorState}
+    when
+        Outer :: #tx{},
+        State :: map(),
+        NewState :: map(),
+        ErrorState :: map().
+```
+
+**Description:** Pre-execution validation of incoming messages. Verifies that messages have sufficient authority commitments before allowing execution.
+
+**Execution Passes:**
+- **Pass 1:** Validation and commitment extraction
+- **Pass 3:** Post-execution (no-op)
+- **Other passes:** Pass-through
+
+**Validation Flow:**
+1. Check if message is user-signed (skip validation)
+2. Extract commitments from message
+3. Verify all commitment signatures
+4. Verify commitments from trusted authorities
+5. Check quorum threshold
+6. Add commitments to VFS
+7. Update arg_prefix with unwrapped message
+
+**Test Code:**
+```erlang
+-module(dev_poda_execute_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+execute_valid_message_test() ->
+    Wallet1 = ar_wallet:new(),
+    Wallet2 = ar_wallet:new(),
+    Addr1 = hb_util:encode(ar_wallet:to_address(Wallet1)),
+    Addr2 = hb_util:encode(ar_wallet:to_address(Wallet2)),
+    
+    % Create inner message
+    InnerMsg = ar_bundles:sign_item(
+        #tx{data = <<"test data">>},
+        Wallet1
+    ),
+    
+    % Create commitments
+    MsgID = hb_util:encode(ar_bundles:id(InnerMsg, unsigned)),
+    Comm1 = ar_bundles:sign_item(
+        #tx{tags = [{<<"commitment-for">>, MsgID}]},
+        Wallet1
+    ),
+    Comm2 = ar_bundles:sign_item(
+        #tx{tags = [{<<"commitment-for">>, MsgID}]},
+        Wallet2
+    ),
+    
+    % Wrap in commitment bundle
+    CommitmentBundle = ar_bundles:sign_item(
+        ar_bundles:normalize(#tx{
+            data = #{
+                <<"commitments">> => ar_bundles:sign_item(
+                    #tx{data = #{<<"1">> => Comm1, <<"2">> => Comm2}},
+                    Wallet1
+                ),
+                <<"body">> => InnerMsg
+            }
+        }),
+        Wallet1
+    ),
+    
+    Outer = #tx{data = #{<<"body">> => CommitmentBundle}},
+    State = #{
+        <<"pass">> => 1,
+        <<"wallet">> => Wallet1,
+        authorities => [Addr1, Addr2],
+        quorum => 2
+    },
+    
+    {ok, NewState} = dev_poda:execute(Outer, State, #{}),
+    ?assert(maps:is_key(<<"vfs">>, NewState)).
+
+execute_insufficient_quorum_test() ->
+    Wallet1 = ar_wallet:new(),
+    Addr1 = hb_util:encode(ar_wallet:to_address(Wallet1)),
+    
+    InnerMsg = ar_bundles:sign_item(
+        #tx{data = <<"test">>},
+        Wallet1
+    ),
+    
+    MsgID = hb_util:encode(ar_bundles:id(InnerMsg, unsigned)),
+    Comm1 = ar_bundles:sign_item(
+        #tx{tags = [{<<"commitment-for">>, MsgID}]},
+        Wallet1
+    ),
+    
+    CommitmentBundle = ar_bundles:sign_item(
+        ar_bundles:normalize(#tx{
+            data = #{
+                <<"commitments">> => ar_bundles:sign_item(
+                    #tx{data = #{<<"1">> => Comm1}},
+                    Wallet1
+                ),
+                <<"body">> => InnerMsg
+            }
+        }),
+        Wallet1
+    ),
+    
+    Outer = #tx{data = #{<<"body">> => CommitmentBundle}},
+    State = #{
+        <<"pass">> => 1,
+        <<"wallet">> => Wallet1,
+        authorities => [Addr1],
+        quorum => 2  % Requires 2 but only has 1
+    },
+    
+    {skip, ErrorState} = dev_poda:execute(Outer, State, #{}),
+    ?assert(maps:is_key(results, ErrorState)).
+
+execute_user_signed_bypass_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = ar_bundles:sign_item(
+        #tx{data = <<"user message">>},
+        Wallet
+    ),
+    Outer = #tx{data = #{<<"body">> => Msg}},
+    State = #{ <<"pass">> => 1 },
+    
+    {ok, State} = dev_poda:execute(Outer, State, #{}).
+```
+
+---
+
+### 3. push/3
+
+```erlang
+-spec push(Item, State, Opts) -> {ok, StateWithCommitments}
+    when
+        Item :: term(),
+        State :: map(),
+        Opts :: map(),
+        StateWithCommitments :: map().
+```
+
+**Description:** Add PoDA commitments to outbound messages. Aggregates signatures from multiple authorities and wraps results in commitment bundles.
+
+**Flow:**
+1. Check if target process uses PoDA
+2. Gather commitments from peer authorities
+3. Add local commitment
+4. Bundle all commitments with message
+5. Sign complete commitment bundle
+
+**Parallel Execution:**
+Uses `pfiltermap/2` for concurrent commitment gathering from multiple authorities.
+
+**Test Code:**
+```erlang
+-module(dev_poda_push_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+push_adds_commitments_test() ->
+    Wallet = ar_wallet:new(),
+    Process = ar_bundles:sign_item(
+        #tx{
+            tags = [
+                {<<"device">>, <<"PODA">>},
+                {<<"authority">>, hb_util:encode(hb:address())},
+                {<<"quorum">>, <<"1">>}
+            ]
+        },
+        Wallet
+    ),
+    
+    OutMsg = ar_bundles:sign_item(
+        #tx{
+            target = ar_bundles:id(Process, unsigned),
+            data = <<"result">>
+        },
+        Wallet
+    ),
+    
+    State = #{
+        <<"results">> => #tx{
+            data = #{
+                <<"/outbox">> => #tx{
+                    data = #{
+                        <<"1">> => OutMsg
+                    }
+                }
+            }
+        },
+        <<"assignment">> => ar_bundles:sign_item(#tx{}, Wallet),
+        <<"store">> => hb_opts:get(store),
+        <<"logger">> => self(),
+        <<"wallet">> => Wallet
+    },
+    
+    {ok, NewState} = dev_poda:push(OutMsg, State, #{}),
+    Results = maps:get(<<"results">>, NewState),
+    ?assert(is_record(Results, tx)).
+```
+
+---
+
+### 4. is_user_signed/1
+
+```erlang
+-spec is_user_signed(Message) -> boolean()
+    when
+        Message :: #tx{}.
+```
+
+**Description:** Determine if a message is user-signed (not from a process). Currently uses presence of `from-process` tag as indicator.
+
+**Note:** Marked with `?no_prod(use_real_commitment_detection)` for future enhancement.
+
+**Test Code:**
+```erlang
+-module(dev_poda_is_user_signed_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+is_user_signed_true_test() ->
+    Msg = ar_bundles:sign_item(
+        #tx{data = <<"user data">>},
+        ar_wallet:new()
+    ),
+    ?assert(dev_poda:is_user_signed(Msg)).
+
+is_user_signed_false_test() ->
+    Msg = ar_bundles:sign_item(
+        #tx{
+            data = <<"process data">>,
+            tags = [{<<"from-process">>, <<"true">>}]
+        },
+        ar_wallet:new()
+    ),
+    ?assertNot(dev_poda:is_user_signed(Msg)).
+```
+
+---
+
+## Message Structure
+
+### Incoming Message (Requires Validation)
+
+```erlang
+#tx{
+    data => #{
+        <<"body">> => #tx{
+            data => #{
+                <<"commitments">> => #tx{
+                    data => #{
+                        <<"1">> => Commitment1,  % Authority signature
+                        <<"2">> => Commitment2,  % Authority signature
+                        ...
+                    }
+                },
+                <<"body">> => ActualMessage  % The message to execute
+            }
+        }
+    }
+}
+```
+
+### Commitment Structure
+
+```erlang
+#tx{
+    tags => [{<<"commitment-for">>, MessageID}],
+    data => <<>>,
+    signature => AuthoritySignature,
+    owner => AuthorityPublicKey
+}
+```
+
+### Outgoing Message (With Commitments)
+
+```erlang
+#tx{
+    data => #{
+        <<"commitments">> => #tx{
+            data => #{
+                <<"1">> => LocalCommitment,
+                <<"2">> => PeerCommitment1,
+                <<"3">> => PeerCommitment2,
+                ...
+            }
+        },
+        <<"body">> => ResultMessage
+    }
+}
+```
+
+---
+
+## Validation Stages
+
+### Stage 1: Structure Check
+Verify message has required `commitments` and `body` fields.
+
+### Stage 2: Signature Verification
+Verify all commitment signatures are valid.
+
+### Stage 3: Quorum Check
+1. Filter commitments from trusted authorities
+2. Verify commitment relevance to message
+3. Count valid commitments
+4. Check against quorum threshold
+
+---
+
+## Commitment Validation
+
+A commitment is valid if **all** of these are true:
+
+1. **Valid Signer:** Signer is in authority list
+2. **Valid Signature:** Cryptographic signature verifies
+3. **Relevant Message:** One of:
+   - Commitment's unsigned ID matches message unsigned ID
+   - Has `commitment-for` tag matching message ID
+   - Message ID found in commitment bundle
+
+---
+
+## Authority Coordination
+
+### Finding Authorities
+
+```erlang
+% Router lookup for authority compute nodes
+{ok, ComputeNode} = hb_router:find(
+    compute,
+    ProcessID,
+    AuthorityAddress,
+    Opts
+)
+```
+
+### Requesting Commitments
+
+```erlang
+% Client request to authority
+Res = hb_client:resolve(
+    ComputeNode,
+    ProcessID,
+    AssignmentID,
+    #{ <<"commit-to">> => MessageID }
+)
+```
+
+### Parallel Gathering
+
+```erlang
+% Concurrent commitment collection
+Commitments = pfiltermap(
+    fun(AuthorityAddress) ->
+        % Request commitment from authority
+        % Return {true, Commitment} or false
+    end,
+    AuthorityList
+)
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Define PoDA process
+Process = ar_bundles:sign_item(
+    #tx{
+        tags = [
+            {<<"device">>, <<"PODA">>},
+            {<<"authority">>, Authority1Address},
+            {<<"authority">>, Authority2Address},
+            {<<"authority">>, Authority3Address},
+            {<<"quorum">>, <<"2">>}
+        ],
+        data = <<"Process state">>
+    },
+    Wallet
+).
+
+%% Create message with commitments
+InnerMsg = ar_bundles:sign_item(
+    #tx{data = <<"Execute this">>},
+    UserWallet
+),
+
+% Get commitments from authorities
+Commitment1 = get_commitment_from_authority(Authority1, InnerMsg),
+Commitment2 = get_commitment_from_authority(Authority2, InnerMsg),
+
+% Bundle commitments
+CommitmentBundle = ar_bundles:sign_item(
+    ar_bundles:normalize(#tx{
+        data => #{
+            <<"commitments">> => ar_bundles:sign_item(
+                #tx{data = #{
+                    <<"1">> => Commitment1,
+                    <<"2">> => Commitment2
+                }},
+                Wallet
+            ),
+            <<"body">> => InnerMsg
+        }
+    }),
+    Wallet
+).
+
+%% Send for execution
+Result = execute_poda_message(Process, CommitmentBundle).
+
+%% Check commitment in VFS after execution
+CommitmentPath = <<"/commitments/", (hb_util:encode(AuthorityID))/binary>>,
+Commitment = hb_ao:get(CommitmentPath, State, #{}).
+```
+
+---
+
+## Integration with Process Device
+
+```erlang
+%% Process with PoDA validation
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"stack@1.0">>,
+    <<"execution-stack">> => [
+        <<"poda@1.0">>,    % Validate first
+        <<"lua@5.3a">>,    % Then execute
+        <<"patch@1.0">>
+    ],
+    % PoDA configuration in tags
+    tags => [
+        {<<"device">>, <<"PODA">>},
+        {<<"authority">>, Addr1},
+        {<<"authority">>, Addr2},
+        {<<"quorum">>, <<"2">>}
+    ]
+}.
+```
+
+---
+
+## Error Handling
+
+### Validation Errors
+
+```erlang
+% Insufficient commitments
+{skip, #{
+    results => #{
+        <<"/outbox">> => #tx{
+            data => <<"Not enough validations">>,
+            tags => [{<<"error">>, <<"PoDA">>}]
+        }
+    }
+}}
+
+% Invalid commitments
+{skip, #{
+    results => #{
+        <<"/outbox">> => #tx{
+            data => <<"Invalid commitments">>,
+            tags => [{<<"error">>, <<"PoDA">>}]
+        }
+    }
+}}
+
+% Missing required fields
+{skip, #{
+    results => #{
+        <<"/outbox">> => #tx{
+            data => <<"Required PoDA messages missing">>,
+            tags => [{<<"error">>, <<"PoDA">>}]
+        }
+    }
+}}
+```
+
+---
+
+## VFS Integration
+
+Validated commitments are stored in the Virtual File System:
+
+```erlang
+% Path format
+<<"/commitments/", (EncodedAuthorityID)/binary>>
+
+% Example
+<<"/commitments/base64url_encoded_authority_address">>
+
+% Access
+Commitment = hb_ao:get(
+    <<"/commitments/authority1">>,
+    State,
+    #{}
+).
+```
+
+---
+
+## Performance Considerations
+
+### Parallel Commitment Gathering
+- Uses `pfiltermap/2` for concurrent requests
+- Spawns separate process for each authority
+- Handles crashes gracefully
+- Waits for all responses before proceeding
+
+### Message Unwrapping
+- Two-layer unwrapping: `/Message/Message`
+- Updates `arg_prefix` with unwrapped message
+- Preserves original structure in VFS
+
+---
+
+## Security Properties
+
+1. **Quorum Requirement:** Configurable M-of-N threshold
+2. **Authority Verification:** Only trusted signers accepted
+3. **Signature Validation:** Cryptographic verification required
+4. **Message Relevance:** Commitments must reference specific message
+5. **User Bypass:** User-signed messages skip validation
+6. **Error Isolation:** Failed validation returns error, doesn't crash
+
+---
+
+## Use Cases
+
+1. **Multi-Authority Validation**
+   - Require multiple nodes to agree on computation
+   - Prevent single-node manipulation
+
+2. **Decentralized Consensus**
+   - Distributed trust among authorities
+   - No single point of control
+
+3. **Result Attestation**
+   - Multiple parties sign computation results
+   - Verifiable execution guarantees
+
+4. **Federated Networks**
+   - Cross-organization validation
+   - Shared authority governance
+
+---
+
+## References
+
+- **Arweave Bundles** - `ar_bundles.erl`
+- **Process Device** - `dev_process.erl`
+- **Router** - `hb_router.erl`
+- **Client** - `hb_client.erl`
+- **Cache** - `hb_cache.erl`
+
+---
+
+## Notes
+
+1. **Exemplar Implementation:** Designed as simple reference, not production-ready
+2. **User Bypass:** User-signed messages skip PoDA validation
+3. **Process Messages:** From-process messages require commitments
+4. **Quorum Threshold:** Must be met for execution to proceed
+5. **Authority List:** Extracted from process tags at init
+6. **Parallel Gathering:** Concurrent commitment requests for performance
+7. **VFS Storage:** Commitments stored for later verification
+8. **Error Returns:** Use `skip` to return error without execution
+9. **Outbox/Spawn Only:** Currently only commits to these result paths
+10. **Commitment Format:** Uses ANS-104 data items with special tags
+11. **Future Enhancement:** Real commitment detection mechanism needed
+12. **Router Integration:** Requires router to find authority nodes
+13. **Message Wrapping:** Double-wrapped structure for validation
+14. **Signature Relevance:** Multiple ways to verify commitment-message relationship
+15. **Production Note:** Marked `?no_prod` for certain simplifications

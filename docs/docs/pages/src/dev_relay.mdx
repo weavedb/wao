@@ -1,0 +1,494 @@
+# dev_relay.erl - Message Relay Device
+
+## Overview
+
+**Purpose:** Relay messages between nodes and HTTP(S) endpoints  
+**Module:** `dev_relay`  
+**Device Name:** `relay@1.0`  
+**Modes:** Synchronous (`call`) and Asynchronous (`cast`)
+
+This device is responsible for relaying messages between HyperBEAM nodes and other HTTP(S) endpoints. It supports both synchronous calls (waits for response) and asynchronous casts (fire-and-forget). The device can also re-route local requests to remote peers based on the node's routing table.
+
+## Supported Operations
+
+- **Synchronous Relay:** Execute HTTP request and return response
+- **Asynchronous Relay:** Fire-and-forget message dispatch
+- **Request Preprocessing:** Re-route requests via routing table
+
+## Dependencies
+
+- **HyperBEAM:** `hb_message`, `hb_http`, `hb_ao`, `hb_maps`, `hb_opts`, `hb_util`
+- **Related:** `dev_router` (routing table)
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Synchronous and Asynchronous Relay
+-spec call(M1, M2, Opts) -> {ok, Result} | {error, Reason}.
+-spec cast(M1, M2, Opts) -> {ok, <<"OK">>}.
+
+%% Request Preprocessing
+-spec request(Msg1, Msg2, Opts) -> {ok, RelayRequest}.
+```
+
+---
+
+## Public Functions
+
+### 1. call/3
+
+```erlang
+-spec call(M1, RawM2, Opts) -> {ok, Result} | {error, Reason}
+    when
+        M1 :: map(),
+        RawM2 :: map(),
+        Opts :: map(),
+        Result :: map(),
+        Reason :: term().
+```
+
+**Description:** Execute a synchronous relay request. Sends an HTTP request to a remote peer and waits for the response. Supports various options for customizing the target, path, method, body, and commitment.
+
+**Supported Options:**
+- `target` - The target message to relay (defaults to original message)
+- `relay-path` / `path` - The path to relay to
+- `relay-device` / `device` - Device to use at destination
+- `peer` - Explicit peer to relay to
+- `relay-method` / `method` - HTTP method (GET, POST, etc.)
+- `relay-body` / `body` - Request body
+- `commit-request` - Whether to sign the request before dispatch (default: `false`)
+
+**Test Code:**
+```erlang
+-module(dev_relay_call_test).
+-include_lib("eunit/include/eunit.hrl").
+
+call_get_test() ->
+    application:ensure_all_started([hb]),
+    {ok, #{<<"body">> := Body}} =
+        hb_ao:resolve(
+            #{
+                <<"device">> => <<"relay@1.0">>,
+                <<"method">> => <<"GET">>,
+                <<"path">> => <<"https://www.google.com/">>
+            },
+            <<"call">>,
+            #{protocol => http2}
+        ),
+    ?assertEqual(true, byte_size(Body) > 10000).
+
+call_to_local_node_test() ->
+    Peer = hb_http_server:start_node(#{priv_wallet => ar_wallet:new()}),
+    {ok, Res} =
+        hb_ao:resolve(
+            #{
+                <<"device">> => <<"relay@1.0">>,
+                <<"method">> => <<"GET">>,
+                <<"path">> => <<"/~meta@1.0/info">>,
+                <<"peer">> => Peer
+            },
+            <<"call">>,
+            #{}
+        ),
+    ?assert(maps:is_key(<<"body">>, Res)).
+
+call_with_body_test() ->
+    Peer = hb_http_server:start_node(#{priv_wallet => ar_wallet:new()}),
+    {ok, Res} =
+        hb_ao:resolve(
+            #{
+                <<"device">> => <<"relay@1.0">>,
+                <<"method">> => <<"POST">>,
+                <<"path">> => <<"/~scheduler@1.0/schedule">>,
+                <<"peer">> => Peer,
+                <<"body">> => #{<<"test">> => <<"data">>}
+            },
+            <<"call">>,
+            #{}
+        ),
+    ?assertMatch(#{<<"body">> := _}, Res).
+```
+
+---
+
+### 2. cast/3
+
+```erlang
+-spec cast(M1, M2, Opts) -> {ok, <<"OK">>}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map().
+```
+
+**Description:** Execute an asynchronous relay request. Spawns a new process to handle the relay and returns immediately with `<<"OK">>`. The actual HTTP request is performed in the background.
+
+**Test Code:**
+```erlang
+-module(dev_relay_cast_test).
+-include_lib("eunit/include/eunit.hrl").
+
+cast_async_test() ->
+    application:ensure_all_started([hb]),
+    {ok, Result} =
+        hb_ao:resolve(
+            #{
+                <<"device">> => <<"relay@1.0">>,
+                <<"method">> => <<"GET">>,
+                <<"path">> => <<"https://www.google.com/">>
+            },
+            <<"cast">>,
+            #{protocol => http2}
+        ),
+    ?assertEqual(<<"OK">>, Result).
+
+cast_no_wait_test() ->
+    Peer = hb_http_server:start_node(#{priv_wallet => ar_wallet:new()}),
+    Start = erlang:monotonic_time(millisecond),
+    {ok, <<"OK">>} =
+        hb_ao:resolve(
+            #{
+                <<"device">> => <<"relay@1.0">>,
+                <<"method">> => <<"GET">>,
+                <<"path">> => <<"/~meta@1.0/info">>,
+                <<"peer">> => Peer
+            },
+            <<"cast">>,
+            #{}
+        ),
+    Duration = erlang:monotonic_time(millisecond) - Start,
+    % Cast should return almost immediately
+    ?assert(Duration < 100).
+```
+
+---
+
+### 3. request/3
+
+```erlang
+-spec request(Msg1, Msg2, Opts) -> {ok, RelayRequest}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        RelayRequest :: map().
+```
+
+**Description:** Preprocess a request to prepare it for relaying. Used internally to construct relay requests that will be dispatched through the `relay@1.0/call` endpoint.
+
+**Test Code:**
+```erlang
+-module(dev_relay_request_test).
+-include_lib("eunit/include/eunit.hrl").
+
+request_preprocessing_test() ->
+    Msg2 = #{
+        <<"request">> => #{
+            <<"path">> => <<"/test">>,
+            <<"method">> => <<"GET">>
+        }
+    },
+    {ok, Result} = dev_relay:request(#{}, Msg2, #{}),
+    ?assertMatch(#{<<"body">> := _}, Result).
+```
+
+---
+
+## Usage Examples
+
+### Basic GET Request
+
+```
+curl /~relay@1.0/call?method=GET&path=https://www.arweave.net/
+```
+
+### Relay via Device Resolution
+
+```erlang
+{ok, Response} =
+    hb_ao:resolve(
+        #{
+            <<"device">> => <<"relay@1.0">>,
+            <<"method">> => <<"GET">>,
+            <<"path">> => <<"https://api.example.com/data">>
+        },
+        <<"call">>,
+        Opts
+    ).
+```
+
+### Relay to Specific Peer
+
+```erlang
+{ok, Response} =
+    hb_ao:resolve(
+        #{
+            <<"device">> => <<"relay@1.0">>,
+            <<"method">> => <<"GET">>,
+            <<"path">> => <<"/~meta@1.0/info">>,
+            <<"peer">> => <<"http://localhost:8080">>
+        },
+        <<"call">>,
+        Opts
+    ).
+```
+
+---
+
+## Routing Integration
+
+### Relay with Nearest Node Strategy
+
+The relay device integrates with the router to automatically select the nearest node from a cluster:
+
+```erlang
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new(),
+    routes => [
+        #{
+            <<"template">> => <<"/.*">>,
+            <<"strategy">> => <<"Nearest">>,
+            <<"nodes">> => [
+                #{<<"prefix">> => Peer1, <<"wallet">> => Address1},
+                #{<<"prefix">> => Peer2, <<"wallet">> => Address2}
+            ]
+        }
+    ]
+}),
+{ok, RelayRes} = hb_http:get(
+    Node,
+    <<"/~relay@1.0/call?relay-path=/~meta@1.0/info">>,
+    Opts
+).
+```
+
+---
+
+## Commit Request Feature
+
+The `commit-request` option allows the relay to sign requests before dispatching. This is useful when the receiving node requires signed requests for authentication or billing.
+
+**Configuration:**
+```erlang
+Node = hb_http_server:start_node(#{
+    priv_wallet => Wallet,
+    relay_allow_commit_request => true,  % Enable commit-request
+    routes => [
+        #{
+            <<"template">> => <<"/test-key">>,
+            <<"strategy">> => <<"Nearest">>,
+            <<"nodes">> => [#{<<"wallet">> => Address, <<"prefix">> => Executor}]
+        }
+    ],
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"router@1.0">>,
+            <<"path">> => <<"preprocess">>,
+            <<"commit-request">> => true
+        }
+    }
+}).
+```
+
+**Test Code:**
+```erlang
+-module(dev_relay_commit_test).
+-include_lib("eunit/include/eunit.hrl").
+
+commit_request_test() ->
+    Wallet = ar_wallet:new(),
+    Executor = hb_http_server:start_node(#{
+        port => 10000 + rand:uniform(10000),
+        force_signed_requests => true
+    }),
+    Node = hb_http_server:start_node(#{
+        priv_wallet => Wallet,
+        relay_allow_commit_request => true,
+        routes => [
+            #{
+                <<"template">> => <<"/test-key">>,
+                <<"strategy">> => <<"Nearest">>,
+                <<"nodes">> => [
+                    #{
+                        <<"wallet">> => hb_util:human_id(Wallet),
+                        <<"prefix">> => Executor
+                    }
+                ]
+            }
+        ],
+        on => #{
+            <<"request">> => #{
+                <<"device">> => <<"router@1.0">>,
+                <<"path">> => <<"preprocess">>,
+                <<"commit-request">> => true
+            }
+        }
+    }),
+    {ok, Res} = hb_http:get(
+        Node,
+        #{<<"path">> => <<"test-key">>, <<"test-key">> => <<"value">>},
+        #{}
+    ),
+    ?assertEqual(<<"value">>, Res).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple HTTP GET relay
+{ok, Response} =
+    hb_ao:resolve(
+        #{
+            <<"device">> => <<"relay@1.0">>,
+            <<"method">> => <<"GET">>,
+            <<"path">> => <<"https://api.example.com/endpoint">>
+        },
+        <<"call">>,
+        #{}
+    ).
+
+%% POST with body
+{ok, Response} =
+    hb_ao:resolve(
+        #{
+            <<"device">> => <<"relay@1.0">>,
+            <<"method">> => <<"POST">>,
+            <<"path">> => <<"/~scheduler@1.0/schedule">>,
+            <<"peer">> => TargetNode,
+            <<"body">> => hb_message:commit(MessageData, Opts)
+        },
+        <<"call">>,
+        Opts
+    ).
+
+%% Fire-and-forget notification
+{ok, <<"OK">>} =
+    hb_ao:resolve(
+        #{
+            <<"device">> => <<"relay@1.0">>,
+            <<"method">> => <<"POST">>,
+            <<"path">> => <<"/webhook">>,
+            <<"peer">> => WebhookEndpoint,
+            <<"body">> => NotificationData
+        },
+        <<"cast">>,
+        Opts
+    ).
+
+%% Relay with custom device at destination
+{ok, Response} =
+    hb_ao:resolve(
+        #{
+            <<"device">> => <<"relay@1.0">>,
+            <<"relay-device">> => <<"custom@1.0">>,
+            <<"method">> => <<"GET">>,
+            <<"path">> => <<"/custom/path">>,
+            <<"peer">> => TargetNode
+        },
+        <<"call">>,
+        Opts
+    ).
+```
+
+---
+
+## Request Flow
+
+### Synchronous Call Flow
+
+```
+1. Client invokes relay@1.0/call
+2. Extract target message and relay parameters
+3. Resolve relay path, method, body, device
+4. Check commit-request option
+5. Optionally sign request if commit-request=true
+6. Verify message signature
+7. Dispatch HTTP request via hb_http
+8. Wait for response
+9. Remove set-cookie headers
+10. Return response to client
+```
+
+### Asynchronous Cast Flow
+
+```
+1. Client invokes relay@1.0/cast
+2. Spawn background process
+3. Return {ok, <<"OK">>} immediately
+4. Background process executes call/3
+5. Response is discarded
+```
+
+---
+
+## Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `relay_allow_commit_request` | `false` | Allow requests to be signed before relay |
+| `relay_http_client` | (from opts) | HTTP client to use for requests |
+| `http_only_result` | `false` | Return only body vs full response |
+
+---
+
+## Response Handling
+
+The relay device automatically:
+
+1. Removes `set-cookie` headers from responses (security)
+2. Preserves all other response headers
+3. Returns full response map including `body`, `status`, headers
+
+---
+
+## Error Handling
+
+### Common Errors
+
+**Network Error:**
+```erlang
+{error, {connection_failed, Reason}}
+```
+
+**Commit Not Allowed:**
+```erlang
+throw(relay_commit_request_not_allowed)
+```
+
+**Verification Failed:**
+```erlang
+% call/3 will fail assertion if message verification fails
+true = hb_message:verify(TargetMod5)
+```
+
+---
+
+## References
+
+- **Router Device** - `dev_router.erl`
+- **HTTP Client** - `hb_http.erl`
+- **Message Handling** - `hb_message.erl`
+- **AO Resolution** - `hb_ao.erl`
+
+---
+
+## Notes
+
+1. **Cookie Stripping:** `set-cookie` headers are removed from responses for security
+2. **Signature Verification:** All relayed messages are verified before dispatch
+3. **Async Guarantee:** Cast mode provides no delivery guarantee
+4. **HTTP/2 Support:** Supports HTTP/2 protocol via `protocol => http2` option
+5. **Commitment Signing:** Optional request signing via `commit-request`
+6. **Peer Override:** Explicit `peer` option bypasses routing table
+7. **Device Forwarding:** `relay-device` specifies device at destination
+8. **Method Flexibility:** Supports all HTTP methods (GET, POST, PUT, DELETE, etc.)
+9. **Body Handling:** Automatic body inclusion for POST/PUT requests
+10. **Path Resolution:** Supports both absolute URLs and relative paths
+11. **Target Extraction:** Can relay specific message via `target` option
+12. **Router Integration:** Works with `dev_router` for load balancing

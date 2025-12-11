@@ -1,0 +1,602 @@
+# dev_cache.erl - Local Cache Storage Device
+
+## Overview
+
+**Purpose:** Read and write data to local cache with access control  
+**Module:** `dev_cache`  
+**Device Name:** `cache@1.0`  
+**Pattern:** ID-based storage with trusted writer verification
+
+This device provides controlled access to the local cache store, enabling reading data by ID and writing data when authorized. It supports both single-item writes and batch operations, with optional format conversion for AO-compatible clients. Access control ensures only trusted writers can modify the cache.
+
+## Supported Operations
+
+- **Read:** Retrieve data by ID/location with optional format conversion
+- **Write:** Store single items or batches with authorization
+- **Link:** Create symbolic links between cache entries
+- **AOS Format:** Convert responses to `application/aos-2` JSON format
+
+## Dependencies
+
+- **HyperBEAM:** `hb_cache`, `hb_store`, `hb_ao`, `hb_maps`, `hb_message`, `hb_opts`, `hb_util`, `hb_http`, `hb_http_server`, `hb_json`
+- **JSON Interface:** `dev_json_iface`
+- **Arweave:** `ar_wallet`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Cache Operations
+-spec read(Base, Request, Opts) -> {ok, Data} | not_found | {error, Reason}.
+-spec write(Base, Request, Opts) -> {ok, Result} | {error, Reason}.
+-spec link(Base, Request, Opts) -> {ok, Result} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. read/3
+
+```erlang
+-spec read(Base, Request, Opts) -> {ok, Data} | not_found | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        Data :: term(),
+        Reason :: term().
+```
+
+**Description:** Read data from the cache using the `target` key as the location identifier. Supports automatic format conversion to `application/aos-2` when requested via the `accept` header. Falls back to direct store reads for explicit data paths.
+
+**Accept Header Options:**
+- `<<"application/aos-2">>` - Return JSON-formatted AO message structure
+- Any other value - Return raw cached data
+
+**Test Code:**
+```erlang
+-module(dev_cache_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_basic_test() ->
+    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    TestData = #{ <<"key">> => <<"value">> },
+    {_WriteRes, Path} = write_to_cache(Node, TestData, Wallet),
+    Request = #{
+        <<"method">> => <<"GET">>,
+        <<"target">> => Path
+    },
+    {ok, ReadData} = dev_cache:read(#{}, Request, Opts),
+    ?assert(hb_message:match(TestData, ReadData, only_present, Opts)).
+
+read_with_aos_format_test() ->
+    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    TestData = #{ <<"data">> => <<"test">> },
+    {_WriteRes, Path} = write_to_cache(Node, TestData, Wallet),
+    Request = #{
+        <<"method">> => <<"GET">>,
+        <<"target">> => Path,
+        <<"accept">> => <<"application/aos-2">>
+    },
+    {ok, Result} = dev_cache:read(#{}, Request, Opts),
+    ?assertEqual(<<"application/aos-2">>, maps:get(<<"content-type">>, Result)),
+    ?assert(is_binary(maps:get(<<"body">>, Result))),
+    % Body should be JSON
+    Decoded = hb_json:decode(maps:get(<<"body">>, Result)),
+    ?assert(is_map(Decoded)).
+
+read_not_found_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    Request = #{
+        <<"target">> => <<"nonexistent-id-12345678901234567890123">>
+    },
+    ?assertEqual(not_found, dev_cache:read(#{}, Request, Opts)).
+```
+
+---
+
+### 2. write/3
+
+```erlang
+-spec write(Base, Request, Opts) -> {ok, Result} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        Result :: map(),
+        Reason :: map().
+```
+
+**Description:** Write data to the cache after verifying the request comes from a trusted writer. Supports single-item writes and batch operations. Requires request to be signed by an address listed in `cache_writers` configuration.
+
+**Write Types:**
+- `<<"single">>` (default) - Write a single item
+- `<<"batch">>` - Write multiple items from body map
+
+**Test Code:**
+```erlang
+-module(dev_cache_write_test).
+-include_lib("eunit/include/eunit.hrl").
+
+write_single_message_test() ->
+    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    TestData = #{ <<"test_key">> => <<"test_value">> },
+    {WriteRes, Path} = write_to_cache(Node, TestData, Wallet),
+    ?assertEqual(200, maps:get(<<"status">>, WriteRes)),
+    ?assertNotEqual(not_found, Path),
+    % Verify readable
+    {ok, ReadData} = hb_cache:read(Path, Opts),
+    ?assert(hb_message:match(TestData, ReadData, only_present, Opts)).
+
+write_binary_test() ->
+    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    TestData = <<"test_binary_data">>,
+    {WriteRes, Path} = write_to_cache(Node, TestData, Wallet),
+    ?assertEqual(200, maps:get(<<"status">>, WriteRes)),
+    {ok, ReadData} = hb_cache:read(Path, Opts),
+    ?assertEqual(TestData, ReadData).
+
+write_unauthorized_test() ->
+    Opts = #{ 
+        store => [hb_test_utils:test_store()],
+        cache_writers => []  % No authorized writers
+    },
+    UntrustedWallet = ar_wallet:new(),
+    Request = hb_message:commit(
+        #{
+            <<"body">> => #{ <<"data">> => <<"value">> }
+        },
+        #{ priv_wallet => UntrustedWallet }
+    ),
+    {error, ErrorMsg} = dev_cache:write(#{}, Request, Opts),
+    ?assertEqual(403, maps:get(<<"status">>, ErrorMsg)),
+    ?assert(is_binary(maps:get(<<"body">>, ErrorMsg))).
+
+write_batch_test() ->
+    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    BatchData = #{
+        <<"item1">> => #{ <<"data">> => <<"value1">> },
+        <<"item2">> => #{ <<"data">> => <<"value2">> }
+    },
+    WriteMsg = #{
+        <<"path">> => <<"/~cache@1.0/write">>,
+        <<"method">> => <<"POST">>,
+        <<"type">> => <<"batch">>,
+        <<"body">> => BatchData
+    },
+    SignedMsg = hb_message:commit(WriteMsg, Wallet),
+    {ok, WriteRes} = hb_http:post(Node, SignedMsg, #{}),
+    ?assertEqual(200, maps:get(<<"status">>, WriteRes)).
+```
+
+---
+
+### 3. link/3
+
+```erlang
+-spec link(Base, Request, Opts) -> {ok, Result} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        Result :: map(),
+        Reason :: term().
+```
+
+**Description:** Create a symbolic link from a source ID to a destination path in the cache. Requires authorization from trusted writer.
+
+**Test Code:**
+```erlang
+-module(dev_cache_link_test).
+-include_lib("eunit/include/eunit.hrl").
+
+link_creation_test() ->
+    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    % Write original data
+    TestData = #{ <<"data">> => <<"original">> },
+    {_WriteRes, SourcePath} = write_to_cache(Node, TestData, Wallet),
+    % Create link
+    DestPath = <<"custom-path-alias">>,
+    LinkMsg = #{
+        <<"path">> => <<"/~cache@1.0/link">>,
+        <<"method">> => <<"POST">>,
+        <<"source">> => SourcePath,
+        <<"destination">> => DestPath
+    },
+    SignedMsg = hb_message:commit(LinkMsg, Wallet),
+    {ok, LinkRes} = hb_http:post(Node, SignedMsg, #{}),
+    ?assertEqual(200, maps:get(<<"status">>, LinkRes)),
+    % Verify link works
+    {ok, ReadData} = hb_cache:read(DestPath, Opts),
+    ?assert(hb_message:match(TestData, ReadData, only_present, Opts)).
+
+link_unauthorized_test() ->
+    Opts = #{ 
+        store => [hb_test_utils:test_store()],
+        cache_writers => []
+    },
+    UntrustedWallet = ar_wallet:new(),
+    Request = hb_message:commit(
+        #{
+            <<"source">> => <<"src">>,
+            <<"destination">> => <<"dst">>
+        },
+        #{ priv_wallet => UntrustedWallet }
+    ),
+    ?assertEqual({error, not_authorized}, dev_cache:link(#{}, Request, Opts)).
+```
+
+---
+
+## Access Control
+
+### Trusted Writers
+
+**Configuration:**
+```erlang
+NodeConfig = #{
+    cache_writers => [
+        <<"address1-43-chars">>,
+        <<"address2-43-chars">>
+    ]
+}
+```
+
+**Verification Process:**
+1. Extract signers from request using `hb_message:signers/2`
+2. Check if any signer is in `cache_writers` list
+3. Allow operation if match found, reject otherwise
+
+### Authorization Errors
+
+**Write Denied:**
+```erlang
+{error, #{
+    <<"status">> => 403,
+    <<"body">> => <<"Not authorized to write to the cache.">>
+}}
+```
+
+**Link Denied:**
+```erlang
+{error, not_authorized}
+```
+
+---
+
+## Write Operations
+
+### Single Write
+
+**Structure:**
+```erlang
+#{
+    <<"type">> => <<"single">>,  % Default
+    <<"body">> => Data,
+    <<"location">> => OptionalPath  % Optional custom path
+}
+```
+
+**Behavior:**
+- Maps: Written with full message structure
+- Binaries: Written directly without message wrapping
+- Custom location: Use specified path if provided
+
+### Batch Write
+
+**Structure:**
+```erlang
+#{
+    <<"type">> => <<"batch">>,
+    <<"body">> => #{
+        <<"key1">> => Item1,
+        <<"key2">> => Item2
+    }
+}
+```
+
+**Behavior:**
+- Iterates over each key-value pair
+- Writes each item individually
+- Returns map of write results
+
+### Link Operation
+
+**Structure:**
+```erlang
+#{
+    <<"operation">> => <<"link">>,
+    <<"source">> => SourceID,
+    <<"destination">> => DestinationPath
+}
+```
+
+**Behavior:**
+- Creates symbolic link in cache
+- Destination can be any custom path
+- Source must be existing cache entry
+
+---
+
+## Format Conversion
+
+### AOS-2 Format
+
+When `accept` header is `<<"application/aos-2">>`:
+
+1. Retrieved data converted to JSON structure
+2. Wrapped in response with `content-type` header
+3. Encoded as JSON string in `body` field
+
+**Response Structure:**
+```erlang
+#{
+    <<"body">> => JSONEncodedMessage,
+    <<"content-type">> => <<"application/aos-2">>
+}
+```
+
+---
+
+## HTTP Integration
+
+### Read Endpoint
+
+```
+GET /~cache@1.0/read
+Headers:
+  - Accept: application/aos-2 (optional)
+Body:
+  - target: <cache-id-or-path>
+```
+
+### Write Endpoint
+
+```
+POST /~cache@1.0/write
+Headers:
+  - Signature required (message must be committed)
+Body:
+  - type: single | batch
+  - body: <data-to-write>
+  - location: <custom-path> (optional)
+```
+
+### Link Endpoint
+
+```
+POST /~cache@1.0/link
+Headers:
+  - Signature required
+Body:
+  - source: <source-id>
+  - destination: <destination-path>
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Setup cache with trusted writers
+Wallet = ar_wallet:new(),
+Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+NodeConfig = #{
+    store => LocalStore,
+    cache_writers => [Address]
+},
+Node = hb_http_server:start_node(NodeConfig).
+
+%% Write data to cache
+TestData = #{ <<"key">> => <<"value">> },
+WriteMsg = #{
+    <<"path">> => <<"/~cache@1.0/write">>,
+    <<"method">> => <<"POST">>,
+    <<"body">> => TestData
+},
+SignedMsg = hb_message:commit(WriteMsg, #{ priv_wallet => Wallet }),
+{ok, WriteRes} = hb_http:post(Node, SignedMsg, #{}),
+Path = maps:get(<<"path">>, WriteRes).
+
+%% Read data from cache
+ReadMsg = #{
+    <<"path">> => <<"/~cache@1.0/read">>,
+    <<"method">> => <<"GET">>,
+    <<"target">> => Path
+},
+{ok, Data} = hb_http:get(Node, ReadMsg, #{}).
+
+%% Read with AOS format
+ReadMsg = #{
+    <<"path">> => <<"/~cache@1.0/read">>,
+    <<"method">> => <<"GET">>,
+    <<"target">> => Path,
+    <<"accept">> => <<"application/aos-2">>
+},
+{ok, JSONResult} = hb_http:get(Node, ReadMsg, #{}),
+Body = maps:get(<<"body">>, JSONResult),
+DecodedMsg = hb_json:decode(Body).
+
+%% Write binary data
+BinaryData = <<"raw binary content">>,
+WriteMsg = #{
+    <<"path">> => <<"/~cache@1.0/write">>,
+    <<"method">> => <<"POST">>,
+    <<"body">> => BinaryData
+},
+SignedMsg = hb_message:commit(WriteMsg, #{ priv_wallet => Wallet }),
+{ok, WriteRes} = hb_http:post(Node, SignedMsg, #{}).
+
+%% Batch write
+BatchData = #{
+    <<"item1">> => #{ <<"data">> => <<"value1">> },
+    <<"item2">> => #{ <<"data">> => <<"value2">> }
+},
+WriteMsg = #{
+    <<"path">> => <<"/~cache@1.0/write">>,
+    <<"method">> => <<"POST">>,
+    <<"type">> => <<"batch">>,
+    <<"body">> => BatchData
+},
+SignedMsg = hb_message:commit(WriteMsg, #{ priv_wallet => Wallet }),
+{ok, WriteRes} = hb_http:post(Node, SignedMsg, #{}).
+
+%% Create link
+LinkMsg = #{
+    <<"path">> => <<"/~cache@1.0/link">>,
+    <<"method">> => <<"POST">>,
+    <<"source">> => SourceID,
+    <<"destination">> => <<"custom/path/alias">>
+},
+SignedMsg = hb_message:commit(LinkMsg, #{ priv_wallet => Wallet }),
+{ok, LinkRes} = hb_http:post(Node, SignedMsg, #{}).
+
+%% Use remote cache as store
+RemoteStore = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => NodeURL,
+    priv_wallet => Wallet
+},
+Opts = #{ store => [RemoteStore] },
+{ok, Path} = hb_cache:write(Data, Opts),
+{ok, ReadData} = hb_cache:read(Path, Opts).
+```
+
+---
+
+## Error Handling
+
+### Read Errors
+
+**Not Found:**
+```erlang
+not_found
+```
+
+**Store Read Error:**
+```erlang
+{error, Reason}
+```
+
+### Write Errors
+
+**No Body:**
+```erlang
+{error, #{
+    <<"status">> => 400,
+    <<"body">> => <<"No body to write.">>
+}}
+```
+
+**Invalid Type:**
+```erlang
+{error, #{
+    <<"status">> => 400,
+    <<"body">> => <<"Invalid write type.">>
+}}
+```
+
+**Not Authorized:**
+```erlang
+{error, #{
+    <<"status">> => 403,
+    <<"body">> => <<"Not authorized to write to the cache.">>
+}}
+```
+
+---
+
+## Cache Configuration
+
+### Node Setup
+
+```erlang
+#{
+    store => StoreConfig,
+    cache_writers => [TrustedAddress1, TrustedAddress2],
+    cache_control => [<<"no-cache">>, <<"no-store">>],
+    store_all_signed => false
+}
+```
+
+### Store Options
+
+**Local File System:**
+```erlang
+#{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"path/to/cache">>
+}
+```
+
+**Remote Node:**
+```erlang
+#{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => NodeURL,
+    priv_wallet => Wallet
+}
+```
+
+---
+
+## Testing Helpers
+
+### setup_test_env/0
+
+Creates a complete test environment with:
+- Temporary file system store
+- Generated wallet and address
+- HTTP server node with cache writers configured
+- Test options map for client operations
+
+### write_to_cache/3
+
+Helper function to:
+- Create write message
+- Sign with wallet
+- POST to node
+- Verify success
+- Return response and path
+
+### read_from_cache/2
+
+Helper function to:
+- Create read message
+- GET from node
+- Handle response format
+- Return data
+
+---
+
+## References
+
+- **Cache System** - `hb_cache.erl`
+- **Store Interface** - `hb_store.erl`
+- **Message System** - `hb_message.erl`
+- **JSON Interface** - `dev_json_iface.erl`
+- **HTTP Server** - `hb_http_server.erl`
+
+---
+
+## Notes
+
+1. **Authorization Required:** All writes require trusted writer signature
+2. **Read-Only by Default:** No authorization needed for reads
+3. **Format Conversion:** Automatic AOS-2 JSON conversion when requested
+4. **Binary Support:** Direct binary writes without message wrapping
+5. **Batch Operations:** Multiple items can be written in one request
+6. **Link Creation:** Symbolic links for custom path aliases
+7. **Store Fallback:** Falls back to direct store reads when cache misses
+8. **Cache Writers:** Configured per-node in options
+9. **Signature Verification:** Uses `hb_message:signers/2` for auth
+10. **Path Management:** Custom paths supported via location parameter
+11. **HTTP Integration:** Full REST API with GET/POST endpoints
+12. **Test Helpers:** Comprehensive helpers for testing
+13. **Remote Stores:** Supports remote node stores for distributed caching
+14. **Cache Control:** Respects HTTP cache control headers
+15. **Error Responses:** Structured error messages with status codes

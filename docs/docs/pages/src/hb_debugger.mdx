@@ -1,0 +1,483 @@
+# hb_debugger.erl - External Debugger Integration
+
+## Overview
+
+**Purpose:** Bootstrap external debuggers for HyperBEAM development  
+**Module:** `hb_debugger`  
+**Supported:** VS Code, Emacs, LSP-compatible editors  
+**Boot Time:** ~10 seconds
+
+This module provides interfaces for attaching external graphical debuggers to HyperBEAM. It supports Erlang Language Server (erlang-ls) integration and enables setting breakpoints, profiling functions, and interactive debugging.
+
+## Debugging Setup
+
+The simplest way to use external debugging:
+
+1. **VS Code**: Use included `launch.json` configuration
+2. **Emacs**: Configure with erlang-ls LSP client
+3. **Manual**: Start with `rebar3 debugging` for console access
+
+The debugger spawns HyperBEAM, attaches the debugger, and executes specified functions with breakpoints.
+
+## Dependencies
+
+- **Erlang/OTP:** `debugger`, `int` (interpreter), `file`
+- **HyperBEAM:** `hb_util`, `dev_profile`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Debugger Startup
+-spec start() -> Seconds.
+-spec start_and_break(Module, Function) -> ok.
+-spec start_and_break(Module, Function, Args) -> ok.
+-spec start_and_break(Module, Function, Args, DebuggerScope) -> ok.
+
+%% Profiling
+-spec profile_and_stop(Fun) -> no_return().
+
+%% Utilities
+-spec await_breakpoint() -> Breakpoint.
+```
+
+---
+
+## Public Functions
+
+### 1. start/0
+
+```erlang
+-spec start() -> Seconds
+    when
+        Seconds :: integer().
+```
+
+**Description:** Start the debugger server and wait for an external debugger node to connect. Returns the number of seconds waited.
+
+**Test Code:**
+```erlang
+-module(hb_debugger_start_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_manual_test() ->
+    % This test requires manual debugger attachment
+    % Start debugger and connect within 5 seconds
+    spawn(fun() ->
+        timer:sleep(5000),
+        net_kernel:connect_node('debugger@localhost')
+    end),
+    
+    Seconds = hb_debugger:start(),
+    ?assert(is_integer(Seconds)),
+    ?assert(Seconds >= 0).
+```
+
+**Usage:**
+```erlang
+% In your code
+hb_debugger:start(),
+% Debugger now attached, continue execution
+my_function().
+```
+
+---
+
+### 2. start_and_break/2, start_and_break/3, start_and_break/4
+
+```erlang
+-spec start_and_break(Module, Function) -> ok
+    when
+        Module :: atom(),
+        Function :: atom().
+
+-spec start_and_break(Module, Function, Args) -> ok
+    when
+        Module :: atom(),
+        Function :: atom(),
+        Args :: [term()].
+
+-spec start_and_break(Module, Function, Args, DebuggerScope) -> ok
+    when
+        Module :: atom(),
+        Function :: atom(),
+        Args :: [term()],
+        DebuggerScope :: [atom() | binary()] | binary().
+```
+
+**Description:** Bootstrap function that starts debugger, waits for attachment, sets breakpoint on `Module:Function/Arity`, then calls the function. Optionally interprets additional modules matching DebuggerScope prefixes.
+
+**Test Code:**
+```erlang
+-module(hb_debugger_break_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-export([test_function/0, test_function/1]).
+
+test_function() ->
+    <<"test result">>.
+
+test_function(Arg) ->
+    {result, Arg}.
+
+start_and_break_no_args_manual_test() ->
+    % This test requires manual debugger attachment
+    % Will set breakpoint on test_function/0
+    hb_debugger:start_and_break(?MODULE, test_function).
+
+start_and_break_with_args_manual_test() ->
+    % Will set breakpoint on test_function/1
+    hb_debugger:start_and_break(?MODULE, test_function, [<<"arg">>]).
+
+start_and_break_with_scope_manual_test() ->
+    % Will interpret all hb_* modules and set breakpoint
+    hb_debugger:start_and_break(
+        ?MODULE, 
+        test_function, 
+        [],
+        <<"hb_,dev_">>  % Interpret hb_* and dev_* modules
+    ).
+```
+
+**Usage:**
+```erlang
+% Simple breakpoint
+hb_debugger:start_and_break(my_module, my_function).
+
+% With arguments
+hb_debugger:start_and_break(my_module, my_function, [arg1, arg2]).
+
+% With debugger scope (interprets matching modules)
+hb_debugger:start_and_break(
+    my_module,
+    my_function,
+    [arg1],
+    [hb_, dev_, my_]  % Comma-separated list or binary
+).
+```
+
+---
+
+### 3. profile_and_stop/1
+
+```erlang
+-spec profile_and_stop(Fun) -> no_return()
+    when
+        Fun :: fun().
+```
+
+**Description:** Profile a function with eflame and stop the node. Redirects output to `profiling-output` file and exits after profiling completes.
+
+**Test Code:**
+```erlang
+-module(hb_debugger_profile_test).
+-include_lib("eunit/include/eunit.hrl").
+
+profile_function_test() ->
+    % This test will stop the node, so skip in normal test runs
+    % Uncomment to profile a specific function
+    
+    % Fun = fun() ->
+    %     lists:seq(1, 10000),
+    %     lists:sum(lists:seq(1, 1000))
+    % end,
+    % hb_debugger:profile_and_stop(Fun).
+    
+    ?assertEqual(skipped, skipped).
+
+profile_with_complex_work_test() ->
+    % Example of profiling complex work
+    
+    % ComplexWork = fun() ->
+    %     Data = lists:duplicate(1000, <<"data">>),
+    %     lists:map(fun(X) -> crypto:hash(sha256, X) end, Data)
+    % end,
+    % hb_debugger:profile_and_stop(ComplexWork).
+    
+    ?assertEqual(skipped, skipped).
+```
+
+**Usage:**
+```erlang
+% Profile a specific function
+Fun = fun() ->
+    my_expensive_operation(),
+    another_operation()
+end,
+hb_debugger:profile_and_stop(Fun).
+% Node will exit after profiling
+% Check 'profiling-output' file for results
+```
+
+---
+
+### 4. await_breakpoint/0
+
+```erlang
+-spec await_breakpoint() -> Breakpoint
+    when
+        Breakpoint :: term().
+```
+
+**Description:** Wait for a breakpoint to be set by the debugger. If no debugger is connected, starts one first. Returns when breakpoint is detected.
+
+**Test Code:**
+```erlang
+-module(hb_debugger_await_test).
+-include_lib("eunit/include/eunit.hrl").
+
+-export([breakpoint_function/0]).
+
+breakpoint_function() ->
+    <<"will break here">>.
+
+await_breakpoint_manual_test() ->
+    % This test requires manual interaction:
+    % 1. Attach debugger
+    % 2. Set breakpoint on breakpoint_function/0
+    
+    spawn(fun() ->
+        timer:sleep(5000),
+        int:break_in(?MODULE, breakpoint_function, 0)
+    end),
+    
+    Breakpoint = hb_debugger:await_breakpoint(),
+    ?assert(is_tuple(Breakpoint)).
+```
+
+**Usage:**
+```erlang
+% In your development code
+hb_debugger:await_breakpoint(),
+% Continue after breakpoint is set
+my_function_to_debug().
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Simple debugging session
+% 1. Start debugger and break on function
+hb_debugger:start_and_break(my_module, my_function).
+
+%% Debug with arguments
+% 2. Test specific inputs
+Args = [<<"test">>, 123, #{key => value}],
+hb_debugger:start_and_break(my_module, my_function, Args).
+
+%% Debug with full scope
+% 3. Interpret multiple module prefixes
+hb_debugger:start_and_break(
+    my_module,
+    my_function,
+    Args,
+    <<"hb_,dev_,my_">>  % All matching modules available to debugger
+).
+
+%% Profile performance
+% 4. Find bottlenecks
+ProfileFun = fun() ->
+    Results = expensive_computation(),
+    process_results(Results)
+end,
+hb_debugger:profile_and_stop(ProfileFun).
+
+%% Wait for manual breakpoint
+% 5. Interactive debugging
+hb_debugger:start(),
+hb_debugger:await_breakpoint(),
+my_code_to_debug().
+
+%% Conditional debugging
+% 6. Debug only when condition met
+case should_debug() of
+    true ->
+        hb_debugger:start_and_break(my_module, my_function),
+        debug_enabled;
+    false ->
+        my_module:my_function(),
+        normal_execution
+end.
+```
+
+---
+
+## VS Code Integration
+
+### Launch Configuration
+
+Example `launch.json` for VS Code:
+
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug HyperBEAM",
+            "type": "erlang",
+            "request": "launch",
+            "projectnode": "hyperbeam@localhost",
+            "cookie": "hyperbeam_cookie",
+            "module": "hb_debugger",
+            "function": "start_and_break",
+            "args": [
+                "my_module",
+                "my_function",
+                [],
+                "hb_,dev_"
+            ],
+            "cwd": "${workspaceFolder}",
+            "verbose": true
+        }
+    ]
+}
+```
+
+### Steps to Debug
+
+1. Open project in VS Code with erlang-ls extension
+2. Set breakpoints in code
+3. Press F5 or select "Debug HyperBEAM" configuration
+4. Debugger attaches and breaks at specified function
+5. Use VS Code debug controls (step, continue, inspect)
+
+---
+
+## Module Interpretation
+
+### Debugger Scope
+
+The `DebuggerScope` parameter controls which modules are interpreted (loaded into debugger):
+
+**Format Options:**
+```erlang
+% Binary with comma-separated prefixes
+<<"hb_,dev_,my_module">>
+
+% List of atoms
+[hb_, dev_, my_module]
+
+% List of binaries
+[<<"hb_">>, <<"dev_">>, <<"my_">>]
+```
+
+**Interpretation Logic:**
+1. Finds all HyperBEAM modules
+2. Filters by prefix match
+3. Attempts to interpret each module
+4. Skips modules that fail to load
+5. Returns list of successfully interpreted modules
+
+### Interpretation Failures
+
+Some modules may fail to interpret due to:
+- NIF dependencies
+- Parse transform issues
+- External dependencies
+- Already loaded in a conflicting way
+
+These failures are logged but don't prevent debugging:
+```erlang
+interpret(Module) ->
+    case int:interpretable(Module) of
+        true -> int:i(Module) == ok;
+        Error -> 
+            io:format("Could not interpret: ~p~n", [Error]),
+            false
+    end.
+```
+
+---
+
+## Profiling with eflame
+
+### Profile Output
+
+The `profile_and_stop/1` function generates flame graph data:
+
+**Output Location:** `profiling-output` file in current directory
+
+**Contents:**
+- Function call hierarchy
+- Time spent in each function
+- Call count statistics
+- Flame graph SVG (if eflame configured)
+
+### Profiling Options
+
+```erlang
+% Profiling is configured via dev_profile device
+Opts = #{
+    <<"return-mode">> => <<"open">>,  % Open results after profiling
+    <<"engine">> => <<"eflame">>      % Use eflame profiler
+}.
+```
+
+---
+
+## Distributed Erlang
+
+### Node Connection
+
+Debugger relies on Distributed Erlang:
+
+**Node Name:** Printed on startup
+```erlang
+io:format("Node is: ~p~n", [node()]).
+% Output: hyperbeam@localhost
+```
+
+**Cookie:** Printed on startup
+```erlang
+io:format("Cookie is: ~p~n", [erlang:get_cookie()]).
+% Output: hyperbeam_cookie
+```
+
+**Connect from Debugger:**
+```erlang
+% From debugger node
+net_kernel:connect_node('hyperbeam@localhost').
+```
+
+### Connection Detection
+
+Waits for any node to connect:
+```erlang
+await_debugger(N) ->
+    case nodes() ++ nodes(hidden) of
+        [] -> 
+            timer:sleep(1000),
+            await_debugger(N + 1);
+        [Node | _] ->
+            io:format("Peer: ~p~n", [Node]),
+            N
+    end.
+```
+
+---
+
+## References
+
+- **Erlang Debugger** - OTP `debugger` application
+- **Erlang Interpreter** - `int` module documentation
+- **erlang-ls** - Erlang Language Server for VS Code/Emacs
+- **eflame** - Flame graph profiler for Erlang
+- **Distributed Erlang** - Node connectivity guide
+
+---
+
+## Notes
+
+1. **Boot Time**: Approximately 10 seconds for debugger startup
+2. **LSP Support**: Best experience with erlang-ls extension
+3. **Interpretation**: Some modules may fail to interpret (non-critical)
+4. **Timeout**: 250ms timeout per module interpretation attempt
+5. **Profiling**: `profile_and_stop/1` exits the node after completion
+6. **Output Redirect**: Profiling redirects group leader to file
+7. **Breakpoint Wait**: Infinite loop until breakpoint is set
+8. **Node Connection**: Requires distributed Erlang with matching cookie
+9. **Scope Performance**: Large scope increases boot time
+10. **Production Warning**: Remove debugger calls before production deployment

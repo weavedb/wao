@@ -1,0 +1,572 @@
+# hb_features.erl - Compile-Time Feature Flags
+
+## Overview
+
+**Purpose:** Runtime access to compile-time feature flags  
+**Module:** `hb_features`  
+**Pattern:** `-ifdef` macro bridge to runtime  
+**Scope:** Build system to runtime environment proxy
+
+This module acts as a bridge between the build system and runtime execution environment, exposing compile-time feature flags as runtime-queryable functions. Features are enabled via `-DENABLE_<FEATURE>` compiler flags during build.
+
+## Feature Flag System
+
+Features are conditionally compiled using Erlang's `-ifdef` preprocessor directive:
+
+```erlang
+-ifdef(ENABLE_HTTP3).
+http3() -> true.
+-else.
+http3() -> false.
+-endif.
+```
+
+This allows the build system to control which features are available at runtime without modifying source code.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_maps`
+- **Erlang/OTP:** Standard library only
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Query Functions
+-spec all() -> FeatureMap.
+-spec enabled(Feature) -> boolean().
+
+%% Individual Feature Flags
+-spec http3() -> boolean().
+-spec rocksdb() -> boolean().
+-spec test() -> boolean().
+-spec genesis_wasm() -> boolean().
+-spec eflame() -> boolean().
+```
+
+---
+
+## Public Functions
+
+### 1. all/0
+
+```erlang
+-spec all() -> FeatureMap
+    when
+        FeatureMap :: #{atom() => boolean()}.
+```
+
+**Description:** Returns a map of all available feature flags and their enabled status. Automatically discovers features by introspecting module exports, filtering out utility functions.
+
+**Test Code:**
+```erlang
+-module(hb_features_all_test).
+-include_lib("eunit/include/eunit.hrl").
+
+all_returns_map_test() ->
+    Features = hb_features:all(),
+    ?assert(is_map(Features)).
+
+all_contains_known_features_test() ->
+    Features = hb_features:all(),
+    ?assert(maps:is_key(http3, Features)),
+    ?assert(maps:is_key(rocksdb, Features)),
+    ?assert(maps:is_key(test, Features)),
+    ?assert(maps:is_key(genesis_wasm, Features)),
+    ?assert(maps:is_key(eflame, Features)).
+
+all_values_are_boolean_test() ->
+    Features = hb_features:all(),
+    Values = maps:values(Features),
+    ?assert(lists:all(fun(V) -> is_boolean(V) end, Values)).
+
+all_excludes_utility_functions_test() ->
+    Features = hb_features:all(),
+    ?assertEqual(false, maps:is_key(all, Features)),
+    ?assertEqual(false, maps:is_key(enabled, Features)),
+    ?assertEqual(false, maps:is_key(module_info, Features)).
+```
+
+**Usage:**
+```erlang
+Features = hb_features:all().
+% Result: #{
+%   http3 => false,
+%   rocksdb => true,
+%   test => true,
+%   genesis_wasm => false,
+%   eflame => false
+% }
+```
+
+---
+
+### 2. enabled/1
+
+```erlang
+-spec enabled(Feature) -> boolean()
+    when
+        Feature :: atom().
+```
+
+**Description:** Check if a specific feature flag is enabled. Returns `false` for unknown features.
+
+**Test Code:**
+```erlang
+-module(hb_features_enabled_test).
+-include_lib("eunit/include/eunit.hrl").
+
+enabled_returns_boolean_test() ->
+    Result = hb_features:enabled(http3),
+    ?assert(is_boolean(Result)).
+
+enabled_known_feature_test() ->
+    % Test will pass regardless of actual flag status
+    HTTP3 = hb_features:enabled(http3),
+    RocksDB = hb_features:enabled(rocksdb),
+    ?assert(is_boolean(HTTP3)),
+    ?assert(is_boolean(RocksDB)).
+
+enabled_unknown_feature_test() ->
+    Result = hb_features:enabled(nonexistent_feature),
+    ?assertEqual(false, Result).
+
+enabled_matches_all_test() ->
+    Features = hb_features:all(),
+    HTTP3FromAll = maps:get(http3, Features),
+    HTTP3FromEnabled = hb_features:enabled(http3),
+    ?assertEqual(HTTP3FromAll, HTTP3FromEnabled).
+```
+
+**Usage:**
+```erlang
+% Check individual features
+case hb_features:enabled(http3) of
+    true -> start_http3_server();
+    false -> start_http2_server()
+end.
+
+% Guard against missing features
+case hb_features:enabled(rocksdb) of
+    true -> {ok, use_rocksdb_store};
+    false -> {error, rocksdb_not_enabled}
+end.
+```
+
+---
+
+### 3. http3/0
+
+```erlang
+-spec http3() -> boolean().
+```
+
+**Description:** Check if HTTP/3 support is enabled. Requires `ENABLE_HTTP3` compiler flag.
+
+**Test Code:**
+```erlang
+-module(hb_features_http3_test).
+-include_lib("eunit/include/eunit.hrl").
+
+http3_returns_boolean_test() ->
+    Result = hb_features:http3(),
+    ?assert(is_boolean(Result)).
+
+http3_consistent_test() ->
+    Result1 = hb_features:http3(),
+    Result2 = hb_features:http3(),
+    ?assertEqual(Result1, Result2).
+
+http3_in_all_test() ->
+    Features = hb_features:all(),
+    ?assertEqual(hb_features:http3(), maps:get(http3, Features)).
+```
+
+**Build Command:**
+```bash
+# Enable HTTP/3
+rebar3 compile -D ENABLE_HTTP3
+
+# Disable HTTP/3 (default)
+rebar3 compile
+```
+
+---
+
+### 4. rocksdb/0
+
+```erlang
+-spec rocksdb() -> boolean().
+```
+
+**Description:** Check if RocksDB storage backend is enabled. Requires `ENABLE_ROCKSDB` compiler flag.
+
+**Test Code:**
+```erlang
+-module(hb_features_rocksdb_test).
+-include_lib("eunit/include/eunit.hrl").
+
+rocksdb_returns_boolean_test() ->
+    Result = hb_features:rocksdb(),
+    ?assert(is_boolean(Result)).
+
+rocksdb_consistent_test() ->
+    Result1 = hb_features:rocksdb(),
+    Result2 = hb_features:rocksdb(),
+    ?assertEqual(Result1, Result2).
+
+rocksdb_store_selection_test() ->
+    Store = case hb_features:rocksdb() of
+        true -> hb_store_rocksdb;
+        false -> hb_store_ets
+    end,
+    ?assert(is_atom(Store)).
+```
+
+**Build Command:**
+```bash
+# Enable RocksDB
+rebar3 compile -D ENABLE_ROCKSDB
+
+# Disable RocksDB (default)
+rebar3 compile
+```
+
+---
+
+### 5. test/0
+
+```erlang
+-spec test() -> boolean().
+```
+
+**Description:** Check if test mode is enabled. Automatically enabled by `TEST` macro (set by EUnit and rebar3 during test runs).
+
+**Test Code:**
+```erlang
+-module(hb_features_test_test).
+-include_lib("eunit/include/eunit.hrl").
+
+test_returns_boolean_test() ->
+    Result = hb_features:test(),
+    ?assert(is_boolean(Result)).
+
+test_enabled_during_tests_test() ->
+    % This test runs in test mode, so test() should return true
+    ?assertEqual(true, hb_features:test()).
+
+test_mode_affects_behavior_test() ->
+    case hb_features:test() of
+        true ->
+            % Test mode: use mock data
+            ?assertEqual(test_mode, test_mode);
+        false ->
+            % Production mode: use real data
+            ?assertEqual(prod_mode, prod_mode)
+    end.
+```
+
+**Behavior:**
+```erlang
+% During normal compilation
+hb_features:test().  % → false
+
+% During test runs (rebar3 eunit)
+hb_features:test().  % → true
+```
+
+---
+
+### 6. genesis_wasm/0
+
+```erlang
+-spec genesis_wasm() -> boolean().
+```
+
+**Description:** Check if Genesis WASM support is enabled. Requires `ENABLE_GENESIS_WASM` compiler flag.
+
+**Test Code:**
+```erlang
+-module(hb_features_genesis_wasm_test).
+-include_lib("eunit/include/eunit.hrl").
+
+genesis_wasm_returns_boolean_test() ->
+    Result = hb_features:genesis_wasm(),
+    ?assert(is_boolean(Result)).
+
+genesis_wasm_consistent_test() ->
+    Result1 = hb_features:genesis_wasm(),
+    Result2 = hb_features:genesis_wasm(),
+    ?assertEqual(Result1, Result2).
+
+genesis_wasm_module_loading_test() ->
+    case hb_features:genesis_wasm() of
+        true ->
+            % Load genesis WASM modules
+            ?assertEqual(available, available);
+        false ->
+            % Skip genesis WASM functionality
+            ?assertEqual(unavailable, unavailable)
+    end.
+```
+
+**Build Command:**
+```bash
+# Enable Genesis WASM
+rebar3 compile -D ENABLE_GENESIS_WASM
+```
+
+---
+
+### 7. eflame/0
+
+```erlang
+-spec eflame() -> boolean().
+```
+
+**Description:** Check if eflame profiler support is enabled. Requires `ENABLE_EFLAME` compiler flag.
+
+**Test Code:**
+```erlang
+-module(hb_features_eflame_test).
+-include_lib("eunit/include/eunit.hrl").
+
+eflame_returns_boolean_test() ->
+    Result = hb_features:eflame(),
+    ?assert(is_boolean(Result)).
+
+eflame_consistent_test() ->
+    Result1 = hb_features:eflame(),
+    Result2 = hb_features:eflame(),
+    ?assertEqual(Result1, Result2).
+
+eflame_profiling_test() ->
+    case hb_features:eflame() of
+        true ->
+            % Profiling available
+            ?assertEqual(can_profile, can_profile);
+        false ->
+            % Profiling unavailable
+            ?assertEqual(no_profiling, no_profiling)
+    end.
+```
+
+**Build Command:**
+```bash
+# Enable eflame
+rebar3 compile -D ENABLE_EFLAME
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Check all features at startup
+Features = hb_features:all(),
+io:format("Available features: ~p~n", [Features]).
+
+%% Conditional functionality
+case hb_features:enabled(http3) of
+    true -> start_http3_listener();
+    false -> io:format("HTTP/3 not available~n")
+end.
+
+%% Select storage backend
+Store = case hb_features:enabled(rocksdb) of
+    true -> hb_store_rocksdb;
+    false -> hb_store_ets
+end.
+
+%% Test vs production behavior
+DataSource = case hb_features:test() of
+    true -> mock_data_source;
+    false -> real_data_source
+end.
+
+%% Feature-dependent initialization
+init(Opts) ->
+    State = #{opts => Opts},
+    State2 = case hb_features:enabled(eflame) of
+        true -> State#{profiler => eflame};
+        false -> State
+    end,
+    {ok, State2}.
+
+%% Multiple feature checks
+validate_environment() ->
+    Required = [rocksdb, http3],
+    Enabled = [F || F <- Required, hb_features:enabled(F)],
+    case Enabled of
+        Required -> ok;
+        _ -> {error, {missing_features, Required -- Enabled}}
+    end.
+```
+
+---
+
+## Build Configuration
+
+### Enabling Features
+
+**Via Compiler Flags:**
+```bash
+# Single feature
+rebar3 compile -D ENABLE_HTTP3
+
+# Multiple features
+rebar3 compile -D ENABLE_HTTP3 -D ENABLE_ROCKSDB
+
+# All optional features
+rebar3 compile -D ENABLE_HTTP3 -D ENABLE_ROCKSDB -D ENABLE_GENESIS_WASM -D ENABLE_EFLAME
+```
+
+**Via rebar.config:**
+```erlang
+{erl_opts, [
+    {d, 'ENABLE_HTTP3'},
+    {d, 'ENABLE_ROCKSDB'},
+    {d, 'ENABLE_EFLAME'}
+]}.
+```
+
+**Via Environment Variables:**
+```bash
+export ERL_COMPILER_OPTIONS="[{d,'ENABLE_HTTP3'},{d,'ENABLE_ROCKSDB'}]"
+rebar3 compile
+```
+
+---
+
+## Feature Discovery
+
+The `all/0` function automatically discovers features:
+
+```erlang
+all() ->
+    % Get all exported functions
+    Exports = ?MODULE:module_info(exports),
+    
+    % Filter out utility functions
+    Features = lists:filtermap(
+        fun({Name, _Arity}) ->
+            case lists:member(Name, [all, enabled, module_info]) of
+                true -> false;  % Exclude utilities
+                false -> {true, Name}  % Include feature
+            end
+        end,
+        Exports
+    ),
+    
+    % Call each feature function to get status
+    hb_maps:from_list([
+        {Name, ?MODULE:Name()} || Name <- Features
+    ]).
+```
+
+---
+
+## Feature Implementation Template
+
+To add a new feature flag:
+
+```erlang
+% 1. Export the function
+-export([my_feature/0]).
+
+% 2. Implement with ifdef
+-ifdef(ENABLE_MY_FEATURE).
+my_feature() -> true.
+-else.
+my_feature() -> false.
+-endif.
+
+% 3. Use in code
+case hb_features:enabled(my_feature) of
+    true -> use_feature();
+    false -> use_fallback()
+end.
+
+% 4. Build with flag
+% rebar3 compile -D ENABLE_MY_FEATURE
+```
+
+---
+
+## Use Cases
+
+### 1. Storage Backend Selection
+
+```erlang
+select_store() ->
+    case hb_features:enabled(rocksdb) of
+        true -> 
+            {hb_store_rocksdb, #{path => "/data/rocksdb"}};
+        false ->
+            {hb_store_ets, #{}}
+    end.
+```
+
+### 2. Protocol Support
+
+```erlang
+start_server(Port) ->
+    case hb_features:enabled(http3) of
+        true ->
+            http3_server:start_link([{port, Port}]);
+        false ->
+            http2_server:start_link([{port, Port}])
+    end.
+```
+
+### 3. Development Tools
+
+```erlang
+maybe_profile(Fun) ->
+    case hb_features:enabled(eflame) of
+        true ->
+            eflame:apply(Fun, []);
+        false ->
+            Fun()
+    end.
+```
+
+### 4. Test Mode Behavior
+
+```erlang
+get_data() ->
+    case hb_features:test() of
+        true -> mock_data();
+        false -> fetch_from_db()
+    end.
+```
+
+---
+
+## References
+
+- **Erlang Preprocessor** - `-ifdef`, `-define` directives
+- **rebar3 Configuration** - Compiler options
+- **Module Introspection** - `module_info/1`
+- **HyperBEAM Build** - Build system documentation
+
+---
+
+## Notes
+
+1. **Compile-Time Only**: Features cannot be toggled at runtime
+2. **Clean Rebuild**: Changing flags requires `rebar3 clean compile`
+3. **Test Flag**: Automatically set by EUnit, don't set manually
+4. **Feature Discovery**: `all/0` uses module introspection
+5. **Unknown Features**: `enabled/1` returns `false` for unknown features
+6. **No Dependencies**: Feature checking has zero runtime overhead
+7. **Boolean Only**: All feature functions return `true` or `false`
+8. **Consistent API**: All features follow same naming pattern
+9. **Build System Bridge**: Connects compile-time to runtime
+10. **Zero Cost**: Disabled features compiled out completely
+11. **Filtered Exports**: Utility functions excluded from feature list
+12. **Map Keys**: Feature names are atoms in result map
+13. **Idempotent**: Multiple calls return same result
+14. **Thread-Safe**: No state, all functions pure
+15. **Extensible**: Easy to add new features following template

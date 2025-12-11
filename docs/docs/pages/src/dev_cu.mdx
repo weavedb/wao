@@ -1,0 +1,396 @@
+# dev_cu.erl - Compute Unit Device
+
+## Overview
+
+**Purpose:** Execute computations on assignments via external Compute Units (CU)  
+**Module:** `dev_cu`  
+**Pattern:** Assignment-based computation with result commitment  
+**Integration:** HyperBEAM process execution pipeline
+
+This module implements a compute device that executes assignments using external compute units through the `hb_client:compute/2` interface. It supports selective result commitment, allowing clients to request specific messages from the computation results bundle.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_client`, `hb_util`, `hb_opts`, `hb_process`, `hb`
+- **Arweave:** `ar_bundles`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Computation
+-spec push(Msg, State) -> {ok, StateWithResults} | {error, Reason}.
+-spec execute(CarrierMsg, State) -> {ok, StateWithResults} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. push/2
+
+```erlang
+-spec push(Msg, State) -> {ok, StateWithResults} | {error, Reason}
+    when
+        Msg :: map(),
+        State :: #{assignment := Assignment, logger := Logger},
+        Assignment :: map(),
+        Logger :: term(),
+        StateWithResults :: #{results => Results},
+        Results :: term(),
+        Reason :: term().
+```
+
+**Description:** Push a message to an external Compute Unit for execution. Uses `hb_client:compute/2` to delegate computation to an external CU based on the assignment.
+
+**Parameters:**
+- `Msg` - Message to compute
+- `State` - State containing assignment and logger
+
+**Returns:**
+- `{ok, StateWithResults}` - State updated with computation results
+- Throws `{cu_error, Error}` on computation failure
+
+**Test Code:**
+```erlang
+-module(dev_cu_push_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+push_success_test() ->
+    Assignment = #{
+        <<"process">> => <<"test-process">>,
+        <<"slot">> => 1
+    },
+    Msg = #{<<"action">> => <<"test">>},
+    State = #{
+        assignment => Assignment,
+        logger => test_logger
+    },
+    % Mock hb_client:compute to return success
+    meck:new(hb_client, [passthrough]),
+    meck:expect(hb_client, compute, fun(_, _) -> 
+        {ok, #{<<"result">> => <<"success">>}}
+    end),
+    {ok, Result} = dev_cu:push(Msg, State),
+    ?assert(maps:is_key(results, Result)),
+    meck:unload(hb_client).
+
+push_error_test() ->
+    Assignment = #{},
+    Msg = #{},
+    State = #{
+        assignment => Assignment,
+        logger => test_logger
+    },
+    meck:new(hb_client, [passthrough]),
+    meck:expect(hb_client, compute, fun(_, _) -> 
+        {error, computation_failed}
+    end),
+    ?assertThrow({cu_error, _}, dev_cu:push(Msg, State)),
+    meck:unload(hb_client).
+```
+
+---
+
+### 2. execute/2
+
+```erlang
+-spec execute(CarrierMsg, State) -> {ok, StateWithResults} | {error, Reason}
+    when
+        CarrierMsg :: #tx{},
+        State :: map(),
+        StateWithResults :: #{results := Results},
+        Results :: #tx{},
+        Reason :: term().
+```
+
+**Description:** Execute a computation based on a carrier message. Supports two execution modes:
+1. **Full Assignment Mode** - Carrier contains full assignment with body and assignment
+2. **Reference Mode** - Carrier references process and slot via tags
+
+Supports selective result commitment via `commit-to` tag.
+
+**Execution Modes:**
+
+**Full Assignment:**
+- Carrier data contains `body` and `assignment`
+- Executes using embedded assignment
+- Returns full results bundle
+
+**Reference Mode:**
+- Carrier tags contain `process` and `slot`
+- Fetches and executes by reference
+- More efficient for known slots
+
+**Selective Commitment:**
+- Use `commit-to` tag with message ID
+- Returns only commitment for specific message
+- Returns 404 if requested message not in results
+
+**Test Code:**
+```erlang
+-module(dev_cu_execute_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+execute_full_assignment_test() ->
+    Wallet = ar_wallet:new(),
+    Assignment = ar_bundles:sign_item(
+        #tx{
+            tags = [{<<"process">>, <<"test-proc">>}],
+            data = #{<<"action">> => <<"test">>}
+        },
+        Wallet
+    ),
+    Body = #{<<"data">> => <<"test-body">>},
+    CarrierData = #{
+        <<"body">> => Body,
+        <<"assignment">> => Assignment
+    },
+    CarrierMsg = #tx{data = CarrierData},
+    State = #{},
+    meck:new(hb_process, [passthrough]),
+    meck:expect(hb_process, result, fun(_, _, _, _) -> 
+        {ok, #tx{data = <<"results">>}}
+    end),
+    {ok, Result} = dev_cu:execute(CarrierMsg, State),
+    ?assert(maps:is_key(results, Result)),
+    meck:unload(hb_process).
+
+execute_reference_mode_test() ->
+    CarrierMsg = #tx{
+        tags = [
+            {<<"process">>, <<"proc-123">>},
+            {<<"slot">>, <<"1">>}
+        ],
+        data = <<"payload">>
+    },
+    State = #{},
+    meck:new(hb_process, [passthrough]),
+    meck:expect(hb_process, result, fun(_, _, _, _) -> 
+        {ok, #tx{data = <<"results">>}}
+    end),
+    {ok, Result} = dev_cu:execute(CarrierMsg, State),
+    ?assert(maps:is_key(results, Result)),
+    meck:unload(hb_process).
+
+execute_commit_to_found_test() ->
+    Wallet = ar_wallet:new(),
+    TargetMsg = ar_bundles:sign_item(
+        #tx{data = <<"target">>},
+        Wallet
+    ),
+    TargetID = hb_util:encode(ar_bundles:id(TargetMsg, signed)),
+    Results = #tx{
+        data = #{
+            <<"1">> => TargetMsg
+        }
+    },
+    CarrierMsg = #tx{
+        tags = [
+            {<<"process">>, <<"proc-123">>},
+            {<<"slot">>, <<"1">>},
+            {<<"commit-to">>, TargetID}
+        ]
+    },
+    State = #{},
+    meck:new(hb_process, [passthrough]),
+    meck:expect(hb_process, result, fun(_, _, _, _) -> {ok, Results} end),
+    {ok, Result} = dev_cu:execute(CarrierMsg, State),
+    Commitment = maps:get(results, Result),
+    ?assertEqual(200, 
+        proplists:get_value(<<"status">>, Commitment#tx.tags)),
+    meck:unload(hb_process).
+
+execute_commit_to_not_found_test() ->
+    Results = #tx{data = #{}},
+    CarrierMsg = #tx{
+        tags = [
+            {<<"process">>, <<"proc-123">>},
+            {<<"slot">>, <<"1">>},
+            {<<"commit-to">>, <<"nonexistent-id">>}
+        ]
+    },
+    State = #{},
+    meck:new(hb_process, [passthrough]),
+    meck:expect(hb_process, result, fun(_, _, _, _) -> {ok, Results} end),
+    {ok, Result} = dev_cu:execute(CarrierMsg, State),
+    Commitment = maps:get(results, Result),
+    ?assertEqual(404, 
+        proplists:get_value(<<"status">>, Commitment#tx.tags)),
+    meck:unload(hb_process).
+
+execute_no_process_test() ->
+    CarrierMsg = #tx{
+        tags = [],
+        data = <<"payload">>
+    },
+    State = #{},
+    {ok, Result} = dev_cu:execute(CarrierMsg, State),
+    % Should return error for no viable computation
+    ?assertEqual({error, no_viable_computation}, 
+        maps:get(results, Result, {error, no_viable_computation})).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Execute assignment with full context
+Assignment = #{
+    <<"process">> => ProcessID,
+    <<"slot">> => Slot,
+    <<"message">> => Message
+},
+State = #{
+    assignment => Assignment,
+    logger => Logger
+},
+{ok, StateWithResults} = dev_cu:push(Message, State),
+Results = maps:get(results, StateWithResults).
+
+%% Execute via carrier message (full assignment)
+CarrierMsg = #tx{
+    data = #{
+        <<"body">> => Message,
+        <<"assignment">> => Assignment
+    }
+},
+{ok, ResultState} = dev_cu:execute(CarrierMsg, #{}),
+Results = maps:get(results, ResultState).
+
+%% Execute via carrier message (reference mode)
+CarrierMsg = #tx{
+    tags = [
+        {<<"process">>, ProcessID},
+        {<<"slot">>, Slot}
+    ]
+},
+{ok, ResultState} = dev_cu:execute(CarrierMsg, #{}),
+Results = maps:get(results, ResultState).
+
+%% Request specific message commitment
+TargetMessageID = hb_util:encode(MessageID),
+CarrierMsg = #tx{
+    tags = [
+        {<<"process">>, ProcessID},
+        {<<"slot">>, Slot},
+        {<<"commit-to">>, TargetMessageID}
+    ]
+},
+{ok, ResultState} = dev_cu:execute(CarrierMsg, #{}),
+Commitment = maps:get(results, ResultState),
+Status = proplists:get_value(<<"status">>, Commitment#tx.tags).
+```
+
+---
+
+## Execution Flow
+
+### Push Execution
+```
+1. Receive message and assignment
+2. Log execution details
+3. Call hb_client:compute(Assignment, Msg)
+4. Return results in state
+5. Throw error on failure
+```
+
+### Execute - Full Assignment Mode
+```
+1. Extract bundle head from carrier
+2. Detect full assignment (body + assignment in data)
+3. Extract process ID from assignment tags
+4. Call hb_process:result with assignment ID
+5. Handle commit-to if present
+6. Return results
+```
+
+### Execute - Reference Mode
+```
+1. Extract process and slot from carrier tags
+2. Call hb_process:result with process and slot
+3. Handle commit-to if present
+4. Return results
+```
+
+### Commit-To Handling
+```
+1. Check for commit-to tag in carrier
+2. Decode target message ID
+3. Search for message in results bundle
+4. If found: Return signed commitment (status 200)
+5. If not found: Return error commitment (status 404)
+```
+
+---
+
+## State Management
+
+### Input State
+```erlang
+#{
+    assignment => Assignment,  % Required for push/2
+    logger => Logger          % Optional logger
+}
+```
+
+### Output State
+```erlang
+#{
+    results => Results  % Computation results or commitment
+}
+```
+
+---
+
+## Commitment Response Format
+
+### Success Commitment (200)
+```erlang
+#tx{
+    tags = [
+        {<<"status">>, 200},
+        {<<"commitment-for">>, EncodedMessageID}
+    ],
+    data = <<>>
+}
+```
+
+### Not Found (404)
+```erlang
+#tx{
+    tags = [
+        {<<"status">>, 404}
+    ],
+    data = <<"Requested message to commit to not in results bundle.">>
+}
+```
+
+---
+
+## References
+
+- **HyperBEAM Client** - `hb_client.erl`
+- **Process Execution** - `hb_process.erl`
+- **Bundles** - `ar_bundles.erl`
+- **Assignment Handling** - HyperBEAM process model
+
+---
+
+## Notes
+
+1. **External Execution:** Delegates computation to external CU via `hb_client`
+2. **Dual Mode:** Supports both full assignment and reference-based execution
+3. **Selective Results:** Commit-to feature reduces bandwidth for specific messages
+4. **Error Handling:** Throws `{cu_error, Error}` on computation failures
+5. **Signed Commitments:** All commitments are signed with node wallet
+6. **Bundle Integration:** Works with ANS-104 bundles for results
+7. **Process Resolution:** Automatically resolves process context from assignment
+8. **Store Access:** Uses configured store for process state lookup
+9. **Wallet Access:** Uses `hb:wallet()` for signing commitments
+10. **Status Codes:** HTTP-style status codes (200, 404) for commitment responses

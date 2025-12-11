@@ -1,0 +1,485 @@
+# hb_volume.erl - Physical Disk & Volume Management
+
+## Overview
+
+**Purpose:** Manage physical disks, partitions, encryption, and volume mounting  
+**Module:** `hb_volume`  
+**Pattern:** OS command wrappers with error handling and security features
+
+This module provides operations for partitioning, formatting, mounting, and managing encrypted volumes on Linux systems. Designed for setting up and migrating HyperBEAM node storage across physical disks with LUKS encryption support.
+
+## Dependencies
+
+- **Erlang/OTP:** `os`, `file`, `filelib`, `string`, `re`
+- **HyperBEAM:** `hb_store_lmdb`, `hb_json`, `hb_opts`
+- **System:** `sudo`, `fdisk`, `parted`, `mkfs`, `cryptsetup`, `mount`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Disk Information
+-spec list_partitions() -> {ok, map()} | {error, binary()}.
+
+%% Partition Management
+-spec create_partition(Device, PartType) -> {ok, map()} | {error, binary()}.
+
+%% Disk Operations
+-spec format_disk(Device, FSType) -> {ok, map()} | {error, binary()}.
+-spec mount_disk(Device, MountPoint, FSType, Passphrase) -> {ok, map()} | {error, binary()}.
+
+%% Store Migration
+-spec change_node_store(EncryptionKey, DevicePath) -> {ok, map()} | {error, binary()}.
+
+%% Utilities
+-spec check_for_device(Device) -> boolean().
+```
+
+---
+
+## Public Functions
+
+### 1. list_partitions/0
+
+```erlang
+-spec list_partitions() -> {ok, map()} | {error, binary()}.
+```
+
+**Description:** List all available partitions and disks using `fdisk -l`. Parses output to extract disk information including size, model, and sector details.
+
+**Returns:**
+```erlang
+{ok, #{
+    <<"status">> => 200,
+    <<"content-type">> => <<"application/json">>,
+    <<"body">> => JSON  % Encoded array of disk objects
+}}
+```
+
+**Disk Object Structure:**
+```erlang
+#{
+    <<"device">> => <<"/dev/sdb">>,
+    <<"size">> => <<"931.5 GiB">>,
+    <<"bytes">> => 1000204886016,
+    <<"sectors">> => 1953525168,
+    <<"model">> => <<"Samsung SSD 860">>,
+    <<"sector_size">> => #{
+        <<"logical">> => <<"512 bytes">>,
+        <<"physical">> => <<"512 bytes">>
+    }
+}
+```
+
+**Test Code:**
+```erlang
+-module(hb_volume_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+list_partitions_test() ->
+    case hb_volume:list_partitions() of
+        {ok, Result} ->
+            ?assert(maps:is_key(<<"status">>, Result)),
+            ?assertEqual(200, maps:get(<<"status">>, Result)),
+            Body = hb_json:decode(maps:get(<<"body">>, Result)),
+            ?assert(maps:is_key(<<"disks">>, Body));
+        {error, _} ->
+            % May fail if not run with sudo
+            ok
+    end.
+```
+
+---
+
+### 2. create_partition/2
+
+```erlang
+-spec create_partition(Device, PartType) -> {ok, map()} | {error, binary()}
+    when
+        Device :: binary(),
+        PartType :: binary().
+```
+
+**Description:** Create a GPT partition table and partition on a device. Uses `parted` to create the partition spanning the entire disk.
+
+**Parameters:**
+- `Device`: Device path (e.g., `<<"/dev/sdb">>`)
+- `PartType`: Partition type (e.g., `<<"ext4">>`, `<<"xfs">>`)
+
+**Test Code:**
+```erlang
+-module(hb_volume_create_partition_test).
+-include_lib("eunit/include/eunit.hrl").
+
+% NOTE: This is a destructive operation - only test on dedicated test devices
+create_partition_validation_test() ->
+    % Test with undefined device
+    ?assertEqual(
+        {error, <<"Device path not specified">>},
+        hb_volume:create_partition(undefined, <<"ext4">>)
+    ).
+
+% Integration test would require physical device
+% create_partition_integration_test() ->
+%     Device = <<"/dev/sdb">>,  % WARNING: Will erase device!
+%     {ok, Result} = hb_volume:create_partition(Device, <<"ext4">>),
+%     ?assertEqual(200, maps:get(<<"status">>, Result)).
+```
+
+---
+
+### 3. format_disk/2
+
+```erlang
+-spec format_disk(Device, FSType) -> {ok, map()} | {error, binary()}
+    when
+        Device :: binary(),
+        FSType :: binary().
+```
+
+**Description:** Format a device with the specified filesystem type using `mkfs`.
+
+**Supported Filesystems:**
+- `<<"ext4">>`
+- `<<"xfs">>`
+- Other filesystems supported by `mkfs`
+
+**Test Code:**
+```erlang
+-module(hb_volume_format_test).
+-include_lib("eunit/include/eunit.hrl").
+
+format_disk_validation_test() ->
+    % Test without actual device
+    Result = hb_volume:format_disk(<<"/dev/nonexistent">>, <<"ext4">>),
+    ?assert(element(1, Result) == error).
+```
+
+---
+
+### 4. mount_disk/4
+
+```erlang
+-spec mount_disk(Device, MountPoint, FSType, Passphrase) -> {ok, map()} | {error, binary()}
+    when
+        Device :: binary(),
+        MountPoint :: binary(),
+        FSType :: binary(),
+        Passphrase :: binary().
+```
+
+**Description:** Mount an encrypted device using LUKS. Opens the encrypted device with `cryptsetup`, formats if needed, and mounts to the specified mount point.
+
+**Process:**
+1. Decrypt device with LUKS using passphrase
+2. Format decrypted device if needed
+3. Create mount point directory
+4. Mount filesystem
+
+**Test Code:**
+```erlang
+-module(hb_volume_mount_test).
+-include_lib("eunit/include/eunit.hrl").
+
+mount_disk_validation_test() ->
+    Device = <<"/dev/sdb1">>,
+    MountPoint = <<"/mnt/encrypted">>,
+    FSType = <<"ext4">>,
+    Passphrase = <<"test-passphrase">>,
+    
+    % This would require actual encrypted device
+    Result = hb_volume:mount_disk(Device, MountPoint, FSType, Passphrase),
+    ?assert(is_tuple(Result)).
+```
+
+---
+
+### 5. change_node_store/2
+
+```erlang
+-spec change_node_store(EncryptionKey, DevicePath) -> {ok, map()} | {error, binary()}
+    when
+        EncryptionKey :: binary(),
+        DevicePath :: binary().
+```
+
+**Description:** Migrate HyperBEAM node storage to a new encrypted device. Comprehensive operation that partitions, encrypts, formats, mounts device, and updates store configuration.
+
+**Process:**
+1. Check device exists
+2. Create partition
+3. Setup LUKS encryption
+4. Format encrypted volume
+5. Mount to `/encrypted`
+6. Update store configuration to use new mount point
+7. Restart affected stores
+
+**Test Code:**
+```erlang
+-module(hb_volume_change_store_test).
+-include_lib("eunit/include/eunit.hrl").
+
+change_node_store_device_check_test() ->
+    % Test with non-existent device
+    Result = hb_volume:change_node_store(
+        <<"test-key">>,
+        <<"/dev/nonexistent">>
+    ),
+    ?assertEqual({error, <<"Device not found">>}, Result).
+```
+
+---
+
+### 6. check_for_device/1
+
+```erlang
+-spec check_for_device(Device) -> boolean()
+    when
+        Device :: binary().
+```
+
+**Description:** Check if a device exists on the system using `ls`.
+
+**Test Code:**
+```erlang
+-module(hb_volume_check_test).
+-include_lib("eunit/include/eunit.hrl").
+
+check_for_device_test() ->
+    ?assertEqual(true, hb_volume:check_for_device(<<"/dev/null">>)),
+    ?assertEqual(false, hb_volume:check_for_device(<<"/dev/nonexistent_123">>)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% List available disks
+{ok, Response} = hb_volume:list_partitions(),
+Body = hb_json:decode(maps:get(<<"body">>, Response)),
+Disks = maps:get(<<"disks">>, Body).
+
+%% Setup encrypted storage
+EncryptionKey = <<"my-secure-passphrase">>,
+DevicePath = <<"/dev/sdb">>,
+
+% Full setup: partition, encrypt, format, mount, migrate
+{ok, Result} = hb_volume:change_node_store(EncryptionKey, DevicePath).
+
+%% Manual setup process
+Device = <<"/dev/sdb">>,
+
+% 1. Create partition
+{ok, _} = hb_volume:create_partition(Device, <<"ext4">>),
+
+% 2. Format
+{ok, _} = hb_volume:format_disk(<<"/dev/sdb1">>, <<"ext4">>),
+
+% 3. Mount with encryption
+{ok, _} = hb_volume:mount_disk(
+    <<"/dev/sdb1">>,
+    <<"/mnt/data">>,
+    <<"ext4">>,
+    <<"passphrase">>
+).
+
+%% Check device before operations
+case hb_volume:check_for_device(Device) of
+    true -> proceed_with_setup(Device);
+    false -> {error, device_not_found}
+end.
+```
+
+---
+
+## LUKS Encryption Details
+
+### Encryption Process
+
+```erlang
+% 1. Setup LUKS on device
+Command = "echo 'passphrase' | sudo cryptsetup luksFormat /dev/sdb1 --batch-mode -"
+
+% 2. Open encrypted device
+"echo 'passphrase' | sudo cryptsetup luksOpen /dev/sdb1 encrypted_device -"
+
+% 3. Format mapped device
+"sudo mkfs.ext4 /dev/mapper/encrypted_device"
+
+% 4. Mount
+"sudo mount /dev/mapper/encrypted_device /encrypted"
+```
+
+### Security Features
+
+- Passphrase passed via stdin (not command line)
+- Temporary key files created in `/root/tmp`
+- Automatic cleanup of key files
+- Exception-safe key file deletion
+
+---
+
+## Store Migration
+
+### Configuration Update
+
+```erlang
+% Updates store paths from old to new mount point
+update_store_config(StoreConfig, <<"/encrypted">>)
+
+% For filesystem stores:
+#{<<"name">> => <<"cache">>} 
+    → #{<<"name">> => <<"/encrypted/cache">>}
+
+% For LMDB stores:
+% 1. Stops current store
+% 2. Updates path
+% 3. Starts new store
+#{<<"name">> => <<"cache/lmdb">>}
+    → #{<<"name">> => <<"/encrypted/cache/lmdb">>}
+
+% For gateway stores:
+% Recursively updates nested stores
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+```erlang
+% Device not found
+{error, <<"Device not found">>}
+
+% Partition creation failed
+{error, <<"Failed to create partition: ...", ErrorDetail/binary>>}
+
+% Format failed
+{error, <<"Failed to format disk: ...", ErrorDetail/binary>>}
+
+% Mount failed
+{error, <<"Failed to mount device: ...", ErrorDetail/binary>>}
+
+% Encryption failed
+{error, <<"Failed to setup encryption: ...", ErrorDetail/binary>>}
+```
+
+### Error Detection
+
+```erlang
+% Check command output for error keywords
+check_command_errors(Output, ["Error", "failed", "cannot"])
+```
+
+---
+
+## Security Considerations
+
+1. **Sudo Required**: All operations require sudo privileges
+2. **Passphrase Handling**: Never logged, passed via stdin
+3. **Temporary Files**: Key files cleaned up even on exceptions
+4. **Secure Location**: Key files in `/root/tmp` (root-only access)
+5. **Batch Mode**: LUKS operations use `--batch-mode` to avoid prompts
+
+---
+
+## System Requirements
+
+### Required Commands
+
+- `sudo` - Root privilege execution
+- `fdisk` - Partition listing
+- `parted` - Partition creation
+- `mkfs.ext4` / `mkfs.xfs` - Filesystem formatting
+- `cryptsetup` - LUKS encryption
+- `mount` - Filesystem mounting
+- `ls` - Device checking
+
+### Permissions
+
+Operations require:
+- Sudo access
+- Write access to `/root/tmp`
+- Permission to modify block devices
+- Permission to create mount points
+
+---
+
+## Disk Information Parsing
+
+### fdisk Output Format
+
+```
+Disk /dev/sdb: 931.5 GiB, 1000204886016 bytes, 1953525168 sectors
+Disk model: Samsung SSD 860
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+```
+
+### Parsed Structure
+
+```erlang
+#{
+    <<"device">> => <<"/dev/sdb">>,
+    <<"size">> => <<"931.5 GiB">>,
+    <<"bytes">> => 1000204886016,
+    <<"sectors">> => 1953525168,
+    <<"model">> => <<"Samsung SSD 860">>,
+    <<"units">> => <<"sectors of 1 * 512 = 512 bytes">>,
+    <<"sector_size">> => #{
+        <<"logical">> => <<"512 bytes">>,
+        <<"physical">> => <<"512 bytes">>
+    },
+    <<"io_size">> => #{
+        <<"minimum">> => <<"512 bytes">>,
+        <<"optimal">> => <<"512 bytes">>
+    }
+}
+```
+
+---
+
+## Testing Utilities
+
+### with_secure_key_file/2
+
+Internal helper for secure temporary key file management:
+
+```erlang
+% Creates temporary key file
+% Executes function with file path
+% Ensures cleanup even on exceptions
+
+with_secure_key_file(EncryptionKey, fun(KeyFile) ->
+    % Use KeyFile for operations
+    cryptsetup_command(KeyFile)
+end)
+```
+
+---
+
+## References
+
+- **LUKS** - Linux Unified Key Setup (disk encryption)
+- **parted** - GNU partition editor
+- **cryptsetup** - LUKS setup utility
+- **fdisk** - Partition table manipulator
+
+---
+
+## Notes
+
+1. **Destructive Operations**: Partition and format operations erase data
+2. **Sudo Required**: All operations need root privileges
+3. **LUKS Encryption**: Industry-standard Linux disk encryption
+4. **Store Migration**: Automatically updates HyperBEAM store paths
+5. **Error Recovery**: Failed operations may leave partial state
+6. **Device Naming**: Partition typically gets device name + "1" (e.g., /dev/sdb1)
+7. **Mount Points**: Creates mount point directories if needed
+8. **Regex Parsing**: Uses regex to parse fdisk/parted output
+9. **RAM Disks**: Explicitly excludes /dev/ram devices from listing
+10. **Security**: Passphrase never appears in process listings

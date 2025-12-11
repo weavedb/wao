@@ -1,0 +1,515 @@
+# dev_arweave.erl - Arweave Network Interface Device
+
+## Overview
+
+**Purpose:** Provide access to Arweave network information via designated relay nodes  
+**Module:** `dev_arweave`  
+**Device Name:** `arweave@2.9` or `arweave@2.9-pre`  
+**Network:** Arweave blockchain and gateway API
+
+This device acts as a proxy to Arweave network, relaying transaction and block data from configured nodes. It handles transaction uploads, retrievals, block queries, and caches responses locally for performance. The relay nodes can be configured through the `/arweave` route in the node's configuration.
+
+## Supported Operations
+
+- **Transaction Upload:** POST transactions to Arweave via bundler
+- **Transaction Retrieval:** GET transaction headers and data
+- **Block Queries:** Retrieve blocks by ID, height, or current
+- **Network Status:** Proxy `/info` endpoint from Arweave nodes
+- **Automatic Caching:** Stores retrieved data in local cache
+
+## Dependencies
+
+- **HyperBEAM:** `hb_client`, `hb_cache`, `hb_http`, `hb_ao`, `hb_message`, `hb_util`, `hb_maps`
+- **Arweave:** `dev_arweave_block_cache`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Transaction Operations
+-spec tx(Base, Request, Opts) -> {ok, TX} | {error, Reason}.
+
+%% Block Operations
+-spec block(Base, Request, Opts) -> {ok, Block} | {error, Reason}.
+-spec current(Base, Request, Opts) -> {ok, CurrentBlock} | {error, Reason}.
+
+%% Network Status
+-spec status(Base, Request, Opts) -> {ok, NetworkInfo} | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. tx/3
+
+```erlang
+-spec tx(Base, Request, Opts) -> {ok, TX} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        TX :: map(),
+        Reason :: term().
+```
+
+**Description:** Upload (POST) or retrieve (GET) a transaction from Arweave. For uploads, ensures the transaction is cached locally after successful upload. For retrievals, optionally includes transaction data based on the `data` key setting.
+
+**Data Key Options:**
+- `false` - Do not retrieve data (header only)
+- `always` - Error if data unavailable
+- `true` (default) - Include data if available, header only otherwise
+
+**Test Code:**
+```erlang
+-module(dev_arweave_tx_test).
+-include_lib("eunit/include/eunit.hrl").
+
+post_transaction_test() ->
+    ServerOpts = #{ store => [hb_test_utils:test_store()] },
+    Server = hb_http_server:start_node(ServerOpts),
+    ClientOpts = #{
+        store => [hb_test_utils:test_store()],
+        priv_wallet => hb:wallet()
+    },
+    Msg = hb_message:commit(
+        #{
+            <<"variant">> => <<"ao.N.1">>,
+            <<"type">> => <<"Process">>,
+            <<"data">> => <<"test-data">>
+        },
+        ClientOpts,
+        #{ <<"commitment-device">> => <<"ans104@1.0">> }
+    ),
+    {ok, PostRes} = hb_http:post(
+        Server,
+        Msg#{
+            <<"path">> => <<"/~arweave@2.9-pre/tx">>,
+            <<"codec-device">> => <<"ans104@1.0">>
+        },
+        ClientOpts
+    ),
+    ?assertMatch(#{ <<"status">> := 200 }, PostRes),
+    SignedID = hb_message:id(Msg, signed, ClientOpts),
+    {ok, GetRes} = hb_http:get(
+        Server,
+        <<"/", SignedID/binary>>,
+        ClientOpts
+    ),
+    ?assertMatch(
+        #{
+            <<"status">> := 200,
+            <<"variant">> := <<"ao.N.1">>,
+            <<"data">> := <<"test-data">>
+        },
+        GetRes
+    ).
+
+get_transaction_header_only_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    Base = #{},
+    Request = #{
+        <<"tx">> => <<"valid-tx-id">>,
+        <<"data">> => false,
+        <<"method">> => <<"GET">>
+    },
+    {ok, Result} = dev_arweave:tx(Base, Request, Opts),
+    ?assertNot(maps:is_key(<<"data">>, Result)).
+
+get_transaction_with_data_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    Base = #{},
+    Request = #{
+        <<"tx">> => <<"valid-tx-id">>,
+        <<"data">> => true,
+        <<"method">> => <<"GET">>
+    },
+    {ok, Result} = dev_arweave:tx(Base, Request, Opts),
+    ?assert(maps:is_key(<<"data">>, Result)).
+```
+
+---
+
+### 2. block/3
+
+```erlang
+-spec block(Base, Request, Opts) -> {ok, Block} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        Block :: map(),
+        Reason :: binary().
+```
+
+**Description:** Retrieve block information from Arweave by ID, height, or current. Automatically caches blocks and creates pseudo-paths for height-based lookups. If no `block` key specified, returns current block.
+
+**Block Reference Options:**
+- `<<"current">>` - Current block (default)
+- 43-char binary - Block ID/hash
+- Integer string - Block height
+- `not_found` - Defaults to current
+
+**Test Code:**
+```erlang
+-module(dev_arweave_block_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_current_block_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    Base = #{},
+    Request = #{},
+    {ok, Block} = dev_arweave:block(Base, Request, Opts),
+    ?assert(is_map(Block)),
+    ?assert(maps:is_key(<<"height">>, Block)),
+    ?assert(maps:is_key(<<"indep_hash">>, Block)).
+
+get_block_by_id_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    Base = #{},
+    BlockID = <<"abcdefghijklmnopqrstuvwxyz012345678901234">>, % 43 chars
+    Request = #{
+        <<"block">> => BlockID
+    },
+    Result = dev_arweave:block(Base, Request, Opts),
+    case Result of
+        {ok, Block} ->
+            ?assertEqual(BlockID, maps:get(<<"indep_hash">>, Block));
+        {error, _} ->
+            ok % Block may not exist
+    end.
+
+get_block_by_height_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    Base = #{},
+    Request = #{
+        <<"block">> => <<"1000000">>
+    },
+    Result = dev_arweave:block(Base, Request, Opts),
+    case Result of
+        {ok, Block} ->
+            ?assertEqual(1000000, maps:get(<<"height">>, Block));
+        {error, _} ->
+            ok % Block may not exist
+    end.
+
+invalid_block_reference_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    Base = #{},
+    Request = #{
+        <<"block">> => <<"invalid-reference!@#">>
+    },
+    Result = dev_arweave:block(Base, Request, Opts),
+    ?assertMatch({error, _}, Result).
+```
+
+---
+
+### 3. current/3
+
+```erlang
+-spec current(Base, Request, Opts) -> {ok, CurrentBlock} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        CurrentBlock :: map(),
+        Reason :: term().
+```
+
+**Description:** Retrieve the current block information from Arweave network.
+
+**Test Code:**
+```erlang
+-module(dev_arweave_current_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_current_block_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    {ok, Block} = dev_arweave:current(#{}, #{}, Opts),
+    ?assert(is_map(Block)),
+    ?assert(maps:is_key(<<"height">>, Block)),
+    ?assert(maps:is_key(<<"timestamp">>, Block)),
+    ?assert(maps:is_key(<<"indep_hash">>, Block)),
+    ?assert(maps:is_key(<<"hash">>, Block)).
+```
+
+---
+
+### 4. status/3
+
+```erlang
+-spec status(Base, Request, Opts) -> {ok, NetworkInfo} | {error, Reason}
+    when
+        Base :: map(),
+        Request :: map(),
+        Opts :: map(),
+        NetworkInfo :: map(),
+        Reason :: term().
+```
+
+**Description:** Proxy the `/info` endpoint from the Arweave node, returning network information such as version, block count, and network status.
+
+**Test Code:**
+```erlang
+-module(dev_arweave_status_test).
+-include_lib("eunit/include/eunit.hrl").
+
+get_network_status_test() ->
+    Opts = #{ store => [hb_test_utils:test_store()] },
+    {ok, Info} = dev_arweave:status(#{}, #{}, Opts),
+    ?assert(is_map(Info)),
+    ?assert(maps:is_key(<<"network">>, Info) orelse 
+            maps:is_key(<<"version">>, Info)).
+```
+
+---
+
+## Request Flow
+
+### Transaction Upload (POST)
+
+```
+1. Client creates signed transaction
+2. Upload via hb_client:upload/2
+3. Cache transaction locally on success
+4. Return upload response
+```
+
+### Transaction Retrieval (GET)
+
+```
+1. Extract TXID from request/base
+2. Request TX header from Arweave
+3. Optionally request TX data
+4. Cache combined result
+5. Return to client
+```
+
+### Block Retrieval
+
+```
+1. Determine block reference (ID/height/current)
+2. Check local cache first
+3. If not cached, request from Arweave
+4. Cache block and create pseudo-paths
+5. Return block data
+```
+
+---
+
+## Caching Strategy
+
+### Transaction Caching
+- Uploaded transactions automatically cached
+- Retrieved transactions cached for future access
+- Cache keys: Transaction ID
+
+### Block Caching
+- All retrieved blocks cached
+- Multiple pseudo-paths created:
+  - Block ID (independent hash)
+  - Block hash (dependent hash)
+  - Height-based path: `~arweave@2.9/block/height/N`
+- Enables fast lookups by any reference type
+
+---
+
+## Common Patterns
+
+```erlang
+%% Upload a signed transaction
+Wallet = ar_wallet:new(),
+Msg = hb_message:commit(
+    #{
+        <<"variant">> => <<"ao.N.1">>,
+        <<"type">> => <<"Message">>,
+        <<"data">> => <<"Hello Arweave">>
+    },
+    #{ priv_wallet => Wallet },
+    #{ <<"commitment-device">> => <<"ans104@1.0">> }
+),
+{ok, Response} = hb_http:post(
+    Node,
+    Msg#{
+        <<"path">> => <<"/~arweave@2.9/tx">>,
+        <<"codec-device">> => <<"ans104@1.0">>
+    },
+    #{ priv_wallet => Wallet }
+).
+
+%% Get transaction with data
+Request = #{
+    <<"tx">> => TXID,
+    <<"data">> => true,
+    <<"method">> => <<"GET">>
+},
+{ok, TX} = dev_arweave:tx(#{}, Request, Opts).
+
+%% Get transaction header only
+Request = #{
+    <<"tx">> => TXID,
+    <<"data">> => false,
+    <<"method">> => <<"GET">>
+},
+{ok, Header} = dev_arweave:tx(#{}, Request, Opts).
+
+%% Get current block
+{ok, Block} = dev_arweave:current(#{}, #{}, Opts).
+
+%% Get block by height
+Request = #{
+    <<"block">> => <<"1234567">>
+},
+{ok, Block} = dev_arweave:block(#{}, Request, Opts).
+
+%% Get block by ID
+Request = #{
+    <<"block">> => <<"valid-43-char-block-id-here-1234567890">>
+},
+{ok, Block} = dev_arweave:block(#{}, Request, Opts).
+
+%% Get network status
+{ok, Status} = dev_arweave:status(#{}, #{}, Opts).
+```
+
+---
+
+## Configuration
+
+### Relay Node Configuration
+
+Configure Arweave relay nodes through the node's configuration message:
+
+```erlang
+NodeConfig = #{
+    routes => [
+        #{
+            <<"template">> => <<"/arweave/*">>,
+            <<"node">> => #{
+                <<"url">> => <<"https://arweave.net">>
+            }
+        }
+    ]
+}
+```
+
+---
+
+## Response Format
+
+### Transaction Response
+
+```erlang
+#{
+    <<"id">> => <<"transaction-id">>,
+    <<"owner">> => <<"public-key">>,
+    <<"target">> => <<"target-address">>,
+    <<"tags">> => [{<<"name">>, <<"value">>}],
+    <<"data">> => <<"transaction-data">>,  % Optional
+    % ... other transaction fields
+}
+```
+
+### Block Response
+
+```erlang
+#{
+    <<"height">> => 1234567,
+    <<"indep_hash">> => <<"independent-hash-43-chars">>,
+    <<"hash">> => <<"dependent-hash-43-chars">>,
+    <<"timestamp">> => 1234567890,
+    <<"txs">> => [<<"tx-id-1">>, <<"tx-id-2">>],
+    % ... other block fields
+}
+```
+
+### Network Status Response
+
+```erlang
+#{
+    <<"network">> => <<"arweave.N.1">>,
+    <<"version">> => 5,
+    <<"blocks">> => 1234567,
+    <<"peers">> => 42,
+    % ... other status fields
+}
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+**Transaction Not Found:**
+```erlang
+{error, not_found}
+```
+
+**Invalid Block Reference:**
+```erlang
+{error, <<"Invalid block reference `bad-ref`">>}
+```
+
+**Data Retrieval Failed (with `always` flag):**
+```erlang
+{error, data_not_available}
+```
+
+**Upload Failed:**
+```erlang
+{error, #{
+    <<"status">> => 500,
+    <<"body">> => <<"Upload failed">>
+}}
+```
+
+---
+
+## Internal Operations
+
+### Transaction ID Resolution
+
+1. Check `tx` key in Request
+2. Check `tx` key in Base
+3. Return `not_found` if neither present
+
+### Response Transformation
+
+- **Raw Data:** `/raw/*` paths return binary data directly
+- **Block Data:** `/block/*` paths parsed as JSON and cached
+- **Other Data:** All other responses parsed from JSON to structured format
+
+---
+
+## References
+
+- **Block Cache** - `dev_arweave_block_cache.erl`
+- **Client Operations** - `hb_client.erl`
+- **Cache System** - `hb_cache.erl`
+- **HTTP Client** - `hb_http.erl`
+- **ANS-104** - `ar_bundles.erl`
+
+---
+
+## Notes
+
+1. **Automatic Caching:** All retrieved data cached for performance
+2. **Data Retrieval:** Optional based on `data` key in request
+3. **Block Indexing:** Multiple pseudo-paths for flexible lookups
+4. **Upload Integration:** Uses configured bundler for transaction uploads
+5. **JSON Conversion:** Automatic conversion between JSON and structured formats
+6. **Relay Configuration:** Nodes specified in route configuration
+7. **Error Propagation:** Network errors returned to client
+8. **Cache-First:** Checks cache before network requests
+9. **Height Lookups:** Blocks indexed by height for fast access
+10. **ID Linkage:** Block IDs linked to message IDs in cache
+11. **POST/GET Support:** Both upload and retrieval operations
+12. **Method Detection:** Uses `method` key to distinguish operations
+13. **Content-Type Handling:** Manages different response formats
+14. **Test Integration:** Designed for easy testing with local stores
+15. **ANS-104 Support:** Full support for bundled transaction uploads

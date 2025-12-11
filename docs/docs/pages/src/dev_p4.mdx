@@ -1,0 +1,510 @@
+# dev_p4.erl - Payment Ledger & Pricing Mechanism
+
+## Overview
+
+**Purpose:** Core payment ledger for HyperBEAM node operators  
+**Module:** `dev_p4`  
+**Pattern:** Pricing Device → Ledger Device → Request/Response Processing  
+**Version:** P4@1.0 (Pay-Per-Process)
+
+This device enables node operators to specify pricing mechanisms and maintain payment ledgers for transactions. It orchestrates pre-execution balance checks and post-execution charges, allowing nodes to gate service fulfillment based on user balances and computed costs.
+
+## Architecture
+
+```
+Request Flow:
+User Request → Pricing Estimate → Balance Check → Execute/Reject
+
+Response Flow:
+Response Generated → Calculate Cost → Charge Ledger → Return
+```
+
+## Dependencies
+
+- **HyperBEAM:** `hb_ao`, `hb_message`, `hb_util`, `hb_http`, `hb_http_server`, `hb_client`, `hb_router`
+- **Arweave:** `ar_wallet`, `ar_bundles`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Configuration
+
+### Required Node Settings
+
+```erlang
+#{
+    <<"pricing-device">> => DeviceName,  % Device to estimate costs
+    <<"ledger-device">> => DeviceName,   % Device to manage balances
+    p4_non_chargable_routes =>           % Routes exempt from charging
+        [
+            #{ <<"template">> => <<"/~p4@1.0/balance">> },
+            #{ <<"template">> => <<"/~meta@1.0/*">> }
+        ]
+}
+```
+
+### Default Non-Chargeable Routes
+
+- `/~p4@1.0/balance` - Balance inquiries
+- `/~p4@1.0/topup` - Adding funds
+- `/~meta@1.0/*` - Metadata endpoints
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Request/Response Processing
+-spec request(State, Request, NodeMsg) -> {ok, Response} | {error, Reason}.
+-spec response(State, Response, NodeMsg) -> {ok, Response} | {error, Reason}.
+
+%% Balance Queries
+-spec balance(State, Request, NodeMsg) -> {ok, Balance}.
+```
+
+---
+
+## Public Functions
+
+### 1. request/3
+
+```erlang
+-spec request(State, Raw, NodeMsg) -> {ok, #{<<"body">> => Messages}} | {error, Reason}
+    when
+        State :: map(),
+        Raw :: map(),
+        NodeMsg :: map(),
+        Messages :: list(),
+        Reason :: binary() | map().
+```
+
+**Description:** Pre-execution payment validation. Estimates transaction cost, checks user balance, and decides whether to proceed with request execution.
+
+**Flow:**
+1. Extract pricing and ledger devices from state
+2. Check if route is chargeable
+3. Get price estimate from pricing device
+4. Query user balance from ledger device
+5. Compare balance vs. price
+6. Proceed or reject based on funds
+
+**Special Cases:**
+- `infinity` price → Request rejected under all circumstances
+- `0` price → Request proceeds without charge
+- No pricing/ledger devices → Request proceeds (default allow)
+- Non-chargeable routes → Request proceeds without checks
+
+**Test Code:**
+```erlang
+-module(dev_p4_request_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+request_with_sufficient_funds_test() ->
+    Wallet = ar_wallet:new(),
+    Processor = #{
+        <<"device">> => <<"p4@1.0">>,
+        <<"ledger-device">> => <<"simple-pay@1.0">>,
+        <<"pricing-device">> => <<"simple-pay@1.0">>
+    },
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"request">> => Processor,
+            <<"response">> => Processor
+        },
+        operator => hb:address()
+    }),
+    % Fund the account
+    FundReq = hb_message:commit(
+        #{ <<"path">> => <<"/~p4@1.0/topup">>, <<"amount">> => 100 },
+        Wallet
+    ),
+    {ok, _} = hb_http:post(Node, FundReq, #{}),
+    % Make a chargeable request
+    Req = hb_message:commit(
+        #{ <<"path">> => <<"/test-path">> },
+        Wallet
+    ),
+    Res = hb_http:get(Node, Req, #{}),
+    ?assertMatch({ok, _}, Res).
+
+request_with_insufficient_funds_test() ->
+    Wallet = ar_wallet:new(),
+    Processor = #{
+        <<"device">> => <<"p4@1.0">>,
+        <<"ledger-device">> => <<"simple-pay@1.0">>,
+        <<"pricing-device">> => <<"simple-pay@1.0">>
+    },
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"request">> => Processor,
+            <<"response">> => Processor
+        }
+    }),
+    Req = hb_message:commit(
+        #{ <<"path">> => <<"/expensive-operation">> },
+        Wallet
+    ),
+    Res = hb_http:get(Node, Req, #{}),
+    ?assertMatch({error, #{ <<"status">> := 402 }}, Res).
+
+non_chargeable_route_test() ->
+    Wallet = ar_wallet:new(),
+    Processor = #{
+        <<"device">> => <<"p4@1.0">>,
+        <<"ledger-device">> => <<"simple-pay@1.0">>,
+        <<"pricing-device">> => <<"simple-pay@1.0">>
+    },
+    Node = hb_http_server:start_node(#{
+        p4_non_chargable_routes => [
+            #{ <<"template">> => <<"/~p4@1.0/balance">> }
+        ],
+        on => #{
+            <<"request">> => Processor
+        }
+    }),
+    Req = hb_message:commit(
+        #{ <<"path">> => <<"/~p4@1.0/balance">> },
+        Wallet
+    ),
+    Res = hb_http:get(Node, Req, #{}),
+    ?assertMatch({ok, _}, Res).
+```
+
+---
+
+### 2. response/3
+
+```erlang
+-spec response(State, RawResponse, NodeMsg) -> {ok, Response} | {error, Reason}
+    when
+        State :: map(),
+        RawResponse :: map(),
+        NodeMsg :: map(),
+        Response :: map(),
+        Reason :: binary() | map().
+```
+
+**Description:** Post-execution payment processing. Calculates actual cost of fulfilled request and charges the user's ledger account.
+
+**Flow:**
+1. Extract pricing and ledger devices
+2. Get actual cost from pricing device (type=post)
+3. Charge user's ledger account
+4. Return response with charge details
+
+**Test Code:**
+```erlang
+-module(dev_p4_response_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+response_charges_ledger_test() ->
+    Wallet = ar_wallet:new(),
+    Processor = #{
+        <<"device">> => <<"p4@1.0">>,
+        <<"ledger-device">> => <<"simple-pay@1.0">>,
+        <<"pricing-device">> => <<"simple-pay@1.0">>
+    },
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"request">> => Processor,
+            <<"response">> => Processor
+        }
+    }),
+    % Fund account and make request
+    FundReq = hb_message:commit(
+        #{ <<"path">> => <<"/~p4@1.0/topup">>, <<"amount">> => 100 },
+        Wallet
+    ),
+    {ok, _} = hb_http:post(Node, FundReq, #{}),
+    Req = hb_message:commit(
+        #{ <<"path">> => <<"/operation">> },
+        Wallet
+    ),
+    {ok, _} = hb_http:get(Node, Req, #{}),
+    % Check balance was reduced
+    BalanceReq = hb_message:commit(
+        #{ <<"path">> => <<"/~p4@1.0/balance">> },
+        Wallet
+    ),
+    {ok, Balance} = hb_http:get(Node, BalanceReq, #{}),
+    ?assert(Balance < 100).
+```
+
+---
+
+### 3. balance/3
+
+```erlang
+-spec balance(State, Request, NodeMsg) -> {ok, Balance}
+    when
+        State :: map(),
+        Request :: map(),
+        NodeMsg :: map(),
+        Balance :: number() | <<"infinity">>.
+```
+
+**Description:** Query the current balance of a user account from the ledger device.
+
+**Test Code:**
+```erlang
+-module(dev_p4_balance_test).
+-include_lib("eunit/include/eunit.hrl").
+
+balance_query_test() ->
+    Wallet = ar_wallet:new(),
+    Processor = #{
+        <<"device">> => <<"p4@1.0">>,
+        <<"ledger-device">> => <<"simple-pay@1.0">>
+    },
+    Node = hb_http_server:start_node(#{
+        on => #{ <<"request">> => Processor }
+    }),
+    BalanceReq = hb_message:commit(
+        #{ <<"path">> => <<"/~p4@1.0/balance">> },
+        Wallet
+    ),
+    {ok, Balance} = hb_http:get(Node, BalanceReq, #{}),
+    ?assert(is_number(Balance) orelse Balance == <<"infinity">>).
+```
+
+---
+
+## Pricing Device Interface
+
+Pricing devices must implement:
+
+```erlang
+% Estimate cost before execution
+GET /estimate?type=pre&body=Messages&request=Request
+Response: number() | <<"infinity">>
+
+% Calculate actual cost after execution
+GET /price?type=post&body=Response&request=Request
+Response: number() | <<"infinity">>
+```
+
+### Request Types
+- `pre` - Estimate cost before execution (for balance check)
+- `post` - Calculate actual cost after execution (for charging)
+
+### Return Values
+- `number()` - Cost in ledger units
+- `<<"infinity">>` - Service will not be provided under any circumstances
+- `0` - No charge for this request
+
+---
+
+## Ledger Device Interface
+
+Ledger devices must implement:
+
+```erlang
+% Add funds to account
+POST /credit?message=PaymentMessage&request=Request
+Response: {ok, NewBalance}
+
+% Charge account
+POST /charge?amount=Amount&request=Request&type=pre|post
+Response: {ok, NewBalance} | {error, insufficient_funds}
+
+% Query balance
+GET /balance?request=Request
+Response: number() | <<"infinity">> | true
+```
+
+### Balance Query Responses
+- `number()` - Specific balance amount
+- `<<"infinity">>` - Unlimited balance
+- `true` - Sufficient funds guaranteed
+
+---
+
+## Common Patterns
+
+```erlang
+%% Initialize node with P4 payment system
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>
+        },
+        <<"response">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>
+        }
+    },
+    p4_non_chargable_routes => [
+        #{ <<"template">> => <<"/~p4@1.0/*">> },
+        #{ <<"template">> => <<"/~meta@1.0/*">> }
+    ],
+    operator => hb:address()
+}).
+
+%% Make a paid request
+Wallet = ar_wallet:new(),
+Request = hb_message:commit(#{
+    <<"path">> => <<"/compute">>,
+    <<"data">> => <<"process this">>
+}, Wallet),
+{ok, Response} = hb_http:post(Node, Request, #{}).
+
+%% Check balance
+BalanceReq = hb_message:commit(
+    #{ <<"path">> => <<"/~p4@1.0/balance">> },
+    Wallet
+),
+{ok, Balance} = hb_http:get(Node, BalanceReq, #{}).
+
+%% Add funds
+TopupReq = hb_message:commit(#{
+    <<"path">> => <<"/~p4@1.0/topup">>,
+    <<"amount">> => 1000
+}, Wallet),
+{ok, _} = hb_http:post(Node, TopupReq, #{}).
+```
+
+---
+
+## Integration with Lua Ledgers
+
+P4 supports Lua-based ledger processes:
+
+```erlang
+%% Process-based ledger (hyper-token)
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"ledger-device">> => <<"lua@5.3a">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>,
+            <<"module">> => #{
+                <<"content-type">> => <<"text/x-lua">>,
+                <<"name">> => <<"scripts/hyper-token-p4-client.lua">>,
+                <<"body">> => ClientScript
+            },
+            <<"ledger-path">> => <<"/ledger~node-process@1.0">>
+        }
+    },
+    node_processes => #{
+        <<"ledger">> => #{
+            <<"device">> => <<"process@1.0">>,
+            <<"execution-device">> => <<"lua@5.3a">>,
+            <<"module">> => [TokenScript, P4Script],
+            <<"balance">> => #{ AliceAddress => 100 }
+        }
+    }
+}).
+```
+
+---
+
+## Error Responses
+
+### 402 Insufficient Funds
+```erlang
+{error, #{
+    <<"status">> => 402,
+    <<"body">> => <<"Insufficient funds">>,
+    <<"price">> => 10,
+    <<"balance">> => 5
+}}
+```
+
+### 500 Ledger Error
+```erlang
+{error, #{
+    <<"status">> => 500,
+    <<"body">> => <<"Error checking ledger balance.">>
+}}
+```
+
+### Infinity (Will Not Service)
+```erlang
+{error, <<"Node will not service this request under any circumstances.">>}
+```
+
+---
+
+## Payment Flow Diagram
+
+```
+┌─────────────┐
+│ User Request│
+└──────┬──────┘
+       │
+       v
+┌──────────────────┐      ┌────────────────┐
+│ Is Route         │─Yes──→ Proceed         │
+│ Chargeable?      │      │ Without Charge │
+└──────┬───────────┘      └────────────────┘
+       │ No
+       v
+┌──────────────────┐      ┌────────────────┐
+│ Pricing Device   │──────→ Estimate Cost  │
+│ /estimate        │      │                │
+└──────┬───────────┘      └────────┬───────┘
+       │                           │
+       v                           v
+┌──────────────────┐      ┌────────────────┐
+│ Cost = infinity? │─Yes──→ Reject Request │
+└──────┬───────────┘      └────────────────┘
+       │ No
+       v
+┌──────────────────┐      ┌────────────────┐
+│ Ledger Device    │──────→ Get Balance    │
+│ /balance         │      │                │
+└──────┬───────────┘      └────────┬───────┘
+       │                           │
+       v                           v
+┌──────────────────┐      ┌────────────────┐
+│ Balance >= Cost? │─Yes──→ Execute Request│
+└──────┬───────────┘      └────────┬───────┘
+       │ No                         │
+       v                           v
+┌──────────────────┐      ┌────────────────┐
+│ Return 402 Error │      │ Pricing Device │
+│ Insufficient     │      │ /price         │
+│ Funds            │      └────────┬───────┘
+└──────────────────┘               │
+                                  v
+                          ┌────────────────┐
+                          │ Ledger Device  │
+                          │ /charge        │
+                          └────────┬───────┘
+                                  │
+                                  v
+                          ┌────────────────┐
+                          │ Return Response│
+                          │ to User        │
+                          └────────────────┘
+```
+
+---
+
+## References
+
+- **Simple Pay Device** - Reference pricing/ledger implementation
+- **Lua Integration** - `scripts/hyper-token-p4.lua`, `scripts/hyper-token-p4-client.lua`
+- **Node Process** - `dev_process.erl`
+- **HTTP Server** - `hb_http_server.erl`
+- **Arweave Bundles** - `ar_bundles.erl`
+
+---
+
+## Notes
+
+1. **Default Behavior:** If pricing/ledger devices not set, all requests proceed
+2. **Operator Initialization:** Important to set devices to enable payment system
+3. **Non-Chargeable Routes:** Essential for balance checks and topups
+4. **Dual Processing:** Both request (pre) and response (post) hooks
+5. **Signer Detection:** Uses `hb_message:signers/2` to identify payer
+6. **Balance Types:** Supports numeric balances, `infinity`, and boolean `true`
+7. **Error Handling:** Returns appropriate HTTP status codes
+8. **Lua Support:** Full integration with Lua-based token ledgers
+9. **Process Ledgers:** Can use persistent processes as ledger backends
+10. **Parallel Architecture:** Pricing and ledger are separate, composable devices

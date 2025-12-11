@@ -1,0 +1,519 @@
+# hb_ao_test_vectors.erl - AO-Core Test Suite
+
+## Overview
+
+**Purpose:** Comprehensive test suite for AO-Core resolution engine  
+**Module:** `hb_ao_test_vectors`  
+**Framework:** EUnit  
+**Coverage:** Resolution, devices, get/set operations, paths, devices
+
+This module provides extensive test coverage for the `hb_ao` resolution engine, testing different execution scenarios with various configuration options.
+
+## Dependencies
+
+- **Testing:** `eunit`
+- **HyperBEAM:** `hb_ao`, `hb_test_utils`
+- **Includes:** `include/hb.hrl`
+
+---
+
+## Test Configuration
+
+```erlang
+%% Benchmark timing
+-define(BENCHMARK_TIME, 0.25).        % 250ms per benchmark
+-define(BENCHMARK_ITERATIONS, 1_000).  % 1000 iterations minimum
+```
+
+---
+
+## Public Functions
+
+### 1. run_test/0
+
+```erlang
+-spec run_test() -> ok | skip.
+```
+
+**Description:** Command-line hook for running specific tests. Execute via:
+```bash
+rebar3 eunit --test hb_ao_test_vectors:run_test
+```
+
+---
+
+### 2. suite_test_/0
+
+```erlang
+-spec suite_test_() -> TestSuite.
+```
+
+**Description:** Main test suite generator. Runs all tests with different option combinations.
+
+---
+
+### 3. benchmark_test_/0
+
+```erlang
+-spec benchmark_test_() -> BenchmarkSuite.
+```
+
+**Description:** Performance benchmark suite for resolution operations.
+
+---
+
+## Test Suite
+
+### Functional Tests
+
+**1. resolve_simple**
+```erlang
+% Basic resolution of a simple message
+Msg = #{<<"path">> => <<"/data">>, <<"data">> => <<"value">>},
+{ok, Result} = hb_ao:resolve(Msg, Opts).
+```
+
+**2. resolve_id**
+```erlang
+% Resolve message by ID
+ID = crypto:strong_rand_bytes(32),
+{ok, Msg} = hb_ao:resolve_many([ID], Opts).
+```
+
+**3. start_as**
+```erlang
+% Start resolution with specific device
+{ok, Result} = hb_ao:resolve_many({as, DeviceID, Msg}, Opts).
+```
+
+**4. start_as_with_parameters**
+```erlang
+% Device with initialization parameters
+{ok, Result} = hb_ao:resolve_many(
+    {as, DeviceID, #{<<"params">> => #{...}}}, 
+    Opts
+).
+```
+
+**5. load_as**
+```erlang
+% Load device from Arweave and execute
+{ok, Result} = hb_ao:resolve_many({as, TxID, Msg}, Opts).
+```
+
+**6. as_path**
+```erlang
+% Use device for specific path
+Msg = #{<<"as">> => DeviceID, <<"path">> => <<"/key">>},
+{ok, Result} = hb_ao:resolve(Msg, Opts).
+```
+
+**7. continue_as**
+```erlang
+% Continue resolution with different device
+Msg1 = #{<<"device">> => Dev1, <<"data">> => <<"test">>},
+Msg2 = #{<<"path">> => <<"/data">>, <<"as">> => Dev2},
+{ok, Result} = hb_ao:resolve(Msg1, Msg2, Opts).
+```
+
+**8. multiple_as_subresolutions**
+```erlang
+% Multiple nested device switches
+{ok, Result} = hb_ao:resolve_many([
+    {as, Dev1, Msg1},
+    {as, Dev2, Msg2},
+    {as, Dev3, Msg3}
+], Opts).
+```
+
+**9. resolve_key_twice**
+```erlang
+% Resolve same key multiple times
+{ok, R1} = hb_ao:resolve(Msg, #{<<"path">> => <<"key">>}, Opts),
+{ok, R2} = hb_ao:resolve(Msg, #{<<"path">> => <<"key">>}, Opts),
+?assertEqual(R1, R2).  % Should return cached result
+```
+
+**10. resolve_from_multiple_keys**
+```erlang
+% Multi-path resolution
+Msg = #{<<"path">> => [<<"/key1">>, <<"/key2">>]},
+{ok, Results} = hb_ao:resolve(Msg, Opts).
+```
+
+**11. resolve_path_element**
+```erlang
+% Nested path resolution
+Msg = #{<<"outer">> => #{<<"inner">> => <<"value">>}},
+{ok, Result} = hb_ao:resolve(Msg, #{<<"path">> => <<"/outer/inner">>}, Opts),
+?assertEqual(<<"value">>, Result).
+```
+
+**12. resolve_binary_key**
+```erlang
+% Direct binary key resolution
+{ok, Result} = hb_ao:resolve(Msg, <<"key">>, Opts).
+```
+
+**13. key_to_binary**
+```erlang
+% Key normalization
+?assertEqual(<<"test">>, hb_ao:normalize_key(test)),
+?assertEqual(<<"42">>, hb_ao:normalize_key(42)).
+```
+
+**14. key_from_id_device_with_args**
+```erlang
+% Device function with arguments
+Dev = #{
+    <<"my_key">> => fun(M1, M2, Opts) -> {ok, <<"result">>} end
+},
+Msg = #{<<"device">> => Dev},
+{ok, Result} = hb_ao:resolve(Msg, #{<<"path">> => <<"my_key">>}, Opts).
+```
+
+**15. device_with_handler_function**
+```erlang
+% Device with global handler
+Dev = #{
+    info => fun() ->
+        #{
+            handler => fun(Key, M1, M2, Opts) -> {ok, Key} end
+        }
+    end
+},
+Msg = #{<<"device">> => Dev},
+{ok, Result} = hb_ao:resolve(Msg, #{<<"path">> => <<"any_key">>}, Opts).
+```
+
+**16. device_with_default_handler_function**
+```erlang
+% Device with default fallback
+Dev = #{
+    info => fun() ->
+        #{
+            default => fun(Key, M1, M2, Opts) -> {ok, <<"default">>} end
+        }
+    end
+},
+{ok, Result} = hb_ao:resolve(#{<<"device">> => Dev}, #{<<"path">> => <<"unknown">>}, Opts).
+```
+
+**17. basic_get**
+```erlang
+% Simple get operation
+Msg = #{<<"key">> => <<"value">>},
+Result = hb_ao:get(Msg, <<"key">>, Opts),
+?assertEqual(<<"value">>, Result).
+```
+
+**18. recursive_get**
+```erlang
+% Nested get
+Msg = #{<<"outer">> => #{<<"inner">> => <<"value">>}},
+Result = hb_ao:get(Msg, <<"/outer/inner">>, Opts),
+?assertEqual(<<"value">>, Result).
+```
+
+**19. deep_recursive_get**
+```erlang
+% Multi-level nesting
+Msg = #{
+    <<"a">> => #{
+        <<"b">> => #{
+            <<"c">> => <<"value">>
+        }
+    }
+},
+Result = hb_ao:get(Msg, <<"/a/b/c">>, Opts),
+?assertEqual(<<"value">>, Result).
+```
+
+**20. basic_set**
+```erlang
+% Simple set operation
+Msg = #{},
+Updated = hb_ao:set(Msg, <<"key">>, <<"value">>, Opts),
+?assertEqual(<<"value">>, hb_ao:get(Updated, <<"key">>, Opts)).
+```
+
+**21. get_with_device**
+```erlang
+% Get with custom device
+Dev = #{
+    <<"data">> => fun(M1, M2, Opts) -> {ok, <<"custom">>} end
+},
+Msg = #{<<"device">> => Dev, <<"data">> => <<"original">>},
+Result = hb_ao:get(Msg, <<"data">>, Opts),
+?assertEqual(<<"custom">>, Result).
+```
+
+**22. get_as_with_device**
+```erlang
+% Get using alternative device
+Result = hb_ao:get(
+    #{<<"data">> => <<"value">>},
+    <<"data">>,
+    #{<<"as">> => CustomDevice}
+).
+```
+
+**23. set_with_device**
+```erlang
+% Set via device
+Dev = #{
+    set => fun(M1, M2, Opts) -> {ok, M2} end
+},
+Updated = hb_ao:set(
+    #{<<"device">> => Dev},
+    <<"key">>,
+    <<"value">>,
+    Opts
+).
+```
+
+**24. deep_set**
+```erlang
+% Set nested value
+Msg = #{},
+Updated = hb_ao:set(Msg, <<"/a/b/c">>, <<"value">>, Opts),
+?assertEqual(<<"value">>, hb_ao:get(Updated, <<"/a/b/c">>, Opts)).
+```
+
+**25. deep_set_with_device**
+```erlang
+% Deep set with custom device
+Dev = #{
+    set => fun(M1, M2, Opts) -> {ok, hb_ao:set(M1, M2, Opts)} end
+},
+Updated = hb_ao:set(
+    #{<<"device">> => Dev},
+    <<"/nested/key">>,
+    <<"value">>,
+    Opts
+).
+```
+
+**26. device_exports**
+```erlang
+% Device with exports list
+Dev = #{
+    info => fun() ->
+        #{exports => [<<"allowed_key">>]}
+    end,
+    <<"allowed_key">> => fun(M1, M2, Opts) -> {ok, <<"result">>} end,
+    <<"blocked_key">> => fun(M1, M2, Opts) -> {ok, <<"blocked">>} end
+},
+% allowed_key should work
+{ok, _} = hb_ao:resolve(#{<<"device">> => Dev}, #{<<"path">> => <<"allowed_key">>}, Opts),
+% blocked_key should fail or use default
+Result = hb_ao:resolve(#{<<"device">> => Dev}, #{<<"path">> => <<"blocked_key">>}, Opts).
+```
+
+**27. device_excludes**
+```erlang
+% Device with excludes list
+Dev = #{
+    info => fun() ->
+        #{
+            exports => [<<"key1">>, <<"key2">>],
+            excludes => [<<"key1">>]
+        }
+    end
+},
+% key2 should work, key1 should not
+```
+
+**28. denormalized_device_key**
+```erlang
+% Device with non-binary keys
+Dev = #{
+    atom_key => fun(M1, M2, Opts) -> {ok, <<"result">>} end,
+    123 => fun(M1, M2, Opts) -> {ok, <<"number">>} end
+},
+{ok, R1} = hb_ao:resolve(#{<<"device">> => Dev}, #{<<"path">> => <<"atom_key">>}, Opts),
+{ok, R2} = hb_ao:resolve(#{<<"device">> => Dev}, #{<<"path">> => <<"123">>}, Opts).
+```
+
+**29. list_transform**
+```erlang
+% List to map transformation
+List = [<<"a">>, <<"b">>, <<"c">>],
+Map = hb_ao:normalize_keys(List),
+?assertEqual(<<"a">>, maps:get(<<"1">>, Map)),
+?assertEqual(<<"b">>, maps:get(<<"2">>, Map)),
+?assertEqual(<<"c">>, maps:get(<<"3">>, Map)).
+```
+
+**30. step_hook**
+```erlang
+% Execution step hook
+StepLog = [],
+Opts = #{
+    step => fun(Msg1, Msg2, Result, OptsInner) ->
+        StepLog ++ [{Msg1, Msg2, Result}]
+    end
+},
+{ok, _} = hb_ao:resolve(Msg1, Msg2, Opts),
+% StepLog should contain execution steps
+```
+
+---
+
+## Benchmark Suite
+
+**1. benchmark_simple**
+```erlang
+% Simple resolution benchmark
+benchmark_simple_resolution() ->
+    Msg = #{<<"data">> => <<"value">>},
+    Req = #{<<"path">> => <<"/data">>},
+    
+    run_benchmark(fun() ->
+        hb_ao:resolve(Msg, Req, #{})
+    end).
+```
+
+**2. benchmark_multistep**
+```erlang
+% Multi-step resolution benchmark
+benchmark_multistep_resolution() ->
+    Messages = [Msg1, Msg2, Msg3, Msg4, Msg5],
+    
+    run_benchmark(fun() ->
+        hb_ao:resolve_many(Messages, #{})
+    end).
+```
+
+**3. benchmark_get**
+```erlang
+% Get operation benchmark
+benchmark_get_operation() ->
+    Msg = #{<<"key">> => <<"value">>},
+    
+    run_benchmark(fun() ->
+        hb_ao:get(Msg, <<"key">>, #{})
+    end).
+```
+
+**4. benchmark_set**
+```erlang
+% Set operation benchmark
+benchmark_set_operation() ->
+    Msg = #{<<"existing">> => <<"value">>},
+    
+    run_benchmark(fun() ->
+        hb_ao:set(Msg, <<"new">>, <<"data">>, #{})
+    end).
+```
+
+---
+
+## Test Options
+
+```erlang
+test_opts() ->
+    [
+        #{name => <<"default">>, opts => #{}},
+        #{name => <<"no_cache">>, opts => #{cache_control => [<<"no-cache">>]}},
+        #{name => <<"no_store">>, opts => #{cache_control => [<<"no-store">>]}},
+        #{name => <<"no_hashpath">>, opts => #{hashpath => ignore}},
+        #{name => <<"spawn_worker">>, opts => #{spawn_worker => true}}
+    ].
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Run all tests
+rebar3 eunit
+
+%% Run specific test
+rebar3 eunit --test hb_ao_test_vectors:resolve_simple_test
+
+%% Run benchmarks
+rebar3 eunit --test hb_ao_test_vectors:benchmark_test_
+
+%% Run with specific options
+Opts = #{cache_control => [<<"no-cache">>]},
+hb_ao_test_vectors:resolve_simple_test(Opts).
+```
+
+---
+
+## Test Utilities
+
+```erlang
+%% From hb_test_utils
+suite_with_opts(TestSuite, TestOpts) ->
+    % Run each test with each option set
+    lists:flatmap(
+        fun(#{name := Name, opts := Opts}) ->
+            lists:map(
+                fun({TestName, Desc, TestFun}) ->
+                    {TestName, 
+                     Desc ++ " [" ++ binary_to_list(Name) ++ "]",
+                     fun() -> TestFun(Opts) end}
+                end,
+                TestSuite
+            )
+        end,
+        TestOpts
+    ).
+```
+
+---
+
+## Benchmark Methodology
+
+```erlang
+run_benchmark(Fun) ->
+    % Warm-up
+    [Fun() || _ <- lists:seq(1, 100)],
+    
+    % Measure
+    Start = erlang:system_time(microsecond),
+    Count = run_for_time(?BENCHMARK_TIME * 1000000, Fun, 0),
+    End = erlang:system_time(microsecond),
+    
+    % Calculate stats
+    TotalTime = End - Start,
+    AvgTime = TotalTime / Count,
+    OpsPerSec = Count / (TotalTime / 1000000),
+    
+    {Count, AvgTime, OpsPerSec}.
+
+run_for_time(TimeLimit, Fun, Count) when TimeLimit > 0 ->
+    Start = erlang:system_time(microsecond),
+    Fun(),
+    End = erlang:system_time(microsecond),
+    Elapsed = End - Start,
+    run_for_time(TimeLimit - Elapsed, Fun, Count + 1);
+run_for_time(_, _, Count) ->
+    Count.
+```
+
+---
+
+## References
+
+- **EUnit** - Erlang unit testing framework
+- **hb_ao** - Resolution engine under test
+- **hb_test_utils** - Test utilities
+
+---
+
+## Notes
+
+1. **Comprehensive Coverage**: Tests all major resolution scenarios
+2. **Multiple Configurations**: Each test runs with different option sets
+3. **Benchmarking**: Performance tests for critical operations
+4. **Device Testing**: Extensive device system validation
+5. **Path Resolution**: Tests simple and complex path handling
+6. **Get/Set Operations**: Validates CRUD operations
+7. **Normalization**: Tests key and message normalization
+8. **Caching**: Tests with/without caching enabled
+9. **Error Handling**: Validates error cases
+10. **Command Line**: Can run individual tests via rebar3

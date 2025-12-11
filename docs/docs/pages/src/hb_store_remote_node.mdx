@@ -1,0 +1,686 @@
+# hb_store_remote_node.erl - Remote AO Node Data Access
+
+## Overview
+
+**Purpose:** Read data from remote HyperBEAM nodes with optional local caching  
+**Module:** `hb_store_remote_node`  
+**Pattern:** HTTP-based remote store with cache-through capability
+
+This module provides a store implementation that reads data from another AO node via HTTP. It supports only the read side of the store interface, with optional write and link operations. Retrieved data can be automatically cached locally for improved performance.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_http`, `hb_message`, `hb_cache`, `hb_ao`, `hb_maps`, `hb_store`
+- **Erlang/OTP:** None
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Store Interface
+-spec scope(StoreOpts) -> remote.
+-spec type(Opts, Key) -> simple | not_found.
+-spec read(Opts, Key) -> {ok, Msg} | not_found.
+-spec write(Opts, Key, Value) -> ok | {error, Reason}.
+-spec make_link(Opts, Source, Destination) -> ok | {error, Reason}.
+-spec resolve(Opts, Key) -> Key.
+
+%% Caching Utilities
+-spec maybe_cache(StoreOpts, Data) -> ok | skipped | {error, Reason}.
+-spec maybe_cache(StoreOpts, Data, Links) -> ok | skipped | {error, Reason}.
+```
+
+---
+
+## Public Functions
+
+### 1. scope/1
+
+```erlang
+-spec scope(StoreOpts) -> remote
+    when
+        StoreOpts :: map().
+```
+
+**Description:** Return the scope of the store. Remote node stores are always `remote`.
+
+**Test Code:**
+```erlang
+-module(hb_store_remote_node_scope_test).
+-include_lib("eunit/include/eunit.hrl").
+
+scope_test() ->
+    ?assertEqual(remote, hb_store_remote_node:scope(#{})).
+
+scope_with_node_test() ->
+    Opts = #{<<"node">> => <<"http://localhost:8421">>},
+    ?assertEqual(remote, hb_store_remote_node:scope(Opts)).
+```
+
+---
+
+### 2. type/2
+
+```erlang
+-spec type(Opts, Key) -> simple | not_found
+    when
+        Opts :: #{ <<"node">> := binary() },
+        Key :: binary().
+```
+
+**Description:** Determine the type of value at a key. Remote nodes support only `simple` type (no composite/group types). Performs a read operation to check existence.
+
+**Test Code:**
+```erlang
+-module(hb_store_remote_node_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+type_simple_test() ->
+    % Setup local store and HTTP server
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-type-test">>
+    },
+    hb_store:reset(LocalStore),
+    
+    M = #{<<"test-key">> => <<"value">>},
+    ID = hb_message:id(M),
+    {ok, ID} = hb_cache:write(M, #{store => LocalStore}),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node
+    },
+    
+    ?assertEqual(simple, hb_store_remote_node:type(RemoteStore, ID)).
+
+type_not_found_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-type-nf">>
+    },
+    hb_store:reset(LocalStore),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node
+    },
+    
+    ?assertEqual(not_found, hb_store_remote_node:type(RemoteStore, <<"nonexistent">>)).
+```
+
+---
+
+### 3. read/2
+
+```erlang
+-spec read(Opts, Key) -> {ok, Msg} | not_found
+    when
+        Opts :: #{ <<"node">> := binary() },
+        Key :: binary(),
+        Msg :: map().
+```
+
+**Description:** Read a key from the remote node via HTTP GET request to `/~cache@1.0/read`. Returns the committed message. Automatically caches locally if `<<"local-store">>` is configured.
+
+**Test Code:**
+```erlang
+-module(hb_store_remote_node_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_basic_test() ->
+    rand:seed(default),
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-read-test">>
+    },
+    hb_store:reset(LocalStore),
+    
+    M = #{<<"test-key">> => Rand = rand:uniform(1337)},
+    ID = hb_message:id(M),
+    {ok, ID} = hb_cache:write(M, #{store => LocalStore}),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node
+    },
+    
+    {ok, RetrievedMsg} = hb_store_remote_node:read(RemoteStore, ID),
+    LoadedMsg = hb_cache:ensure_all_loaded(RetrievedMsg),
+    ?assertMatch(#{<<"test-key">> := Rand}, LoadedMsg).
+
+read_not_found_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-read-nf">>
+    },
+    hb_store:reset(LocalStore),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node
+    },
+    
+    ?assertEqual(not_found, hb_store_remote_node:read(RemoteStore, <<"nonexistent">>)).
+
+read_with_caching_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-remote">>
+    },
+    CacheStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-local">>
+    },
+    hb_store:reset(LocalStore),
+    hb_store:reset(CacheStore),
+    
+    M = #{<<"data">> => <<"test-value">>},
+    ID = hb_message:id(M),
+    {ok, ID} = hb_cache:write(M, #{store => LocalStore}),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node,
+        <<"local-store">> => CacheStore
+    },
+    
+    {ok, _} = hb_store_remote_node:read(RemoteStore, ID),
+    
+    % Verify data was cached locally
+    {ok, CachedMsg} = hb_cache:read(ID, #{store => CacheStore}),
+    ?assertMatch(#{<<"data">> := <<"test-value">>}, hb_cache:ensure_all_loaded(CachedMsg)).
+```
+
+---
+
+### 4. write/3
+
+```erlang
+-spec write(Opts, Key, Value) -> ok | {error, Reason}
+    when
+        Opts :: #{ <<"node">> := binary() },
+        Key :: binary(),
+        Value :: binary(),
+        Reason :: term().
+```
+
+**Description:** Write a key to the remote node via HTTP POST to `/~cache@1.0/write`. Message is signed if wallet is available in options. Returns `ok` on HTTP 200 status.
+
+**Test Code:**
+```erlang
+-module(hb_store_remote_node_write_test).
+-include_lib("eunit/include/eunit.hrl").
+
+write_basic_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-write-test">>
+    },
+    hb_store:reset(LocalStore),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node
+    },
+    
+    Key = <<"test-key">>,
+    Value = <<"test-value">>,
+    Result = hb_store_remote_node:write(RemoteStore, Key, Value),
+    
+    ?assert(Result == ok orelse element(1, Result) == error).
+
+write_with_wallet_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-write-wallet">>
+    },
+    hb_store:reset(LocalStore),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    Wallet = hb:wallet(),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node,
+        <<"wallet">> => Wallet
+    },
+    
+    Key = <<"test-key">>,
+    Value = <<"test-value">>,
+    Result = hb_store_remote_node:write(RemoteStore, Key, Value),
+    
+    ?assert(Result == ok orelse element(1, Result) == error).
+```
+
+---
+
+### 5. make_link/3
+
+```erlang
+-spec make_link(Opts, Source, Destination) -> ok | {error, Reason}
+    when
+        Opts :: #{ <<"node">> := binary() },
+        Source :: binary(),
+        Destination :: binary(),
+        Reason :: term().
+```
+
+**Description:** Create a link from Destination to Source on the remote node via HTTP POST to `/~cache@1.0/link`. Message is signed if wallet is available. Returns `ok` on HTTP 200 status.
+
+**Test Code:**
+```erlang
+-module(hb_store_remote_node_link_test).
+-include_lib("eunit/include/eunit.hrl").
+
+make_link_basic_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-link-test">>
+    },
+    hb_store:reset(LocalStore),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node
+    },
+    
+    Source = <<"source-key">>,
+    Destination = <<"dest-key">>,
+    Result = hb_store_remote_node:make_link(RemoteStore, Source, Destination),
+    
+    ?assert(Result == ok orelse element(1, Result) == error).
+
+make_link_with_wallet_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-link-wallet">>
+    },
+    hb_store:reset(LocalStore),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    Wallet = hb:wallet(),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node,
+        <<"wallet">> => Wallet
+    },
+    
+    Source = <<"source-key">>,
+    Destination = <<"dest-key">>,
+    Result = hb_store_remote_node:make_link(RemoteStore, Source, Destination),
+    
+    ?assert(Result == ok orelse element(1, Result) == error).
+```
+
+---
+
+### 6. resolve/2
+
+```erlang
+-spec resolve(Opts, Key) -> Key
+    when
+        Opts :: #{ <<"node">> := binary() },
+        Key :: binary().
+```
+
+**Description:** Resolve a key path. For remote node stores, keys are returned as-is without resolution.
+
+**Test Code:**
+```erlang
+-module(hb_store_remote_node_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_test() ->
+    Opts = #{<<"node">> => <<"http://localhost:8421">>},
+    Key = <<"test-key">>,
+    ?assertEqual(Key, hb_store_remote_node:resolve(Opts, Key)).
+```
+
+---
+
+### 7. maybe_cache/2, maybe_cache/3
+
+```erlang
+-spec maybe_cache(StoreOpts, Data) -> ok | skipped | {error, Reason}
+    when
+        StoreOpts :: map(),
+        Data :: map(),
+        Reason :: term().
+
+-spec maybe_cache(StoreOpts, Data, Links) -> ok | skipped | {failed_links, [Link]} | {error, Reason}
+    when
+        StoreOpts :: map(),
+        Data :: map(),
+        Links :: [binary()],
+        Link :: binary(),
+        Reason :: term().
+```
+
+**Description:** Cache retrieved data locally if `<<"local-store">>` is configured. The 3-arity version also creates links to the cached data. Returns `skipped` if no local store configured.
+
+**Test Code:**
+```erlang
+-module(hb_store_remote_node_cache_test).
+-include_lib("eunit/include/eunit.hrl").
+
+maybe_cache_disabled_test() ->
+    StoreOpts = #{},
+    Data = #{<<"test">> => <<"value">>},
+    ?assertEqual(skipped, hb_store_remote_node:maybe_cache(StoreOpts, Data)).
+
+maybe_cache_enabled_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-maybe">>
+    },
+    hb_store:reset(LocalStore),
+    
+    StoreOpts = #{<<"local-store">> => LocalStore},
+    Data = #{<<"test-key">> => <<"test-value">>},
+    ID = hb_message:id(Data),
+    
+    Result = hb_store_remote_node:maybe_cache(StoreOpts, Data),
+    ?assertEqual(ok, Result),
+    
+    % Verify data was cached
+    {ok, Cached} = hb_cache:read(ID, #{store => LocalStore}),
+    ?assertMatch(#{<<"test-key">> := <<"test-value">>}, hb_cache:ensure_all_loaded(Cached)).
+
+maybe_cache_with_links_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-links">>
+    },
+    hb_store:reset(LocalStore),
+    
+    StoreOpts = #{<<"local-store">> => LocalStore},
+    Data = #{<<"data">> => <<"value">>},
+    ID = hb_message:id(Data),
+    Links = [<<"link1">>, <<"link2">>, ID],  % ID should be filtered
+    
+    Result = hb_store_remote_node:maybe_cache(StoreOpts, Data, Links),
+    ?assertEqual(ok, Result),
+    
+    % Verify links were created
+    {ok, ViaLink1} = hb_store:read(LocalStore, <<"link1">>),
+    ?assertMatch(#{<<"data">> := <<"value">>}, hb_cache:ensure_all_loaded(ViaLink1)).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic remote store configuration
+RemoteStore = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://ao-node.example.com:8421">>
+}.
+
+%% Read from remote node
+{ok, Message} = hb_store_remote_node:read(RemoteStore, MessageID),
+LoadedMsg = hb_cache:ensure_all_loaded(Message).
+
+%% Remote store with local caching
+LocalCache = #{
+    <<"store-module">> => hb_store_lmdb,
+    <<"name">> => <<"cache-local">>
+},
+RemoteStoreWithCache = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://ao-node.example.com:8421">>,
+    <<"local-store">> => LocalCache
+},
+{ok, Msg} = hb_store_remote_node:read(RemoteStoreWithCache, ID).
+% Data is now cached locally for future reads
+
+%% Write to remote node with authentication
+Wallet = hb:wallet(),
+RemoteStoreAuth = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://ao-node.example.com:8421">>,
+    <<"wallet">> => Wallet
+},
+hb_store_remote_node:write(RemoteStoreAuth, <<"key">>, <<"value">>).
+
+%% Create link on remote node
+hb_store_remote_node:make_link(
+    RemoteStoreAuth,
+    <<"source-key">>,
+    <<"destination-key">>
+).
+
+%% Manual caching with links
+Data = #{<<"content">> => <<"data">>},
+Links = [<<"alias1">>, <<"alias2">>],
+hb_store_remote_node:maybe_cache(RemoteStoreWithCache, Data, Links).
+
+%% Check if key exists on remote node
+case hb_store_remote_node:type(RemoteStore, Key) of
+    simple -> 
+        {ok, Data} = hb_store_remote_node:read(RemoteStore, Key);
+    not_found -> 
+        not_found
+end.
+
+%% Fallback pattern: try remote, fall back to local
+case hb_store_remote_node:read(RemoteStore, ID) of
+    {ok, Msg} -> {ok, Msg};
+    not_found -> hb_store:read(LocalStore, ID)
+end.
+```
+
+---
+
+## HTTP API Endpoints
+
+### Read Endpoint
+
+```
+GET /~cache@1.0/read?target={Key}
+
+Response:
+{
+  "status": 200,
+  "body": {committed message}
+}
+```
+
+### Write Endpoint
+
+```
+POST /~cache@1.0/write
+
+Body: {
+  "path": "/~cache@1.0/write",
+  "method": "POST",
+  "body": {value},
+  "commitments": {...}  // If signed
+}
+
+Response:
+{
+  "status": 200
+}
+```
+
+### Link Endpoint
+
+```
+POST /~cache@1.0/link
+
+Body: {
+  "path": "/~cache@1.0/link",
+  "method": "POST",
+  "source": {source_key},
+  "destination": {destination_key},
+  "commitments": {...}  // If signed
+}
+
+Response:
+{
+  "status": 200
+}
+```
+
+---
+
+## Caching Strategy
+
+### Cache-Through Pattern
+
+```
+1. Read request arrives
+2. Fetch from remote node via HTTP
+3. If successful and local-store configured:
+   a. Write to local cache
+   b. Create requested links (if any)
+4. Return data to caller
+
+Future reads:
+- Can check local cache first
+- Fall back to remote if not found
+```
+
+### Link Management
+
+```erlang
+% When caching with links:
+RootPath = MessageID,
+Links = [<<"alias1">>, <<"alias2">>, MessageID],
+
+% Filter out RootPath from links
+LinksToCreate = [<<"alias1">>, <<"alias2">>],
+
+% Create each link → RootPath
+hb_store:make_link(LocalStore, RootPath, <<"alias1">>),
+hb_store:make_link(LocalStore, RootPath, <<"alias2">>).
+```
+
+---
+
+## Authentication
+
+### Signed Requests
+
+When wallet is provided in options:
+```erlang
+Opts = #{
+    <<"node">> => Node,
+    <<"wallet">> => {PrivKey, PubKey}
+},
+
+% Write request is signed
+WriteMsg = #{
+    <<"path">> => <<"/~cache@1.0/write">>,
+    <<"method">> => <<"POST">>,
+    <<"body">> => Value
+},
+SignedMsg = hb_message:commit(WriteMsg, Opts),
+% SignedMsg now includes commitments
+```
+
+### Unsigned Requests
+
+Without wallet, requests are sent unsigned:
+```erlang
+Opts = #{
+    <<"node">> => Node
+    % No wallet provided
+},
+
+% Message sent without commitments
+```
+
+---
+
+## Configuration Options
+
+### Required Options
+
+```erlang
+#{
+    <<"node">> := binary()  % Remote node URL (required)
+}
+```
+
+### Optional Options
+
+```erlang
+#{
+    <<"local-store">> => map() | false,  % Local cache configuration
+    <<"wallet">> => {PrivKey, PubKey},   % For signing requests
+    <<"timeout">> => integer(),          % HTTP timeout
+    <<"http-client">> => httpc | gun     % HTTP client choice
+}
+```
+
+---
+
+## Error Handling
+
+### Read Errors
+
+```erlang
+case hb_store_remote_node:read(Opts, Key) of
+    {ok, Msg} -> 
+        % Success
+        process_message(Msg);
+    not_found -> 
+        % Key doesn't exist
+        handle_missing_key();
+    {error, Reason} ->
+        % HTTP error or network issue
+        handle_error(Reason)
+end.
+```
+
+### Write Errors
+
+```erlang
+case hb_store_remote_node:write(Opts, Key, Value) of
+    ok -> 
+        % Write succeeded
+        ok;
+    {error, {unexpected_status, Status}} ->
+        % Server returned non-200 status
+        handle_status(Status);
+    {error, Reason} ->
+        % Network or other error
+        handle_error(Reason)
+end.
+```
+
+---
+
+## References
+
+- **hb_http** - HTTP client abstraction
+- **hb_message** - Message commitment and signing
+- **hb_cache** - Cache write operations
+- **hb_ao** - AO message utilities
+- **Cache Device** - `/~cache@1.0` endpoint implementation
+
+---
+
+## Notes
+
+1. **Read-Only Primary Use**: Designed primarily for reading from remote nodes
+2. **Write Support**: Write and link operations available but less common
+3. **No Composite Types**: Remote nodes only support simple types
+4. **Automatic Caching**: Transparent local caching when configured
+5. **Link Filtering**: Automatically removes root path from link creation
+6. **HTTP-Based**: All operations via HTTP to remote node
+7. **Signed Operations**: Write/link can be signed with wallet
+8. **No Link Resolution**: `resolve/2` returns keys unchanged
+9. **Cache-Through**: Caches on read, not on write
+10. **Error Propagation**: Network errors returned to caller

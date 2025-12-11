@@ -1,0 +1,708 @@
+# hb_store_lmdb.erl - LMDB Persistent Key-Value Store
+
+## Overview
+
+**Purpose:** High-performance embedded transactional database storage using LMDB  
+**Module:** `hb_store_lmdb`  
+**Pattern:** Singleton server with asynchronous writes and automatic link resolution
+
+This module provides a persistent key-value store backend using LMDB (Lightning Memory Database), implementing the HyperBEAM store interface. Each database environment gets its own dedicated server process to manage transactions and coordinate writes with a dual-flush strategy for optimal performance.
+
+## Dependencies
+
+- **External:** `elmdb` (Erlang LMDB bindings)
+- **HyperBEAM:** `hb_util`, `hb_store`
+- **Erlang/OTP:** `filelib`, `filename`, `persistent_term`
+- **Records:** `#tx{}` from `include/hb.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Lifecycle Management
+-spec start(StoreOpts) -> {ok, Instance} | {error, Reason}.
+-spec stop(StoreOpts) -> ok.
+-spec reset(StoreOpts) -> ok.
+-spec scope() -> local.
+-spec scope(StoreOpts) -> local.
+
+%% Core Store Operations
+-spec read(Opts, Path) -> {ok, Value} | not_found | {error, Reason}.
+-spec write(Opts, Path, Value) -> ok | retry.
+-spec list(Opts, Path) -> {ok, [Key]} | {error, Reason}.
+-spec type(Opts, Key) -> composite | simple | not_found.
+
+%% Hierarchical Structure
+-spec make_group(Opts, Path) -> ok.
+-spec make_link(Opts, Existing, New) -> ok.
+
+%% Path Operations
+-spec path(Opts, PathParts) -> binary().
+-spec add_path(Opts, Path1, Path2) -> binary().
+-spec resolve(Opts, Path) -> binary().
+```
+
+---
+
+## Public Functions
+
+### 1. start/1
+
+```erlang
+-spec start(StoreOpts) -> {ok, Instance} | {error, Reason}
+    when
+        StoreOpts :: #{ <<"name">> := binary(), <<"capacity">> => integer() },
+        Instance :: #{ <<"env">> => reference(), <<"db">> => reference() },
+        Reason :: term().
+```
+
+**Description:** Initialize or connect to an LMDB database instance. Uses singleton pattern - multiple calls with same configuration return same server. Creates directory if needed and opens LMDB environment with specified size limit.
+
+**Configuration:**
+- `<<"name">>`: Database directory path (required)
+- `<<"capacity">>`: Maximum database size in bytes (default: 16GB)
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_start_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+start_basic_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb">>,
+        <<"store-module">> => hb_store_lmdb,
+        <<"capacity">> => 1024 * 1024 * 100  % 100MB
+    },
+    {ok, Instance} = hb_store_lmdb:start(StoreOpts),
+    ?assert(is_map(Instance)),
+    ?assert(maps:is_key(<<"env">>, Instance)),
+    ?assert(maps:is_key(<<"db">>, Instance)),
+    hb_store_lmdb:stop(StoreOpts).
+
+start_with_defaults_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-default">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _Instance} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:stop(StoreOpts).
+
+start_invalid_opts_test() ->
+    ?assertEqual(
+        {error, {badarg, <<"StoreOpts must be a map">>}},
+        hb_store_lmdb:start(not_a_map)
+    ).
+```
+
+---
+
+### 2. stop/1
+
+```erlang
+-spec stop(StoreOpts) -> ok
+    when
+        StoreOpts :: map().
+```
+
+**Description:** Stop the LMDB storage system and close the database environment. Cleans up resources including persistent_term storage.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_stop_test).
+-include_lib("eunit/include/eunit.hrl").
+
+stop_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-stop">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    ?assertEqual(ok, hb_store_lmdb:stop(StoreOpts)).
+```
+
+---
+
+### 3. reset/1
+
+```erlang
+-spec reset(StoreOpts) -> ok
+    when
+        StoreOpts :: map().
+```
+
+**Description:** Clear all data from the database by closing and deleting the database directory, then reinitializing it.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_reset_test).
+-include_lib("eunit/include/eunit.hrl").
+
+reset_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-reset">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:write(StoreOpts, <<"key1">>, <<"value1">>),
+    ?assertEqual({ok, <<"value1">>}, hb_store_lmdb:read(StoreOpts, <<"key1">>)),
+    
+    hb_store_lmdb:reset(StoreOpts),
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    ?assertEqual(not_found, hb_store_lmdb:read(StoreOpts, <<"key1">>)),
+    hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+### 4. scope/0, scope/1
+
+```erlang
+-spec scope() -> local.
+-spec scope(StoreOpts) -> local
+    when
+        StoreOpts :: map().
+```
+
+**Description:** Return the scope of the store. LMDB is always local storage.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_scope_test).
+-include_lib("eunit/include/eunit.hrl").
+
+scope_test() ->
+    ?assertEqual(local, hb_store_lmdb:scope()),
+    ?assertEqual(local, hb_store_lmdb:scope(#{})).
+```
+
+---
+
+### 5. write/3
+
+```erlang
+-spec write(Opts, Path, Value) -> ok | retry
+    when
+        Opts :: map(),
+        Path :: binary() | list(),
+        Value :: binary().
+```
+
+**Description:** Write a key-value pair to the database asynchronously. Accepts either binary path or list of path segments. Returns immediately - writes are accumulated and flushed periodically.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_write_test).
+-include_lib("eunit/include/eunit.hrl").
+
+write_basic_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-write">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    ?assertEqual(ok, hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>)),
+    {ok, Value} = hb_store_lmdb:read(StoreOpts, <<"key">>),
+    ?assertEqual(<<"value">>, Value),
+    hb_store_lmdb:stop(StoreOpts).
+
+write_with_path_list_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-write-list">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    ?assertEqual(ok, hb_store_lmdb:write(StoreOpts, [<<"dir">>, <<"key">>], <<"value">>)),
+    {ok, Value} = hb_store_lmdb:read(StoreOpts, <<"dir/key">>),
+    ?assertEqual(<<"value">>, Value),
+    hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+### 6. read/2
+
+```erlang
+-spec read(Opts, Path) -> {ok, Value} | not_found | {error, Reason}
+    when
+        Opts :: map(),
+        Path :: binary() | list(),
+        Value :: binary(),
+        Reason :: term().
+```
+
+**Description:** Read a value from the database with automatic link resolution. Accepts binary path or list of segments. If key stores a link (value starting with "link:"), automatically follows it to the target.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_read_test).
+-include_lib("eunit/include/eunit.hrl").
+
+read_basic_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-read">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>),
+    ?assertEqual({ok, <<"value">>}, hb_store_lmdb:read(StoreOpts, <<"key">>)),
+    hb_store_lmdb:stop(StoreOpts).
+
+read_not_found_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-read-nf">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    ?assertEqual(not_found, hb_store_lmdb:read(StoreOpts, <<"nonexistent">>)),
+    hb_store_lmdb:stop(StoreOpts).
+
+read_with_link_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-read-link">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:write(StoreOpts, <<"target">>, <<"data">>),
+    hb_store_lmdb:make_link(StoreOpts, <<"target">>, <<"link">>),
+    ?assertEqual({ok, <<"data">>}, hb_store_lmdb:read(StoreOpts, <<"link">>)),
+    hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+### 7. list/2
+
+```erlang
+-spec list(Opts, Path) -> {ok, [Key]} | {error, Reason}
+    when
+        Opts :: map(),
+        Path :: binary(),
+        Key :: binary(),
+        Reason :: term().
+```
+
+**Description:** List all immediate children of a group path. Returns only direct children, not nested descendants. Automatically resolves links.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_list_test).
+-include_lib("eunit/include/eunit.hrl").
+
+list_basic_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-list">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:make_group(StoreOpts, <<"group">>),
+    hb_store_lmdb:write(StoreOpts, <<"group/child1">>, <<"val1">>),
+    hb_store_lmdb:write(StoreOpts, <<"group/child2">>, <<"val2">>),
+    
+    {ok, Children} = hb_store_lmdb:list(StoreOpts, <<"group">>),
+    ?assertEqual([<<"child1">>, <<"child2">>], lists:sort(Children)),
+    hb_store_lmdb:stop(StoreOpts).
+
+list_empty_group_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-list-empty">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:make_group(StoreOpts, <<"empty">>),
+    ?assertEqual({ok, []}, hb_store_lmdb:list(StoreOpts, <<"empty">>)),
+    hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+### 8. type/2
+
+```erlang
+-spec type(Opts, Key) -> composite | simple | not_found
+    when
+        Opts :: map(),
+        Key :: binary().
+```
+
+**Description:** Determine whether a key represents a group (composite) or simple value. Keys storing the literal binary "group" are composite. Automatically follows links to check target type.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_type_test).
+-include_lib("eunit/include/eunit.hrl").
+
+type_simple_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-type-simple">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>),
+    ?assertEqual(simple, hb_store_lmdb:type(StoreOpts, <<"key">>)),
+    hb_store_lmdb:stop(StoreOpts).
+
+type_composite_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-type-comp">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:make_group(StoreOpts, <<"group">>),
+    ?assertEqual(composite, hb_store_lmdb:type(StoreOpts, <<"group">>)),
+    hb_store_lmdb:stop(StoreOpts).
+
+type_not_found_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-type-nf">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    ?assertEqual(not_found, hb_store_lmdb:type(StoreOpts, <<"nonexistent">>)),
+    hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+### 9. make_group/2
+
+```erlang
+-spec make_group(Opts, Path) -> ok
+    when
+        Opts :: map(),
+        Path :: binary().
+```
+
+**Description:** Create a group (directory-like structure) at the specified path. Groups store the literal binary "group" as their value and can contain child entries.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_make_group_test).
+-include_lib("eunit/include/eunit.hrl").
+
+make_group_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-mkgroup">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    ?assertEqual(ok, hb_store_lmdb:make_group(StoreOpts, <<"mygroup">>)),
+    ?assertEqual(composite, hb_store_lmdb:type(StoreOpts, <<"mygroup">>)),
+    hb_store_lmdb:stop(StoreOpts).
+
+make_nested_group_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-mkgroup-nest">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:make_group(StoreOpts, <<"parent">>),
+    hb_store_lmdb:make_group(StoreOpts, <<"parent/child">>),
+    ?assertEqual(composite, hb_store_lmdb:type(StoreOpts, <<"parent/child">>)),
+    hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+### 10. make_link/3
+
+```erlang
+-spec make_link(Opts, Existing, New) -> ok
+    when
+        Opts :: map(),
+        Existing :: binary(),
+        New :: binary().
+```
+
+**Description:** Create a symbolic link from New to Existing. The New key will store "link:" prefix followed by Existing path. Reading New will automatically resolve to Existing's value.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_make_link_test).
+-include_lib("eunit/include/eunit.hrl").
+
+make_link_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-mklink">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:write(StoreOpts, <<"original">>, <<"data">>),
+    ?assertEqual(ok, hb_store_lmdb:make_link(StoreOpts, <<"original">>, <<"link">>)),
+    ?assertEqual({ok, <<"data">>}, hb_store_lmdb:read(StoreOpts, <<"link">>)),
+    hb_store_lmdb:stop(StoreOpts).
+
+make_link_preserves_type_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-mklink-type">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:make_group(StoreOpts, <<"group">>),
+    hb_store_lmdb:make_link(StoreOpts, <<"group">>, <<"link-to-group">>),
+    ?assertEqual(composite, hb_store_lmdb:type(StoreOpts, <<"link-to-group">>)),
+    hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+### 11. path/2
+
+```erlang
+-spec path(Opts, PathParts) -> binary()
+    when
+        Opts :: map(),
+        PathParts :: list().
+```
+
+**Description:** Convert a list of path segments into a binary path string, joined with "/".
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_path_test).
+-include_lib("eunit/include/eunit.hrl").
+
+path_test() ->
+    ?assertEqual(
+        <<"a/b/c">>,
+        hb_store_lmdb:path(#{}, [<<"a">>, <<"b">>, <<"c">>])
+    ).
+
+path_single_test() ->
+    ?assertEqual(
+        <<"key">>,
+        hb_store_lmdb:path(#{}, [<<"key">>])
+    ).
+```
+
+---
+
+### 12. add_path/3
+
+```erlang
+-spec add_path(Opts, Path1, Path2) -> binary()
+    when
+        Opts :: map(),
+        Path1 :: binary(),
+        Path2 :: binary().
+```
+
+**Description:** Join two paths together with "/" separator.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_add_path_test).
+-include_lib("eunit/include/eunit.hrl").
+
+add_path_test() ->
+    ?assertEqual(
+        <<"root/child">>,
+        hb_store_lmdb:add_path(#{}, <<"root">>, <<"child">>)
+    ).
+```
+
+---
+
+### 13. resolve/2
+
+```erlang
+-spec resolve(Opts, Path) -> binary()
+    when
+        Opts :: map(),
+        Path :: binary() | list().
+```
+
+**Description:** Resolve a path by following all links in the path segments (except the final segment). Returns the fully resolved path.
+
+**Test Code:**
+```erlang
+-module(hb_store_lmdb_resolve_test).
+-include_lib("eunit/include/eunit.hrl").
+
+resolve_direct_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-resolve">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>),
+    ?assertEqual(<<"key">>, hb_store_lmdb:resolve(StoreOpts, <<"key">>)),
+    hb_store_lmdb:stop(StoreOpts).
+
+resolve_with_link_test() ->
+    StoreOpts = #{
+        <<"name">> => <<"/tmp/test-lmdb-resolve-link">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    {ok, _} = hb_store_lmdb:start(StoreOpts),
+    hb_store_lmdb:make_group(StoreOpts, <<"target">>),
+    hb_store_lmdb:write(StoreOpts, <<"target/key">>, <<"value">>),
+    hb_store_lmdb:make_link(StoreOpts, <<"target">>, <<"link">>),
+    
+    Resolved = hb_store_lmdb:resolve(StoreOpts, [<<"link">>, <<"key">>]),
+    ?assertEqual(<<"target/key">>, Resolved),
+    hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Initialize database
+StoreOpts = #{
+    <<"name">> => <<"cache-mainnet/lmdb">>,
+    <<"store-module">> => hb_store_lmdb,
+    <<"capacity">> => 16 * 1024 * 1024 * 1024  % 16GB
+},
+{ok, _Instance} = hb_store_lmdb:start(StoreOpts).
+
+%% Basic write and read
+hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>),
+{ok, Value} = hb_store_lmdb:read(StoreOpts, <<"key">>).
+
+%% Hierarchical data with groups
+hb_store_lmdb:make_group(StoreOpts, <<"messages">>),
+hb_store_lmdb:write(StoreOpts, <<"messages/msg1">>, <<"data1">>),
+hb_store_lmdb:write(StoreOpts, <<"messages/msg2">>, <<"data2">>),
+{ok, Children} = hb_store_lmdb:list(StoreOpts, <<"messages">>).
+
+%% Symbolic links for data deduplication
+hb_store_lmdb:write(StoreOpts, <<"data/hash123">>, <<"actual_data">>),
+hb_store_lmdb:make_link(StoreOpts, <<"data/hash123">>, <<"messages/msg1/body">>),
+{ok, Data} = hb_store_lmdb:read(StoreOpts, <<"messages/msg1/body">>).
+
+%% Nested structure with links
+hb_store_lmdb:make_group(StoreOpts, <<"root">>),
+hb_store_lmdb:make_group(StoreOpts, <<"root/commitments">>),
+hb_store_lmdb:write(StoreOpts, <<"data/value1">>, <<"Value1">>),
+hb_store_lmdb:make_link(StoreOpts, <<"data/value1">>, <<"root/commitments/key1">>).
+
+%% Check type before operations
+case hb_store_lmdb:type(StoreOpts, <<"path">>) of
+    composite -> 
+        {ok, Children} = hb_store_lmdb:list(StoreOpts, <<"path">>);
+    simple -> 
+        {ok, Value} = hb_store_lmdb:read(StoreOpts, <<"path">>);
+    not_found -> 
+        not_found
+end.
+
+%% Cleanup
+hb_store_lmdb:stop(StoreOpts).
+```
+
+---
+
+## Storage Architecture
+
+### Database Structure
+
+```
+Database Directory/
+├── data.mdb       # Main data file
+└── lock.mdb       # Lock file
+```
+
+### Key Encoding
+
+Keys use forward-slash path notation:
+```
+"key"                    → Simple value
+"group/child"            → Hierarchical structure
+"data/hash"              → Content-addressed storage
+```
+
+### Value Types
+
+| Value Pattern | Type | Meaning |
+|--------------|------|---------|
+| `<<"group">>` | Composite | Directory/group containing children |
+| `<<"link:", Path/binary>>` | Link | Symbolic link to another path |
+| Any other binary | Simple | Regular data value |
+
+### Link Resolution
+
+Links are automatically resolved during read operations:
+
+```erlang
+% Store: <<"target">> → <<"actual_data">>
+% Store: <<"link">> → <<"link:target">>
+
+read(Opts, <<"link">>)
+  → follows link → reads <<"target">> 
+  → returns {ok, <<"actual_data">>}
+```
+
+### Group Membership
+
+Groups track their children implicitly through path prefixes:
+```
+Write: "group/child1"  → Creates "group" as composite
+Write: "group/child2"  → Adds to "group"
+List:  "group"         → Returns ["child1", "child2"]
+```
+
+---
+
+## Configuration Constants
+
+```erlang
+-define(DEFAULT_SIZE, 16 * 1024 * 1024 * 1024).  % 16GB default capacity
+-define(CONNECT_TIMEOUT, 6000).                  % 6s server timeout
+-define(DEFAULT_IDLE_FLUSH_TIME, 5).             % 5s idle before flush
+-define(DEFAULT_MAX_FLUSH_TIME, 50).             % 50ms max between flushes
+-define(MAX_REDIRECTS, 1000).                    % Max link chain depth
+-define(MAX_PENDING_WRITES, 400).                % Force flush threshold
+-define(FOLD_YIELD_INTERVAL, 100).               % Yield every 100 keys
+```
+
+---
+
+## Performance Considerations
+
+### Asynchronous Writes
+
+Writes return immediately and are batched:
+```erlang
+write(Opts, <<"key1">>, <<"val1">>),  % Returns instantly
+write(Opts, <<"key2">>, <<"val2">>),  % Returns instantly
+% Actual flush happens after idle timeout or max pending writes
+```
+
+### Read Performance
+
+- Direct reads: Fast path without link resolution
+- Link resolution: Minimal overhead for simple chains
+- Avoid circular links: Can cause infinite loops
+
+### Database Size
+
+- Pre-allocate capacity: Set `<<"capacity">>` appropriately
+- LMDB uses memory-mapped files: Virtual memory = capacity
+- Actual disk usage grows with data
+
+---
+
+## References
+
+- **LMDB Documentation** - http://www.lmdb.tech/doc/
+- **elmdb** - Erlang LMDB bindings
+- **hb_store** - HyperBEAM store interface
+- **HyperBEAM** - Message processing system
+
+---
+
+## Notes
+
+1. **Singleton Pattern**: Each database path gets one server process
+2. **Automatic Directory Creation**: Ensures database directory exists
+3. **Link Chain Limit**: Maximum 1000 redirects to prevent infinite loops
+4. **Path Format**: Always uses "/" as separator, never "\\"
+5. **Group Detection**: Only literal `<<"group">>` creates composite types
+6. **Flush Strategy**: Dual-flush with idle and max time constraints
+7. **Process-Local Cache**: Database handles cached via persistent_term
+8. **No Sync Mode**: Uses `no_sync` flag for performance
+9. **Transaction Batching**: Writes accumulated and flushed together
+10. **Thread Safety**: Each environment has dedicated server process

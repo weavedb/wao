@@ -1,0 +1,654 @@
+# ar_tx.erl - Arweave Transaction Management
+
+## Overview
+
+**Purpose:** Transaction creation, signing, verification, and JSON serialization  
+**Module:** `ar_tx`  
+**Supported Formats:** Transaction format versions 1 and 2
+
+This module provides core utilities for creating, signing, and verifying Arweave transactions. It handles transaction structure, cryptographic signing, ID calculation, and JSON conversion.
+
+## Dependencies
+
+- **Erlang/OTP:** `crypto`
+- **Arweave:** `ar_wallet`, `ar_deep_hash`, `hb_util`, `hb_maps`
+- **Records:** `#tx{}` from `include/ar.hrl`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Transaction Creation
+-spec new(Dest, Reward, Qty, Last) -> TX.
+-spec new(Dest, Reward, Qty, Last, SigType) -> TX.
+
+%% Signing & Verification
+-spec sign(TX, Wallet) -> SignedTX.
+-spec verify(TX) -> boolean().
+-spec verify_tx_id(ExpectedID, TX) -> boolean().
+
+%% JSON Serialization
+-spec json_struct_to_tx(JSONStruct) -> TX.
+-spec tx_to_json_struct(TX) -> JSONStruct.
+```
+
+---
+
+## Public Functions
+
+### 1. new/4
+
+```erlang
+-spec new(Dest, Reward, Qty, Last) -> TX
+    when
+        Dest :: binary(),
+        Reward :: non_neg_integer(),
+        Qty :: non_neg_integer(),
+        Last :: binary(),
+        TX :: #tx{}.
+```
+
+**Description:** Create a new unsigned transaction with destination, reward, quantity (amount), and last transaction anchor. Uses default signature type (RSA-4096).
+
+**Parameters:**
+- `Dest` - Target address (32 bytes) or `<<>>` for data-only transactions
+- `Reward` - Mining reward/fee in Winston (smallest AR unit)
+- `Qty` - Transfer amount in Winston (0 for data-only transactions)
+- `Last` - Last transaction ID for replay protection (anchor)
+
+**Test Code:**
+```erlang
+-module(ar_tx_new4_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+new_basic_test() ->
+    Dest = crypto:strong_rand_bytes(32),
+    Reward = 1000000,
+    Qty = 5000000,
+    Last = crypto:strong_rand_bytes(32),
+    TX = ar_tx:new(Dest, Reward, Qty, Last),
+    ?assert(is_record(TX, tx)),
+    ?assertEqual(Dest, TX#tx.target),
+    ?assertEqual(Reward, TX#tx.reward),
+    ?assertEqual(Qty, TX#tx.quantity),
+    ?assertEqual(Last, TX#tx.anchor),
+    ?assertEqual(<<>>, TX#tx.data),
+    ?assertEqual(0, TX#tx.data_size),
+    ?assert(is_binary(TX#tx.id)),
+    ?assertEqual(32, byte_size(TX#tx.id)).
+
+new_data_only_test() ->
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    ?assertEqual(<<>>, TX#tx.target),
+    ?assertEqual(0, TX#tx.quantity).
+
+new_transfer_only_test() ->
+    Dest = crypto:strong_rand_bytes(32),
+    TX = ar_tx:new(Dest, 1000000, 5000000, <<>>),
+    ?assertEqual(Dest, TX#tx.target),
+    ?assertEqual(5000000, TX#tx.quantity),
+    ?assertEqual(0, TX#tx.data_size).
+```
+
+---
+
+### 2. new/5
+
+```erlang
+-spec new(Dest, Reward, Qty, Last, SigType) -> TX
+    when
+        Dest :: binary(),
+        Reward :: non_neg_integer(),
+        Qty :: non_neg_integer(),
+        Last :: binary(),
+        SigType :: {rsa, 65537} | {ecdsa, secp256k1} | {eddsa, ed25519},
+        TX :: #tx{}.
+```
+
+**Description:** Create a new unsigned transaction with specified signature type. Allows using alternative signature schemes.
+
+**Test Code:**
+```erlang
+-module(ar_tx_new5_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+new_rsa_test() ->
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>, {rsa, 65537}),
+    ?assertEqual({rsa, 65537}, TX#tx.signature_type).
+
+new_ecdsa_test() ->
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>, {ecdsa, secp256k1}),
+    ?assertEqual({ecdsa, secp256k1}, TX#tx.signature_type).
+
+new_eddsa_test() ->
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>, {eddsa, ed25519}),
+    ?assertEqual({eddsa, ed25519}, TX#tx.signature_type).
+```
+
+---
+
+### 3. sign/2
+
+```erlang
+-spec sign(TX, Wallet) -> SignedTX
+    when
+        TX :: #tx{},
+        Wallet :: {PrivateKey, PublicKey},
+        SignedTX :: #tx{}.
+```
+
+**Description:** Cryptographically sign a transaction. Sets owner, generates signature using wallet, and calculates transaction ID from signature hash.
+
+**Transaction ID Calculation:**
+```erlang
+Signature = ar_wallet:sign(PrivateKey, SignatureData),
+TransactionID = crypto:hash(sha256, Signature)
+```
+
+**Test Code:**
+```erlang
+-module(ar_tx_sign_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+sign_basic_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    {KeyType, Owner} = Pub,
+    ?assertEqual(Owner, SignedTX#tx.owner),
+    ?assertEqual(KeyType, SignedTX#tx.signature_type),
+    ?assert(is_binary(SignedTX#tx.signature)),
+    ?assert(is_binary(SignedTX#tx.id)),
+    ?assertEqual(32, byte_size(SignedTX#tx.id)).
+
+sign_sets_correct_id_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    ExpectedID = crypto:hash(sha256, SignedTX#tx.signature),
+    ?assertEqual(ExpectedID, SignedTX#tx.id).
+
+sign_with_data_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    Data = <<"Test transaction data">>,
+    TX = (ar_tx:new(<<>>, 1000000, 0, <<>>))#tx{
+        data = Data,
+        data_size = byte_size(Data)
+    },
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    ?assertEqual(Data, SignedTX#tx.data),
+    ?assertEqual(byte_size(Data), SignedTX#tx.data_size).
+
+sign_different_key_types_test() ->
+    % RSA
+    {PrivRSA, PubRSA} = ar_wallet:new(),
+    TXRSA = ar_tx:sign(ar_tx:new(<<>>, 1000000, 0, <<>>), {PrivRSA, PubRSA}),
+    ?assertEqual({rsa, 65537}, TXRSA#tx.signature_type),
+    ?assertEqual(512, byte_size(TXRSA#tx.signature)).
+```
+
+---
+
+### 4. verify/1
+
+```erlang
+-spec verify(TX) -> boolean()
+    when
+        TX :: #tx{}.
+```
+
+**Description:** Verify whether a transaction is valid. Performs comprehensive validation including:
+- Signature verification
+- Transaction ID validation (ID = SHA-256 of signature)
+- Non-negative quantity
+- Owner not same as target
+- Non-negative data size
+- Data size/data root consistency
+
+**Test Code:**
+```erlang
+-module(ar_tx_verify_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+verify_valid_tx_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    ?assertEqual(true, ar_tx:verify(SignedTX)).
+
+verify_with_data_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    Data = <<"Transaction data">>,
+    TX = (ar_tx:new(<<>>, 1000000, 0, <<>>))#tx{
+        data = Data,
+        data_size = byte_size(Data)
+    },
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    ?assertEqual(true, ar_tx:verify(SignedTX)).
+
+verify_unsigned_tx_test() ->
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    ?assertEqual(false, ar_tx:verify(TX)).
+
+verify_tampered_signature_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    <<First:8, Rest/binary>> = SignedTX#tx.signature,
+    TamperedTX = SignedTX#tx{signature = <<(First bxor 1), Rest/binary>>},
+    ?assertEqual(false, ar_tx:verify(TamperedTX)).
+
+verify_tampered_data_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    Data = <<"Original data">>,
+    TX = (ar_tx:new(<<>>, 1000000, 0, <<>>))#tx{
+        data = Data,
+        data_size = byte_size(Data)
+    },
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    TamperedTX = SignedTX#tx{data = <<"Tampered data">>},
+    ?assertEqual(false, ar_tx:verify(TamperedTX)).
+
+verify_negative_quantity_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    InvalidTX = SignedTX#tx{quantity = -1},
+    ?assertEqual(false, ar_tx:verify(InvalidTX)).
+
+verify_same_owner_target_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    {_, Owner} = Pub,
+    OwnerAddress = crypto:hash(sha256, Owner),
+    TX = ar_tx:new(OwnerAddress, 1000000, 1000000, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    ?assertEqual(false, ar_tx:verify(SignedTX)).
+```
+
+---
+
+### 5. verify_tx_id/2
+
+```erlang
+-spec verify_tx_id(ExpectedID, TX) -> boolean()
+    when
+        ExpectedID :: binary(),
+        TX :: #tx{}.
+```
+
+**Description:** Verify that a transaction has the expected ID and is valid. Checks:
+1. Transaction ID matches expected ID
+2. Signature is valid
+3. Transaction ID is SHA-256 hash of signature
+
+**Test Code:**
+```erlang
+-module(ar_tx_verify_tx_id_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+verify_tx_id_correct_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    ?assertEqual(true, ar_tx:verify_tx_id(SignedTX#tx.id, SignedTX)).
+
+verify_tx_id_wrong_id_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    WrongID = crypto:strong_rand_bytes(32),
+    ?assertEqual(false, ar_tx:verify_tx_id(WrongID, SignedTX)).
+
+verify_tx_id_tampered_signature_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:new(<<>>, 1000000, 0, <<>>),
+    SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+    <<First:8, Rest/binary>> = SignedTX#tx.signature,
+    TamperedTX = SignedTX#tx{signature = <<(First bxor 1), Rest/binary>>},
+    ?assertEqual(false, ar_tx:verify_tx_id(SignedTX#tx.id, TamperedTX)).
+```
+
+---
+
+### 6. json_struct_to_tx/1
+
+```erlang
+-spec json_struct_to_tx(JSONStruct) -> TX
+    when
+        JSONStruct :: map(),
+        TX :: #tx{}.
+```
+
+**Description:** Deserialize a transaction from JSON structure. Handles base64url-encoded fields, tags array, and optional denomination field.
+
+**JSON Field Mapping:**
+- `id` → Transaction ID (base64url decoded to 32 bytes)
+- `anchor` → Last TX anchor (base64url decoded)
+- `owner` → Public key (base64url decoded)
+- `target` → Destination address (base64url decoded)
+- `quantity` → Transfer amount (string to integer)
+- `reward` → Mining fee (string to integer)
+- `data` → Transaction data (base64url decoded)
+- `data_size` → Data size in bytes (string to integer)
+- `data_root` → Merkle root for chunked data (base64url decoded)
+- `signature` → Transaction signature (base64url decoded)
+- `tags` → Array of `{name, value}` pairs (base64url decoded)
+- `format` → Transaction format version (1 or 2)
+- `denomination` → Optional denomination field
+
+**Test Code:**
+```erlang
+-module(ar_tx_json_struct_to_tx_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+json_struct_to_tx_basic_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    OrigTX = ar_tx:sign(ar_tx:new(<<>>, 1000000, 0, <<>>), {Priv, Pub}),
+    JSONStruct = ar_tx:tx_to_json_struct(OrigTX),
+    ParsedTX = ar_tx:json_struct_to_tx(JSONStruct),
+    ?assertEqual(OrigTX#tx.id, ParsedTX#tx.id),
+    ?assertEqual(OrigTX#tx.owner, ParsedTX#tx.owner),
+    ?assertEqual(OrigTX#tx.signature, ParsedTX#tx.signature),
+    ?assertEqual(OrigTX#tx.quantity, ParsedTX#tx.quantity),
+    ?assertEqual(OrigTX#tx.reward, ParsedTX#tx.reward).
+
+json_struct_to_tx_with_data_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    Data = <<"Test data">>,
+    OrigTX = ar_tx:sign(
+        (ar_tx:new(<<>>, 1000000, 0, <<>>))#tx{
+            data = Data,
+            data_size = byte_size(Data)
+        },
+        {Priv, Pub}
+    ),
+    JSONStruct = ar_tx:tx_to_json_struct(OrigTX),
+    ParsedTX = ar_tx:json_struct_to_tx(JSONStruct),
+    ?assertEqual(Data, ParsedTX#tx.data),
+    ?assertEqual(byte_size(Data), ParsedTX#tx.data_size).
+
+json_struct_to_tx_with_tags_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    Tags = [{<<"Content-Type">>, <<"text/plain">>}, {<<"App-Name">>, <<"Test">>}],
+    OrigTX = ar_tx:sign(
+        (ar_tx:new(<<>>, 1000000, 0, <<>>))#tx{tags = Tags},
+        {Priv, Pub}
+    ),
+    JSONStruct = ar_tx:tx_to_json_struct(OrigTX),
+    ParsedTX = ar_tx:json_struct_to_tx(JSONStruct),
+    ?assertEqual(Tags, ParsedTX#tx.tags).
+
+json_struct_to_tx_with_target_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    Target = crypto:strong_rand_bytes(32),
+    OrigTX = ar_tx:sign(
+        ar_tx:new(Target, 1000000, 5000000, <<>>),
+        {Priv, Pub}
+    ),
+    JSONStruct = ar_tx:tx_to_json_struct(OrigTX),
+    ParsedTX = ar_tx:json_struct_to_tx(JSONStruct),
+    ?assertEqual(Target, ParsedTX#tx.target),
+    ?assertEqual(5000000, ParsedTX#tx.quantity).
+```
+
+---
+
+### 7. tx_to_json_struct/1
+
+```erlang
+-spec tx_to_json_struct(TX) -> JSONStruct
+    when
+        TX :: #tx{},
+        JSONStruct :: map().
+```
+
+**Description:** Serialize a transaction to JSON structure. Encodes binary fields as base64url, formats tags as array of objects.
+
+**Output Format:**
+```erlang
+#{
+    <<"format">> => 1 | 2,
+    <<"id">> => Base64URLEncodedID,
+    <<"anchor">> => Base64URLEncodedAnchor,
+    <<"owner">> => Base64URLEncodedOwner,
+    <<"target">> => Base64URLEncodedTarget,
+    <<"quantity">> => <<"AmountAsString">>,
+    <<"reward">> => <<"RewardAsString">>,
+    <<"data">> => Base64URLEncodedData,
+    <<"data_size">> => <<"SizeAsString">>,
+    <<"data_root">> => Base64URLEncodedRoot,
+    <<"signature">> => Base64URLEncodedSignature,
+    <<"tags">> => [
+        #{<<"name">> => EncodedName, <<"value">> => EncodedValue},
+        ...
+    ]
+}
+```
+
+**Test Code:**
+```erlang
+-module(ar_tx_tx_to_json_struct_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/ar.hrl").
+
+tx_to_json_struct_basic_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:sign(ar_tx:new(<<>>, 1000000, 0, <<>>), {Priv, Pub}),
+    JSONStruct = ar_tx:tx_to_json_struct(TX),
+    ?assert(is_map(JSONStruct)),
+    ?assert(maps:is_key(<<"id">>, JSONStruct)),
+    ?assert(maps:is_key(<<"owner">>, JSONStruct)),
+    ?assert(maps:is_key(<<"signature">>, JSONStruct)),
+    ?assert(maps:is_key(<<"quantity">>, JSONStruct)),
+    ?assert(maps:is_key(<<"reward">>, JSONStruct)).
+
+tx_to_json_struct_roundtrip_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    OrigTX = ar_tx:sign(ar_tx:new(<<>>, 1000000, 0, <<>>), {Priv, Pub}),
+    JSONStruct = ar_tx:tx_to_json_struct(OrigTX),
+    ParsedTX = ar_tx:json_struct_to_tx(JSONStruct),
+    ?assertEqual(OrigTX#tx.id, ParsedTX#tx.id),
+    ?assertEqual(OrigTX#tx.signature, ParsedTX#tx.signature),
+    ?assertEqual(OrigTX#tx.owner, ParsedTX#tx.owner).
+
+tx_to_json_struct_quantity_format_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:sign(ar_tx:new(<<>>, 1000000, 5000000, <<>>), {Priv, Pub}),
+    JSONStruct = ar_tx:tx_to_json_struct(TX),
+    Quantity = maps:get(<<"quantity">>, JSONStruct),
+    ?assert(is_binary(Quantity)),
+    ?assertEqual(5000000, binary_to_integer(Quantity)).
+
+tx_to_json_struct_tags_format_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    Tags = [{<<"Key">>, <<"Value">>}],
+    TX = ar_tx:sign(
+        (ar_tx:new(<<>>, 1000000, 0, <<>>))#tx{tags = Tags},
+        {Priv, Pub}
+    ),
+    JSONStruct = ar_tx:tx_to_json_struct(TX),
+    JSONTags = maps:get(<<"tags">>, JSONStruct),
+    ?assert(is_list(JSONTags)),
+    ?assertEqual(1, length(JSONTags)).
+
+tx_to_json_struct_denomination_test() ->
+    {Priv, Pub} = ar_wallet:new(),
+    TX = ar_tx:sign(
+        (ar_tx:new(<<>>, 1000000, 0, <<>>))#tx{denomination = 10},
+        {Priv, Pub}
+    ),
+    JSONStruct = ar_tx:tx_to_json_struct(TX),
+    ?assertEqual(<<"10">>, maps:get(<<"denomination">>, JSONStruct)).
+```
+
+---
+
+## Transaction Structure
+
+### Core Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `binary()` | Transaction ID (SHA-256 of signature) - 32 bytes |
+| `anchor` | `binary()` | Last TX ID for replay protection - 32 bytes |
+| `owner` | `binary()` | Public key of sender - 512 bytes (RSA-4096) |
+| `target` | `binary()` | Destination address - 32 bytes or `<<>>` |
+| `quantity` | `integer()` | Transfer amount in Winston |
+| `reward` | `integer()` | Mining fee in Winston |
+| `data` | `binary()` | Transaction data |
+| `data_size` | `integer()` | Size of data in bytes |
+| `data_root` | `binary()` | Merkle root for chunked data - 32 bytes |
+| `signature` | `binary()` | Transaction signature - 512 bytes (RSA-4096) |
+| `signature_type` | `tuple()` | Signature algorithm: `{rsa, 65537}`, `{ecdsa, secp256k1}`, `{eddsa, ed25519}` |
+| `format` | `integer()` | Transaction format version (1 or 2) |
+| `tags` | `list()` | List of `{Name, Value}` pairs |
+| `denomination` | `integer()` | Optional denomination field |
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create and sign a data transaction
+{Priv, Pub} = ar_wallet:new(),
+Data = <<"Hello, Arweave!">>,
+TX = (ar_tx:new(<<>>, 1000000, 0, <<>>))#tx{
+    data = Data,
+    data_size = byte_size(Data),
+    tags = [{<<"Content-Type">>, <<"text/plain">>}]
+},
+SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+true = ar_tx:verify(SignedTX).
+
+%% Create and sign a transfer transaction
+{Priv, Pub} = ar_wallet:new(),
+Destination = crypto:strong_rand_bytes(32),
+Amount = 5000000,  % 5M Winston
+Fee = 1000000,     % 1M Winston reward
+LastTX = <<>>,     % First transaction for this wallet
+TX = ar_tx:new(Destination, Fee, Amount, LastTX),
+SignedTX = ar_tx:sign(TX, {Priv, Pub}),
+true = ar_tx:verify(SignedTX).
+
+%% Convert to/from JSON
+JSONStruct = ar_tx:tx_to_json_struct(SignedTX),
+JSONBinary = jiffy:encode(JSONStruct),
+% ... send over network ...
+ReceivedStruct = jiffy:decode(JSONBinary, [return_maps]),
+RecoveredTX = ar_tx:json_struct_to_tx(ReceivedStruct),
+true = ar_tx:verify_tx_id(SignedTX#tx.id, RecoveredTX).
+
+%% Sign with ECDSA (Ethereum-compatible)
+ECDSAWallet = ar_wallet:new_keyfile({ecdsa, secp256k1}, <<"eth_wallet">>),
+TX = ar_tx:new(<<>>, 1000000, 0, <<>>, {ecdsa, secp256k1}),
+SignedTX = ar_tx:sign(TX, ECDSAWallet).
+```
+
+---
+
+## Signature Data Segment
+
+The signature is computed over a deep hash of transaction fields:
+
+```erlang
+SignatureData = ar_deep_hash:hash([
+    integer_to_binary(Format),
+    Owner,
+    Target,
+    list_to_binary(integer_to_list(Quantity)),
+    list_to_binary(integer_to_list(Reward)),
+    Anchor,
+    integer_to_binary(DataSize),
+    DataRoot
+])
+```
+
+**Note:** The data itself is NOT included in the signature data. Instead, the `DataRoot` (Merkle root) is signed for large data.
+
+---
+
+## Transaction ID Calculation
+
+```erlang
+Signature = ar_wallet:sign(PrivateKey, SignatureData),
+TransactionID = crypto:hash(sha256, Signature)
+```
+
+The transaction ID is deterministically derived from the signature, ensuring uniqueness and preventing ID spoofing.
+
+---
+
+## Validation Checks
+
+The `verify/1` function performs these checks:
+
+1. **Quantity Check**: `quantity >= 0`
+2. **Self-Transfer Check**: `owner_address ≠ target`
+3. **ID Validity**: `id == SHA-256(signature)`
+4. **Signature Validity**: Signature verifies with owner's public key
+5. **Data Size Check**: `data_size >= 0`
+6. **Data Root Consistency**: `(data_size == 0) == (data_root == <<>>)`
+
+---
+
+## Winston Units
+
+Arweave uses **Winston** as the smallest unit:
+- 1 AR = 1,000,000,000,000 Winston (1 trillion)
+- All `quantity` and `reward` values are in Winston
+
+**Example Conversions:**
+```erlang
+% 0.001 AR fee
+Fee = 1000000000,
+
+% 0.5 AR transfer
+Amount = 500000000000,
+
+% 1 AR = 1,000,000,000,000 Winston
+OneAR = 1000000000000.
+```
+
+---
+
+## Transaction Formats
+
+### Format 1 (Legacy)
+- Original Arweave transaction format
+- Limited data size
+- Full data included in transaction
+
+### Format 2 (Current)
+- Supports chunked data uploads
+- Uses Merkle tree for large data
+- `data_root` contains Merkle root
+- Enables efficient data verification
+
+---
+
+## References
+
+- **Arweave Yellow Paper** - Transaction specification
+- **ar_wallet.erl** - Wallet and signing functions
+- **ar_deep_hash.erl** - Deep hash algorithm
+- **ar_bundles.erl** - ANS-104 data items (alternative format)
+
+---
+
+## Notes
+
+1. **ID Immutability**: Transaction ID is SHA-256 of signature, making it immutable and unique
+2. **Replay Protection**: The `anchor` field prevents transaction replay attacks
+3. **Data vs Data Root**: For large data, only `data_root` is signed; data is verified separately
+4. **Signature Types**: RSA-4096 is default; ECDSA/EdDSA supported for compatibility
+5. **JSON Encoding**: All binary fields use base64url encoding in JSON
+6. **Tag Limits**: No enforced limit on number of tags, but network may have practical limits
+7. **Denomination**: Optional field for future multi-currency support
+8. **Self-Transfer**: Transactions cannot send to own address (validation fails)

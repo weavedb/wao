@@ -1,0 +1,616 @@
+# dev_wasm.erl - WebAssembly Execution Device
+
+## Overview
+
+**Purpose:** Execute WebAssembly images on messages using Memory-64 preview standard  
+**Module:** `dev_wasm`  
+**Device Name:** `wasm-64@1.0`  
+**Backend:** BEAMR (Erlang wrapper for WAMR - WebAssembly Micro Runtime)
+
+This device executes WASM images on HyperBEAM messages using the Memory-64 preview standard. It manages WASM instance lifecycle, handles imports/exports, provides state serialization/deserialization, and integrates with the HyperBEAM device stack for complex execution workflows.
+
+## Key Features
+
+- **WASM Execution:** Run WebAssembly modules with Memory-64 support
+- **Import Resolution:** Dynamic import resolution via AO-Core
+- **State Management:** Serialize/deserialize WASM memory state
+- **Standard Library:** Extensible stdlib system
+- **AOT Support:** Ahead-of-time compilation (when enabled)
+- **Stack Integration:** Works seamlessly with dev_stack
+
+## Dependencies
+
+- **HyperBEAM:** `hb_beamr`, `hb_beamr_io`, `hb_ao`, `hb_private`, `hb_cache`, `hb_maps`
+- **Stack Device:** `dev_stack`
+- **Message Device:** `dev_message`
+- **Includes:** `include/hb.hrl`
+- **Testing:** `eunit`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info(Msg1, Opts) -> InfoMap.
+
+%% Lifecycle
+-spec init(M1, M2, Opts) -> {ok, InitializedMsg}.
+-spec compute(M1, M2, Opts) -> {ok, ResultMsg}.
+-spec terminate(M1, M2, Opts) -> {ok, CleanedMsg}.
+
+%% State Management
+-spec snapshot(M1, M2, Opts) -> {ok, SerializedState}.
+-spec normalize(M1, M2, Opts) -> {ok, NormalizedMsg}.
+
+%% Import Handling
+-spec import(Msg1, Msg2, Opts) -> {ok, Result}.
+
+%% API for Other Devices
+-spec instance(M1, M2, Opts) -> Instance | not_found.
+
+%% Test API
+-spec cache_wasm_image(File) -> MessageWithImage.
+-spec cache_wasm_image(File, Opts) -> MessageWithImage.
+```
+
+---
+
+## Public Functions
+
+### 1. info/2
+
+```erlang
+-spec info(Msg1, Opts) -> InfoMap
+    when
+        Msg1 :: map(),
+        Opts :: map(),
+        InfoMap :: map().
+```
+
+**Description:** Returns device information. Excludes the `instance/3` function from AO-Core resolution (only for internal use by other devices).
+
+**Test Code:**
+```erlang
+-module(dev_wasm_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_excludes_instance_test() ->
+    Info = dev_wasm:info(#{}, #{}),
+    ?assertEqual([instance], maps:get(excludes, Info)).
+```
+
+---
+
+### 2. init/3
+
+```erlang
+-spec init(M1, M2, Opts) -> {ok, InitializedMsg}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        InitializedMsg :: map().
+```
+
+**Description:** Boot a WASM image stated in the message. Loads the image, starts WASM executor, and sets up instance, import resolver, and I/O functions in private message space.
+
+**Image Source Resolution:**
+1. `[InPrefix]/image` - ID or binary
+2. `body` - Direct binary
+3. Throws error if not found
+
+**Execution Modes:**
+- `wasm` - Standard WASM execution (default)
+- `aot` - Ahead-of-time compiled (requires `wasm_allow_aot` option)
+
+**Private Keys Set:**
+- `[Prefix]/instance` - WASM executor instance
+- `[Prefix]/write` - Write function for strings
+- `[Prefix]/read` - Read function for strings
+- `[Prefix]/import-resolver` - Import resolution function
+
+**Test Code:**
+```erlang
+-module(dev_wasm_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_test() ->
+    Msg = #{
+        <<"device">> => <<"wasm-64@1.0">>,
+        <<"image">> => ImageID
+    },
+    {ok, InitMsg} = hb_ao:resolve(Msg, <<"init">>, #{}),
+    Priv = hb_private:from_message(InitMsg),
+    ?assertMatch({ok, Instance} when is_pid(Instance),
+        hb_ao:resolve(Priv, <<"instance">>, #{})),
+    ?assertMatch({ok, Fun} when is_function(Fun),
+        hb_ao:resolve(Priv, <<"import-resolver">>, #{})).
+
+init_with_prefix_test() ->
+    Msg = #{
+        <<"device">> => <<"wasm-64@1.0">>,
+        <<"input-prefix">> => <<"process">>,
+        <<"output-prefix">> => <<"wasm">>,
+        <<"process">> => #{ <<"image">> => ImageID }
+    },
+    {ok, InitMsg} = hb_ao:resolve(Msg, <<"init">>, #{}),
+    Priv = hb_private:from_message(InitMsg),
+    ?assertMatch({ok, Instance} when is_pid(Instance),
+        hb_ao:resolve(Priv, <<"wasm/instance">>, #{})).
+```
+
+---
+
+### 3. compute/3
+
+```erlang
+-spec compute(M1, M2, Opts) -> {ok, ResultMsg}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        ResultMsg :: map().
+```
+
+**Description:** Execute WASM function with prepared message. Calls WASM executor with specified function and parameters, using import resolver for external functions.
+
+**Function Resolution Order:**
+1. `M2/body/function`
+2. `M2/function`
+3. `M1/function`
+
+**Parameter Resolution Order:**
+1. `M2/body/parameters`
+2. `M2/parameters`
+3. `M1/parameters`
+
+**Result Structure:**
+```erlang
+#{
+    <<"results/[Prefix]/type">> => ResultType,
+    <<"results/[Prefix]/output">> => Results
+}
+```
+
+**Pass Handling:**
+- Only executes on pass 1 or when pass is not found
+- Returns unchanged message on subsequent passes
+
+**Test Code:**
+```erlang
+-module(dev_wasm_compute_test).
+-include_lib("eunit/include/eunit.hrl").
+
+basic_execution_test() ->
+    Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    Msg2 = Msg1#{
+        <<"function">> => <<"fac">>,
+        <<"parameters">> => [5.0]
+    },
+    {ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+    ?assertEqual([120.0], hb_ao:get(<<"results/output">>, Result, #{})).
+
+compute_with_imports_test() ->
+    Msg0 = dev_wasm:cache_wasm_image("test/pow_calculator.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    Msg2 = Msg1#{
+        <<"function">> => <<"pow">>,
+        <<"parameters">> => [2, 5],
+        <<"stdlib/my_lib">> => #{ <<"device">> => <<"test-device@1.0">> }
+    },
+    {ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+    ?assertEqual([32], hb_ao:get(<<"results/output">>, Result, #{})).
+```
+
+---
+
+### 4. snapshot/3
+
+```erlang
+-spec snapshot(M1, M2, Opts) -> {ok, SerializedState}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        SerializedState :: map().
+```
+
+**Description:** Serialize the WASM state to binary. Captures complete memory state for later restoration.
+
+**Return Structure:**
+```erlang
+#{
+    <<"body">> => SerializedBinary
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_wasm_snapshot_test).
+-include_lib("eunit/include/eunit.hrl").
+
+snapshot_and_restore_test() ->
+    Msg0 = dev_wasm:cache_wasm_image("test/pow_calculator.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    Msg2 = Msg1#{
+        <<"function">> => <<"pow">>,
+        <<"parameters">> => [2, 2]
+    },
+    {ok, Msg3} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+    ?assertEqual([4], hb_ao:get(<<"results/output">>, Msg3, #{})),
+    {ok, State} = hb_ao:resolve(Msg3, <<"snapshot">>, #{}),
+    % Restore from snapshot
+    NewMsg = Msg0#{ <<"snapshot">> => State },
+    {ok, Restored} = hb_ao:resolve(NewMsg, <<"compute">>, #{}),
+    ?assertEqual([4], hb_ao:get(<<"results/output">>, Restored, #{})).
+```
+
+---
+
+### 5. normalize/3
+
+```erlang
+-spec normalize(M1, M2, Opts) -> {ok, NormalizedMsg}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        NormalizedMsg :: map().
+```
+
+**Description:** Normalize message to have an open WASM instance without literal `snapshot` key. If no instance exists, attempts to deserialize from snapshot. Ensures HashPath remains unchanged during normalization.
+
+**Normalization Process:**
+1. Check for existing instance
+2. If not found, load snapshot
+3. Deserialize state into instance
+4. Remove snapshot key from message
+
+**Test Code:**
+```erlang
+-module(dev_wasm_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_with_instance_test() ->
+    Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    {ok, Normalized} = dev_wasm:normalize(Msg1, #{}, #{}),
+    ?assertEqual(not_found, hb_ao:get(<<"snapshot">>, Normalized, #{})).
+
+normalize_from_snapshot_test() ->
+    % Create snapshot first
+    Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    {ok, Snapshot} = hb_ao:resolve(Msg1, <<"snapshot">>, #{}),
+    % Normalize from snapshot
+    MsgWithSnapshot = Msg0#{ <<"snapshot">> => Snapshot },
+    {ok, Normalized} = dev_wasm:normalize(MsgWithSnapshot, #{}, #{}),
+    Instance = dev_wasm:instance(Normalized, #{}, #{}),
+    ?assert(is_pid(Instance)).
+```
+
+---
+
+### 6. terminate/3
+
+```erlang
+-spec terminate(M1, M2, Opts) -> {ok, CleanedMsg}
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        CleanedMsg :: map().
+```
+
+**Description:** Tear down the WASM executor. Stops the instance and removes it from private message space.
+
+**Test Code:**
+```erlang
+-module(dev_wasm_terminate_test).
+-include_lib("eunit/include/eunit.hrl").
+
+terminate_test() ->
+    Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    {ok, Terminated} = hb_ao:resolve(Msg1, <<"terminate">>, #{}),
+    ?assertEqual(not_found, dev_wasm:instance(Terminated, #{}, #{})).
+```
+
+---
+
+### 7. import/3
+
+```erlang
+-spec import(Msg1, Msg2, Opts) -> {ok, Result}
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map(),
+        Result :: map().
+```
+
+**Description:** Handle standard library calls by resolving imports via AO-Core. Adjusts path to stdlib, adds state to message, and resolves. Falls back to stub handler if not found.
+
+**Import Resolution:**
+1. Adjust path: `[Prefix]/stdlib/[Module]/[Function]`
+2. Add state at: `[Prefix]/stdlib/[Module]/state`
+3. Resolve adjusted path
+4. Return result or call stub
+
+**Stub Behavior:**
+- Logs unimplemented call
+- Records call in `state/results/[Prefix]/undefined-calls`
+- Returns success with errno 0
+
+**Test Code:**
+```erlang
+-module(dev_wasm_import_test).
+-include_lib("eunit/include/eunit.hrl").
+
+imported_function_test() ->
+    Msg = #{
+        <<"device">> => <<"wasm-64@1.0">>,
+        <<"image">> => ImageID,
+        <<"stdlib/my_lib">> => #{ <<"device">> => <<"test-device@1.0">> }
+    },
+    {ok, InitMsg} = hb_ao:resolve(Msg, <<"init">>, #{}),
+    ComputeMsg = InitMsg#{
+        <<"function">> => <<"pow">>,
+        <<"parameters">> => [2, 5]
+    },
+    {ok, Result} = hb_ao:resolve(ComputeMsg, <<"compute">>, #{}),
+    ?assertEqual([32], hb_ao:get(<<"results/output">>, Result, #{})).
+```
+
+---
+
+### 8. instance/3
+
+```erlang
+-spec instance(M1, M2, Opts) -> Instance | not_found
+    when
+        M1 :: map(),
+        M2 :: map(),
+        Opts :: map(),
+        Instance :: pid().
+```
+
+**Description:** Get WASM instance from message. Exported for use by other devices but excluded from AO-Core resolution. Returns PID of WASM executor instance.
+
+**Test Code:**
+```erlang
+-module(dev_wasm_instance_test).
+-include_lib("eunit/include/eunit.hrl").
+
+instance_after_init_test() ->
+    Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    Instance = dev_wasm:instance(Msg1, #{}, #{}),
+    ?assert(is_pid(Instance)).
+
+instance_not_found_test() ->
+    Msg = #{ <<"device">> => <<"wasm-64@1.0">> },
+    ?assertEqual(not_found, dev_wasm:instance(Msg, #{}, #{})).
+```
+
+---
+
+## Message Interface
+
+### Init Phase
+
+**Assumes:**
+- `M1/[Prefix]/image` - WASM binary or ID
+- `M1/process` - Optional process context
+
+**Generates:**
+- `/priv/[Prefix]/instance` - WASM executor PID
+- `/priv/[Prefix]/import-resolver` - Import handler function
+- `/priv/[Prefix]/write` - String write function
+- `/priv/[Prefix]/read` - String read function
+
+**Side Effects:**
+- Creates WASM executor in HyperBEAM node memory
+
+### Compute Phase
+
+**Assumes:**
+- `M1/priv/[Prefix]/instance` - Active instance
+- `M1/priv/[Prefix]/import-resolver` - Import handler
+- `M2/message/function` OR `M1/function` - Function name
+- `M2/message/parameters` OR `M1/parameters` - Function params
+
+**Generates:**
+- `/results/[Prefix]/type` - Result type
+- `/results/[Prefix]/output` - Function return values
+
+**Side Effects:**
+- Executes WASM function
+- May call import functions
+
+---
+
+## Prefix System
+
+The device integrates with dev_stack prefix system:
+
+```erlang
+%% Input prefix: where to read configuration
+<<"input-prefix">> => <<"process">>
+
+%% Output prefix: where to write results
+<<"output-prefix">> => <<"wasm">>
+
+%% Reads from:
+%%   process/image
+%%
+%% Writes to:
+%%   priv/wasm/instance
+%%   results/wasm/output
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Basic WASM execution
+Msg0 = dev_wasm:cache_wasm_image("program.wasm"),
+{ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+Msg2 = Msg1#{
+    <<"function">> => <<"main">>,
+    <<"parameters">> => [42]
+},
+{ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+Output = hb_ao:get(<<"results/output">>, Result, #{}).
+
+%% With standard library
+Msg = #{
+    <<"device">> => <<"wasm-64@1.0">>,
+    <<"image">> => ImageID,
+    <<"stdlib/math">> => #{ <<"device">> => <<"math@1.0">> },
+    <<"stdlib/io">> => #{ <<"device">> => <<"wasi@1.0">> }
+}.
+
+%% With stack integration
+StackMsg = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => [<<"wasi@1.0">>, <<"wasm-64@1.0">>],
+    <<"stack-keys">> => [<<"init">>, <<"compute">>],
+    <<"input-prefix">> => <<"process">>,
+    <<"output-prefix">> => <<"wasm">>,
+    <<"process">> => #{ <<"image">> => ImageID }
+},
+{ok, InitMsg} = hb_ao:resolve(StackMsg, <<"init">>, #{}),
+{ok, ComputeMsg} = hb_ao:resolve(InitMsg, <<"compute">>, #{}).
+
+%% State persistence
+{ok, Snapshot} = hb_ao:resolve(Msg, <<"snapshot">>, #{}),
+% Later restore
+RestoredMsg = OriginalMsg#{ <<"snapshot">> => Snapshot },
+{ok, Result} = hb_ao:resolve(RestoredMsg, <<"compute">>, #{}).
+
+%% Memory I/O helpers
+Instance = dev_wasm:instance(Msg, #{}, #{}),
+Writer = hb_private:get(<<"write">>, Msg, #{}),
+Reader = hb_private:get(<<"read">>, Msg, #{}),
+{ok, Ptr} = Writer(<<"Hello">>),
+{ok, Data} = Reader(Ptr).
+```
+
+---
+
+## Import Resolution
+
+### Default Import Resolver
+
+```erlang
+default_import_resolver(Msg1, Msg2, Opts) ->
+    % BEAMR provides:
+    #{
+        instance := WASM,
+        module := Module,
+        func := Func,
+        args := Args,
+        func_sig := Signature
+    } = Msg2,
+    
+    % Resolve via AO-Core:
+    Path = <<Prefix/binary, "/stdlib/", Module/binary, "/", Func/binary>>,
+    {ok, Result} = hb_ao:resolve(Msg1, #{ <<"path">> => Path }, Opts),
+    
+    % Return state and results:
+    {ok, Results, NextState}.
+```
+
+### Undefined Import Stub
+
+Unimplemented imports are logged and recorded:
+
+```erlang
+undefined_import_stub(Msg1, Msg2, Opts) ->
+    % Log the call
+    ?event({unimplemented_dev_wasm_call, Msg2}),
+    
+    % Record in undefined-calls
+    UndefinedCalls = [Msg2 | PreviousCalls],
+    
+    % Return success
+    {ok, #{ state => UpdatedMsg, results => [0] }}.
+```
+
+---
+
+## State Serialization
+
+### Snapshot Format
+
+Snapshots contain complete WASM memory state:
+
+```erlang
+#{
+    <<"body">> => <<...binary state...>>
+}
+```
+
+### Serialization Process
+
+```erlang
+1. Get WASM instance
+2. Call hb_beamr:serialize(Instance)
+3. Return binary state in body
+```
+
+### Deserialization Process
+
+```erlang
+1. Extract snapshot body
+2. Initialize new WASM instance
+3. Call hb_beamr:deserialize(Instance, State)
+4. Instance restored to previous state
+```
+
+---
+
+## AOT Mode
+
+Ahead-of-time compilation support (requires configuration):
+
+```erlang
+NodeOpts = #{
+    wasm_allow_aot => true
+}
+
+Msg = #{
+    <<"device">> => <<"wasm-64@1.0">>,
+    <<"Mode">> => <<"AOT">>,
+    <<"image">> => CompiledImageID
+}
+```
+
+---
+
+## References
+
+- **BEAMR** - `hb_beamr.erl`, `hb_beamr_io.erl`
+- **Stack Device** - `dev_stack.erl`
+- **WASI Device** - `dev_wasi.erl`
+- **AO Resolution** - `hb_ao.erl`
+- **WAMR** - WebAssembly Micro Runtime
+
+---
+
+## Notes
+
+1. **Memory-64 Support:** Full Memory-64 preview standard support
+2. **Instance Lifecycle:** Init → Compute → Snapshot/Terminate
+3. **State Portability:** Snapshots fully portable across executions
+4. **Import System:** Dynamic import resolution via AO-Core
+5. **Prefix Aware:** Full integration with dev_stack prefix system
+6. **HashPath Preservation:** Normalization doesn't change HashPath
+7. **Pass Handling:** Only executes on first pass
+8. **AOT Optional:** AOT mode requires explicit enablement
+9. **Stub Logging:** Undefined imports logged for debugging
+10. **Cache Integration:** Images cached by ID for reuse

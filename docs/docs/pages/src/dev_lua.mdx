@@ -1,0 +1,720 @@
+# dev_lua.erl - Lua 5.3 Execution Device
+
+## Overview
+
+**Purpose:** Execute Lua scripts within HyperBEAM processes  
+**Module:** `dev_lua`  
+**Pattern:** Sandboxed Lua VM with AO-Core library integration  
+**Integration:** Process execution device, WASM alternative, AOS compatibility
+
+This module provides Lua 5.3 execution capabilities for HyperBEAM processes. It initializes Lua virtual machines, loads modules, applies sandboxing rules, and executes Lua functions. The device includes the full AO-Core library for Lua scripts and supports process state management through snapshots.
+
+## Dependencies
+
+- **Erlang/OTP:** `luerl` (Lua implementation in Erlang)
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_private`, `hb_opts`, `hb_util`, `hb_message`
+- **Devices:** `dev_lua_lib`, `dev_message`
+- **Arweave:** `ar_wallet`
+
+---
+
+## Public Functions Overview
+
+```erlang
+%% Device Info
+-spec info(Base) -> DeviceInfo.
+
+%% Lifecycle
+-spec init(Base, Req, Opts) -> {ok, BaseWithState} | {error, Reason}.
+-spec normalize(Base, Req, Opts) -> {ok, BaseWithSnapshot} | {error, Reason}.
+-spec snapshot(Base, Req, Opts) -> {ok, Snapshot}.
+
+%% Execution
+-spec functions(Base, Req, Opts) -> {ok, [FunctionName]}.
+
+%% Utilities
+-spec encode(Term, Opts) -> LuaTerm.
+-spec decode(LuaTerm, Opts) -> Term.
+-spec pure_lua_process_benchmark(BenchMsgs) -> ok.
+```
+
+---
+
+## Public Functions
+
+### 1. info/1
+
+```erlang
+-spec info(Base) -> DeviceInfo
+    when
+        Base :: map(),
+        DeviceInfo :: #{
+            default => fun(),
+            excludes => [binary()]
+        }.
+```
+
+**Description:** Return device information. Sets default handler to `compute/4` and excludes base message keys plus utility functions.
+
+**Excluded Functions:**
+- `keys`, `set` (message@1.0 functions)
+- `encode`, `decode` (public utilities)
+- All keys present in Base message
+
+**Test Code:**
+```erlang
+-module(dev_lua_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    Base = #{<<"custom-key">> => <<"value">>},
+    Info = dev_lua:info(Base),
+    ?assert(is_map(Info)),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)).
+
+info_excludes_test() ->
+    Base = #{<<"my-func">> => <<"test">>},
+    Info = dev_lua:info(Base),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"keys">>, Excludes)),
+    ?assert(lists:member(<<"set">>, Excludes)),
+    ?assert(lists:member(<<"encode">>, Excludes)),
+    ?assert(lists:member(<<"decode">>, Excludes)),
+    ?assert(lists:member(<<"my-func">>, Excludes)).
+```
+
+---
+
+### 2. init/3
+
+```erlang
+-spec init(Base, Req, Opts) -> {ok, BaseWithState} | {error, Reason}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        BaseWithState :: map(),
+        Reason :: term().
+```
+
+**Description:** Initialize the Lua VM by loading modules and installing libraries.
+
+**Initialization Steps:**
+1. Check if already initialized (has state)
+2. Find modules from `module` key
+3. Load module code (from cache if ID)
+4. Initialize new Lua state
+5. Load all modules into state
+6. Apply sandboxing rules
+7. Install AO-Core library
+8. Return base with state in private storage
+
+**Module Sources:**
+- Binary string (inline code)
+- Message ID (fetch from cache)
+- Message with `body` or `data` key
+- List of any above
+
+**Test Code:**
+```erlang
+-module(dev_lua_init_test).
+-include_lib("eunit/include/eunit.hrl").
+
+init_with_inline_module_test() ->
+    Base = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"function test() return 42 end">>
+        }
+    },
+    {ok, Result} = dev_lua:init(Base, #{}, #{}),
+    ?assert(hb_private:has(<<"state">>, Result, #{})).
+
+init_with_module_id_test() ->
+    Module = <<"function hello() return 'world' end">>,
+    {ok, ModuleID} = hb_cache:write(Module, #{}),
+    Base = #{<<"module">> => ModuleID},
+    {ok, Result} = dev_lua:init(Base, #{}, #{}),
+    ?assert(hb_private:has(<<"state">>, Result, #{})).
+
+init_already_initialized_test() ->
+    State = luerl:init(),
+    Base = hb_private:set(#{}, <<"state">>, State, #{}),
+    {ok, Result} = dev_lua:init(Base, #{}, #{}),
+    ?assertEqual(Base, Result).
+
+init_multiple_modules_test() ->
+    Modules = [
+        #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"function mod1() return 1 end">>
+        },
+        #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"function mod2() return 2 end">>
+        }
+    ],
+    Base = #{<<"module">> => Modules},
+    {ok, Result} = dev_lua:init(Base, #{}, #{}),
+    ?assert(hb_private:has(<<"state">>, Result, #{})).
+```
+
+---
+
+### 3. functions/3
+
+```erlang
+-spec functions(Base, Req, Opts) -> {ok, [FunctionName]} | {error, not_found}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        FunctionName :: binary().
+```
+
+**Description:** Return list of all functions in the Lua global environment.
+
+**Execution:** Runs Lua code to iterate `_G` table and collect function names.
+
+**Test Code:**
+```erlang
+-module(dev_lua_functions_test).
+-include_lib("eunit/include/eunit.hrl").
+
+functions_test() ->
+    Base = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<
+                "function test1() end\n",
+                "function test2() end\n"
+            >>
+        }
+    },
+    {ok, Initialized} = dev_lua:init(Base, #{}, #{}),
+    {ok, Functions} = dev_lua:functions(Initialized, #{}, #{}),
+    ?assert(is_list(Functions)),
+    ?assert(lists:member(<<"test1">>, Functions)),
+    ?assert(lists:member(<<"test2">>, Functions)).
+
+functions_not_initialized_test() ->
+    Base = #{},
+    {error, not_found} = dev_lua:functions(Base, #{}, #{}).
+```
+
+---
+
+### 4. snapshot/3
+
+```erlang
+-spec snapshot(Base, Req, Opts) -> {ok, Snapshot}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        Snapshot :: map().
+```
+
+**Description:** Create a snapshot of the current Lua state for persistence.
+
+**Snapshot Structure:**
+```erlang
+#{
+    <<"state">> => SerializedLuaState,
+    <<"version">> => <<"1.0">>,
+    <<"timestamp">> => Timestamp
+}
+```
+
+**Test Code:**
+```erlang
+-module(dev_lua_snapshot_test).
+-include_lib("eunit/include/eunit.hrl").
+
+snapshot_test() ->
+    Base = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"x = 42">>
+        }
+    },
+    {ok, Initialized} = dev_lua:init(Base, #{}, #{}),
+    {ok, Snapshot} = dev_lua:snapshot(Initialized, #{}, #{}),
+    ?assert(is_map(Snapshot)),
+    ?assert(maps:is_key(<<"state">>, Snapshot)).
+```
+
+---
+
+### 5. normalize/3
+
+```erlang
+-spec normalize(Base, Req, Opts) -> {ok, BaseWithSnapshot} | {error, Reason}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        BaseWithSnapshot :: map(),
+        Reason :: term().
+```
+
+**Description:** Restore Lua state from a snapshot if present.
+
+**Normalization Flow:**
+1. Check for snapshot in Base
+2. If found, extract state
+3. Replace current state with snapshot state
+4. Remove snapshot from message
+
+**Test Code:**
+```erlang
+-module(dev_lua_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_with_snapshot_test() ->
+    % Create and snapshot a state
+    Base1 = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"value = 123">>
+        }
+    },
+    {ok, Initialized} = dev_lua:init(Base1, #{}, #{}),
+    {ok, Snapshot} = dev_lua:snapshot(Initialized, #{}, #{}),
+    
+    % Create new base with snapshot
+    Base2 = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"value = 0">>
+        },
+        <<"snapshot">> => Snapshot
+    },
+    {ok, Normalized} = dev_lua:normalize(Base2, #{}, #{}),
+    ?assert(hb_private:has(<<"state">>, Normalized, #{})),
+    ?assertNot(maps:is_key(<<"snapshot">>, Normalized)).
+
+normalize_without_snapshot_test() ->
+    Base = #{},
+    {ok, Normalized} = dev_lua:normalize(Base, #{}, #{}),
+    ?assertEqual(Base, Normalized).
+```
+
+---
+
+### 6. encode/2, decode/2
+
+```erlang
+-spec encode(Term, Opts) -> LuaTerm
+    when
+        Term :: term(),
+        Opts :: map(),
+        LuaTerm :: term().
+
+-spec decode(LuaTerm, Opts) -> Term
+    when
+        LuaTerm :: term(),
+        Opts :: map(),
+        Term :: term().
+```
+
+**Description:** Convert between Erlang and Lua data structures.
+
+**Encoding Rules:**
+- Maps → Lua tables
+- Lists → Lua arrays (numeric indices)
+- Binaries → Lua strings
+- Numbers → Lua numbers
+- Atoms → Lua strings
+
+**Test Code:**
+```erlang
+-module(dev_lua_encode_decode_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_decode_map_test() ->
+    Term = #{<<"key">> => <<"value">>, <<"num">> => 42},
+    Encoded = dev_lua:encode(Term, #{}),
+    Decoded = dev_lua:decode(Encoded, #{}),
+    ?assertEqual(Term, Decoded).
+
+encode_decode_list_test() ->
+    Term = [1, 2, 3, 4, 5],
+    Encoded = dev_lua:encode(Term, #{}),
+    Decoded = dev_lua:decode(Encoded, #{}),
+    ?assertEqual(Term, Decoded).
+
+encode_decode_nested_test() ->
+    Term = #{
+        <<"users">> => [
+            #{<<"name">> => <<"Alice">>, <<"age">> => 30},
+            #{<<"name">> => <<"Bob">>, <<"age">> => 25}
+        ]
+    },
+    Encoded = dev_lua:encode(Term, #{}),
+    Decoded = dev_lua:decode(Encoded, #{}),
+    ?assertEqual(Term, Decoded).
+```
+
+---
+
+## Common Patterns
+
+```erlang
+%% Create Lua process
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => #{
+        <<"content-type">> => <<"application/lua">>,
+        <<"body">> => LuaCode
+    }
+},
+{ok, Initialized} = hb_ao:resolve(Process, <<"init">>, Opts).
+
+%% Execute Lua function
+{ok, Result} = hb_ao:resolve(
+    Initialized,
+    #{
+        <<"path">> => <<"my_function">>,
+        <<"parameters">> => [Arg1, Arg2]
+    },
+    Opts
+).
+
+%% Load multiple modules
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => [
+        #{<<"content-type">> => <<"application/lua">>, <<"body">> => Mod1},
+        #{<<"content-type">> => <<"application/lua">>, <<"body">> => Mod2}
+    ]
+},
+{ok, Initialized} = hb_ao:resolve(Process, <<"init">>, Opts).
+
+%% Apply sandboxing
+Process = #{
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => Module,
+    <<"sandbox">> => true  % Use default sandbox
+},
+{ok, Initialized} = dev_lua:init(Process, #{}, Opts).
+
+%% Custom sandbox
+Process = #{
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => Module,
+    <<"sandbox">> => #{
+        ['_G', os, execute] => <<"sandboxed">>,
+        ['_G', io] => <<"sandboxed">>
+    }
+},
+{ok, Initialized} = dev_lua:init(Process, #{}, Opts).
+
+%% Snapshot and restore
+{ok, Snapshot} = dev_lua:snapshot(Process, #{}, Opts),
+{ok, _} = hb_cache:write(Snapshot, Opts),
+
+% Later, restore
+Process2 = Process#{<<"snapshot">> => Snapshot},
+{ok, Restored} = dev_lua:normalize(Process2, #{}, Opts).
+```
+
+---
+
+## Sandboxing
+
+### Default Sandbox
+```erlang
+-define(DEFAULT_SANDBOX, [
+    {['_G', io], <<"sandboxed">>},
+    {['_G', file], <<"sandboxed">>},
+    {['_G', os, execute], <<"sandboxed">>},
+    {['_G', os, exit], <<"sandboxed">>},
+    {['_G', os, getenv], <<"sandboxed">>},
+    {['_G', os, remove], <<"sandboxed">>},
+    {['_G', os, rename], <<"sandboxed">>},
+    {['_G', os, tmpname], <<"sandboxed">>},
+    {['_G', package], <<"sandboxed">>},
+    {['_G', loadfile], <<"sandboxed">>},
+    {['_G', require], <<"sandboxed">>},
+    {['_G', dofile], <<"sandboxed">>},
+    {['_G', load], <<"sandboxed">>},
+    {['_G', loadstring], <<"sandboxed">>}
+]).
+```
+
+### Sandbox Options
+
+**Boolean (default):**
+```erlang
+#{<<"sandbox">> => true}
+% Uses DEFAULT_SANDBOX
+```
+
+**List (all return "sandboxed"):**
+```erlang
+#{
+    <<"sandbox">> => [
+        ['_G', os],
+        ['_G', io]
+    ]
+}
+```
+
+**Map (custom returns):**
+```erlang
+#{
+    <<"sandbox">> => #{
+        ['_G', os, execute] => <<"blocked">>,
+        ['_G', io] => fun() -> error("IO disabled") end
+    }
+}
+```
+
+### Security Benefits
+- Prevents file system access
+- Blocks process execution
+- Disables module loading
+- Protects environment variables
+- Prevents code injection
+
+---
+
+## AO-Core Library
+
+### Automatic Installation
+The `dev_lua_lib` is automatically installed during `init/3`:
+```erlang
+{ok, State3} = dev_lua_lib:install(Base, State2, Opts)
+```
+
+### Available Functions
+```lua
+-- AO-Core resolution
+ao.resolve(message)
+ao.resolve(base, path)
+
+-- Message manipulation
+ao.get(key, base)
+ao.set(base, key, value)
+ao.set(base, updates)
+
+-- Event logging
+ao.event(event)
+ao.event(group, event)
+```
+
+### Device Sandbox
+```erlang
+#{
+    <<"device-sandbox">> => [
+        <<"message@1.0">>,
+        <<"custom-device@1.0">>
+    ]
+}
+% Only listed devices available in ao.resolve()
+```
+
+---
+
+## Module Loading
+
+### Module Sources
+
+**Inline Binary:**
+```erlang
+#{
+    <<"module">> => #{
+        <<"content-type">> => <<"application/lua">>,
+        <<"body">> => <<"function test() return 1 end">>
+    }
+}
+```
+
+**Module ID:**
+```erlang
+#{
+    <<"module">> => <<"module-id-abc123...">>
+}
+% Fetched from cache via hb_cache:read/2
+```
+
+**Module Message:**
+```erlang
+#{
+    <<"module">> => #{
+        <<"name">> => <<"my-module">>,
+        <<"body">> => LuaCode
+    }
+}
+```
+
+**Multiple Modules:**
+```erlang
+#{
+    <<"module">> => [
+        ModuleID1,
+        #{<<"body">> => Code2},
+        #{<<"body">> => Code3}
+    ]
+}
+```
+
+### Loading Order
+Modules are loaded in order they appear in the list. Later modules can reference functions from earlier modules.
+
+---
+
+## State Management
+
+### Private Storage
+Lua state is stored in message private data:
+```erlang
+hb_private:set(Base, <<"state">>, LuerlState, Opts)
+```
+
+### State Isolation
+Each process has its own Lua VM:
+- No shared state between processes
+- Each execution independent
+- Snapshots capture complete state
+
+### State Serialization
+```erlang
+% Create snapshot
+{ok, Snapshot} = snapshot(Base, #{}, Opts),
+
+% Snapshot contains serialized state
+State = maps:get(<<"state">>, Snapshot),
+
+% Restore from snapshot
+Base2 = Base#{<<"snapshot">> => Snapshot},
+{ok, Restored} = normalize(Base2, #{}, Opts)
+```
+
+---
+
+## Execution Model
+
+### Function Call
+```lua
+function my_function(arg1, arg2)
+    return arg1 + arg2
+end
+```
+
+```erlang
+{ok, Result} = hb_ao:resolve(
+    Process,
+    #{
+        <<"path">> => <<"my_function">>,
+        <<"parameters">> => [5, 3]
+    },
+    Opts
+),
+% Result: 8
+```
+
+### Default Handler
+Unrecognized paths resolve to Lua function calls:
+```
+GET /path/to/function
+→ Calls: function(params)
+```
+
+---
+
+## Process Integration
+
+### As Execution Device
+```erlang
+#{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => LuaModule
+}
+```
+
+### With Scheduler
+```erlang
+#{
+    <<"device">> => <<"process@1.0">>,
+    <<"scheduler-device">> => <<"scheduler@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => LuaModule,
+    <<"authority">> => AuthorityAddress
+}
+```
+
+---
+
+## AOS Compatibility
+
+### AOS Processes
+```erlang
+generate_lua_process("path/to/hyper-aos.lua", Opts)
+```
+
+Creates process compatible with AOS:
+- Eval action support
+- Message handlers
+- Send() function
+- Process state management
+
+### AOS Messages
+```erlang
+#{
+    <<"action">> => <<"Eval">>,
+    <<"data">> => <<"return 1 + 1">>,
+    <<"target">> => ProcessID
+}
+```
+
+---
+
+## Performance
+
+### Benchmarking
+```erlang
+dev_lua:pure_lua_process_benchmark(100)
+% Executes 100 messages and reports performance
+```
+
+### Optimization Tips
+- Minimize module size
+- Use local variables in Lua
+- Batch operations when possible
+- Consider WASM for compute-heavy tasks
+
+---
+
+## References
+
+- **Lua Library** - `dev_lua_lib.erl`
+- **Luerl** - Lua in Erlang implementation
+- **AO Resolution** - `hb_ao.erl`
+- **Cache** - `hb_cache.erl`
+- **Private Storage** - `hb_private.erl`
+
+---
+
+## Notes
+
+1. **Lua 5.3:** Uses Luerl (Lua in Erlang) implementation
+2. **Sandboxing:** Default sandbox blocks dangerous operations
+3. **AO Library:** Full AO-Core integration via dev_lua_lib
+4. **Multiple Modules:** Supports loading multiple Lua files
+5. **State Snapshots:** Complete VM state can be saved/restored
+6. **Function Discovery:** Can list all global functions
+7. **Module Sources:** Inline code, IDs, or messages
+8. **Security:** Sandboxing prevents file/process/network access
+9. **Device Sandbox:** Restricts available devices in ao.resolve()
+10. **Encode/Decode:** Bidirectional Erlang ↔ Lua conversion
+11. **Private State:** Lua VM stored in message private data
+12. **Default Handler:** Unknown paths → Lua function calls
+13. **Process Compatible:** Works as execution-device in processes
+14. **AOS Support:** Full compatibility with AOS processes
+15. **Benchmarking:** Built-in performance testing utilities
