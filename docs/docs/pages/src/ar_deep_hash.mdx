@@ -22,7 +22,7 @@ Deep hash is a cryptographic hash algorithm that recursively hashes nested lists
 %% Deep Hashing
 -spec hash(List) -> Hash
     when
-        List :: list() | binary(),
+        List :: list(),
         Hash :: binary().
 ```
 
@@ -35,14 +35,18 @@ Deep hash is a cryptographic hash algorithm that recursively hashes nested lists
 ```erlang
 -spec hash(List) -> Hash
     when
-        List :: list() | binary(),
+        List :: list(),
         Hash :: binary().
 ```
 
-**Description:** Compute deep hash of a list or binary. The algorithm recursively hashes nested structures with size-tagged prefixes to ensure structural integrity.
+**Description:** Compute deep hash of a list. The algorithm recursively hashes nested structures with size-tagged prefixes to ensure structural integrity. List elements can be binaries or nested lists.
+
+:::info
+The public `hash/1` function only accepts lists. To hash a single binary, wrap it in a list: `hash([Binary])`.
+:::
 
 **Algorithm:**
-1. **For Binaries**: Hash as `SHA384(SHA384("blob" + size) + SHA384(data))`
+1. **For Binaries** (within lists): Hash as `SHA384(SHA384("blob" + size) + SHA384(data))`
 2. **For Lists**: Hash as recursive accumulation with `"list" + length` tag
 
 **Output:** 48-byte (384-bit) SHA-384 hash
@@ -51,28 +55,6 @@ Deep hash is a cryptographic hash algorithm that recursively hashes nested lists
 ```erlang
 -module(ar_deep_hash_hash_test).
 -include_lib("eunit/include/eunit.hrl").
-
-hash_binary_test() ->
-    Data = <<"Hello, Arweave!">>,
-    Hash = ar_deep_hash:hash(Data),
-    ?assert(is_binary(Hash)),
-    ?assertEqual(48, byte_size(Hash)).
-
-hash_empty_binary_test() ->
-    Hash = ar_deep_hash:hash(<<>>),
-    ?assert(is_binary(Hash)),
-    ?assertEqual(48, byte_size(Hash)).
-
-hash_deterministic_test() ->
-    Data = <<"Test data">>,
-    Hash1 = ar_deep_hash:hash(Data),
-    Hash2 = ar_deep_hash:hash(Data),
-    ?assertEqual(Hash1, Hash2).
-
-hash_different_data_test() ->
-    Hash1 = ar_deep_hash:hash(<<"Data1">>),
-    Hash2 = ar_deep_hash:hash(<<"Data2">>),
-    ?assertNotEqual(Hash1, Hash2).
 
 hash_empty_list_test() ->
     Hash = ar_deep_hash:hash([]),
@@ -84,6 +66,27 @@ hash_single_element_list_test() ->
     Hash = ar_deep_hash:hash(Data),
     ?assert(is_binary(Hash)),
     ?assertEqual(48, byte_size(Hash)).
+
+hash_single_binary_wrapped_test() ->
+    Hash = ar_deep_hash:hash([<<"Hello, Arweave!">>]),
+    ?assert(is_binary(Hash)),
+    ?assertEqual(48, byte_size(Hash)).
+
+hash_empty_binary_wrapped_test() ->
+    Hash = ar_deep_hash:hash([<<>>]),
+    ?assert(is_binary(Hash)),
+    ?assertEqual(48, byte_size(Hash)).
+
+hash_deterministic_test() ->
+    Data = [<<"Test data">>],
+    Hash1 = ar_deep_hash:hash(Data),
+    Hash2 = ar_deep_hash:hash(Data),
+    ?assertEqual(Hash1, Hash2).
+
+hash_different_data_test() ->
+    Hash1 = ar_deep_hash:hash([<<"Data1">>]),
+    Hash2 = ar_deep_hash:hash([<<"Data2">>]),
+    ?assertNotEqual(Hash1, Hash2).
 
 hash_multiple_elements_test() ->
     Data = [<<"First">>, <<"Second">>, <<"Third">>],
@@ -133,7 +136,7 @@ hash_size_prefix_test() ->
     ?assertNotEqual(HashSingle, HashDouble).
 
 hash_large_data_test() ->
-    LargeData = binary:copy(<<"X">>, 1000000),  % 1MB
+    LargeData = [binary:copy(<<"X">>, 1000000)],  % 1MB wrapped in list
     Hash = ar_deep_hash:hash(LargeData),
     ?assertEqual(48, byte_size(Hash)).
 
@@ -167,9 +170,9 @@ hash_transaction_like_test() ->
 
 ## Algorithm Details
 
-### Binary Hashing
+### Binary Hashing (Internal)
 
-For a binary `B`:
+For a binary `B` within a list:
 
 ```
 Tag = "blob" + byte_size(B)
@@ -205,8 +208,8 @@ Result = AccN
 List = [<<"A">>, <<"B">>],
 Tag = <<"list2">>,  % "list" + length(List)
 Acc0 = crypto:hash(sha384, Tag),
-Acc1 = crypto:hash(sha384, <<Acc0/binary, (ar_deep_hash:hash(<<"A">>))/binary>>),
-Acc2 = crypto:hash(sha384, <<Acc1/binary, (ar_deep_hash:hash(<<"B">>))/binary>>),
+Acc1 = crypto:hash(sha384, <<Acc0/binary, (hash_bin_or_list(<<"A">>))/binary>>),
+Acc2 = crypto:hash(sha384, <<Acc1/binary, (hash_bin_or_list(<<"B">>))/binary>>),
 Result = Acc2.
 ```
 
@@ -241,11 +244,9 @@ ar_deep_hash:hash(List1) =/= ar_deep_hash:hash(List2).  % True
 ### Size Awareness
 Content size is embedded in the hash:
 ```erlang
-Data1 = <<"AB">>,
-Data2 = <<"A">>,
-% Even if Data2 was followed by "B" in context,
-% the size prefix ensures different hashes
-ar_deep_hash:hash(Data1) =/= ar_deep_hash:hash(Data2).  % True
+List1 = [<<"AB">>],
+List2 = [<<"A">>],
+ar_deep_hash:hash(List1) =/= ar_deep_hash:hash(List2).  % True
 ```
 
 ---
@@ -253,9 +254,9 @@ ar_deep_hash:hash(Data1) =/= ar_deep_hash:hash(Data2).  % True
 ## Common Patterns
 
 ```erlang
-%% Hash binary data
+%% Hash a single binary (must wrap in list)
 Data = <<"Transaction data">>,
-Hash = ar_deep_hash:hash(Data).
+Hash = ar_deep_hash:hash([Data]).
 
 %% Hash transaction signature data (from ar_tx.erl)
 SignatureData = [
@@ -283,18 +284,17 @@ StructHash = ar_deep_hash:hash(NestedData).
 
 %% Hash for content addressing
 Content = <<"File content">>,
-ContentID = ar_deep_hash:hash(Content),
-% Use ContentID as unique identifier
+ContentID = ar_deep_hash:hash([Content]).
 
 %% Verify data integrity
-OriginalHash = ar_deep_hash:hash(Data),
+OriginalHash = ar_deep_hash:hash([Data]),
 % ... store or transmit data ...
-ReceivedHash = ar_deep_hash:hash(ReceivedData),
+ReceivedHash = ar_deep_hash:hash([ReceivedData]),
 Valid = (OriginalHash =:= ReceivedHash).
 
 %% Hash empty structures
-EmptyBinary = ar_deep_hash:hash(<<>>),
 EmptyList = ar_deep_hash:hash([]).
+EmptyBinaryInList = ar_deep_hash:hash([<<>>]).
 ```
 
 ---
@@ -343,7 +343,7 @@ NodeHash = ar_deep_hash:hash([<<"node">>, LeftHash, RightHash]).
 ### 4. Content Addressing
 ```erlang
 % Create content-addressed identifier
-ContentHash = ar_deep_hash:hash(FileData),
+ContentHash = ar_deep_hash:hash([FileData]),
 % Use as unique, deterministic ID
 ```
 
@@ -410,7 +410,7 @@ Simple = crypto:hash(sha384, <<<<"A">>/binary, <<"B">>/binary>>),
 
 % Deep hash preserves structure
 Deep1 = ar_deep_hash:hash([<<"A">>, <<"B">>]),
-Deep2 = ar_deep_hash:hash(<<"AB">>),
+Deep2 = ar_deep_hash:hash([<<"AB">>]),
 Deep1 =/= Deep2.  % True - structure preserved
 ```
 
@@ -432,7 +432,7 @@ Deep1 =/= Deep2.  % True - structure preserved
 ## Performance Considerations
 
 ### Complexity
-- **Binary**: O(1) hash operations (constant)
+- **Single binary in list**: O(1) hash operations (constant)
 - **List of N elements**: O(N) hash operations (linear)
 - **Nested structures**: O(total_elements) across all levels
 
@@ -443,8 +443,8 @@ Deep1 =/= Deep2.  % True - structure preserved
 
 ### Benchmarks
 ```erlang
-% Small binary (16 bytes): ~1-2 μs
-% Large binary (1 MB): ~5-10 ms
+% Single binary in list (16 bytes): ~1-2 μs
+% Large binary in list (1 MB): ~5-10 ms
 % List (100 elements): ~200-300 μs
 % Nested list (10 levels, 10 each): ~1-2 ms
 ```
@@ -454,29 +454,28 @@ Deep1 =/= Deep2.  % True - structure preserved
 ## Test Vectors
 
 ```erlang
-%% Empty structures
-ar_deep_hash:hash(<<>>) = 
-    <<...48 bytes...>>
-
+%% Empty list
 ar_deep_hash:hash([]) = 
-    <<...48 bytes...>>
+    SHA384("list0")
 
-%% Simple binary
-ar_deep_hash:hash(<<"test">>) = 
-    SHA384(SHA384("blob4") + SHA384("test"))
+%% Single binary
+ar_deep_hash:hash([<<"test">>]) = 
+    Tag = SHA384("list1"),
+    BlobHash = SHA384(SHA384("blob4") + SHA384("test")),
+    SHA384(Tag + BlobHash)
 
-%% Simple list
+%% Two binaries
 ar_deep_hash:hash([<<"a">>, <<"b">>]) = 
     Tag = SHA384("list2"),
-    Acc1 = SHA384(Tag + DeepHash("a")),
-    Acc2 = SHA384(Acc1 + DeepHash("b"))
+    Acc1 = SHA384(Tag + DeepHash(<<"a">>)),
+    Acc2 = SHA384(Acc1 + DeepHash(<<"b">>))
 
 %% Nested structure
 ar_deep_hash:hash([<<"x">>, [<<"y">>]]) =
     OuterTag = SHA384("list2"),
     InnerList = SHA384("list1"),
-    InnerComplete = SHA384(InnerList + DeepHash("y")),
-    Acc1 = SHA384(OuterTag + DeepHash("x")),
+    InnerComplete = SHA384(InnerList + DeepHash(<<"y">>)),
+    Acc1 = SHA384(OuterTag + DeepHash(<<"x">>)),
     Final = SHA384(Acc1 + InnerComplete)
 ```
 
@@ -486,15 +485,15 @@ ar_deep_hash:hash([<<"x">>, [<<"y">>]]) =
 
 The module assumes valid input:
 - Lists containing binaries or other lists
-- Pure binary data
-- No atoms, numbers, or other Erlang terms
+- No atoms, numbers, or other Erlang terms directly
 
 **Invalid inputs will cause runtime errors:**
 ```erlang
 % These will crash:
-ar_deep_hash:hash(123).        % Not a list or binary
-ar_deep_hash:hash([atom]).     % Atoms not supported
-ar_deep_hash:hash([1, 2, 3]).  % Numbers not supported
+ar_deep_hash:hash(<<"binary">>).  % Must be wrapped in list
+ar_deep_hash:hash(123).           % Not a list
+ar_deep_hash:hash([atom]).        % Atoms not supported
+ar_deep_hash:hash([1, 2, 3]).     % Numbers not supported
 ```
 
 ---
@@ -511,13 +510,13 @@ ar_deep_hash:hash([1, 2, 3]).  % Numbers not supported
 
 ## Notes
 
-1. **Output Size**: Always 48 bytes (384 bits) regardless of input
-2. **Deterministic**: Same input always produces same hash
-3. **Structure Sensitive**: Different structures hash differently even with same content
-4. **Tagged**: Uses "blob" and "list" prefixes to prevent ambiguity
-5. **Recursive**: Handles arbitrary nesting depth
-6. **Order Dependent**: Element order affects the hash
-7. **Size Embedded**: Element/list size is part of the hash
-8. **No Serialization**: Works directly on Erlang data structures
-9. **Performance**: Linear in number of elements, efficient for nested structures
-10. **Security**: Inherits SHA-384's cryptographic properties
+1. **Input Type**: The public `hash/1` function only accepts lists; wrap binaries in a list
+2. **Output Size**: Always 48 bytes (384 bits) regardless of input
+3. **Deterministic**: Same input always produces same hash
+4. **Structure Sensitive**: Different structures hash differently even with same content
+5. **Tagged**: Uses "blob" and "list" prefixes to prevent ambiguity
+6. **Recursive**: Handles arbitrary nesting depth
+7. **Order Dependent**: Element order affects the hash
+8. **Size Embedded**: Element/list size is part of the hash
+9. **No Serialization**: Works directly on Erlang data structures
+10. **Performance**: Linear in number of elements, efficient for nested structures
