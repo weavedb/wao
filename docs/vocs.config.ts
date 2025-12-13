@@ -243,6 +243,34 @@ export default defineConfig({
       ],
     },
     {
+      text: "Building Devices",
+      collapsed: true,
+      items: [
+        {
+          text: "Erlang Crash Course",
+          link: "/erlang",
+        },
+        {
+          text: "Creating Devices",
+          collapsed: true,
+          items: [
+            {
+              text: "Custom Devices in Erlang",
+              link: "/tutorials/creating-devices",
+            },
+            {
+              text: "Custom Devices in Rust",
+              link: "/tutorials/devices-rust",
+            },
+            {
+              text: "Custom Devices in C++",
+              link: "/tutorials/devices-cpp",
+            },
+          ],
+        },
+      ],
+    },
+    {
       text: "HyperBEAM on Mobile",
       collapsed: true,
       items: [
@@ -285,18 +313,6 @@ export default defineConfig({
         {
           text: "Mainnet AOS",
           link: "/tutorials/mainnet-aos",
-        },
-        {
-          text: "Creating Custom Devices",
-          link: "/tutorials/creating-devices",
-        },
-        {
-          text: "Custom Devices in Rust",
-          link: "/tutorials/devices-rust",
-        },
-        {
-          text: "Custom Devices in C++",
-          link: "/tutorials/devices-cpp",
         },
         {
           text: "Running LLMs on AOS",
