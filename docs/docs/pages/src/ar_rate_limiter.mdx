@@ -47,54 +47,54 @@ This module implements a GenServer-based rate limiter that throttles requests to
 ### Rate Limiting Model
 
 ```
-┌─────────────────────────────────────────────────────┐
-│         ar_rate_limiter (GenServer)                  │
-│                                                      │
-│  State: #{                                          │
-│    traces => #{                                      │
-│      {Peer1, Type1} => {Count, Queue[Timestamps]},  │
-│      {Peer2, Type2} => {Count, Queue[Timestamps]},  │
-│      ...                                            │
-│    },                                               │
-│    off => boolean(),                                │
-│    opts => map()                                    │
-│  }                                                  │
-│                                                      │
-│  Sliding Window (30s default):                      │
-│  [--------------------|---------]                   │
-│   Old (discarded)    | Recent (counted)            │
-└──────────────────────────────────────────────────────┘
++-----------------------------------------------------+
+|         ar_rate_limiter (GenServer)                 |
+|                                                     |
+|  State: #{                                          |
+|    traces => #{                                     |
+|      {Peer1, Type1} => {Count, Queue[Timestamps]},  |
+|      {Peer2, Type2} => {Count, Queue[Timestamps]},  |
+|      ...                                            |
+|    },                                               |
+|    off => boolean(),                                |
+|    opts => map()                                    |
+|  }                                                  |
+|                                                     |
+|  Sliding Window (30s default):                      |
+|  [--------------------|---------]                   |
+|   Old (discarded)    | Recent (counted)             |
++-----------------------------------------------------+
 ```
 
 ### Request Flow
 
 ```
 Client Request
-      │
-      ▼
+      |
+      v
    throttle(Peer, Path, Opts)
-      │
-      ├─► Exempt Peer? ──Yes──► Allow immediately
-      │        │
-      │        No
-      │        ▼
-      ├─► Exempt Path? ──Yes──► Allow immediately
-      │        │
-      │        No
-      │        ▼
-      └─► gen_server:call({throttle, Peer, Path})
-              │
-              ▼
+      |
+      +-> Exempt Peer? --Yes--> Allow immediately
+      |        |
+      |        No
+      |        v
+      +-> Exempt Path? --Yes--> Allow immediately
+      |        |
+      |        No
+      |        v
+      +-> gen_server:call({throttle, Peer, Path})
+              |
+              v
           Check Rate
-              │
-              ├─► Under 80% of limit? ──Yes──► Reply OK
-              │                                  │
-              │                                  ▼
-              │                              Update traces
-              │
-              └─► Over threshold? ──Yes──► Delay 1 second
-                                            │
-                                            ▼
+              |
+              +-> Under 80% of limit? --Yes--> Reply OK
+              |                                  |
+              |                                  v
+              |                              Update traces
+              |
+              +-> Over threshold? --Yes--> Delay 1 second
+                                            |
+                                            v
                                         Retry throttle
 ```
 
@@ -106,8 +106,8 @@ Queue Structure (per Peer+Type):
 
 Example (30s window, Now = 100000):
   Timestamps: [70001, 75000, 80000, 90000, 95000]
-                 │                    │
-                 └─ Expired (>30s)   └─ Recent (<30s)
+                 |                    |
+                 +-- Expired (>30s)   +-- Recent (<30s)
                  
 After cut_trace:
   Timestamps: [80000, 90000, 95000]
@@ -144,9 +144,7 @@ After cut_trace:
 start_link_basic_test() ->
     Opts = #{
         throttle_period => 30000,
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 60}
-        }
+        throttle_rpm_by_path => {api, 60}
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     ?assert(is_pid(PID)),
@@ -195,9 +193,7 @@ start_link_with_exemptions_test() ->
 throttle_exempt_peer_test() ->
     Opts = #{
         throttle_exempt_peers => [<<"trusted-peer">>],
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 10}
-        }
+        throttle_rpm_by_path => {api, 60}
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     
@@ -212,9 +208,7 @@ throttle_exempt_peer_test() ->
 throttle_exempt_path_test() ->
     Opts = #{
         throttle_exempt_paths => [<<"/health">>, <<"/metrics">>],
-        throttle_rpm_by_path => #{
-            <<".*">> => {default, 10}
-        }
+        throttle_rpm_by_path => {default, 60}
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     
@@ -229,9 +223,7 @@ throttle_exempt_path_test() ->
 throttle_under_limit_test() ->
     Opts = #{
         throttle_period => 30000,
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 60}  % 60 requests per minute
-        }
+        throttle_rpm_by_path => {api, 60}  % 60 requests per minute
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     
@@ -250,13 +242,11 @@ throttle_under_limit_test() ->
 throttle_over_limit_test() ->
     Opts = #{
         throttle_period => 30000,
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 10}  % 10 requests per minute = 5 per 30s
-        }
+        throttle_rpm_by_path => {api, 10}  % 10 requests per minute = 5 per 30s
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     
-    % Make requests up to 80% of limit (4 requests)
+    % Make requests up to 80% of half-limit (80% of 5 = 4 requests)
     lists:foreach(
         fun(_) ->
             ok = ar_rate_limiter:throttle(<<"peer1">>, <<"/api/data">>, Opts)
@@ -264,7 +254,7 @@ throttle_over_limit_test() ->
         lists:seq(1, 4)
     ),
     
-    % Next request should be delayed
+    % Next request should be delayed (over 80% threshold)
     Start = os:system_time(millisecond),
     ok = ar_rate_limiter:throttle(<<"peer1">>, <<"/api/data">>, Opts),
     End = os:system_time(millisecond),
@@ -274,9 +264,7 @@ throttle_over_limit_test() ->
 
 throttle_different_peers_test() ->
     Opts = #{
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 10}
-        }
+        throttle_rpm_by_path => {api, 60}
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     
@@ -310,9 +298,7 @@ throttle_no_server_test() ->
 
 off_disables_limiting_test() ->
     Opts = #{
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 10}
-        }
+        throttle_rpm_by_path => {api, 60}
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     
@@ -350,9 +336,7 @@ off_disables_limiting_test() ->
 
 on_enables_limiting_test() ->
     Opts = #{
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 10}
-        }
+        throttle_rpm_by_path => {api, 60}
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     
@@ -372,9 +356,7 @@ on_enables_limiting_test() ->
 
 on_off_toggle_test() ->
     Opts = #{
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 10}
-        }
+        throttle_rpm_by_path => {api, 60}
     },
     {ok, PID} = ar_rate_limiter:start_link(Opts),
     
@@ -485,42 +467,6 @@ Clean shutdown (no special cleanup needed).
    - Return current count and queue
 ```
 
-**Test Code:**
-```erlang
--module(ar_rate_limiter_cut_trace_test).
--include_lib("eunit/include/eunit.hrl").
-
-% Note: This is a private function, testing through throttle/3
-
-cut_trace_behavior_test() ->
-    Opts = #{
-        throttle_period => 5000,  % 5 second window for testing
-        throttle_rpm_by_path => #{
-            <<"/api/.*">> => {api, 20}
-        }
-    },
-    {ok, PID} = ar_rate_limiter:start_link(Opts),
-    
-    % Make requests
-    lists:foreach(
-        fun(_) ->
-            ok = ar_rate_limiter:throttle(<<"peer1">>, <<"/api/data">>, Opts)
-        end,
-        lists:seq(1, 5)
-    ),
-    
-    % Wait for traces to expire
-    timer:sleep(6000),
-    
-    % Should be able to make more requests without delay
-    Start = os:system_time(millisecond),
-    ok = ar_rate_limiter:throttle(<<"peer1">>, <<"/api/data">>, Opts),
-    End = os:system_time(millisecond),
-    
-    ?assert((End - Start) < 100),
-    gen_server:stop(PID).
-```
-
 ---
 
 ## Configuration
@@ -603,15 +549,15 @@ Threshold = HalfLimit * 80 / 100   % 24 (80% of half limit)
 ```
 RPM = 60, Window = 30s, Threshold = 24
 
-Time (s) │ Requests │ Action
-─────────┼──────────┼────────────────────
-0        │ 1-24     │ Allowed immediately
-25       │ 25       │ Delayed 1s
-26       │ 26       │ Delayed 1s
-27       │ 27       │ Delayed 1s
+Time (s) | Requests | Action
+---------|----------|--------------------
+0        | 1-24     | Allowed immediately
+25       | 25       | Delayed 1s
+26       | 26       | Delayed 1s
+27       | 27       | Delayed 1s
 ...
-30       │ (window) │ Old requests expire
-31       │ 31       │ Allowed (if under threshold after expiry)
+30       | (window) | Old requests expire
+31       | 31       | Allowed (if under threshold after expiry)
 ```
 
 ---

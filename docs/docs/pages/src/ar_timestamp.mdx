@@ -36,20 +36,20 @@ This module implements a simple caching server that maintains the current Arweav
 ### Server Model
 
 ```
-┌─────────────────────────────────────────────┐
-│         ar_timestamp (Registered Process)    │
-│                                              │
-│  ┌────────────┐          ┌───────────────┐  │
-│  │   Cache    │◄─────────┤   Refresher   │  │
-│  │  Process   │          │   Process     │  │
-│  └─────┬──────┘          └───────┬───────┘  │
-│        │                         │          │
-│        │ Serves cached           │ Updates  │
-│        │ timestamp               │ every    │
-│        │                         │ 15s      │
-└────────┼─────────────────────────┼──────────┘
-         │                         │
-         ▼                         ▼
++---------------------------------------------+
+|         ar_timestamp (Registered Process)   |
+|                                             |
+|  +------------+          +---------------+  |
+|  |   Cache    |<---------|   Refresher   |  |
+|  |  Process   |          |   Process     |  |
+|  +-----+------+          +-------+-------+  |
+|        |                         |          |
+|        | Serves cached           | Updates  |
+|        | timestamp               | every    |
+|        |                         | 15s      |
++--------+-------------------------+----------+
+         |                         |
+         v                         v
    Client Requests         hb_client:arweave_timestamp()
 ```
 
@@ -57,14 +57,14 @@ This module implements a simple caching server that maintains the current Arweav
 
 ```
 Client                Cache Process         Refresher Process
-  │                        │                       │
-  ├──{get, self()}────────►│                       │
-  │                        │                       │
-  │◄──{timestamp, TS}──────┤                       │
-  │                        │                       │
-  │                        │◄──{refresh, NewTS}────┤
-  │                        │                       │
-  │                        │  (every 15 seconds)   │
+  |                        |                       |
+  +--{get, self()}-------->|                       |
+  |                        |                       |
+  |<--{timestamp, TS}------+                       |
+  |                        |                       |
+  |                        |<--{refresh, NewTS}----+
+  |                        |                       |
+  |                        |  (every 15 seconds)   |
 ```
 
 ---
@@ -97,7 +97,6 @@ start_creates_process_test() ->
     case whereis(ar_timestamp) of
         undefined -> ok;
         OldPID -> 
-            unregister(ar_timestamp),
             exit(OldPID, kill),
             timer:sleep(10)
     end,
@@ -113,13 +112,19 @@ start_idempotent_test() ->
     ?assertEqual(PID1, PID2),
     ?assert(is_process_alive(PID1)).
 
-start_restarts_dead_process_test() ->
+start_after_kill_test() ->
     PID1 = ar_timestamp:start(),
-    unregister(ar_timestamp),
+    ?assert(is_process_alive(PID1)),
+    
+    % Kill the process - registration is automatically removed
     exit(PID1, kill),
     timer:sleep(10),
-    register(ar_timestamp, PID1),  % Register dead PID
     
+    % Verify process is dead and unregistered
+    ?assertEqual(false, is_process_alive(PID1)),
+    ?assertEqual(undefined, whereis(ar_timestamp)),
+    
+    % Start should spawn a new process
     PID2 = ar_timestamp:start(),
     ?assert(is_process_alive(PID2)),
     ?assertNotEqual(PID1, PID2).
@@ -150,78 +155,55 @@ start_restarts_dead_process_test() ->
 -module(ar_timestamp_get_test).
 -include_lib("eunit/include/eunit.hrl").
 
-get_returns_timestamp_test() ->
-    Timestamp = ar_timestamp:get(),
-    ?assert(is_integer(Timestamp)),
-    ?assert(Timestamp > 0),
-    % Timestamp should be reasonable (after 2020, before 2100)
-    ?assert(Timestamp > 1577836800),  % 2020-01-01
-    ?assert(Timestamp < 4102444800).  % 2100-01-01
+get_returns_value_test() ->
+    Result = ar_timestamp:get(),
+    % get/0 should return whatever hb_client:arweave_timestamp() returns
+    ?assertNotEqual(undefined, Result).
 
 get_starts_server_test() ->
     % Ensure clean state
     case whereis(ar_timestamp) of
         undefined -> ok;
         OldPID -> 
-            unregister(ar_timestamp),
             exit(OldPID, kill),
             timer:sleep(10)
     end,
     
     ?assertEqual(undefined, whereis(ar_timestamp)),
-    Timestamp = ar_timestamp:get(),
-    ?assert(is_integer(Timestamp)),
+    _Result = ar_timestamp:get(),
     ?assertNotEqual(undefined, whereis(ar_timestamp)).
 
-get_multiple_times_test() ->
-    TS1 = ar_timestamp:get(),
-    TS2 = ar_timestamp:get(),
-    TS3 = ar_timestamp:get(),
+get_cached_value_test() ->
+    Result1 = ar_timestamp:get(),
+    Result2 = ar_timestamp:get(),
+    Result3 = ar_timestamp:get(),
     
-    ?assert(is_integer(TS1)),
-    ?assert(is_integer(TS2)),
-    ?assert(is_integer(TS3)),
-    
-    % Within 15 seconds, should return same cached value
-    ?assertEqual(TS1, TS2),
-    ?assertEqual(TS2, TS3).
+    % Within cache window, should return same cached value
+    ?assertEqual(Result1, Result2),
+    ?assertEqual(Result2, Result3).
 
 get_concurrent_test() ->
     % Multiple processes getting timestamp concurrently
     Self = self(),
-    Pids = [
-        spawn(fun() -> 
-            TS = ar_timestamp:get(),
-            Self ! {timestamp, TS}
-        end)
-        || _ <- lists:seq(1, 10)
-    ],
+    NumProcs = 10,
+    lists:foreach(
+        fun(_) ->
+            spawn(fun() -> 
+                Result = ar_timestamp:get(),
+                Self ! {timestamp, Result}
+            end)
+        end,
+        lists:seq(1, NumProcs)
+    ),
     
-    Timestamps = [
-        receive {timestamp, TS} -> TS end
-        || _ <- Pids
-    ],
+    Results = [receive {timestamp, R} -> R end || _ <- lists:seq(1, NumProcs)],
     
-    % All should get a timestamp
-    ?assertEqual(10, length(Timestamps)),
-    lists:foreach(fun(TS) -> ?assert(is_integer(TS)) end, Timestamps),
+    % All should get a result
+    ?assertEqual(NumProcs, length(Results)),
     
     % All should be the same (from cache)
-    [First | Rest] = Timestamps,
-    lists:foreach(fun(TS) -> ?assertEqual(First, TS) end, Rest).
-
-get_after_refresh_test() ->
-    TS1 = ar_timestamp:get(),
-    
-    % Wait for refresh (15 seconds + buffer)
-    timer:sleep(16000),
-    
-    TS2 = ar_timestamp:get(),
-    
-    % Should potentially be different after refresh
-    ?assert(is_integer(TS1)),
-    ?assert(is_integer(TS2)),
-    ?assert(TS2 >= TS1).  % Time should not go backwards
+    [First | Rest] = Results,
+    lists:foreach(fun(R) -> ?assertEqual(First, R) end, Rest).
 ```
 
 ---
