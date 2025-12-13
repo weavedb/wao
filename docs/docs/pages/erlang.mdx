@@ -1,0 +1,2085 @@
+# The Complete Erlang Crash Course
+
+**Master Erlang: from primitives to production**
+
+*This guide covers every Erlang feature used in the HyperBEAM codebase*
+
+**Time to complete:** ~1 hour (reading + running tests)
+
+**What you'll be able to do:**
+- Read and understand the HyperBEAM source code
+- Build your own custom HyperBEAM devices
+
+---
+
+## Table of Contents
+
+**Chapter 1: Setup**  
+Getting started with your test environment
+
+**Chapter 2: Primitives** (Parts 1-4)  
+Numbers, atoms, strings, variables - the foundation
+
+**Chapter 3: Data Structures** (Parts 5-8)  
+Lists, tuples, maps, records - organizing data
+
+**Chapter 4: Functions** (Parts 9-11)  
+Functions, guards, pattern matching - building blocks
+
+**Chapter 5: Control Flow** (Parts 12-14)  
+Branching, recursion, higher-order functions
+
+**Chapter 6: Standard Library** (Parts 20-27)  
+Essential modules for real applications
+
+**Chapter 7: Concurrency** (Parts 15-19)  
+Processes, gen_server, supervisors, applications - the heart of Erlang
+
+**Chapter 8: Advanced Topics** (Parts 28-35)  
+ETS, ports, optimization, introspection
+
+**Chapter 9: Module System & Organization** (Parts 36-38)  
+Module basics, compile directives, type specifications
+
+**Chapter 10: NIFs (Native Implemented Functions)** (Parts 39-42)  
+C NIFs, Rustler, binaries, best practices
+
+---
+
+## Chapter 1: Setup
+
+Create your test file at `src/test/test_erlang.erl`:
+
+```erlang
+-module(test_erlang).
+-include_lib("eunit/include/eunit.hrl").
+
+%% Add your tests below as you learn each part
+%% Run with: rebar3 eunit --module=test_erlang
+```
+
+After each part, add the test code to this file and run:
+```bash
+rebar3 eunit --module=test_erlang
+```
+
+---
+
+## Chapter 2: Primitives
+
+The basic building blocks of Erlang - learn these first!
+
+---
+
+### Part 1: Numbers
+
+Integers have arbitrary precision. Division `/` always returns float.
+
+```erlang
+%% Arithmetic
+3 + 4         % 7
+10 div 3      % 3 (integer division)
+10 rem 3      % 1 (remainder)
+5 / 2         % 2.5 (always float!)
+
+%% Formats
+255           % Decimal
+16#FF         % Hex = 255
+2#1010        % Binary = 10  
+1_000_000     % Readable
+
+%% Comparisons
+5 < 10        % true
+5 =< 5        % true (note: =< not <=)
+5 == 5.0      % true (coercion)
+5 =:= 5.0     % false (exact match)
+```
+
+**Test:**
+```erlang
+numbers_test() ->
+    ?assertEqual(7, 3 + 4),
+    ?assertEqual(3, 10 div 3),
+    ?assertEqual(1, 10 rem 3),
+    ?assertEqual(2.5, 5 / 2),
+    ?assertEqual(255, 16#FF),
+    ?assert(5 == 5.0),
+    ?assertNot(5 =:= 5.0).
+```
+
+---
+
+### Part 2: Atoms
+
+Atoms are constants - like symbols or enums.
+
+```erlang
+%% Atoms
+ok
+error
+true
+false
+undefined
+my_atom
+
+%% Booleans are just atoms!
+is_atom(true)             % true
+is_atom(false)            % true
+is_atom(ok)               % true (all atoms!)
+
+%% BUT: Boolean operators ONLY work with true/false atoms
+true and true             % true
+true andalso true         % true (short-circuit AND)
+false orelse true         % true (short-circuit OR)
+not false                 % true
+
+%% Other atoms will crash the operators
+ok andalso error          % CRASH! bad argument in operator andalso
+
+%% IMPORTANT: and vs andalso, or vs orelse
+%% and/or - ALWAYS evaluate BOTH sides
+true and (1/0 == 0)       % CRASH! Evaluates 1/0 even though left is true
+
+%% andalso/orelse - SHORT-CIRCUIT (stop early if possible)
+false andalso (1/0 == 0)  % false - never evaluates 1/0
+true orelse (1/0 == 0)    % true - never evaluates 1/0
+
+%% Always use andalso/orelse (they're safer!)
+
+%% Tagged tuples (idiomatic Erlang)
+{ok, <<"data">>}
+{error, not_found}
+```
+
+**Test:**
+```erlang
+atoms_test() ->
+    ?assertEqual(ok, ok),
+    ?assert(is_atom(true)),
+    ?assert(is_atom(ok)),      % true and ok are both just atoms
+    ?assert(true andalso true),
+    ?assert(not false).
+
+short_circuit_test() ->
+    %% andalso stops if left is false
+    ?assertNot(false andalso (1/0 == 0)),  % Doesn't crash!
+    
+    %% orelse stops if left is true
+    ?assert(true orelse (1/0 == 0)).       % Doesn't crash!
+
+tagged_tuples_test() ->
+    Result = {ok, 42},
+    {ok, Value} = Result,
+    ?assertEqual(42, Value).
+```
+
+---
+
+### Part 3: Binaries & Strings
+
+**Binaries** are byte sequences. Modern Erlang uses binaries for strings.
+
+```erlang
+%% Binary syntax
+<<"hello">>                    % Binary string
+<<72, 101, 108, 108, 111>>     % Same (ASCII)
+byte_size(<<"hello">>)         % 5
+
+%% Concatenation
+<<<<"hello">>/binary, " world">>
+
+%% Pattern matching
+<<H:8, Rest/binary>> = <<"hello">>,
+%% H = 104 (ASCII 'h')
+%% Rest = <<"ello">>
+
+<<A:16, B:16>> = <<0, 10, 0, 20>>,
+%% A = 10, B = 20
+```
+
+**Test:**
+```erlang
+binaries_test() ->
+    ?assertEqual(5, byte_size(<<"hello">>)),
+    ?assert(is_binary(<<"test">>)),
+    
+    <<H:8, Rest/binary>> = <<"hello">>,
+    ?assertEqual(104, H),
+    ?assertEqual(<<"ello">>, Rest).
+```
+
+---
+
+### Part 4: Variables & Pattern Matching
+
+Variables are **immutable**. `=` is pattern matching, not assignment.
+
+```erlang
+%% Binding
+X = 42,           % X bound to 42
+Y = X + 8,        % Y bound to 50
+% X = 43,         % ERROR! Already bound
+
+%% Pattern matching
+{A, B} = {10, 20},              % A=10, B=20
+{ok, Data} = {ok, <<"value">>}, % Extract
+[H|T] = [1, 2, 3],              % H=1, T=[2,3]
+{_, X, _} = {a, b, c},          % X=b, ignore rest
+
+%% Must match
+{ok, Value} = {ok, 42},         % OK
+% {ok, Value} = {error, x},     % ERROR! No match
+```
+
+**Test:**
+```erlang
+variables_test() ->
+    X = 42,
+    ?assertEqual(42, X),
+    
+    %% X = 43,  % Would CRASH! Variables can't be rebound
+    
+    Y = X + 8,
+    ?assertEqual(50, Y).
+
+pattern_matching_test() ->
+    {A, B} = {10, 20},
+    ?assertEqual(10, A),
+    ?assertEqual(20, B),
+    
+    [H|T] = [1, 2, 3],
+    ?assertEqual(1, H),
+    ?assertEqual([2, 3], T).
+```
+
+---
+
+## Chapter 3: Data Structures
+
+How to organize and structure data in Erlang.
+
+---
+
+### Part 5: Lists
+
+Lists are linked lists - efficient prepend, slow append.
+
+```erlang
+%% Syntax
+[1, 2, 3]
+[H|T] = [1, 2, 3]     % H=1, T=[2,3]
+
+%% Operations
+[0|[1, 2]]            % [0, 1, 2] - prepend O(1)
+[1, 2] ++ [3]         % [1, 2, 3] - append O(n)
+[1, 2, 3] -- [2]      % [1, 3] - difference
+length([1, 2, 3])     % 3
+
+%% List comprehensions
+[X * 2 || X <- [1, 2, 3]]                  % [2, 4, 6]
+%% Read as: "X * 2 for each X from [1,2,3]"
+
+[X || X <- [1,2,3,4], X rem 2 == 0]        % [2, 4]
+%% Read as: "X for each X from [1,2,3,4] where X is even"
+%% X rem 2 == 0 is a FILTER (only include if true)
+
+[{X, Y} || X <- [1,2], Y <- [a,b]]         % [{1,a},{1,b},{2,a},{2,b}]
+%% Read as: "tuple {X,Y} for each X from [1,2] and each Y from [a,b]"
+%% This creates all combinations (Cartesian product)
+
+%% Pattern: [Expression || Generator, Filter]
+%% Generator: X <- List (draw from list)
+%% Filter: Condition (optional, acts like guard)
+%% Expression: What to build
+```
+
+**Test:**
+```erlang
+lists_test() ->
+    ?assertEqual([0, 1, 2], [0|[1, 2]]),
+    ?assertEqual([1, 2, 3], [1, 2] ++ [3]),
+    ?assertEqual(3, length([1, 2, 3])),
+    
+    [H|T] = [1, 2, 3],
+    ?assertEqual(1, H),
+    ?assertEqual([2, 3], T).
+
+list_comprehension_test() ->
+    ?assertEqual([2, 4, 6], [X * 2 || X <- [1, 2, 3]]),
+    ?assertEqual([2, 4], [X || X <- [1,2,3,4], X rem 2 == 0]).
+```
+
+---
+
+### Part 6: Tuples
+
+Tuples are fixed-size, fast access.
+
+```erlang
+%% Syntax
+{10, 20}
+{person, <<"Alice">>, 25}
+
+%% Pattern matching
+{X, Y} = {10, 20}                % X=10, Y=20
+{person, Name, Age} = Person     % Extract fields
+
+%% Operations
+element(2, {a, b, c})            % b (1-indexed!)
+setelement(2, {a, b, c}, new)    % {a, new, c}
+tuple_size({a, b, c})            % 3
+```
+
+**Test:**
+```erlang
+tuples_test() ->
+    T = {a, b, c},
+    ?assertEqual(3, tuple_size(T)),
+    ?assertEqual(b, element(2, T)),
+    
+    {X, Y} = {10, 20},
+    ?assertEqual(10, X),
+    ?assertEqual(20, Y).
+```
+
+---
+
+### Part 7: Maps
+
+Maps are key-value stores - modern, efficient.
+
+```erlang
+%% Creation
+#{name => <<"Alice">>, age => 25}
+
+%% Access
+#{name := Name} = User,          % Must exist
+maps:get(age, User),             % 25
+maps:get(missing, User, default) % default
+
+%% Update
+User#{age => 26}                 % Update/add
+User#{age := 26}                 % Update (must exist)
+
+%% Operations
+maps:keys(User)                  % [name, age]
+maps:remove(age, User)
+maps:merge(M1, M2)
+```
+
+**Test:**
+```erlang
+maps_test() ->
+    M = #{a => 1, b => 2},
+    ?assertEqual(1, maps:get(a, M)),
+    ?assertEqual(2, maps:size(M)),
+    
+    M2 = M#{c => 3},
+    ?assertEqual(3, maps:size(M2)),
+    
+    M3 = maps:remove(a, M2),
+    ?assertNot(maps:is_key(a, M3)).
+```
+
+---
+
+### Part 8: Records
+
+Records are compile-time tuples with named fields.
+
+```erlang
+%% Definition (at top of file)
+-record(user, {
+    id,
+    name,
+    age = 0,
+    active = true
+}).
+
+%% Creation
+User = #user{id = 1, name = <<"Alice">>},
+
+%% Access
+User#user.id                     % 1
+User#user.age                    % 0 (default)
+
+%% Pattern matching
+#user{name = Name} = User,
+
+%% Update
+User2 = User#user{age = 25},
+```
+
+**Test:**
+```erlang
+%% Note: Add this record definition at the TOP of your test file (after -module and -include):
+%% -record(user, {id, name, age = 0}).
+
+records_test() ->
+    U = #user{id = 1, name = <<"Alice">>},
+    ?assertEqual(1, U#user.id),
+    ?assertEqual(0, U#user.age),
+    
+    U2 = U#user{age = 25},
+    ?assertEqual(25, U2#user.age).
+```
+
+---
+
+## Chapter 4: Functions
+
+Building blocks of Erlang programs - pattern matching, guards, and closures.
+
+---
+
+### Part 9: Functions
+
+Functions are first-class values.
+
+```erlang
+%% Named function
+double(X) -> X * 2.
+
+%% Multiple clauses
+factorial(0) -> 1;
+factorial(N) -> N * factorial(N - 1).
+
+%% Anonymous function
+Double = fun(X) -> X * 2 end,
+Double(5),  % 10
+
+%% Closures
+make_adder(N) ->
+    fun(X) -> X + N end.
+
+Add5 = make_adder(5),
+Add5(10),  % 15
+```
+
+**Test:**
+```erlang
+%% Helper functions for functions_test
+double(X) -> X * 2.
+
+factorial(0) -> 1;
+factorial(N) -> N * factorial(N - 1).
+
+functions_test() ->
+    ?assertEqual(10, double(5)),
+    ?assertEqual(120, factorial(5)),
+    
+    Double = fun(X) -> X * 2 end,
+    ?assertEqual(10, Double(5)).
+```
+
+---
+
+### Part 10: Guards
+
+Guards constrain pattern matching with boolean expressions.
+
+```erlang
+%% Guard syntax
+max(A, B) when A > B -> A;
+max(_, B) -> B.
+
+%% Multiple guards (comma = AND, semicolon = OR)
+in_range(X) when X >= 0, X =< 100 -> true;
+in_range(_) -> false.
+
+is_valid(Age) when is_integer(Age); is_float(Age) ->
+    Age >= 0.
+
+%% Common guard BIFs
+is_adult(Age) when is_integer(Age), Age >= 18 -> true;
+is_adult(_) -> false.
+
+%% Type checks: is_atom, is_binary, is_integer, is_list, is_map, is_tuple
+%% Comparisons: >, <, >=, =<, ==, =:=
+%% Arithmetic: +, -, *, div, rem
+```
+
+**Test:**
+```erlang
+%% Helper functions for guards_test
+max(A, B) when A > B -> A;
+max(_A, B) -> B.
+
+in_range(X) when X >= 0, X =< 100 -> true;
+in_range(_) -> false.
+
+is_adult(Age) when is_integer(Age), Age >= 18 -> true;
+is_adult(_) -> false.
+
+guards_test() ->
+    ?assertEqual(10, max(10, 5)),
+    ?assert(in_range(50)),
+    ?assertNot(in_range(150)),
+    ?assert(is_adult(25)),
+    ?assertNot(is_adult(15)).
+```
+
+---
+
+### Part 11: Pattern Matching in Functions
+
+Functions can pattern match arguments directly.
+
+```erlang
+%% Match on structure
+process({ok, Data}) -> {success, Data};
+process({error, Reason}) -> {failed, Reason}.
+
+%% Match on values
+handle(start) -> init();
+handle(stop) -> cleanup();
+handle(_) -> unknown.
+
+%% Destructure in function head
+format_user({user, Name, Age}) ->
+    io_lib:format("~s is ~p years old", [Name, Age]).
+
+%% List patterns
+sum([]) -> 0;
+sum([H|T]) -> H + sum(T).
+```
+
+**Test:**
+```erlang
+%% Helper functions for pattern_functions_test
+process({ok, Data}) -> {success, Data};
+process({error, Reason}) -> {failed, Reason}.
+
+sum([]) -> 0;
+sum([H|T]) -> H + sum(T).
+
+pattern_functions_test() ->
+    ?assertEqual({success, 42}, process({ok, 42})),
+    ?assertEqual({failed, timeout}, process({error, timeout})),
+    
+    ?assertEqual(0, sum([])),
+    ?assertEqual(15, sum([1, 2, 3, 4, 5])).
+```
+
+---
+
+## Chapter 5: Control Flow
+
+Branching, recursion, and functional programming patterns.
+
+---
+
+### Part 12: Control Flow (case/if)
+
+Branch execution with case and if.
+
+```erlang
+%% case - pattern matching
+handle_response(Response) ->
+    case Response of
+        {ok, Data} -> 
+            process(Data);
+        {error, not_found} -> 
+            default();
+        {error, Reason} -> 
+            {error, Reason}
+    end.
+
+%% case with guards
+classify(N) ->
+    case N of
+        _ when N < 0 -> negative;
+        0 -> zero;
+        _ when N > 0 -> positive
+    end.
+
+%% if (rarely used - use case instead)
+classify_if(N) ->
+    if
+        N < 0 -> negative;
+        N == 0 -> zero;
+        N > 0 -> positive
+    end.
+```
+
+**Test:**
+```erlang
+%% Helper function for case_test
+classify(N) ->
+    case N of
+        _ when N < 0 -> negative;
+        0 -> zero;
+        _ -> positive
+    end.
+
+case_test() ->
+    ?assertEqual(negative, classify(-5)),
+    ?assertEqual(zero, classify(0)),
+    ?assertEqual(positive, classify(5)).
+```
+
+---
+
+### Part 13: Recursion
+
+Erlang has no loops - use recursion. **Tail recursion** is optimized.
+
+```erlang
+%% Simple recursion (not tail-recursive)
+factorial(0) -> 1;
+factorial(N) -> N * factorial(N - 1).
+
+%% Tail recursion (optimized - constant stack)
+factorial_tail(N) -> factorial_tail(N, 1).
+factorial_tail(0, Acc) -> Acc;
+factorial_tail(N, Acc) -> factorial_tail(N - 1, N * Acc).
+
+%% List sum (tail recursive)
+sum(List) -> sum(List, 0).
+sum([], Acc) -> Acc;
+sum([H|T], Acc) -> sum(T, Acc + H).
+
+%% Map
+map(_, []) -> [];
+map(F, [H|T]) -> [F(H) | map(F, T)].
+
+%% Filter
+filter(_, []) -> [];
+filter(F, [H|T]) ->
+    case F(H) of
+        true -> [H | filter(F, T)];
+        false -> filter(F, T)
+    end.
+```
+
+**Test:**
+```erlang
+%% Helper functions for recursion_test
+%% (factorial already defined in Part 9)
+factorial_tail(N) -> factorial_tail(N, 1).
+factorial_tail(0, Acc) -> Acc;
+factorial_tail(N, Acc) -> factorial_tail(N - 1, N * Acc).
+
+%% (sum already defined in Part 11)
+map(_, []) -> [];
+map(F, [H|T]) -> [F(H) | map(F, T)].
+
+recursion_test() ->
+    ?assertEqual(120, factorial(5)),
+    ?assertEqual(120, factorial_tail(5)),
+    ?assertEqual(15, sum([1, 2, 3, 4, 5])),
+    
+    Double = fun(X) -> X * 2 end,
+    ?assertEqual([2, 4, 6], map(Double, [1, 2, 3])).
+```
+
+---
+
+### Part 14: Higher-Order Functions
+
+Functions that take or return functions.
+
+```erlang
+%% Standard library
+lists:map(fun(X) -> X * 2 end, [1, 2, 3]),          % [2, 4, 6]
+lists:filter(fun(X) -> X rem 2 == 0 end, [1,2,3,4]), % [2, 4]
+lists:foldl(fun(X, Acc) -> X + Acc end, 0, [1,2,3]), % 6
+
+%% Composition
+compose(F, G) ->
+    fun(X) -> F(G(X)) end.
+
+Add1 = fun(X) -> X + 1 end,
+Double = fun(X) -> X * 2 end,
+F = compose(Double, Add1),
+F(5),  % 12 = (5 + 1) * 2
+
+%% Partial application
+partial(F, Arg1) ->
+    fun(Arg2) -> F(Arg1, Arg2) end.
+```
+
+**Test:**
+```erlang
+higher_order_test() ->
+    ?assertEqual([2, 4, 6], 
+        lists:map(fun(X) -> X * 2 end, [1, 2, 3])),
+    
+    ?assertEqual([2, 4], 
+        lists:filter(fun(X) -> X rem 2 == 0 end, [1,2,3,4])),
+    
+    ?assertEqual(10, 
+        lists:foldl(fun(X, Acc) -> X + Acc end, 0, [1,2,3,4])).
+```
+
+---
+
+## Chapter 6: Standard Library
+
+Essential modules and functions for real-world applications.
+
+---
+
+### Part 20: Try-Catch-After
+
+Production error handling with guaranteed cleanup.
+
+```erlang
+%% Full syntax
+process_file(File) ->
+    try
+        {ok, Fd} = file:open(File, [read]),
+        Data = file:read(Fd, 1024),
+        process(Data)
+    catch
+        error:enoent -> 
+            {error, not_found};
+        error:Reason -> 
+            {error, Reason};
+        throw:invalid -> 
+            {error, validation}
+    after
+        %% Always runs (cleanup)
+        file:close(Fd)
+    end.
+
+%% Simple
+safe_div(A, B) ->
+    try
+        A / B
+    catch
+        error:badarith -> {error, division_by_zero}
+    end.
+```
+
+**Test:**
+```erlang
+%% Helper function for try_catch_test
+safe_div(_A, 0) -> {error, division_by_zero};
+safe_div(A, B) -> 
+    try
+        A / B
+    catch
+        error:badarith -> {error, division_by_zero}
+    end.
+
+try_catch_test() ->
+    ?assertEqual(2.0, safe_div(10, 5)),
+    ?assertEqual({error, division_by_zero}, safe_div(10, 0)).
+```
+
+---
+
+### Part 21: Binary Module
+
+Efficient binary manipulation.
+
+```erlang
+%% Split
+binary:split(<<"a,b,c">>, <<",">>),          % [<<"a">>, <<"b,c">>]
+binary:split(<<"a,b,c">>, <<",">>, [global]), % [<<"a">>, <<"b">>, <<"c">>]
+
+%% Match
+binary:match(<<"hello">>, <<"llo">>),        % {2, 3}
+
+%% Replace
+binary:replace(<<"hello">>, <<"l">>, <<"L">>, [global]), % <<"heLLo">>
+
+%% Encoding
+binary:encode_hex(<<1, 255>>),               % <<"01ff">>
+binary:decode_hex(<<"01ff">>),               % <<1, 255>>
+```
+
+**Test:**
+```erlang
+binary_test() ->
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>],
+        binary:split(<<"a,b,c">>, <<",">>, [global])),
+    
+    ?assertEqual(<<"heLLo">>,
+        binary:replace(<<"hello">>, <<"l">>, <<"L">>, [global])).
+```
+
+---
+
+### Part 22: Crypto Module
+
+Cryptographic operations.
+
+```erlang
+%% Hashing
+crypto:hash(sha256, <<"data">>),             % 32 bytes
+crypto:hash(sha512, <<"data">>),             % 64 bytes
+
+%% HMAC
+Key = <<"secret">>,
+crypto:mac(hmac, sha256, Key, <<"data">>),
+
+%% Random
+crypto:strong_rand_bytes(32),                % Secure random
+
+%% Multi-stage
+Ctx = crypto:hash_init(sha256),
+Ctx2 = crypto:hash_update(Ctx, <<"part1">>),
+crypto:hash_final(Ctx2),
+```
+
+**Test:**
+```erlang
+crypto_test() ->
+    Hash = crypto:hash(sha256, <<"test">>),
+    ?assertEqual(32, byte_size(Hash)),
+    
+    %% Same input = same hash
+    ?assertEqual(Hash, crypto:hash(sha256, <<"test">>)).
+```
+
+---
+
+### Part 23: Lists Module
+
+Essential list operations.
+
+```erlang
+%% Basics
+lists:reverse([1, 2, 3]),                    % [3, 2, 1]
+lists:sort([3, 1, 2]),                       % [1, 2, 3]
+lists:member(2, [1, 2, 3]),                  % true
+lists:nth(2, [a, b, c]),                     % b (1-indexed)
+
+%% Transform
+lists:map(fun(X) -> X * 2 end, [1,2,3]),         % [2, 4, 6]
+lists:filter(fun(X) -> X > 2 end, [1,2,3,4]),    % [3, 4]
+lists:foldl(fun(X, Acc) -> X + Acc end, 0, [1,2,3]), % 6
+
+%% Split/Join
+lists:split(2, [1,2,3,4]),                       % {[1,2], [3,4]}
+lists:flatten([[1, 2], [3]]),                    % [1, 2, 3]
+lists:zip([1, 2], [a, b]),                       % [{1,a}, {2,b}]
+
+%% Predicates
+lists:any(fun(X) -> X > 5 end, [1,2,3]),         % false
+lists:all(fun(X) -> X > 0 end, [1,2,3]),         % true
+lists:partition(fun(X) -> X rem 2 == 0 end, [1,2,3,4]), % {[2,4], [1,3]}
+```
+
+**Test:**
+```erlang
+lists_module_test() ->
+    ?assertEqual([3, 2, 1], lists:reverse([1, 2, 3])),
+    ?assertEqual([1, 2, 3], lists:sort([3, 1, 2])),
+    ?assert(lists:member(2, [1, 2, 3])),
+    
+    ?assertEqual([2, 4, 6],
+        lists:map(fun(X) -> X * 2 end, [1, 2, 3])).
+```
+
+---
+
+### Part 24: Maps Module
+
+Map operations.
+
+```erlang
+%% Access
+maps:get(key, Map),                              % value
+maps:get(key, Map, Default),                     % value or Default
+maps:find(key, Map),                             % {ok, Val} | error
+maps:is_key(key, Map),                           % true | false
+
+%% Update
+maps:put(key, val, Map),                         % New map with key added
+maps:update(key, val, Map),                      % New map (key must exist)
+maps:remove(key, Map),                           % New map without key
+
+%% Bulk operations
+maps:merge(M1, M2),                              % Merged map
+maps:keys(Map),                                  % [key1, key2, ...]
+maps:values(Map),                                % [val1, val2, ...]
+maps:to_list(Map),                               % [{K1, V1}, {K2, V2}, ...]
+maps:from_list([{k, v}, ...]),                   % #{k => v, ...}
+
+%% Transform
+maps:map(fun(K, V) -> V * 2 end, Map),          % #{k => v*2, ...}
+maps:filter(fun(K, V) -> V > 10 end, Map),      % Filtered map
+maps:fold(fun(K, V, Acc) -> Acc + V end, 0, Map), % Sum of values
+```
+
+**Test:**
+```erlang
+maps_module_test() ->
+    M = #{a => 1, b => 2},
+    
+    ?assertEqual(1, maps:get(a, M)),
+    ?assert(maps:is_key(a, M)),
+    
+    M2 = maps:put(c, 3, M),
+    ?assertEqual(3, maps:size(M2)).
+```
+
+---
+
+### Part 25: String Module
+
+Unicode-aware string operations.
+
+```erlang
+%% Case
+string:uppercase(<<"hello">>),               % <<"HELLO">>
+string:lowercase(<<"HELLO">>),               % <<"hello">>
+
+%% Trim
+string:trim(<<"  hello  ">>),                % <<"hello">>
+
+%% Split
+string:split(<<"a,b,c">>, <<",">>),              % [<<"a">>, <<"b,c">>]
+string:split(<<"a,b,c">>, <<",">>, all),         % [<<"a">>, <<"b">>, <<"c">>]
+
+%% Find
+string:find(<<"hello world">>, <<"world">>), % <<"world">>
+```
+
+**Test:**
+```erlang
+string_test() ->
+    ?assertEqual(<<"HELLO">>, string:uppercase(<<"hello">>)),
+    ?assertEqual(<<"hello">>, string:trim(<<"  hello  ">>)),
+    ?assertEqual([<<"a">>, <<"b">>], 
+        string:split(<<"a,b">>, <<",">>, all)).
+```
+
+---
+
+### Part 26: File I/O
+
+Reading and writing files.
+
+```erlang
+%% Read
+{ok, Bin} = file:read_file("file.txt"),
+{ok, Fd} = file:open("file.txt", [read]),
+{ok, Data} = file:read(Fd, 1024),
+file:close(Fd),
+
+%% Write
+file:write_file("out.txt", <<"data">>),
+{ok, Fd} = file:open("out.txt", [write]),
+file:write(Fd, <<"line\n">>),
+file:close(Fd),
+
+%% Info
+{ok, Info} = file:read_file_info("file.txt"),
+Info#file_info.size,                             % File size in bytes
+
+%% Directory
+file:list_dir("."),                              % {ok, [Files]}
+file:make_dir("dir"),                            % ok | {error, Reason}
+file:delete("file.txt"),                         % ok | {error, Reason}
+```
+
+**Test:**
+```erlang
+file_test() ->
+    File = "/tmp/test.txt",
+    Data = <<"test">>,
+    
+    ok = file:write_file(File, Data),
+    {ok, Read} = file:read_file(File),
+    ?assertEqual(Data, Read),
+    
+    file:delete(File).
+```
+
+---
+
+### Part 27: Regular Expressions
+
+Pattern matching in strings.
+
+```erlang
+%% Match
+re:run(<<"abc123">>, "\\d+"),               % {match, ...}
+
+%% Extract
+{match, [Match]} = re:run(<<"abc123">>, "\\d+", 
+    [{capture, all, binary}]),
+%% Match = <<"123">>
+
+%% Split
+re:split(<<"a,b,c">>, ","),                      % [<<"a">>, <<"b">>, <<"c">>]
+
+%% Replace
+re:replace(<<"hello">>, "l", "L", 
+    [{return, binary}, global]),                 % <<"heLLo">>
+```
+
+**Test:**
+```erlang
+regex_test() ->
+    ?assertMatch({match, _}, re:run(<<"abc123">>, "\\d+")),
+    
+    {match, [Num]} = re:run(<<"abc123">>, "\\d+",
+        [{capture, all, binary}]),
+    ?assertEqual(<<"123">>, Num).
+```
+
+---
+
+## Chapter 7: Concurrency
+
+**The heart of Erlang** - processes, OTP, supervision trees, and fault tolerance.
+
+This is what makes Erlang special!
+
+---
+
+### Part 15: Processes & Message Passing
+
+Processes are lightweight, isolated, communicate via messages.
+
+```erlang
+%% Spawn process
+Pid = spawn(fun() -> 
+    io:format("Hello~n")
+end),
+
+%% Send message
+Pid ! {msg, <<"data">>},
+
+%% Receive message
+receive
+    {msg, Data} -> 
+        io:format("Got: ~p~n", [Data])
+after 5000 ->
+    timeout
+end,
+
+%% Simple server loop
+loop(State) ->
+    receive
+        {get, From} ->
+            From ! {value, State},
+            loop(State);
+        {set, NewState} ->
+            loop(NewState);
+        stop -> ok
+    end.
+
+%% Start server
+Server = spawn(fun() -> loop(0) end),
+Server ! {set, 42},
+Server ! {get, self()},
+receive {value, V} -> V end,  % 42
+```
+
+**Test:**
+```erlang
+processes_test() ->
+    Parent = self(),
+    spawn(fun() -> Parent ! {result, 42} end),
+    
+    receive
+        {result, N} -> ?assertEqual(42, N)
+    after 1000 -> ?assert(false)
+    end.
+
+server_loop_test() ->
+    Loop = fun Loop(State) ->
+        receive
+            {get, From} -> 
+                From ! {value, State},
+                Loop(State);
+            {set, New} -> 
+                Loop(New);
+            stop -> ok
+        end
+    end,
+    
+    Pid = spawn(fun() -> Loop(0) end),
+    Pid ! {set, 42},
+    Pid ! {get, self()},
+    
+    receive
+        {value, V} -> ?assertEqual(42, V)
+    after 1000 -> ?assert(false)
+    end,
+    
+    Pid ! stop.
+```
+
+---
+
+### Part 16: Process Links & Monitors
+
+Processes can link (bi-directional) or monitor (uni-directional).
+
+```erlang
+%% Linking
+Pid = spawn_link(fun() -> worker() end),  % Crash propagates
+process_flag(trap_exit, true),            % Convert exits to messages
+
+receive
+    {'EXIT', Pid, Reason} ->
+        io:format("Process died: ~p~n", [Reason])
+end,
+
+%% Monitoring (one-way)
+Ref = monitor(process, Pid),
+
+receive
+    {'DOWN', Ref, process, Pid, Reason} ->
+        handle_down(Reason)
+end,
+
+%% Process registration
+register(my_server, Pid),
+whereis(my_server),                       % Get Pid
+my_server ! message,                      % Send to named
+unregister(my_server),
+```
+
+**Test:**
+```erlang
+link_test() ->
+    process_flag(trap_exit, true),
+    Pid = spawn_link(fun() -> exit(normal) end),
+    
+    receive
+        {'EXIT', Pid, normal} -> ok
+    after 1000 -> ?assert(false)
+    end.
+
+monitor_test() ->
+    Pid = spawn(fun() -> ok end),
+    Ref = monitor(process, Pid),
+    
+    receive
+        {'DOWN', Ref, process, Pid, normal} -> ok
+    after 1000 -> ?assert(false)
+    end.
+```
+
+---
+
+### Part 17: gen_server
+
+**gen_server** is OTP's standard server pattern.
+
+```erlang
+-module(counter).
+-behaviour(gen_server).
+
+-export([start_link/0, increment/0, get/0]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+
+%% Client API
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+increment() ->
+    gen_server:cast(?MODULE, increment).
+
+get() ->
+    gen_server:call(?MODULE, get).
+
+%% Callbacks
+init([]) ->
+    {ok, 0}.  % State = 0
+
+handle_call(get, _From, State) ->
+    {reply, State, State}.
+
+handle_cast(increment, State) ->
+    {noreply, State + 1}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+```
+
+**Key callbacks:**
+- `init/1` - Initialize state
+- `handle_call/3` - Synchronous requests (get reply)
+- `handle_cast/2` - Asynchronous requests (no reply)
+- `handle_info/2` - Non-OTP messages
+- `terminate/2` - Cleanup
+
+**Test:**
+```erlang
+%% Test gen_server concepts using basic processes
+gen_server_test() ->
+    %% Start a simple process that mimics gen_server behavior
+    Parent = self(),
+    Pid = spawn(fun() ->
+        receive
+            {call, From, get} ->
+                From ! {reply, 42},
+                Parent ! test_complete;
+            stop -> ok
+        end
+    end),
+    
+    %% Send a synchronous-style message
+    Pid ! {call, self(), get},
+    receive
+        {reply, Value} -> ?assertEqual(42, Value)
+    after 1000 -> ?assert(false)
+    end,
+    
+    receive
+        test_complete -> ok
+    after 1000 -> ?assert(false)
+    end,
+    
+    Pid ! stop.
+```
+
+**Note:** Full gen_server testing requires creating a proper callback module like the `counter` example above. This test demonstrates the message-passing concepts.
+
+---
+
+### Part 18: Supervisor
+
+**Supervisors** restart failed processes automatically.
+
+```erlang
+-module(my_supervisor).
+-behaviour(supervisor).
+
+-export([start_link/0, init/1]).
+
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+init([]) ->
+    SupFlags = #{
+        strategy => one_for_one,  % Restart strategy
+        intensity => 5,           % Max 5 restarts
+        period => 60              % In 60 seconds
+    },
+    
+    Children = [
+        #{
+            id => counter,
+            start => {counter, start_link, []},
+            restart => permanent,  % Always restart
+            shutdown => 5000,
+            type => worker
+        }
+    ],
+    
+    {ok, {SupFlags, Children}}.
+```
+
+**Restart strategies:**
+- `one_for_one` - Restart only failed child
+- `one_for_all` - Restart all if one fails
+- `rest_for_one` - Restart failed + all started after it
+
+**Restart types:**
+- `permanent` - Always restart
+- `temporary` - Never restart
+- `transient` - Restart only on abnormal exit
+
+**Test:**
+```erlang
+%% Test supervisor concepts using process monitoring
+supervisor_test() ->
+    %% Start a process and monitor it (basic supervision concept)
+    Worker = spawn(fun() ->
+        receive
+            stop -> ok
+        after 5000 -> ok
+        end
+    end),
+    
+    Ref = monitor(process, Worker),
+    ?assert(is_process_alive(Worker)),
+    
+    %% Simulate supervisor checking worker
+    ?assert(is_pid(Worker)),
+    
+    %% Stop worker
+    Worker ! stop,
+    
+    %% Wait for worker to die
+    receive
+        {'DOWN', Ref, process, Worker, normal} -> ok
+    after 1000 -> ?assert(false)
+    end.
+```
+
+**Note:** Full supervisor testing requires creating worker modules. This test demonstrates the monitoring concepts that supervisors use.
+
+---
+
+### Part 19: Application
+
+**Applications** package modules with lifecycle management.
+
+```erlang
+-module(my_app).
+-behaviour(application).
+
+-export([start/2, stop/1]).
+
+start(_Type, _Args) ->
+    my_supervisor:start_link().
+
+stop(_State) ->
+    ok.
+```
+
+**my_app.app (resource file):**
+```erlang
+{application, my_app, [
+    {description, "My Application"},
+    {vsn, "1.0.0"},
+    {modules, [my_app, my_supervisor, counter]},
+    {registered, [my_supervisor, counter]},
+    {applications, [kernel, stdlib]},
+    {mod, {my_app, []}}
+]}.
+```
+
+**Control:**
+```erlang
+application:start(my_app),
+application:stop(my_app),
+application:which_applications(),
+```
+
+**Test:**
+```erlang
+%% Test checks system applications
+application_test() ->
+    %% Get list of running applications
+    Apps = application:which_applications(),
+    ?assert(is_list(Apps)),
+    
+    %% Check that kernel is always running
+    ?assert(lists:keymember(kernel, 1, Apps)),
+    
+    %% Check that stdlib is always running
+    ?assert(lists:keymember(stdlib, 1, Apps)).
+```
+
+**Note:** This test verifies system applications. Creating custom applications requires `.app` resource files and proper OTP project structure.
+
+---
+
+## Chapter 8: Advanced Topics
+
+Production patterns, optimization, and system-level programming.
+
+---
+
+### Part 28: ETS (Erlang Term Storage)
+
+In-memory tables shared across processes.
+
+```erlang
+%% Create
+T = ets:new(my_table, [set, public]),
+
+%% Insert
+ets:insert(T, {key, value}),
+ets:insert(T, [{k1, v1}, {k2, v2}]),
+
+%% Lookup
+ets:lookup(T, key),                          % [{key, value}]
+
+%% Delete
+ets:delete(T, key),
+ets:delete(T),                               % Delete table
+
+%% Query
+ets:member(T, key),                              % true | false
+ets:tab2list(T),                                 % [{k1, v1}, {k2, v2}, ...]
+ets:info(T, size),                               % Number of entries
+```
+
+**Table types:**
+- `set` - Unique keys
+- `ordered_set` - Sorted unique keys
+- `bag` - Duplicate keys allowed
+- `duplicate_bag` - Duplicate key-value pairs
+
+**Test:**
+```erlang
+ets_test() ->
+    T = ets:new(test, [set]),
+    
+    ets:insert(T, {a, 1}),
+    ?assertEqual([{a, 1}], ets:lookup(T, a)),
+    
+    ets:delete(T, a),
+    ?assertEqual([], ets:lookup(T, a)),
+    
+    ets:delete(T).
+```
+
+---
+
+### Part 29: Timer Functions
+
+Time-based operations.
+
+```erlang
+%% Sleep
+timer:sleep(1000),                           % 1 second
+
+%% Send after delay
+timer:send_after(1000, self(), timeout),
+
+%% Periodic
+{ok, Ref} = timer:send_interval(1000, self(), tick),
+timer:cancel(Ref),
+
+%% Measure time
+{Time, Result} = timer:tc(fun() -> 
+    expensive()
+end),
+%% Time in microseconds
+```
+
+**Test:**
+```erlang
+timer_test() ->
+    timer:send_after(10, self(), msg),
+    
+    receive
+        msg -> ok
+    after 100 -> ?assert(false)
+    end.
+```
+
+---
+
+### Part 30: Queue Data Structure
+
+Efficient FIFO queues.
+
+```erlang
+%% Create
+Q = queue:new(),
+
+%% Add
+Q1 = queue:in(1, Q),
+Q2 = queue:in(2, Q1),
+
+%% Remove
+{{value, Item}, Q3} = queue:out(Q2),         % Item=1
+
+%% Operations
+queue:len(Q),                                    % 0, 1, 2, ...
+queue:is_empty(Q),                               % true | false
+queue:to_list(Q),                                % [1, 2, 3]
+queue:from_list([1, 2, 3]),                      % Queue with [1,2,3]
+```
+
+**Test:**
+```erlang
+queue_test() ->
+    Q = queue:from_list([1, 2, 3]),
+    ?assertEqual(3, queue:len(Q)),
+    
+    {{value, 1}, Q2} = queue:out(Q),
+    ?assertEqual([2, 3], queue:to_list(Q2)).
+```
+
+---
+
+### Part 31: Ports (External Programs)
+
+Communicate with external programs safely.
+
+```erlang
+%% Open port
+Port = open_port({spawn, "python script.py"}, [
+    binary,
+    {packet, 4},
+    exit_status
+]),
+
+%% Send
+Port ! {self(), {command, <<"input">>}},
+
+%% Receive
+receive
+    {Port, {data, Output}} -> handle(Output);
+    {Port, {exit_status, Status}} -> done
+end,
+
+%% Close
+port_close(Port),
+```
+
+**When to use:**
+- External programs
+- Untrusted code (isolation)
+- Safety > performance
+
+**Test:**
+```erlang
+%% Test port communication with a simple shell command
+port_test() ->
+    %% Open a port to run 'echo hello'
+    Port = open_port({spawn, "echo hello"}, [
+        stream,
+        exit_status,
+        use_stdio,
+        binary,
+        eof
+    ]),
+    
+    %% Receive output
+    receive
+        {Port, {data, Data}} ->
+            ?assertEqual(<<"hello\n">>, Data)
+    after 1000 ->
+        ?assert(false)
+    end,
+    
+    %% Wait for port to close
+    receive
+        {Port, {exit_status, 0}} -> ok
+    after 1000 ->
+        ?assert(false)
+    end.
+```
+
+---
+
+### Part 32: Reference Type
+
+Globally unique identifiers.
+
+```erlang
+%% Create
+Ref = make_ref(),
+
+%% Request-response pattern
+request(Pid, Msg) ->
+    Ref = make_ref(),
+    Pid ! {request, Ref, self(), Msg},
+    receive
+        {response, Ref, Result} -> {ok, Result}
+    after 5000 -> timeout
+    end.
+
+%% Monitor references
+Ref = monitor(process, Pid),
+receive
+    {'DOWN', Ref, process, Pid, Reason} -> ...
+end.
+```
+
+**Test:**
+```erlang
+%% Test reference creation and uniqueness
+reference_test() ->
+    Ref1 = make_ref(),
+    Ref2 = make_ref(),
+    
+    %% References are unique
+    ?assertNot(Ref1 =:= Ref2),
+    ?assert(is_reference(Ref1)),
+    ?assert(is_reference(Ref2)).
+```
+
+---
+
+### Part 33: Proplists
+
+Simple key-value lists.
+
+```erlang
+%% Create
+Props = [{name, <<"Alice">>}, {age, 25}],
+
+%% Access
+proplists:get_value(name, Props),                % <<"Alice">>
+proplists:get_value(missing, Props, default),    % default
+
+%% Boolean flags
+Props2 = [verbose, {debug, false}],
+proplists:get_bool(verbose, Props2),         % true
+```
+
+**Test:**
+```erlang
+proplists_test() ->
+    Props = [{name, <<"Alice">>}, {age, 25}],
+    
+    ?assertEqual(<<"Alice">>, proplists:get_value(name, Props)),
+    ?assertEqual(25, proplists:get_value(age, Props)),
+    ?assertEqual(default, proplists:get_value(missing, Props, default)),
+    
+    %% Boolean flags
+    Props2 = [verbose, {debug, false}],
+    ?assert(proplists:get_bool(verbose, Props2)),
+    ?assertNot(proplists:get_bool(debug, Props2)).
+```
+
+---
+
+### Part 34: Bitwise Operations
+
+Bit manipulation.
+
+```erlang
+%% Operations
+16#FF band 16#0F,                            % AND: 15
+16#F0 bor 16#0F,                             % OR: 255
+16#FF bxor 16#0F,                            % XOR: 240
+bnot 16#FF,                                  % NOT
+
+%% Shifts
+1 bsl 3,                                     % Left: 8
+8 bsr 1,                                     % Right: 4
+
+%% Set bit
+Value bor (1 bsl Position),
+
+%% Clear bit
+Value band bnot (1 bsl Position),
+
+%% Check bit
+(Value band (1 bsl Position)) =/= 0,
+```
+
+**Test:**
+```erlang
+bitwise_test() ->
+    %% Basic operations
+    ?assertEqual(16#0F, 16#FF band 16#0F),  % AND
+    ?assertEqual(16#FF, 16#F0 bor 16#0F),   % OR
+    ?assertEqual(240, 16#FF bxor 16#0F),    % XOR
+    
+    %% Shifts
+    ?assertEqual(8, 1 bsl 3),               % Left shift
+    ?assertEqual(4, 8 bsr 1),               % Right shift
+    
+    %% Bit manipulation
+    Value = 2#1010,
+    %% Set bit at position 0
+    ?assertEqual(2#1011, Value bor (1 bsl 0)),
+    %% Clear bit at position 1
+    ?assertEqual(2#1000, Value band bnot (1 bsl 1)).
+```
+
+---
+
+### Part 35: System Introspection
+
+Runtime VM inspection.
+
+```erlang
+%% Process info
+process_info(Pid),                               % List of all info
+process_info(Pid, memory),                       % Memory usage in bytes
+process_info(Pid, message_queue_len),            % Number of messages
+
+%% System
+erlang:system_info(process_count),               % Number of processes
+erlang:system_info(schedulers),                  % Number of schedulers
+erlang:memory(),                                 % Memory usage stats
+
+%% List processes
+erlang:processes(),                              % [Pid1, Pid2, ...]
+erlang:registered(),                             % [Name1, Name2, ...]
+
+%% Process dictionary
+put(key, value),                                 % Sets value, returns old
+get(key),                                        % Returns value | undefined
+erase(key),                                      % Removes key, returns old value
+```
+
+**Test:**
+```erlang
+introspection_test() ->
+    %% System info
+    ?assert(is_integer(erlang:system_info(process_count))),
+    ?assert(is_integer(erlang:system_info(schedulers))),
+    
+    %% Process lists
+    ?assert(is_list(erlang:processes())),
+    ?assert(is_list(erlang:registered())),
+    
+    %% Process dictionary
+    ?assertEqual(undefined, put(test_key, 123)),
+    ?assertEqual(123, get(test_key)),
+    ?assertEqual(123, erase(test_key)),
+    ?assertEqual(undefined, get(test_key)).
+```
+
+---
+
+## Chapter 9: Module System & Organization
+
+How to organize code into modules - you've been using this already, now understand it!
+
+---
+
+### Part 36: Module Basics
+
+Every Erlang file is a module. The filename must match the module name.
+
+```erlang
+-module(my_module).              % Declares module name
+-export([public_func/1]).        % Public functions
+
+%% Macros (compile-time constants)
+-define(TIMEOUT, 5000).
+-define(PI, 3.14159).
+
+%% Records (structured data)
+-record(user, {id, name, age = 0}).
+
+%% Public function (exported)
+public_func(X) -> 
+    private_helper(X) * 2.
+
+%% Private function (not exported)
+private_helper(X) -> 
+    X + 1.
+```
+
+**Key directives:**
+- `-module(name)` - Module name (must match `name.erl`)
+- `-export([func/arity, ...])` - List of public functions
+- `-define(MACRO, value)` - Compile-time constants
+- `-record(name, {fields})` - Struct-like definitions
+- `-include("file.hrl")` - Include header files
+- `-include_lib("app/include/file.hrl")` - Include from application
+
+**Arity notation:**
+```erlang
+func/0    % Function with 0 arguments
+func/1    % Function with 1 argument
+func/2    % Function with 2 arguments
+```
+
+Different arities are different functions!
+
+**Test:**
+```erlang
+%% Test module system concepts
+module_basics_test() ->
+    %% Test that module name matches
+    ?assertEqual(test_erlang, ?MODULE),
+    
+    %% Test macros (if defined)
+    %% -define(TEST_MACRO, 42).
+    %% ?assertEqual(42, ?TEST_MACRO),
+    
+    %% Test that exported functions are callable
+    ?assert(is_function(fun numbers_test/0)),
+    ?assert(is_function(fun atoms_test/0)).
+```
+
+---
+
+### Part 37: Compile Directives
+
+```erlang
+%% Disable auto-import
+-compile({no_auto_import, [apply/2]}).
+
+%% Export all (debugging only!)
+-compile(export_all).
+
+%% Inline optimization
+-compile({inline, [fast_func/1]}).
+
+%% Conditional compilation
+-ifdef(DEBUG).
+    debug(Msg) -> io:format("~p~n", [Msg]).
+-else.
+    debug(_) -> ok.
+-endif.
+```
+
+---
+
+### Part 38: Type Specifications
+
+Optional type documentation for Dialyzer.
+
+```erlang
+-spec add(integer(), integer()) -> integer().
+add(A, B) -> A + B.
+
+-spec divide(number(), number()) -> number() | {error, atom()}.
+divide(_A, 0) -> {error, division_by_zero};
+divide(A, B) -> A / B.
+
+%% Custom types
+-type user_id() :: pos_integer().
+-type user() :: #{id => user_id(), name => binary()}.
+```
+
+---
+## Chapter 10: NIFs (Native Implemented Functions)
+
+NIFs allow you to implement Erlang functions in C or Rust for performance-critical code.
+
+---
+
+### Part 39: C NIFs Basics
+
+NIFs provide a way to call native code (C/C++) from Erlang.
+
+**C NIF Structure:**
+```c
+#include "erl_nif.h"
+
+// NIF function implementation
+static ERL_NIF_TERM hello_nif(ErlNifEnv* env, int argc, 
+                               const ERL_NIF_TERM argv[]) {
+    return enif_make_string(env, "Hello from C!", ERL_NIF_LATIN1);
+}
+
+// Function table
+static ErlNifFunc nif_funcs[] = {
+    {"hello", 0, hello_nif}
+};
+
+// Module initialization
+ERL_NIF_INIT(my_nif, nif_funcs, NULL, NULL, NULL, NULL)
+```
+
+**Erlang Module:**
+```erlang
+-module(my_nif).
+-export([hello/0]).
+-on_load(init/0).
+
+init() ->
+    SoName = filename:join(code:priv_dir(my_app), "my_nif"),
+    ok = erlang:load_nif(SoName, 0).
+
+hello() ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}]}).
+```
+
+**Key Concepts:**
+- `ErlNifEnv*` - NIF environment (required for all NIF API calls)
+- `ERL_NIF_TERM` - Erlang term representation in C
+- `enif_make_*` - Create Erlang terms from C values
+- `enif_get_*` - Extract C values from Erlang terms
+- `-on_load` - Directive to load NIF when module loads
+
+---
+
+### Part 40: Working with Binaries in NIFs
+
+Binaries are the most common data type passed between Erlang and NIFs.
+
+**C Example (Hash Function):**
+```c
+#include "erl_nif.h"
+#include <string.h>
+
+static ERL_NIF_TERM sha3_256_nif(ErlNifEnv* env, int argc,
+                                  const ERL_NIF_TERM argv[]) {
+    ErlNifBinary input;
+    
+    // Step 1: Extract binary from Erlang term
+    if (!enif_inspect_binary(env, argv[0], &input)) {
+        return enif_make_badarg(env);
+    }
+    
+    // Step 2: Process the data
+    uint8_t output[32];
+    sha3_256(output, 32, input.data, input.size);
+    
+    // Step 3: Create new binary for result
+    ERL_NIF_TERM result;
+    uint8_t* result_data = enif_make_new_binary(env, 32, &result);
+    memcpy(result_data, output, 32);
+    
+    return result;
+}
+
+static ErlNifFunc nif_funcs[] = {
+    {"sha3_256", 1, sha3_256_nif}
+};
+
+ERL_NIF_INIT(hb_keccak, nif_funcs, NULL, NULL, NULL, NULL)
+```
+
+**Erlang Usage:**
+```erlang
+-module(hb_keccak).
+-export([sha3_256/1]).
+-on_load(init/0).
+
+init() ->
+    SoName = filename:join(code:priv_dir(hyperbeam), "hb_keccak"),
+    erlang:load_nif(SoName, 0).
+
+sha3_256(_Data) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}]}).
+
+%% Usage
+Hash = hb_keccak:sha3_256(<<"hello">>).
+```
+
+---
+
+### Part 41: Rustler NIFs
+
+Rustler makes writing NIFs in Rust safe and easy.
+
+**Rust Example:**
+```rust
+use rustler::{Binary, Encoder, Env, NifResult, Term};
+use rustler::types::atom::ok;
+
+#[rustler::nif]
+fn generate_attestation_report<'a>(
+    env: Env<'a>,
+    unique_data: Binary,
+    vmpl: u32,
+) -> NifResult<Term<'a>> {
+    // Convert binary to fixed-size array
+    let data_array: [u8; 64] = unique_data.as_slice()
+        .try_into()
+        .map_err(|_| rustler::Error::BadArg)?;
+    
+    // Call native Rust code
+    let report = generate_report(data_array, vmpl)?;
+    
+    // Return as Erlang term
+    Ok((ok(), report).encode(env))
+}
+
+rustler::init!("dev_snp_nif");
+```
+
+**Erlang Module:**
+```erlang
+-module(dev_snp_nif).
+-export([generate_attestation_report/2]).
+-on_load(init/0).
+
+-define(NOT_LOADED, not_loaded(?LINE)).
+
+generate_attestation_report(_UniqueData, _VMPL) ->
+    ?NOT_LOADED.
+
+init() ->
+    SoName = filename:join(
+        code:priv_dir(hyperbeam), 
+        "libdev_snp_nif"
+    ),
+    erlang:load_nif(SoName, 0).
+
+not_loaded(Line) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, Line}]}).
+```
+
+**Cargo.toml:**
+```toml
+[package]
+name = "dev_snp_nif"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dev_snp_nif"
+crate-type = ["dylib"]
+
+[dependencies]
+rustler = "0.36.0"
+```
+
+**Test:**
+```erlang
+nif_basics_test() ->
+    %% Test that NIFs can be loaded
+    %% Note: This test assumes you have a NIF module available
+    
+    %% Check if a module is loaded
+    ?assert(code:is_loaded(erlang) =/= false),
+    
+    %% NIF functions look like regular functions
+    %% but are implemented in native code
+    ?assert(is_function(fun erlang:md5/1)),
+    ?assert(is_binary(erlang:md5(<<"test">>))).
+```
+
+---
+
+### Part 42: NIF Best Practices
+
+**Safety Rules:**
+1. **Never block** - NIFs should complete quickly (less than 1ms)
+2. **Use dirty schedulers** for long-running operations
+3. **Handle errors** - Always validate input
+4. **Memory management** - Let Erlang manage memory when possible
+5. **Thread safety** - NIFs can be called concurrently
+
+**Dirty NIF Example (Long Operation):**
+```c
+static ERL_NIF_TERM long_operation_nif(ErlNifEnv* env, int argc,
+                                        const ERL_NIF_TERM argv[]) {
+    // This will run on a dirty scheduler
+    // and won't block the Erlang scheduler
+    heavy_computation();
+    return enif_make_atom(env, "ok");
+}
+
+static ErlNifFunc nif_funcs[] = {
+    {"long_operation", 0, long_operation_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND}
+};
+```
+
+**Error Handling:**
+```c
+static ERL_NIF_TERM safe_divide_nif(ErlNifEnv* env, int argc,
+                                     const ERL_NIF_TERM argv[]) {
+    int a, b;
+    
+    if (!enif_get_int(env, argv[0], &a) ||
+        !enif_get_int(env, argv[1], &b)) {
+        return enif_make_badarg(env);
+    }
+    
+    if (b == 0) {
+        return enif_make_tuple2(env,
+            enif_make_atom(env, "error"),
+            enif_make_atom(env, "division_by_zero")
+        );
+    }
+    
+    return enif_make_tuple2(env,
+        enif_make_atom(env, "ok"),
+        enif_make_int(env, a / b)
+    );
+}
+```
+
+**When to use NIFs:**
+- ✅ Performance-critical operations (crypto, compression)
+- ✅ Interfacing with C/C++ libraries
+- ✅ Hardware access or system calls
+- ✅ CPU-intensive algorithms
+
+**When NOT to use NIFs:**
+- ❌ Operations that can block (use ports instead)
+- ❌ Simple operations (Erlang is fast enough)
+- ❌ When pure Erlang would work fine
+
+**Key Takeaways:**
+- NIFs provide zero-copy data transfer
+- Use Rustler for safer NIF development
+- Always handle errors properly
+- Use dirty schedulers for long operations
+- NIFs crash = VM crash (be careful!)
+
+---
