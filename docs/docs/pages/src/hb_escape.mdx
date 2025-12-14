@@ -130,8 +130,10 @@ decode_empty_test() ->
     ?assertEqual(<<>>, hb_escape:decode(<<>>)).
 
 decode_case_insensitive_test() ->
-    ?assertEqual(<<"A">>, hb_escape:decode(<<"%41">>)),
-    ?assertEqual(<<"A">>, hb_escape:decode(<<"%4a">>)).  % Also lowercase hex
+    %% Test that hex digits work in both upper and lower case
+    ?assertEqual(<<"A">>, hb_escape:decode(<<"%41">>)),  % uppercase hex
+    ?assertEqual(<<"J">>, hb_escape:decode(<<"%4a">>)),  % lowercase hex (4a = 74 = 'J')
+    ?assertEqual(<<"J">>, hb_escape:decode(<<"%4A">>)).  % uppercase hex same result
 ```
 
 ---
