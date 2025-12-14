@@ -81,7 +81,8 @@ init() ->
 
 keccak_256_test() ->
     Input = <<"testing">>,
-    Expected = <<"5F16F4C7F149AC4F9510D9CF8CF384038AD348B3BCDC01915F95DE12DF9D1B02">>,
+    %% hb_util:to_hex returns lowercase hex
+    Expected = <<"5f16f4c7f149ac4f9510d9cf8cf384038ad348b3bcdc01915f95de12df9d1b02">>,
     Hash = hb_keccak:keccak_256(Input),
     HexHash = hb_util:to_hex(Hash),
     ?assertEqual(Expected, HexHash).
@@ -127,7 +128,8 @@ keccak_256_deterministic_test() ->
 
 sha3_256_test() ->
     Input = <<"testing">>,
-    Expected = <<"7F5979FB78F082E8B1C676635DB8795C4AC6FABA03525FB708CB5FD68FD40C5E">>,
+    %% hb_util:to_hex returns lowercase hex
+    Expected = <<"7f5979fb78f082e8b1c676635db8795c4ac6faba03525fb708cb5fd68fd40c5e">>,
     Hash = hb_keccak:sha3_256(Input),
     HexHash = hb_util:to_hex(Hash),
     ?assertEqual(Expected, HexHash).
@@ -144,7 +146,7 @@ sha3_256_nist_vector_test() ->
     Expected = <<"3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532">>,
     Hash = hb_keccak:sha3_256(Input),
     HexHash = hb_util:to_hex(Hash),
-    ?assertEqual(string:to_upper(Expected), HexHash).
+    ?assertEqual(Expected, HexHash).
 ```
 
 ---
@@ -281,18 +283,7 @@ hash_to_checksum_address(Last40, Hash) when
     <<"0x", (list_to_binary(lists:append(Formatted)))/binary>>.
 ```
 
-**Test Code:**
-```erlang
--module(hb_checksum_test).
--include_lib("eunit/include/eunit.hrl").
-
-checksum_address_test() ->
-    Address = <<"b7b4360f7f6298de2e7a11009270f35f189bd77e">>,
-    Hash = hb_keccak:keccak_256(Address),
-    HashHex = hb_util:to_hex(Hash),
-    Checksummed = hash_to_checksum_address(Address, HashHex),
-    ?assertEqual(<<"0xb7B4360F7F6298dE2e7a11009270F35F189Bd77E">>, Checksummed).
-```
+**Note:** This is a private helper function. Test coverage is provided through `key_to_ethereum_address/1` tests.
 
 ---
 
