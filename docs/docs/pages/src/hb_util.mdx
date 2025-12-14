@@ -16,44 +16,130 @@ This module provides a comprehensive set of utility functions including type coe
 
 ---
 
-## Function Categories
+## Public Functions Overview
 
 ### Type Coercion
-```erlang
-int/1, float/1, atom/1, bin/1, list/1, map/1
-```
+| Function | Description |
+|----------|-------------|
+| `int/1` | Convert binary/string/integer to integer |
+| `float/1` | Convert binary/string/integer/float to float |
+| `atom/1` | Convert binary/string to existing atom |
+| `bin/1` | Convert atom/integer/float/string to binary |
+| `list/1` | Convert binary/atom to string list |
+| `map/1` | Convert key-value list to map |
 
-### ID Operations  
-```erlang
-id/1, id/2, native_id/1, human_id/1, encode/1, decode/1, to_hex/1
-```
+### Encoding & IDs
+| Function | Description |
+|----------|-------------|
+| `encode/1` | URL-safe base64 encode binary |
+| `decode/1` | URL-safe base64 decode binary |
+| `safe_encode/1` | Safe encode (returns input if not binary) |
+| `safe_decode/1` | Safe decode returning `{ok, Data}` or `{error, invalid}` |
+| `id/1, id/2` | Get message ID (human-readable) |
+| `native_id/1` | Convert to 32-byte native ID |
+| `human_id/1` | Convert to 43-byte base64 human ID |
+| `to_hex/1` | Convert binary to lowercase hex string |
 
-### Deep Data Access
-```erlang
-deep_merge/3, deep_set/4, deep_get/3, deep_get/4, find_value/2-4
-```
+### Deep Data Operations
+| Function | Description |
+|----------|-------------|
+| `deep_get/3, deep_get/4` | Get nested value by path |
+| `deep_set/4` | Set nested value by path |
+| `deep_merge/3` | Recursively merge two maps |
+| `find_value/2, find_value/3` | Find value in map or key-value list |
+| `find_target_path/2` | Find route path for request message |
+| `template_matches/3` | Check if message matches template |
 
 ### List Operations
-```erlang
-unique/1, list_with/2, list_without/2, list_replace/3
-to_sorted_list/1-2, to_sorted_keys/1-2
-```
+| Function | Description |
+|----------|-------------|
+| `unique/1` | Remove duplicates preserving order |
+| `list_with/2` | Intersection of two lists |
+| `list_without/2` | Remove items from list |
+| `list_replace/3` | Replace item in list |
+| `to_sorted_list/1, to_sorted_list/2` | Sort map/list deterministically |
+| `to_sorted_keys/1, to_sorted_keys/2` | Get sorted keys from map/list |
+| `hd/1, hd/2, hd/3` | Get first element of numbered map |
+
+### Numbered Message Operations
+| Function | Description |
+|----------|-------------|
+| `number/1` | Label list elements with numbers |
+| `list_to_numbered_message/1` | Convert list to numbered map |
+| `message_to_ordered_list/1, message_to_ordered_list/2` | Convert numbered map to list |
+| `numbered_keys_to_list/2` | Extract numbered keys as list |
+| `is_ordered_list/2` | Check if map is ordered list |
+
+### String Operations
+| Function | Description |
+|----------|-------------|
+| `to_lower/1` | Convert string to lowercase |
+| `remove_common/2` | Remove common prefix from string |
+| `key_to_atom/1, key_to_atom/2` | Convert key to atom (with dash→underscore) |
+| `unquote/1` | Remove surrounding quotes |
+| `is_string_list/1` | Check if term is string (char list) |
+| `binary_to_strings/1` | Parse binary as structured field list |
+
+### String Parsing
+| Function | Description |
+|----------|-------------|
+| `split_depth_string_aware/2` | Split honoring nesting and quotes |
+| `split_depth_string_aware_single/2` | Split single part with nesting |
+| `split_escaped_single/2` | Split respecting escape sequences |
 
 ### Math & Statistics
-```erlang
-ceil_int/2, floor_int/2, count/2, mean/1, stddev/1, variance/1, weighted_random/1
-```
+| Function | Description |
+|----------|-------------|
+| `ceil_int/2` | Round up to nearest multiple |
+| `floor_int/2` | Round down to nearest multiple |
+| `count/2` | Count occurrences in list |
+| `mean/1` | Calculate arithmetic mean |
+| `variance/1` | Calculate variance |
+| `stddev/1` | Calculate standard deviation |
+| `weighted_random/1` | Pick random item by weight |
 
-### Utilities
-```erlang
-ok/1-2, until/1-3, maybe_throw/2, remove_common/2, to_lower/1
-```
+### Validation
+| Function | Description |
+|----------|-------------|
+| `check_size/2` | Check binary size against list or range |
+| `check_type/2` | Check value type |
+| `check_value/2` | Check value in allowed list |
+
+### Error Handling
+| Function | Description |
+|----------|-------------|
+| `ok/1, ok/2` | Unwrap `{ok, Value}` or throw |
+| `ok_or_throw/3` | Assert condition or throw |
+| `maybe_throw/2` | Conditionally throw based on opts |
+
+### Control Flow
+| Function | Description |
+|----------|-------------|
+| `until/1, until/2, until/3` | Wait for condition with optional work |
+
+### Formatting
+| Function | Description |
+|----------|-------------|
+| `human_int/1` | Format integer with commas |
+
+### Map Operations
+| Function | Description |
+|----------|-------------|
+| `lower_case_key_map/2` | Recursively lowercase map keys |
+
+### Module Introspection
+| Function | Description |
+|----------|-------------|
+| `is_hb_module/1, is_hb_module/2` | Check if module is HyperBEAM module |
+| `all_hb_modules/0` | List all loaded HB modules |
+| `all_atoms/0` | List all atoms in VM |
+| `binary_is_atom/1` | Check if binary is existing atom |
 
 ---
 
-## Public Functions (Selected Key Functions)
+## Public Functions
 
-### 1. int/1, float/1, atom/1, bin/1, list/1, map/1
+### 1. Type Coercion: int/1, float/1, atom/1, bin/1, list/1, map/1
 
 ```erlang
 -spec int(binary() | list() | integer()) -> integer().
@@ -71,28 +157,62 @@ ok/1-2, until/1-3, maybe_throw/2, remove_common/2, to_lower/1
 -module(hb_util_type_test).
 -include_lib("eunit/include/eunit.hrl").
 
-int_test() ->
-    ?assertEqual(42, hb_util:int(<<"42">>)),
-    ?assertEqual(42, hb_util:int("42")),
+int_from_binary_test() ->
+    ?assertEqual(42, hb_util:int(<<"42">>)).
+
+int_from_string_test() ->
+    ?assertEqual(42, hb_util:int("42")).
+
+int_passthrough_test() ->
     ?assertEqual(42, hb_util:int(42)).
 
-float_test() ->
-    ?assertEqual(3.14, hb_util:float(<<"3.14">>)),
+int_negative_test() ->
+    ?assertEqual(-123, hb_util:int(<<"-123">>)).
+
+float_from_binary_test() ->
+    ?assertEqual(3.14, hb_util:float(<<"3.14">>)).
+
+float_from_integer_test() ->
     ?assertEqual(42.0, hb_util:float(42)).
 
-bin_test() ->
-    ?assertEqual(<<"test">>, hb_util:bin(test)),
-    ?assertEqual(<<"42">>, hb_util:bin(42)),
+float_passthrough_test() ->
+    ?assertEqual(3.14, hb_util:float(3.14)).
+
+bin_from_atom_test() ->
+    ?assertEqual(<<"test">>, hb_util:bin(test)).
+
+bin_from_integer_test() ->
+    ?assertEqual(<<"42">>, hb_util:bin(42)).
+
+bin_from_string_test() ->
     ?assertEqual(<<"hello">>, hb_util:bin("hello")).
 
-map_test() ->
-    ?assertEqual(#{a => 1}, hb_util:map([{a, 1}])),
+bin_passthrough_test() ->
+    ?assertEqual(<<"data">>, hb_util:bin(<<"data">>)).
+
+bin_from_float_test() ->
+    Bin = hb_util:bin(3.14),
+    ?assert(is_binary(Bin)).
+
+list_from_binary_test() ->
+    ?assertEqual("hello", hb_util:list(<<"hello">>)).
+
+list_from_atom_test() ->
+    ?assertEqual("test", hb_util:list(test)).
+
+list_passthrough_test() ->
+    ?assertEqual("hello", hb_util:list("hello")).
+
+map_from_list_test() ->
+    ?assertEqual(#{a => 1, b => 2}, hb_util:map([{a, 1}, {b, 2}])).
+
+map_passthrough_test() ->
     ?assertEqual(#{a => 1}, hb_util:map(#{a => 1})).
 ```
 
 ---
 
-### 2. encode/1, decode/1, safe_encode/1, safe_decode/1
+### 2. Encoding: encode/1, decode/1, safe_encode/1, safe_decode/1
 
 ```erlang
 -spec encode(binary()) -> binary().
@@ -101,37 +221,53 @@ map_test() ->
 -spec safe_decode(binary()) -> {ok, binary()} | {error, invalid}.
 ```
 
-**Description:** URL-safe base64 encoding/decoding for IDs and binary data. Safe versions handle errors gracefully.
+**Description:** URL-safe base64 encoding/decoding for IDs and binary data.
 
 **Test Code:**
 ```erlang
 -module(hb_util_encode_test).
 -include_lib("eunit/include/eunit.hrl").
 
-encode_decode_test() ->
+encode_decode_roundtrip_test() ->
     Original = crypto:strong_rand_bytes(32),
     Encoded = hb_util:encode(Original),
-    ?assertEqual(43, byte_size(Encoded)),
     Decoded = hb_util:decode(Encoded),
     ?assertEqual(Original, Decoded).
 
-safe_decode_test() ->
+encode_produces_43_bytes_test() ->
+    Data = crypto:strong_rand_bytes(32),
+    Encoded = hb_util:encode(Data),
+    ?assertEqual(43, byte_size(Encoded)).
+
+encode_url_safe_test() ->
+    Data = crypto:strong_rand_bytes(100),
+    Encoded = hb_util:encode(Data),
+    ?assertEqual(nomatch, binary:match(Encoded, <<"+">>)),
+    ?assertEqual(nomatch, binary:match(Encoded, <<"/">>)).
+
+safe_decode_valid_test() ->
     Valid = hb_util:encode(<<"test">>),
-    ?assertMatch({ok, _}, hb_util:safe_decode(Valid)),
-    ?assertEqual({error, invalid}, hb_util:safe_decode(<<"invalid!@#">>)).
+    ?assertMatch({ok, <<"test">>}, hb_util:safe_decode(Valid)).
+
+safe_decode_invalid_test() ->
+    ?assertEqual({error, invalid}, hb_util:safe_decode(<<"invalid!@#$%">>)).
+
+safe_encode_binary_test() ->
+    ?assertEqual(hb_util:encode(<<"test">>), hb_util:safe_encode(<<"test">>)).
+
+safe_encode_non_binary_test() ->
+    ?assertEqual(not_binary, hb_util:safe_encode(not_binary)).
 ```
 
 ---
 
-### 3. id/1, id/2, native_id/1, human_id/1
+### 3. ID Operations: id/1, id/2, native_id/1, human_id/1, to_hex/1
 
 ```erlang
--spec id(Item) -> binary()
-    when Item :: map() | binary() | #tx{}.
--spec id(Item, Type) -> binary()
-    when Item :: map() | binary() | #tx{}, Type :: signed | unsigned.
--spec native_id(binary() | {term(), term()}) -> binary().
--spec human_id(binary() | {term(), term()}) -> binary().
+-spec id(Item) -> binary().
+-spec native_id(binary()) -> binary().
+-spec human_id(binary()) -> binary().
+-spec to_hex(binary()) -> binary().
 ```
 
 **Description:** ID conversion between native (32-byte) and human-readable (43-byte base64) formats.
@@ -141,21 +277,36 @@ safe_decode_test() ->
 -module(hb_util_id_test).
 -include_lib("eunit/include/eunit.hrl").
 
-human_id_test() ->
+native_to_human_test() ->
     NativeID = crypto:strong_rand_bytes(32),
     HumanID = hb_util:human_id(NativeID),
-    ?assertEqual(43, byte_size(HumanID)),
+    ?assertEqual(43, byte_size(HumanID)).
+
+human_to_native_test() ->
+    NativeID = crypto:strong_rand_bytes(32),
+    HumanID = hb_util:human_id(NativeID),
     ?assertEqual(NativeID, hb_util:native_id(HumanID)).
 
-id_passthrough_test() ->
-    % Already human-readable
-    ID = hb_util:encode(crypto:strong_rand_bytes(32)),
-    ?assertEqual(ID, hb_util:id(ID)).
+human_id_passthrough_test() ->
+    HumanID = hb_util:encode(crypto:strong_rand_bytes(32)),
+    ?assertEqual(HumanID, hb_util:human_id(HumanID)).
+
+native_id_passthrough_test() ->
+    NativeID = crypto:strong_rand_bytes(32),
+    ?assertEqual(NativeID, hb_util:native_id(NativeID)).
+
+to_hex_test() ->
+    Hex = hb_util:to_hex(<<255, 0, 127>>),
+    ?assertEqual(<<"ff007f">>, Hex).
+
+to_hex_lowercase_test() ->
+    Hex = hb_util:to_hex(<<171, 205>>),
+    ?assertEqual(<<"abcd">>, Hex).
 ```
 
 ---
 
-### 4. deep_merge/3, deep_set/4, deep_get/3-4
+### 4. Deep Data: deep_merge/3, deep_set/4, deep_get/3-4
 
 ```erlang
 -spec deep_merge(map(), map(), Opts) -> map().
@@ -171,26 +322,55 @@ id_passthrough_test() ->
 -module(hb_util_deep_test).
 -include_lib("eunit/include/eunit.hrl").
 
-deep_set_test() ->
+deep_set_single_key_test() ->
+    Map = #{},
+    Updated = hb_util:deep_set([<<"a">>], 1, Map, #{}),
+    ?assertEqual(#{<<"a">> => 1}, Updated).
+
+deep_set_nested_test() ->
     Map = #{},
     Updated = hb_util:deep_set([<<"a">>, <<"b">>, <<"c">>], 123, Map, #{}),
-    ?assertEqual(123, hb_util:deep_get([<<"a">>, <<"b">>, <<"c">>], Updated, #{})).
+    ?assertEqual(#{<<"a">> => #{<<"b">> => #{<<"c">> => 123}}}, Updated).
 
-deep_merge_test() ->
+deep_get_existing_test() ->
+    Map = #{<<"a">> => #{<<"b">> => 42}},
+    ?assertEqual(42, hb_util:deep_get([<<"a">>, <<"b">>], Map, #{})).
+
+deep_get_missing_test() ->
+    Map = #{<<"a">> => 1},
+    ?assertEqual(not_found, hb_util:deep_get([<<"x">>, <<"y">>], Map, #{})).
+
+deep_get_with_default_test() ->
+    Map = #{},
+    ?assertEqual(default_val, hb_util:deep_get([<<"missing">>], Map, default_val, #{})).
+
+deep_merge_nested_test() ->
     Map1 = #{<<"a">> => #{<<"b">> => 1}},
     Map2 = #{<<"a">> => #{<<"c">> => 2}},
     Merged = hb_util:deep_merge(Map1, Map2, #{}),
     ?assertEqual(#{<<"a">> => #{<<"b">> => 1, <<"c">> => 2}}, Merged).
+
+deep_merge_overwrite_test() ->
+    Map1 = #{<<"a">> => 1},
+    Map2 = #{<<"a">> => 2},
+    Merged = hb_util:deep_merge(Map1, Map2, #{}),
+    ?assertEqual(#{<<"a">> => 2}, Merged).
+
+deep_set_unset_test() ->
+    Map = #{<<"a">> => 1, <<"b">> => 2},
+    Updated = hb_util:deep_set([<<"a">>], unset, Map, #{}),
+    ?assertEqual(#{<<"b">> => 2}, Updated).
 ```
 
 ---
 
-### 5. unique/1, list_with/2, list_without/2
+### 5. List Operations: unique/1, list_with/2, list_without/2, list_replace/3
 
 ```erlang
 -spec unique(list()) -> list().
 -spec list_with(list(), list()) -> list().
 -spec list_without(list(), list()) -> list().
+-spec list_replace(list(), term(), term()) -> list().
 ```
 
 **Description:** List manipulation utilities maintaining order and uniqueness.
@@ -200,25 +380,50 @@ deep_merge_test() ->
 -module(hb_util_list_test).
 -include_lib("eunit/include/eunit.hrl").
 
-unique_test() ->
-    ?assertEqual([1,2,3], hb_util:unique([1,2,2,3,1,3])).
+unique_removes_duplicates_test() ->
+    ?assertEqual([1, 2, 3], hb_util:unique([1, 2, 2, 3, 1, 3])).
 
-list_with_test() ->
-    ?assertEqual([1,3], hb_util:list_with([1,2,3], [1,3,4])).
+unique_preserves_order_test() ->
+    ?assertEqual([3, 1, 2], hb_util:unique([3, 1, 2, 1, 3])).
 
-list_without_test() ->
-    ?assertEqual([2], hb_util:list_without([1,3], [1,2,3])).
+unique_empty_test() ->
+    ?assertEqual([], hb_util:unique([])).
+
+list_with_intersection_test() ->
+    ?assertEqual([1, 3], hb_util:list_with([1, 2, 3], [1, 3, 4])).
+
+list_with_empty_test() ->
+    ?assertEqual([], hb_util:list_with([1, 2], [3, 4])).
+
+list_with_all_match_test() ->
+    ?assertEqual([1, 2], hb_util:list_with([1, 2], [1, 2, 3])).
+
+list_without_removes_test() ->
+    ?assertEqual([2], hb_util:list_without([1, 3], [1, 2, 3])).
+
+list_without_none_match_test() ->
+    ?assertEqual([1, 2, 3], hb_util:list_without([4, 5], [1, 2, 3])).
+
+list_without_all_match_test() ->
+    ?assertEqual([], hb_util:list_without([1, 2, 3], [1, 2, 3])).
+
+list_replace_single_test() ->
+    ?assertEqual([1, 99, 3], hb_util:list_replace([1, 2, 3], 2, 99)).
+
+list_replace_with_list_test() ->
+    ?assertEqual([1, a, b, 3], hb_util:list_replace([1, 2, 3], 2, [a, b])).
+
+list_replace_not_found_test() ->
+    ?assertEqual([1, 2, 3], hb_util:list_replace([1, 2, 3], 99, 0)).
 ```
 
 ---
 
-### 6. to_sorted_list/1-2, to_sorted_keys/1-2
+### 6. Sorting: to_sorted_list/1-2, to_sorted_keys/1-2
 
 ```erlang
 -spec to_sorted_list(map() | list()) -> list().
--spec to_sorted_list(map() | list(), Opts) -> list().
 -spec to_sorted_keys(map() | list()) -> list().
--spec to_sorted_keys(map() | list(), Opts) -> list().
 ```
 
 **Description:** Deterministic sorting of maps and key-value lists.
@@ -228,20 +433,31 @@ list_without_test() ->
 -module(hb_util_sort_test).
 -include_lib("eunit/include/eunit.hrl").
 
-to_sorted_list_test() ->
-    Map = #{b => 2, a => 1, c => 3},
-    ?assertEqual([{a,1},{b,2},{c,3}], hb_util:to_sorted_list(Map)).
+to_sorted_list_map_test() ->
+    Map = #{c => 3, a => 1, b => 2},
+    ?assertEqual([{a, 1}, {b, 2}, {c, 3}], hb_util:to_sorted_list(Map)).
 
-to_sorted_keys_test() ->
+to_sorted_list_kv_test() ->
+    KV = [{z, 1}, {a, 2}, {m, 3}],
+    ?assertEqual([{a, 2}, {m, 3}, {z, 1}], hb_util:to_sorted_list(KV)).
+
+to_sorted_list_plain_list_test() ->
+    ?assertEqual([1, 2, 3], hb_util:to_sorted_list([3, 1, 2])).
+
+to_sorted_keys_map_test() ->
     Map = #{z => 1, a => 2, m => 3},
-    ?assertEqual([a,m,z], hb_util:to_sorted_keys(Map)).
+    ?assertEqual([a, m, z], hb_util:to_sorted_keys(Map)).
+
+to_sorted_keys_list_test() ->
+    ?assertEqual([a, b, c], hb_util:to_sorted_keys([c, a, b])).
 ```
 
 ---
 
-### 7. mean/1, stddev/1, variance/1, weighted_random/1
+### 7. Statistics: count/2, mean/1, stddev/1, variance/1, weighted_random/1
 
 ```erlang
+-spec count(term(), list()) -> integer().
 -spec mean(list()) -> float().
 -spec stddev(list()) -> float().
 -spec variance(list()) -> float().
@@ -255,23 +471,77 @@ to_sorted_keys_test() ->
 -module(hb_util_stats_test).
 -include_lib("eunit/include/eunit.hrl").
 
+count_test() ->
+    ?assertEqual(3, hb_util:count(a, [a, b, a, c, a])).
+
+count_zero_test() ->
+    ?assertEqual(0, hb_util:count(x, [a, b, c])).
+
 mean_test() ->
-    ?assertEqual(3.0, hb_util:mean([1,2,3,4,5])).
+    ?assertEqual(3.0, hb_util:mean([1, 2, 3, 4, 5])).
+
+mean_single_test() ->
+    ?assertEqual(42.0, hb_util:mean([42])).
+
+variance_test() ->
+    Var = hb_util:variance([1, 2, 3, 4, 5]),
+    ?assertEqual(2.0, Var).
 
 stddev_test() ->
-    StdDev = hb_util:stddev([1,2,3,4,5]),
-    ?assert(is_float(StdDev)),
-    ?assert(StdDev > 1.0).
+    StdDev = hb_util:stddev([1, 2, 3, 4, 5]),
+    ?assert(abs(StdDev - 1.4142135623730951) < 0.0001).
 
-weighted_random_test() ->
+weighted_random_returns_valid_item_test() ->
     Items = [{a, 10}, {b, 5}, {c, 1}],
     Result = hb_util:weighted_random(Items),
-    ?assert(lists:member(Result, [a,b,c])).
+    ?assert(lists:member(Result, [a, b, c])).
+
+weighted_random_respects_weights_test() ->
+    % With extreme weights, heavily weighted item should appear most
+    Items = [{heavy, 1000}, {light, 1}],
+    Results = [hb_util:weighted_random(Items) || _ <- lists:seq(1, 100)],
+    HeavyCount = length([X || X <- Results, X == heavy]),
+    ?assert(HeavyCount > 80).
 ```
 
 ---
 
-### 8. until/1-3
+### 8. Rounding: ceil_int/2, floor_int/2
+
+```erlang
+-spec ceil_int(integer(), integer()) -> integer().
+-spec floor_int(integer(), integer()) -> integer().
+```
+
+**Description:** Round integers to nearest multiple.
+
+**Test Code:**
+```erlang
+-module(hb_util_round_test).
+-include_lib("eunit/include/eunit.hrl").
+
+ceil_int_rounds_up_test() ->
+    ?assertEqual(10, hb_util:ceil_int(7, 5)).
+
+ceil_int_exact_multiple_test() ->
+    ?assertEqual(10, hb_util:ceil_int(5, 5)).
+
+ceil_int_large_test() ->
+    ?assertEqual(1000, hb_util:ceil_int(999, 100)).
+
+floor_int_rounds_down_test() ->
+    ?assertEqual(5, hb_util:floor_int(7, 5)).
+
+floor_int_exact_multiple_test() ->
+    ?assertEqual(5, hb_util:floor_int(5, 5)).
+
+floor_int_large_test() ->
+    ?assertEqual(900, hb_util:floor_int(999, 100)).
+```
+
+---
+
+### 9. Condition Waiting: until/1-3
 
 ```erlang
 -spec until(fun(() -> boolean())) -> integer().
@@ -279,82 +549,502 @@ weighted_random_test() ->
 -spec until(fun(() -> boolean()), fun(), integer()) -> integer().
 ```
 
-**Description:** Wait for condition to be true, optionally executing function between checks. Returns iteration count.
+**Description:** Wait for condition to be true, optionally executing function between checks.
 
 **Test Code:**
 ```erlang
 -module(hb_util_until_test).
 -include_lib("eunit/include/eunit.hrl").
 
-until_basic_test() ->
-    Ref = make_ref(),
-    spawn(fun() -> 
-        timer:sleep(100),
-        put(Ref, true)
-    end),
-    
-    Count = hb_util:until(fun() -> get(Ref) == true end),
-    ?assert(Count > 0).
+until_immediate_true_test() ->
+    Count = hb_util:until(fun() -> true end),
+    ?assertEqual(0, Count).
 
-until_with_fun_test() ->
-    Counter = spawn(fun() -> counter_loop(0) end),
-    
+until_with_iterations_test() ->
+    put(until_counter, 0),
     Count = hb_util:until(
-        fun() -> get_count(Counter) >= 5 end,
-        fun() -> 
-            Counter ! increment,
-            timer:sleep(10),
+        fun() -> get(until_counter) >= 3 end,
+        fun() ->
+            put(until_counter, get(until_counter) + 1),
             1
         end,
         0
     ),
-    ?assert(Count >= 5).
+    ?assertEqual(3, Count).
+
+until_returns_iteration_count_test() ->
+    put(until_counter2, 0),
+    Count = hb_util:until(
+        fun() -> get(until_counter2) >= 5 end,
+        fun() ->
+            put(until_counter2, get(until_counter2) + 1),
+            1
+        end,
+        0
+    ),
+    ?assertEqual(5, Count).
 ```
 
 ---
 
-### 9. human_int/1
+### 10. Formatting: human_int/1, to_lower/1
 
 ```erlang
 -spec human_int(integer() | float()) -> string().
+-spec to_lower(binary() | string()) -> binary() | string().
 ```
 
-**Description:** Format integer with comma separators for readability.
+**Description:** Human-readable formatting utilities.
 
 **Test Code:**
 ```erlang
--module(hb_util_human_test).
+-module(hb_util_format_test).
 -include_lib("eunit/include/eunit.hrl").
 
-human_int_test() ->
-    ?assertEqual("1,234", hb_util:human_int(1234)),
-    ?assertEqual("1,234,567", hb_util:human_int(1234567)),
+human_int_thousands_test() ->
+    ?assertEqual("1,234", hb_util:human_int(1234)).
+
+human_int_millions_test() ->
+    ?assertEqual("1,234,567", hb_util:human_int(1234567)).
+
+human_int_small_test() ->
     ?assertEqual("100", hb_util:human_int(100)).
+
+human_int_zero_test() ->
+    ?assertEqual("0", hb_util:human_int(0)).
+
+human_int_float_test() ->
+    ?assertEqual("1,235", hb_util:human_int(1234.6)).
+
+to_lower_binary_test() ->
+    ?assertEqual(<<"hello">>, hb_util:to_lower(<<"HELLO">>)).
+
+to_lower_mixed_test() ->
+    ?assertEqual(<<"hello world">>, hb_util:to_lower(<<"Hello World">>)).
 ```
 
 ---
 
-### 10. ceil_int/2, floor_int/2
+### 11. Value Finding: find_value/2-4
 
 ```erlang
--spec ceil_int(integer(), integer()) -> integer().
--spec floor_int(integer(), integer()) -> integer().
+-spec find_value(term(), map() | list()) -> term().
+-spec find_value(term(), map() | list(), term()) -> term().
 ```
 
-**Description:** Round integers to nearest multiple. `ceil_int` always rounds up, `floor_int` rounds down.
+**Description:** Find values in maps or key-value lists.
 
 **Test Code:**
 ```erlang
--module(hb_util_round_test).
+-module(hb_util_find_test).
 -include_lib("eunit/include/eunit.hrl").
 
-ceil_int_test() ->
-    ?assertEqual(10, hb_util:ceil_int(7, 5)),
-    ?assertEqual(10, hb_util:ceil_int(5, 5)).
+find_value_in_map_test() ->
+    Map = #{a => 1, b => 2},
+    ?assertEqual(1, hb_util:find_value(a, Map)).
 
-floor_int_test() ->
-    ?assertEqual(5, hb_util:floor_int(7, 5)),
-    ?assertEqual(5, hb_util:floor_int(5, 5)).
+find_value_in_list_test() ->
+    List = [{a, 1}, {b, 2}],
+    ?assertEqual(1, hb_util:find_value(a, List)).
+
+find_value_missing_test() ->
+    ?assertEqual(undefined, hb_util:find_value(x, #{a => 1})).
+
+find_value_with_default_test() ->
+    ?assertEqual(default, hb_util:find_value(x, #{a => 1}, default)).
+```
+
+---
+
+### 12. String Operations: remove_common/2, key_to_atom/1-2
+
+```erlang
+-spec remove_common(binary() | string(), binary() | string()) -> binary() | string().
+-spec key_to_atom(binary() | atom()) -> atom().
+```
+
+**Description:** String manipulation and key normalization.
+
+**Test Code:**
+```erlang
+-module(hb_util_string_test).
+-include_lib("eunit/include/eunit.hrl").
+
+remove_common_prefix_test() ->
+    ?assertEqual(<<"world">>, hb_util:remove_common(<<"hello world">>, <<"hello ">>)).
+
+remove_common_no_match_test() ->
+    ?assertEqual(<<"abc">>, hb_util:remove_common(<<"abc">>, <<"xyz">>)).
+
+remove_common_full_match_test() ->
+    ?assertEqual(<<>>, hb_util:remove_common(<<"test">>, <<"test">>)).
+
+key_to_atom_passthrough_test() ->
+    ?assertEqual(test, hb_util:key_to_atom(test)).
+
+key_to_atom_converts_dashes_test() ->
+    % Note: requires the atom to already exist
+    ?assertEqual(hello_world, hb_util:key_to_atom(<<"hello-world">>)).
+```
+
+---
+
+### 13. Validation: check_size/2, check_type/2, check_value/2
+
+```erlang
+-spec check_size(binary(), list() | {range, integer(), integer()}) -> boolean().
+-spec check_type(term(), atom()) -> boolean().
+-spec check_value(term(), list()) -> boolean().
+```
+
+**Description:** Validation utilities for type and size checking.
+
+**Test Code:**
+```erlang
+-module(hb_util_check_test).
+-include_lib("eunit/include/eunit.hrl").
+
+check_size_valid_test() ->
+    ?assert(hb_util:check_size(<<"abc">>, [3])).
+
+check_size_invalid_test() ->
+    ?assertNot(hb_util:check_size(<<"abc">>, [5])).
+
+check_size_range_test() ->
+    ?assert(hb_util:check_size(<<"abc">>, {range, 1, 5})).
+
+check_size_range_invalid_test() ->
+    ?assertNot(hb_util:check_size(<<"abc">>, {range, 5, 10})).
+
+check_type_binary_test() ->
+    ?assert(hb_util:check_type(<<"test">>, binary)).
+
+check_type_integer_test() ->
+    ?assert(hb_util:check_type(42, integer)).
+
+check_type_list_test() ->
+    ?assert(hb_util:check_type([1, 2], list)).
+
+check_type_map_test() ->
+    ?assert(hb_util:check_type(#{}, map)).
+
+check_type_wrong_test() ->
+    ?assertNot(hb_util:check_type(<<"binary">>, integer)).
+
+check_value_valid_test() ->
+    ?assert(hb_util:check_value(a, [a, b, c])).
+
+check_value_invalid_test() ->
+    ?assertNot(hb_util:check_value(x, [a, b, c])).
+```
+
+---
+
+### 14. Error Handling: ok/1-2, maybe_throw/2, ok_or_throw/3
+
+```erlang
+-spec ok(term()) -> term().
+-spec ok(term(), map()) -> term().
+-spec maybe_throw(term(), map()) -> term() | no_return().
+-spec ok_or_throw(term(), boolean(), term()) -> true | no_return().
+```
+
+**Description:** Error handling and unwrapping utilities.
+
+**Test Code:**
+```erlang
+-module(hb_util_error_test).
+-include_lib("eunit/include/eunit.hrl").
+
+ok_unwrap_test() ->
+    ?assertEqual(value, hb_util:ok({ok, value})).
+
+ok_throw_on_error_test() ->
+    ?assertThrow({unexpected, error}, hb_util:ok(error)).
+
+ok_or_throw_true_test() ->
+    ?assertEqual(true, hb_util:ok_or_throw(ignored, true, some_error)).
+
+ok_or_throw_false_test() ->
+    ?assertThrow(some_error, hb_util:ok_or_throw(ignored, false, some_error)).
+
+maybe_throw_with_throw_strategy_test() ->
+    ?assertThrow(my_error, hb_util:maybe_throw(my_error, #{error_strategy => throw})).
+```
+
+---
+
+### 15. Atom Conversion: atom/1
+
+```erlang
+-spec atom(binary() | list() | atom()) -> atom().
+```
+
+**Description:** Convert string/binary to existing atom. Throws if atom doesn't exist.
+
+**Test Code:**
+```erlang
+-module(hb_util_atom_test).
+-include_lib("eunit/include/eunit.hrl").
+
+atom_passthrough_test() ->
+    ?assertEqual(test, hb_util:atom(test)).
+
+atom_from_binary_test() ->
+    ?assertEqual(true, hb_util:atom(<<"true">>)).
+
+atom_from_string_test() ->
+    ?assertEqual(false, hb_util:atom("false")).
+```
+
+---
+
+### 16. String Predicates: is_string_list/1, unquote/1
+
+```erlang
+-spec is_string_list(term()) -> boolean().
+-spec unquote(binary()) -> binary().
+```
+
+**Description:** String validation and quote removal.
+
+**Test Code:**
+```erlang
+-module(hb_util_string_pred_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_string_list_true_test() ->
+    ?assert(hb_util:is_string_list("hello")).
+
+is_string_list_false_test() ->
+    ?assertNot(hb_util:is_string_list([a, b, c])).
+
+is_string_list_empty_test() ->
+    ?assert(hb_util:is_string_list([])).
+
+unquote_quoted_test() ->
+    ?assertEqual(<<"hello">>, hb_util:unquote(<<"\"hello\"">>)).
+
+unquote_unquoted_test() ->
+    ?assertEqual(<<"hello">>, hb_util:unquote(<<"hello">>)).
+
+unquote_partial_test() ->
+    ?assertEqual(<<"hello">>, hb_util:unquote(<<"\"hello">>)).
+```
+
+---
+
+### 17. String Parsing: split_depth_string_aware/2, split_escaped_single/2
+
+```erlang
+-spec split_depth_string_aware(char() | [char()], binary()) -> [binary()].
+-spec split_escaped_single(char(), binary()) -> {binary(), binary()}.
+```
+
+**Description:** Advanced string splitting with nesting and escape awareness. Separator is a character (integer) or list of characters, not a binary.
+
+**Test Code:**
+```erlang
+-module(hb_util_split_test).
+-include_lib("eunit/include/eunit.hrl").
+
+split_simple_test() ->
+    %% Separator is $, (comma character = 44), not <<",">>
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], 
+                 hb_util:split_depth_string_aware($,, <<"a,b,c">>)).
+
+split_with_quotes_test() ->
+    %% Quoted strings are preserved (comma inside quotes not split)
+    ?assertEqual([<<"\"a,b\"">>, <<"c">>],
+                 hb_util:split_depth_string_aware($,, <<"\"a,b\",c">>)).
+
+split_with_parens_test() ->
+    %% Parentheses create depth (comma inside parens not split)
+    ?assertEqual([<<"(a,b)">>, <<"c">>],
+                 hb_util:split_depth_string_aware($,, <<"(a,b),c">>)).
+
+split_empty_test() ->
+    ?assertEqual([], hb_util:split_depth_string_aware($,, <<>>)).
+
+split_escaped_test() ->
+    {Part, Rest} = hb_util:split_escaped_single($,, <<"a\\,b,c">>),
+    ?assertEqual(<<"a\\,b">>, Part),
+    ?assertEqual(<<"c">>, Rest).
+```
+
+---
+
+### 18. Binary/String Utilities: binary_to_strings/1, binary_is_atom/1
+
+```erlang
+-spec binary_to_strings(binary() | list()) -> list().
+-spec binary_is_atom(binary()) -> boolean().
+```
+
+**Description:** Binary parsing and atom checking utilities.
+
+**Test Code:**
+```erlang
+-module(hb_util_binary_test).
+-include_lib("eunit/include/eunit.hrl").
+
+binary_to_strings_passthrough_test() ->
+    ?assertEqual([a, b], hb_util:binary_to_strings([a, b])).
+
+binary_is_atom_true_test() ->
+    ?assert(hb_util:binary_is_atom(<<"true">>)).
+
+binary_is_atom_false_test() ->
+    ?assertNot(hb_util:binary_is_atom(<<"not_an_existing_atom_xyz123">>)).
+```
+
+---
+
+### 19. Numbered Message Operations: number/1, hd/1-3
+
+```erlang
+-spec number(list()) -> [{binary(), term()}].
+-spec hd(map()) -> term().
+-spec hd(map(), key | value) -> term().
+-spec hd(map(), key | value, map()) -> term().
+```
+
+**Description:** Number list elements and get first element from numbered maps. `hd/1-3` gets the first element (lowest integer key >= 1) from a numbered map.
+
+**Test Code:**
+```erlang
+-module(hb_util_numbered_test).
+-include_lib("eunit/include/eunit.hrl").
+
+number_test() ->
+    ?assertEqual([{<<"1">>, a}, {<<"2">>, b}], hb_util:number([a, b])).
+
+number_empty_test() ->
+    ?assertEqual([], hb_util:number([])).
+
+hd_value_test() ->
+    %% Get first value from numbered map - returns {ok, Value}
+    Map = #{<<"1">> => first, <<"2">> => second},
+    ?assertEqual({ok, first}, hb_util:hd(Map)).
+
+hd_key_test() ->
+    %% Get first key from numbered map
+    Map = #{<<"1">> => first, <<"2">> => second},
+    ?assertEqual(<<"1">>, hb_util:hd(Map, key)).
+
+hd_empty_throws_test() ->
+    %% Empty map throws by default
+    ?assertThrow(no_integer_keys, hb_util:hd(#{})).
+
+hd_empty_with_return_strategy_test() ->
+    %% With error_strategy => return, returns undefined
+    ?assertEqual(undefined, hb_util:hd(#{}, value, #{error_strategy => return})).
+```
+
+---
+
+### 20. Ordered List Operations: is_ordered_list/2, list_to_numbered_message/1
+
+```erlang
+-spec is_ordered_list(map(), map()) -> boolean().
+-spec list_to_numbered_message(list() | map()) -> map().
+```
+
+**Description:** Check and convert ordered numbered message structures.
+
+**Test Code:**
+```erlang
+-module(hb_util_ordered_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_ordered_list_true_test() ->
+    ?assert(hb_util:is_ordered_list([a, b, c], #{})).
+
+list_to_numbered_message_test() ->
+    Result = hb_util:list_to_numbered_message([a, b, c]),
+    ?assert(is_map(Result)).
+```
+
+---
+
+### 21. Map Case Operations: lower_case_key_map/2
+
+```erlang
+-spec lower_case_key_map(map(), map()) -> map().
+```
+
+**Description:** Recursively lowercase all keys in a map.
+
+**Test Code:**
+```erlang
+-module(hb_util_case_test).
+-include_lib("eunit/include/eunit.hrl").
+
+lower_case_key_map_test() ->
+    Map = #{<<"Hello">> => 1, <<"WORLD">> => 2},
+    Result = hb_util:lower_case_key_map(Map, #{}),
+    ?assertEqual(#{<<"hello">> => 1, <<"world">> => 2}, Result).
+
+lower_case_key_map_nested_test() ->
+    Map = #{<<"Outer">> => #{<<"Inner">> => 1}},
+    Result = hb_util:lower_case_key_map(Map, #{}),
+    ?assertEqual(#{<<"outer">> => #{<<"inner">> => 1}}, Result).
+```
+
+---
+
+### 22. Module Introspection: is_hb_module/1-2, all_hb_modules/0, all_atoms/0
+
+```erlang
+-spec is_hb_module(atom()) -> boolean().
+-spec is_hb_module(atom(), [string()]) -> boolean().
+-spec all_hb_modules() -> [atom()].
+-spec all_atoms() -> [atom()].
+```
+
+**Description:** Check if module is part of HyperBEAM based on prefix matching. `is_hb_module/2` takes explicit prefixes list. Note: `hb_event` is explicitly excluded (always returns false).
+
+**Test Code:**
+```erlang
+-module(hb_util_module_test).
+-include_lib("eunit/include/eunit.hrl").
+
+is_hb_module_with_prefix_test() ->
+    %% With explicit prefixes, checks if module starts with prefix
+    ?assert(hb_util:is_hb_module(hb_util, ["hb"])),
+    ?assert(hb_util:is_hb_module(hb_cache, ["hb"])),
+    ?assert(hb_util:is_hb_module(ar_wallet, ["ar"])).
+
+is_hb_module_no_match_test() ->
+    %% Module not matching any prefix returns false
+    ?assertNot(hb_util:is_hb_module(lists, ["hb", "ar"])),
+    ?assertNot(hb_util:is_hb_module(crypto, ["hb"])).
+
+is_hb_module_hb_event_excluded_test() ->
+    %% hb_event is explicitly excluded (always false)
+    ?assertNot(hb_util:is_hb_module(hb_event, ["hb"])).
+
+is_hb_module_empty_prefixes_test() ->
+    %% Empty prefixes list means nothing matches
+    ?assertNot(hb_util:is_hb_module(hb_util, [])).
+
+all_hb_modules_returns_list_test() ->
+    %% Returns a list of atoms
+    Modules = hb_util:all_hb_modules(),
+    ?assert(is_list(Modules)),
+    lists:foreach(fun(M) -> ?assert(is_atom(M)) end, Modules).
+
+all_atoms_returns_list_test() ->
+    Atoms = hb_util:all_atoms(),
+    ?assert(is_list(Atoms)),
+    ?assert(length(Atoms) > 0).
+
+all_atoms_contains_common_atoms_test() ->
+    Atoms = hb_util:all_atoms(),
+    ?assert(lists:member(true, Atoms)),
+    ?assert(lists:member(false, Atoms)),
+    ?assert(lists:member(ok, Atoms)),
+    ?assert(lists:member(error, Atoms)).
 ```
 
 ---

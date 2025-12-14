@@ -106,7 +106,7 @@ encode_mixed_types_test() ->
 encode_empty_map_test() ->
     Term = #{},
     JSON = hb_json:encode(Term),
-    ?assertEqual(<<"{}">>), JSON).
+    ?assertEqual(<<"{}">>, JSON).
 
 encode_empty_list_test() ->
     Term = [],
