@@ -1,0 +1,140 @@
+# Setup
+
+Get HyperBEAM running, write your first test, and create a minimal device.
+
+## Clone the Repository
+
+This book is written for a specific release. Clone and checkout that version:
+
+```bash [Terminal]
+git clone https://github.com/permaweb/HyperBEAM.git
+cd HyperBEAM
+git checkout v0.9-milestone-3-beta-3
+```
+
+:::warning
+Code examples in this book may not work with other versions. Always use the version above when following along.
+:::
+
+## Installation
+
+Follow the [official installation guide](https://hyperbeam.ar.io/run/running-a-hyperbeam-node.html) to install all dependencies (Erlang/OTP 27, Rebar3, Node.js, and optionally Rust).
+
+---
+
+## Writing Tests
+
+HyperBEAM uses EUnit for Erlang tests. Create a test directory and module:
+
+### Create a Test File
+
+```bash [Terminal]
+mkdir -p src/test
+touch src/test/my_first_test.erl
+```
+
+```erlang [src/test/my_first_test.erl]
+-module(my_first_test).
+-include_lib("eunit/include/eunit.hrl").
+
+basic_test() ->
+    ?assertEqual(4, 2 + 2).
+
+hb_util_test() ->
+    % Test base64url encoding
+    Encoded = hb_util:encode(<<"hello">>),
+    ?assertEqual(<<"hello">>, hb_util:decode(Encoded)).
+
+message_test() ->
+    % Create a simple message
+    Msg = #{ <<"key">> => <<"value">> },
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, Msg)).
+```
+
+### Run Tests
+
+```bash [Terminal]
+rebar3 eunit --module=my_first_test
+```
+
+### Test Output
+
+```txt [Output]
+  my_first_test: basic_test/0...[0.001 s] ok
+  my_first_test: hb_util_test/0...[0.002 s] ok
+  my_first_test: message_test/0...[0.001 s] ok
+```
+
+### Debug Output
+
+Use `?debugFmt` to print during tests:
+
+```erlang [src/test/my_first_test.erl]
+debug_test() ->
+    Value = 42,
+    ?debugFmt("Value is ~p~n", [Value]),
+    ?assertEqual(42, Value).
+```
+
+:::tip
+Each module in the [HyperBEAM Reference](/hyperbeam) includes comprehensive tests for every public function. Copy any test into your `src/test/` directory and run it the same way.
+:::
+
+---
+
+## Creating a Minimal Device
+
+Devices are Erlang modules that handle specific message keys. Here's the simplest possible device.
+
+### Create the Device Module
+
+Create `src/dev_hello.erl`:
+
+```erlang [src/dev_hello.erl]
+-module(dev_hello).
+-export([info/3, greet/3]).
+-include("include/hb.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+info(_Msg, _Msg2, _Opts) ->
+    {ok, #{
+        <<"name">> => <<"hello">>,
+        <<"version">> => <<"1.0">>
+    }}.
+
+greet(Msg, _Msg2, Opts) ->
+    Name = hb_ao:get(<<"name">>, Msg, Opts),
+    Greeting = <<"Hello, ", Name/binary, "!">>,
+    {ok, hb_ao:set(Msg, #{ <<"greeting">> => Greeting }, Opts)}.
+
+%% Tests
+info_test() ->
+    {ok, Result} = info(#{}, #{}, #{}),
+    ?assertEqual(<<"hello">>, maps:get(<<"name">>, Result)).
+
+greet_test() ->
+    Msg = #{ <<"name">> => <<"Alice">> },
+    {ok, Result} = greet(Msg, #{}, #{}),
+    ?assertEqual(<<"Hello, Alice!">>, maps:get(<<"greeting">>, Result)).
+```
+
+### Register the Device
+
+Add your device to `preloaded_devices` in `src/hb_opts.erl`:
+
+```erlang [src/hb_opts.erl]
+preloaded_devices => [
+    % ... existing devices ...
+    #{<<"name">> => <<"hello@1.0">>, <<"module">> => dev_hello}
+],
+```
+
+### Run Tests
+
+```bash [Terminal]
+rebar3 eunit --module=dev_hello
+```
+
+---
+
+For high-performance devices, see [Creating Devices in Rust](/tutorials/devices-rust) and [Creating Devices in C++](/tutorials/devices-cpp).
