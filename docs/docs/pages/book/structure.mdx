@@ -1,0 +1,239 @@
+# Project Structure
+
+Understand how HyperBEAM's codebase is organized before reading the source.
+
+## Repository Layout
+
+```txt [HyperBEAM/]
+HyperBEAM/
+├── src/                 # Erlang source (137 modules)
+├── include/             # Header files (.hrl)
+├── test/                # Test files and fixtures
+├── native/              # Rust/C native code (NIFs)
+├── priv/                # Runtime resources
+├── scripts/             # Lua scripts
+├── docs/                # Documentation
+├── certificates/        # AMD SEV-SNP certificates
+├── rebar.config         # Build configuration
+├── rebar.lock           # Dependency lock
+├── Makefile             # Native build automation
+└── config.flat          # Node configuration
+```
+
+---
+
+## Module Prefixes
+
+HyperBEAM organizes modules by prefix. Learn what each prefix means.
+
+### `ar_*` — Arweave Integration (7 modules)
+
+Low-level Arweave protocol primitives. Handles transactions, wallets, bundles, and cryptographic hashing.
+
+```txt [src/ar_*.erl]
+ar_wallet.erl        # Key generation, signing, addresses
+ar_tx.erl            # Layer 1 transactions
+ar_bundles.erl       # ANS-104 data items
+ar_deep_hash.erl     # Recursive SHA-384 hashing
+ar_timestamp.erl     # Network time sync
+ar_rate_limiter.erl  # Gateway throttling
+rsa_pss.erl          # RSA-PSS signatures
+```
+
+### `hb_*` — HyperBEAM Core (55 modules)
+
+Runtime infrastructure that powers everything. Messages, storage, caching, HTTP, and the AO protocol engine.
+
+```txt [src/hb_*.erl]
+hb.erl               # Entry point and top-level API
+hb_ao.erl            # Core protocol (resolve/3 routes all requests)
+hb_message.erl       # Message creation, signing, IDs
+hb_cache.erl         # Content-addressed caching
+hb_store.erl         # Abstract storage interface
+hb_store_lmdb.erl    # LMDB backend (default)
+hb_http_server.erl   # Cowboy HTTP handlers
+hb_opts.erl          # Hierarchical configuration
+```
+
+### `dev_*` — Devices (77 modules)
+
+Pluggable handlers that extend HyperBEAM. Each device handles specific message keys.
+
+```txt [src/dev_*.erl]
+dev_message.erl      # Default message device (simplest)
+dev_stack.erl        # Device pipelines
+dev_wasm.erl         # WebAssembly execution
+dev_process.erl      # Stateful computation
+dev_scheduler.erl    # Deterministic ordering
+dev_codec_*.erl      # Format transformation (14 codecs)
+```
+
+---
+
+## Header Files
+
+Headers (`.hrl`) define records, macros, and types shared across modules.
+
+### `include/ar.hrl` — Arweave Structures
+
+Defines the `#tx{}` record for Arweave transactions and cryptographic constants.
+
+```erlang [include/ar.hrl]
+-record(tx, {
+    format = ans104,           % Transaction format
+    id = ?DEFAULT_ID,          % 32-byte transaction ID
+    owner = ?DEFAULT_OWNER,    % 512-byte RSA public key
+    tags = [],                 % [{Key, Value}] metadata
+    target = ?DEFAULT_TARGET,  % Recipient address
+    quantity = 0,              % Amount in Winstons
+    data = ?DEFAULT_DATA,      % Payload
+    signature = ?DEFAULT_SIG   % 512-byte RSA signature
+}).
+
+-define(HASH_ALG, sha256).
+-define(RSA_PRIV_KEY_SZ, 4096).
+```
+
+### `include/hb.hrl` — HyperBEAM Core
+
+Core macros for message validation, logging, and debugging. Includes `ar.hrl` automatically.
+
+```erlang [include/hb.hrl]
+-include("ar.hrl").
+
+-define(HYPERBEAM_VERSION, 0.9).
+
+%% Message validation
+-define(IS_ID(X), 
+    (is_binary(X) andalso (byte_size(X) == 43 orelse byte_size(X) == 32))).
+
+-define(IS_EMPTY_MESSAGE(Msg), 
+    (map_size(Msg) == 0) orelse 
+    (map_size(Msg) == 1 andalso is_map_key(priv, Msg))).
+
+%% Logging (auto-captures module, function, line)
+-define(event(X), 
+    hb_event:log(global, X, ?MODULE, ?FUNCTION_NAME, ?LINE)).
+
+%% Debugging
+-define(p(X), io:format("~p~n", [X])).
+-define(h(), io:format("--- ~p:~p:~p ---~n", [?MODULE, ?FUNCTION_NAME, ?LINE])).
+```
+
+### `include/hb_http.hrl` — HTTP Parsing
+
+Guard-compatible macros for validating HTTP characters per RFC 9110.
+
+```erlang [include/hb_http.hrl]
+-define(IS_ALPHA(C), (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z)).
+-define(IS_DIGIT(C), (C >= $0 andalso C =< $9)).
+-define(IS_TOKEN(C), ?IS_ALPHA(C) orelse ?IS_DIGIT(C) orelse ...).
+-define(IS_WS(C), (C =:= $\s) orelse (C =:= $\t)).
+```
+
+### `include/cargo.hrl` — Rust NIF Loading
+
+Auto-generated macro for loading Rust native functions.
+
+```erlang [include/cargo.hrl]
+-define(load_nif_from_crate(__CRATE, __INIT),
+    (fun() ->
+        __PATH = filename:join([code:priv_dir(hb), "crates", __CRATE, __CRATE]),
+        erlang:load_nif(__PATH, __INIT)
+    end)()).
+```
+
+---
+
+## Build Configuration
+
+### `rebar.config` — Erlang Build
+
+The main build configuration. Defines dependencies, compiler options, hooks, and profiles.
+
+```erlang [rebar.config]
+{deps, [
+    {cowboy, "2.14.0"},              % HTTP server
+    {gun, "2.2.0"},                  % HTTP client
+    {elmdb, {git, "..."}},           % LMDB bindings (Rust)
+    {luerl, "1.3.0"},                % Lua interpreter
+    {prometheus, "6.0.3"}            % Metrics
+]}.
+
+{port_specs, [
+    {"./priv/hb_beamr.so", ["./native/hb_beamr/*.c"]},  % WASM runtime
+    {"./priv/hb_keccak.so", ["./native/hb_keccak/*.c"]} % Keccak hashing
+]}.
+```
+
+Key sections:
+
+- **deps** — External dependencies from Hex.pm and Git
+- **profiles** — Optional features (rocksdb, genesis_wasm, http3)
+- **port_specs** — C code compiled to NIFs
+- **cargo_opts** — Rust crates compiled to NIFs
+- **pre_hooks/post_hooks** — Build automation
+
+### `Makefile` — Native Build
+
+Builds WAMR (WebAssembly Micro Runtime) and Genesis WASM server.
+
+```makefile [Makefile]
+WAMR_VERSION = 2.2.0
+
+wamr: $(WAMR_DIR)/lib/libvmlib.a    # Build WAMR library
+setup-genesis-wasm:                  # Clone and setup Genesis WASM
+```
+
+WAMR is configured for:
+
+- 64-bit memory addressing
+- AOT and interpreter modes (no JIT)
+- Tail call optimization
+- Exception handling
+
+### Build Profiles
+
+Enable optional features by compiling with profiles:
+
+```bash [Terminal]
+# Default (LMDB storage, HTTP/1.1 + HTTP/2)
+rebar3 shell
+
+# With RocksDB storage
+rebar3 as rocksdb shell
+
+# With Genesis WASM runtime
+rebar3 as genesis_wasm shell
+
+# Multiple profiles
+rebar3 as rocksdb,genesis_wasm shell
+```
+
+---
+
+## Native Code
+
+HyperBEAM uses NIFs (Native Implemented Functions) for performance-critical operations.
+
+### `native/` — Rust NIFs
+
+```txt [native/]
+native/
+├── dev_snp_nif/     # AMD SEV-SNP attestation
+└── elmdb_nif/       # LMDB database bindings
+```
+
+Compiled NIFs go to `priv/` and are loaded at runtime via `cargo.hrl`.
+
+---
+
+## File Count Summary
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| `ar_*.erl` | 7 | Arweave primitives |
+| `hb_*.erl` | 55 | Core infrastructure |
+| `dev_*.erl` | 77 | Device implementations |
+| `.hrl` | 4 | Header files |
+| **Total** | **143** | |

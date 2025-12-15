@@ -153,14 +153,14 @@ export default defineConfig({
     "https://vocs.dev/api/og?logo=%logo&title=%title&description=%description",
   topNav: [
     { text: "Get Started", link: "/getting-started" },
+    { text: "HyperBEAM", link: "/book" },
     { text: "Mobile", link: "/mobile" },
     { text: "SDK", link: "/api/ao" },
-    { text: "HyperBEAM", link: "/hyperbeam" },
   ],
   socials: [
     {
       icon: "discord",
-      link: "https://discord.gg/vCkuVhkugY",
+      link: "https://discord.gg/jGqWtUUntQ",
     },
     {
       icon: "github",
@@ -247,26 +247,20 @@ export default defineConfig({
       collapsed: true,
       items: [
         {
-          text: "Erlang Crash Course",
-          link: "/erlang",
+          text: "Overview",
+          link: "/book",
         },
         {
-          text: "Creating Devices",
-          collapsed: true,
-          items: [
-            {
-              text: "Custom Devices in Erlang",
-              link: "/tutorials/creating-devices",
-            },
-            {
-              text: "Custom Devices in Rust",
-              link: "/tutorials/devices-rust",
-            },
-            {
-              text: "Custom Devices in C++",
-              link: "/tutorials/devices-cpp",
-            },
-          ],
+          text: "Setup",
+          link: "/book/setup",
+        },
+        {
+          text: "Erlang",
+          link: "/book/erlang",
+        },
+        {
+          text: "Structure",
+          link: "/book/structure",
         },
       ],
     },
@@ -317,6 +311,18 @@ export default defineConfig({
         {
           text: "Running LLMs on AOS",
           link: "/tutorials/running-llms",
+        },
+        {
+          text: "Custom Devices in Erlang",
+          link: "/tutorials/creating-devices",
+        },
+        {
+          text: "Custom Devices in Rust",
+          link: "/tutorials/devices-rust",
+        },
+        {
+          text: "Custom Devices in C++",
+          link: "/tutorials/devices-cpp",
         },
       ],
     },
