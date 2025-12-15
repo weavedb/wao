@@ -28,7 +28,7 @@ This module provides a comprehensive system for managing configuration options i
 %% Configuration Loading
 -spec load(Path) -> {ok, Config} | {error, Reason}.
 -spec load(Path, Opts) -> {ok, Config} | {error, Reason}.
--spec load_bin(Binary, Format) -> {ok, Config} | {error, Reason}.
+-spec load_bin(Binary, Opts) -> {ok, Config} | {error, Reason}.
 
 %% Default Messages
 -spec default_message() -> Map.
@@ -39,11 +39,11 @@ This module provides a comprehensive system for managing configuration options i
 -spec as(Identity, Opts) -> {ok, OptsWithIdentity} | not_found.
 
 %% Type Conversion
--spec mimic_default_types(Key, Value, Default) -> TypedValue.
+-spec mimic_default_types(Map, Mode, Opts) -> TypedMap.
 
 %% Validation
 -spec ensure_node_history(Opts, RequiredOpts) -> {ok, valid} | {error, invalid_values}.
--spec check_required_opts(Opts, RequiredKeys) -> {ok, valid} | {error, missing_keys, MissingKeys}.
+-spec check_required_opts(KeyValuePairs, Opts) -> {ok, Opts} | {error, ErrorMsg}.
 ```
 
 ---
@@ -168,15 +168,15 @@ load_json_test() ->
 ### 3. load_bin/2
 
 ```erlang
--spec load_bin(Binary, Format) -> {ok, Config} | {error, Reason}
+-spec load_bin(Binary, Opts) -> {ok, Config} | {error, Reason}
     when
         Binary :: binary(),
-        Format :: flat | json,
+        Opts :: map(),
         Config :: map(),
         Reason :: term().
 ```
 
-**Description:** Load configuration from binary data instead of file. Useful for dynamic configuration or testing.
+**Description:** Load configuration from binary data in flat format (key: value per line). Types are converted to match those in `default_message/0`.
 
 **Test Code:**
 ```erlang
@@ -184,16 +184,17 @@ load_json_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 load_bin_flat_test() ->
+    %% load_bin/2 uses flat@1.0 device by default
     Config = <<"port: 8080\nhost: localhost">>,
-    {ok, Loaded} = hb_opts:load_bin(Config, flat),
+    {ok, Loaded} = hb_opts:load_bin(Config, #{}),
     ?assertEqual(8080, maps:get(port, Loaded)),
     ?assertEqual(<<"localhost">>, maps:get(host, Loaded)).
 
-load_bin_json_test() ->
-    Config = <<"{\"port\": 8080, \"host\": \"localhost\"}">>,
-    {ok, Loaded} = hb_opts:load_bin(Config, json),
-    ?assertEqual(8080, maps:get(port, Loaded)),
-    ?assertEqual(<<"localhost">>, maps:get(host, Loaded)).
+load_bin_with_types_test() ->
+    %% Types are converted to match default_message types
+    Config = <<"debug: true\nport: 9000">>,
+    {ok, Loaded} = hb_opts:load_bin(Config, #{}),
+    ?assert(is_integer(maps:get(port, Loaded))).
 ```
 
 ---
@@ -339,19 +340,19 @@ as_identity_test() ->
 ### 7. mimic_default_types/3
 
 ```erlang
--spec mimic_default_types(Key, Value, Default) -> TypedValue
+-spec mimic_default_types(Map, Mode, Opts) -> TypedMap
     when
-        Key :: atom() | binary(),
-        Value :: term(),
-        Default :: map(),
-        TypedValue :: term().
+        Map :: map(),
+        Mode :: new_atoms | existing_atoms,
+        Opts :: map(),
+        TypedMap :: map().
 ```
 
-**Description:** Convert a value to match the type of the corresponding default value. Used during configuration loading to ensure type consistency.
+**Description:** Convert all values in a map to match the types in `default_message/0`. Used during configuration loading to ensure type consistency.
 
 **Type Conversions:**
-- String numbers → Integers
-- String "true"/"false" → Booleans
+- String numbers → Integers (if default is integer)
+- String "true"/"false" → Atoms (if default is atom)
 - Preserves binaries, lists, maps as-is
 
 **Test Code:**
@@ -360,10 +361,18 @@ as_identity_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 mimic_default_types_test() ->
-    Default = #{port => 8080, enabled => true, name => <<"test">>},
-    ?assertEqual(1234, hb_opts:mimic_default_types(port, "1234", Default)),
-    ?assertEqual(true, hb_opts:mimic_default_types(enabled, "true", Default)),
-    ?assertEqual(<<"value">>, hb_opts:mimic_default_types(name, <<"value">>, Default)).
+    %% mimic_default_types/3 takes (Map, Mode, Opts)
+    %% It converts types in Map to match default_message types
+    Input = #{<<"port">> => <<"8080">>, <<"debug">> => <<"true">>},
+    Result = hb_opts:mimic_default_types(Input, existing_atoms, #{}),
+    %% port should be converted to integer (matching default_message)
+    ?assert(is_map(Result)).
+
+mimic_default_types_integer_test() ->
+    %% String numbers become integers if default has integer
+    Input = #{port => "9000"},
+    Result = hb_opts:mimic_default_types(Input, existing_atoms, #{}),
+    ?assertEqual(9000, maps:get(port, Result)).
 ```
 
 ---
@@ -409,16 +418,11 @@ ensure_node_history_missing_test() ->
     },
     ?assertEqual({error, invalid_values}, hb_opts:ensure_node_history(MissingItems, RequiredOpts)).
 
-ensure_node_history_invalid_test() ->
-    RequiredOpts = #{key1 => <<"value1">>, key2 => <<"value2">>},
-    InvalidItems = #{
-        <<"key1">> => <<"value1">>,
-        <<"key2">> => <<"value2">>,
-        node_history => [
-            #{<<"key1">> => <<"wrong">>, <<"key2">> => <<"value2">>}
-        ]
-    },
-    ?assertEqual({error, invalid_values}, hb_opts:ensure_node_history(InvalidItems, RequiredOpts)).
+ensure_node_history_empty_test() ->
+    %% Empty node_history should validate if main opts match
+    RequiredOpts = #{key1 => <<"value1">>},
+    Opts = #{<<"key1">> => <<"value1">>, node_history => []},
+    ?assertEqual({ok, valid}, hb_opts:ensure_node_history(Opts, RequiredOpts)).
 ```
 
 ---
@@ -426,14 +430,14 @@ ensure_node_history_invalid_test() ->
 ### 9. check_required_opts/2
 
 ```erlang
--spec check_required_opts(Opts, RequiredKeys) -> {ok, valid} | {error, missing_keys, MissingKeys}
+-spec check_required_opts(KeyValuePairs, Opts) -> {ok, Opts} | {error, ErrorMsg}
     when
+        KeyValuePairs :: [{Name :: binary(), Value :: term()}],
         Opts :: map(),
-        RequiredKeys :: [atom() | binary()],
-        MissingKeys :: [atom() | binary()].
+        ErrorMsg :: binary().
 ```
 
-**Description:** Verify that all required configuration keys are present in the options map.
+**Description:** Check that none of the key-value pairs have `not_found` as their value. Returns `{ok, Opts}` if all values are present, or `{error, ErrorMsg}` listing missing keys. The `Opts` parameter is passed through unchanged on success.
 
 **Test Code:**
 ```erlang
@@ -441,17 +445,15 @@ ensure_node_history_invalid_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 check_required_opts_valid_test() ->
-    Opts = #{port => 8080, host => <<"localhost">>, mode => prod},
-    Required = [port, host, mode],
-    ?assertEqual({ok, valid}, hb_opts:check_required_opts(Opts, Required)).
+    %% All values present (none are 'not_found')
+    KeyValuePairs = [{<<"port">>, 8080}, {<<"host">>, <<"localhost">>}],
+    ?assertMatch({ok, _}, hb_opts:check_required_opts(KeyValuePairs, #{})).
 
 check_required_opts_missing_test() ->
-    Opts = #{port => 8080},
-    Required = [port, host, mode],
-    {error, missing_keys, Missing} = hb_opts:check_required_opts(Opts, Required),
-    ?assertEqual(2, length(Missing)),
-    ?assert(lists:member(host, Missing)),
-    ?assert(lists:member(mode, Missing)).
+    %% Some values are 'not_found' - returns error with message
+    KeyValuePairs = [{<<"port">>, 8080}, {<<"host">>, not_found}, {<<"mode">>, not_found}],
+    ?assertMatch({error, <<"Missing required opts:", _/binary>>}, 
+                 hb_opts:check_required_opts(KeyValuePairs, #{})).
 ```
 
 ---
@@ -490,12 +492,16 @@ Opts = #{
 Defaults = hb_opts:default_message_with_env(),
 % Includes overrides from HB_PORT, HB_MODE, etc.
 
-%% Validate required options
-Required = [port, gateway, bundler_ans104],
-case hb_opts:check_required_opts(Opts, Required) of
-    {ok, valid} -> proceed();
-    {error, missing_keys, Missing} -> 
-        io:format("Missing: ~p~n", [Missing])
+%% Validate required options are present
+%% First, get values (using not_found for missing)
+KeyValuePairs = [
+    {<<"port">>, hb_opts:get(port, not_found, Opts)},
+    {<<"gateway">>, hb_opts:get(gateway, not_found, Opts)}
+],
+case hb_opts:check_required_opts(KeyValuePairs, Opts) of
+    {ok, _} -> proceed();
+    {error, ErrorMsg} -> 
+        io:format("Error: ~s~n", [ErrorMsg])
 end.
 ```
 

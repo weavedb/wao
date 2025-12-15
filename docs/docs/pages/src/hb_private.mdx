@@ -346,10 +346,16 @@ opts_priv_store_test() ->
     ?assertEqual(PrivStore, lists:nth(1, Store)).
 
 opts_no_priv_store_test() ->
-    Opts = #{store => [#{name => <<"public">>}]},
+    %% Explicitly set priv_store to undefined to override global config
+    Opts = #{
+        priv_store => undefined,
+        store => [#{name => <<"public">>}],
+        prefer => local
+    },
     PrivOpts = hb_private:opts(Opts),
     Store = maps:get(store, PrivOpts),
-    ?assertEqual(1, length(Store)).
+    %% First store should be our public store (no priv_store prepended)
+    ?assertEqual(#{name => <<"public">>}, hd(Store)).
 ```
 
 ---
