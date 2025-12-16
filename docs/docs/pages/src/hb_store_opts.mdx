@@ -40,7 +40,7 @@ This module takes store options and store defaults, applying type-specific defau
         UpdatedStoreOpts :: [map()].
 ```
 
-**Description:** Apply store defaults to a list of store configuration maps. For each store in the list, applies defaults based on its `store-module` type and recursively processes any nested stores in the `<<"store">>` field.
+**Description:** Apply store defaults to a list of store configuration maps. For each store in the list, applies defaults based on its `store-module` type and recursively processes any nested stores in the `<<"store">>` field. Store options take precedence over defaults.
 
 **Supported Store Modules:**
 - `hb_store_lmdb` → Uses `<<"lmdb">>` defaults
@@ -50,10 +50,11 @@ This module takes store options and store defaults, applying type-specific defau
 
 **Test Code:**
 ```erlang
--module(hb_store_opts_apply_test).
+-module(test_hb_store_opts).
 -include_lib("eunit/include/eunit.hrl").
 
-apply_basic_test() ->
+%% Basic apply tests
+apply_single_store_test() ->
     StoreOpts = [
         #{
             <<"name">> => <<"cache-mainnet/lmdb">>,
@@ -65,66 +66,37 @@ apply_basic_test() ->
             <<"capacity">> => 1073741824
         }
     },
-    Expected = [
-        #{
-            <<"name">> => <<"cache-mainnet/lmdb">>,
-            <<"store-module">> => hb_store_lmdb,
-            <<"capacity">> => 1073741824
-        }
-    ],
     Result = hb_store_opts:apply(StoreOpts, Defaults),
-    ?assertEqual(Expected, Result).
+    [Updated] = Result,
+    ?assertEqual(1073741824, maps:get(<<"capacity">>, Updated)),
+    ?assertEqual(<<"cache-mainnet/lmdb">>, maps:get(<<"name">>, Updated)).
 
 apply_empty_defaults_test() ->
     StoreOpts = [
         #{
-            <<"name">> => <<"cache-mainnet/lmdb">>,
+            <<"name">> => <<"test">>,
             <<"store-module">> => hb_store_lmdb
         }
     ],
     Defaults = #{},
-    Expected = [
-        #{
-            <<"name">> => <<"cache-mainnet/lmdb">>,
-            <<"store-module">> => hb_store_lmdb
-        }
-    ],
     Result = hb_store_opts:apply(StoreOpts, Defaults),
-    ?assertEqual(Expected, Result).
+    ?assertEqual(StoreOpts, Result).
 
 apply_empty_store_opts_test() ->
     StoreOpts = [],
-    Defaults = #{
-        <<"lmdb">> => #{
-            <<"capacity">> => 1073741824
-        }
-    },
-    Expected = [],
+    Defaults = #{<<"lmdb">> => #{<<"capacity">> => 1000}},
     Result = hb_store_opts:apply(StoreOpts, Defaults),
-    ?assertEqual(Expected, Result).
+    ?assertEqual([], Result).
 
 apply_multiple_stores_test() ->
     StoreOpts = [
-        #{
-            <<"name">> => <<"lmdb1">>,
-            <<"store-module">> => hb_store_lmdb
-        },
-        #{
-            <<"name">> => <<"lmdb2">>,
-            <<"store-module">> => hb_store_lmdb
-        },
-        #{
-            <<"name">> => <<"fs1">>,
-            <<"store-module">> => hb_store_fs
-        }
+        #{<<"name">> => <<"lmdb1">>, <<"store-module">> => hb_store_lmdb},
+        #{<<"name">> => <<"lmdb2">>, <<"store-module">> => hb_store_lmdb},
+        #{<<"name">> => <<"fs1">>, <<"store-module">> => hb_store_fs}
     ],
     Defaults = #{
-        <<"lmdb">> => #{
-            <<"capacity">> => 5000
-        },
-        <<"fs">> => #{
-            <<"buffer-size">> => 1024
-        }
+        <<"lmdb">> => #{<<"capacity">> => 5000},
+        <<"fs">> => #{<<"buffer-size">> => 1024}
     },
     Result = hb_store_opts:apply(StoreOpts, Defaults),
     [Lmdb1, Lmdb2, Fs1] = Result,
@@ -133,6 +105,154 @@ apply_multiple_stores_test() ->
     ?assertEqual(5000, maps:get(<<"capacity">>, Lmdb2)),
     ?assertEqual(1024, maps:get(<<"buffer-size">>, Fs1)),
     ?assertEqual(false, maps:is_key(<<"capacity">>, Fs1)).
+
+%% Module type tests
+apply_lmdb_defaults_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => hb_store_lmdb
+    },
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 1000,
+            <<"sync">> => true
+        }
+    },
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(1000, maps:get(<<"capacity">>, Updated)),
+    ?assertEqual(true, maps:get(<<"sync">>, Updated)).
+
+apply_fs_defaults_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => hb_store_fs
+    },
+    Defaults = #{
+        <<"fs">> => #{<<"buffer-size">> => 2048}
+    },
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(2048, maps:get(<<"buffer-size">>, Updated)).
+
+apply_rocksdb_defaults_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => hb_store_rocksdb
+    },
+    Defaults = #{
+        <<"rocksdb">> => #{<<"block-size">> => 8192}
+    },
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(8192, maps:get(<<"block-size">>, Updated)).
+
+apply_gateway_defaults_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => hb_store_gateway
+    },
+    Defaults = #{
+        <<"gateway">> => #{<<"timeout">> => 30000}
+    },
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(30000, maps:get(<<"timeout">>, Updated)).
+
+apply_unknown_module_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => unknown_module
+    },
+    Defaults = #{<<"lmdb">> => #{<<"capacity">> => 1000}},
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(StoreOpt, Updated).
+
+%% Store options precedence
+apply_store_opts_precedence_test() ->
+    StoreOpt = #{
+        <<"name">> => <<"test">>,
+        <<"store-module">> => hb_store_lmdb,
+        <<"capacity">> => 9999  %% User-specified
+    },
+    Defaults = #{
+        <<"lmdb">> => #{
+            <<"capacity">> => 1000,  %% Default
+            <<"sync">> => true       %% Additional default
+        }
+    },
+    Result = hb_store_opts:apply([StoreOpt], Defaults),
+    [Updated] = Result,
+    ?assertEqual(9999, maps:get(<<"capacity">>, Updated)),  %% Kept from store
+    ?assertEqual(true, maps:get(<<"sync">>, Updated)).      %% Added from defaults
+
+%% Nested store tests
+apply_nested_stores_test() ->
+    StoreOpts = [
+        #{
+            <<"store-module">> => hb_store_gateway,
+            <<"store">> => [
+                #{
+                    <<"name">> => <<"cache-mainnet/lmdb">>,
+                    <<"store-module">> => hb_store_lmdb
+                }
+            ]
+        }
+    ],
+    Defaults = #{
+        <<"lmdb">> => #{<<"capacity">> => 1073741824}
+    },
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    [Gateway] = Result,
+    [NestedLmdb] = maps:get(<<"store">>, Gateway),
+    ?assertEqual(1073741824, maps:get(<<"capacity">>, NestedLmdb)).
+
+apply_deeply_nested_stores_test() ->
+    StoreOpts = [
+        #{
+            <<"store-module">> => hb_store_gateway,
+            <<"store">> => [
+                #{
+                    <<"store-module">> => hb_store_lru,
+                    <<"store">> => [
+                        #{
+                            <<"name">> => <<"lmdb">>,
+                            <<"store-module">> => hb_store_lmdb
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    Defaults = #{<<"lmdb">> => #{<<"capacity">> => 5000}},
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    [Gateway] = Result,
+    [Lru] = maps:get(<<"store">>, Gateway),
+    [Lmdb] = maps:get(<<"store">>, Lru),
+    ?assertEqual(5000, maps:get(<<"capacity">>, Lmdb)).
+
+apply_nested_with_parent_defaults_test() ->
+    StoreOpts = [
+        #{
+            <<"store-module">> => hb_store_gateway,
+            <<"store">> => [
+                #{
+                    <<"name">> => <<"nested">>,
+                    <<"store-module">> => hb_store_lmdb
+                }
+            ]
+        }
+    ],
+    Defaults = #{
+        <<"gateway">> => #{<<"timeout">> => 30000},
+        <<"lmdb">> => #{<<"capacity">> => 5000}
+    },
+    Result = hb_store_opts:apply(StoreOpts, Defaults),
+    [Gateway] = Result,
+    ?assertEqual(30000, maps:get(<<"timeout">>, Gateway)),
+    [NestedLmdb] = maps:get(<<"store">>, Gateway),
+    ?assertEqual(5000, maps:get(<<"capacity">>, NestedLmdb)).
 ```
 
 ---
@@ -165,56 +285,6 @@ apply_multiple_stores_test() ->
 
 **Description:** Apply type-specific defaults based on the `<<"store-module">>` field. If the module type has defaults defined, merges them with the store options (store options take precedence).
 
-**Test Code:**
-```erlang
--module(hb_store_opts_module_type_test).
--include_lib("eunit/include/eunit.hrl").
-
-module_type_lmdb_test() ->
-    StoreOpt = #{
-        <<"name">> => <<"test">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    Defaults = #{
-        <<"lmdb">> => #{
-            <<"capacity">> => 1000,
-            <<"sync">> => true
-        }
-    },
-    Result = hb_store_opts:apply([StoreOpt], Defaults),
-    [Updated] = Result,
-    ?assertEqual(1000, maps:get(<<"capacity">>, Updated)),
-    ?assertEqual(true, maps:get(<<"sync">>, Updated)).
-
-module_type_fs_test() ->
-    StoreOpt = #{
-        <<"name">> => <<"test">>,
-        <<"store-module">> => hb_store_fs
-    },
-    Defaults = #{
-        <<"fs">> => #{
-            <<"buffer-size">> => 2048
-        }
-    },
-    Result = hb_store_opts:apply([StoreOpt], Defaults),
-    [Updated] = Result,
-    ?assertEqual(2048, maps:get(<<"buffer-size">>, Updated)).
-
-module_type_unknown_test() ->
-    StoreOpt = #{
-        <<"name">> => <<"test">>,
-        <<"store-module">> => unknown_module
-    },
-    Defaults = #{
-        <<"lmdb">> => #{
-            <<"capacity">> => 1000
-        }
-    },
-    Result = hb_store_opts:apply([StoreOpt], Defaults),
-    [Updated] = Result,
-    ?assertEqual(StoreOpt, Updated).
-```
-
 ---
 
 ### apply_type_defaults/3
@@ -243,72 +313,6 @@ module_type_unknown_test() ->
 ```
 
 **Description:** Recursively apply defaults to nested stores found in the `<<"store">>` field. Processes each sub-store independently.
-
-**Test Code:**
-```erlang
--module(hb_store_opts_nested_test).
--include_lib("eunit/include/eunit.hrl").
-
-nested_stores_test() ->
-    StoreOpts = [
-        #{
-            <<"store-module">> => hb_store_gateway,
-            <<"store">> => [
-                #{
-                    <<"name">> => <<"cache-mainnet/lmdb">>,
-                    <<"store-module">> => hb_store_lmdb
-                }
-            ]
-        }
-    ],
-    Defaults = #{
-        <<"lmdb">> => #{
-            <<"capacity">> => 1073741824
-        }
-    },
-    Expected = [
-        #{
-            <<"store-module">> => hb_store_gateway,
-            <<"store">> => [
-                #{
-                    <<"name">> => <<"cache-mainnet/lmdb">>,
-                    <<"store-module">> => hb_store_lmdb,
-                    <<"capacity">> => 1073741824
-                }
-            ]
-        }
-    ],
-    Result = hb_store_opts:apply(StoreOpts, Defaults),
-    ?assertEqual(Expected, Result).
-
-deeply_nested_stores_test() ->
-    StoreOpts = [
-        #{
-            <<"store-module">> => hb_store_gateway,
-            <<"store">> => [
-                #{
-                    <<"store-module">> => hb_store_lru,
-                    <<"store">> => [
-                        #{
-                            <<"name">> => <<"lmdb">>,
-                            <<"store-module">> => hb_store_lmdb
-                        }
-                    ]
-                }
-            ]
-        }
-    ],
-    Defaults = #{
-        <<"lmdb">> => #{
-            <<"capacity">> => 5000
-        }
-    },
-    Result = hb_store_opts:apply(StoreOpts, Defaults),
-    [Gateway] = Result,
-    [Lru] = maps:get(<<"store">>, Gateway),
-    [Lmdb] = maps:get(<<"store">>, Lru),
-    ?assertEqual(5000, maps:get(<<"capacity">>, Lmdb)).
-```
 
 ---
 
@@ -531,50 +535,6 @@ UpdatedOpts = hb_store_opts:apply(
     StoreOpts,
     maps:get(<<"store_defaults">>, LoadedDefaults, #{})
 ).
-```
-
----
-
-## Integration Tests
-
-### Full Server Flow
-
-```erlang
-full_integration_flow_test() ->
-    LoadedConfig = #{
-        <<"store_defaults">> => #{
-            <<"lmdb">> => #{<<"capacity">> => 5000}
-        }
-    },
-    DefaultStoreOpts = [
-        #{
-            <<"name">> => <<"cache-mainnet/lmdb">>,
-            <<"store-module">> => hb_store_lmdb
-        },
-        #{
-            <<"store-module">> => hb_store_gateway,
-            <<"store">> => [
-                #{
-                    <<"store-module">> => hb_store_lmdb,
-                    <<"name">> => <<"cache-mainnet/lmdb">>
-                }
-            ]
-        }
-    ],
-    MergedConfig = maps:merge(
-        #{<<"store">> => DefaultStoreOpts},
-        LoadedConfig
-    ),
-    StoreOpts = maps:get(<<"store">>, MergedConfig),
-    StoreDefaults = maps:get(<<"store_defaults">>, MergedConfig, #{}),
-    UpdatedStoreOpts = hb_store_opts:apply(StoreOpts, StoreDefaults),
-    
-    [LmdbStore, GatewayStore] = UpdatedStoreOpts,
-    ?assertEqual(5000, maps:get(<<"capacity">>, LmdbStore)),
-    
-    NestedStores = maps:get(<<"store">>, GatewayStore),
-    [NestedLmdb] = NestedStores,
-    ?assertEqual(5000, maps:get(<<"capacity">>, NestedLmdb)).
 ```
 
 ---

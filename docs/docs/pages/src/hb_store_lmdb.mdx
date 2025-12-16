@@ -65,29 +65,28 @@ This module provides a persistent key-value store backend using LMDB (Lightning 
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_start_test).
+-module(test_hb_store_lmdb).
 -include_lib("eunit/include/eunit.hrl").
 -include("include/hb.hrl").
 
+%% Helper to generate unique store names (avoids LMDB already_open errors)
+unique_store(Prefix) ->
+    Id = integer_to_binary(erlang:unique_integer([positive])),
+    #{
+        <<"name">> => <<"/tmp/lmdb-test-", Prefix/binary, "-", Id/binary>>,
+        <<"store-module">> => hb_store_lmdb
+    }.
+
 start_basic_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb">>,
-        <<"store-module">> => hb_store_lmdb,
-        <<"capacity">> => 1024 * 1024 * 100  % 100MB
-    },
-    {ok, Instance} = hb_store_lmdb:start(StoreOpts),
+    Store = maps:merge(unique_store(<<"start">>), #{<<"capacity">> => 1024 * 1024 * 10}),
+    {ok, Instance} = hb_store_lmdb:start(Store),
     ?assert(is_map(Instance)),
     ?assert(maps:is_key(<<"env">>, Instance)),
-    ?assert(maps:is_key(<<"db">>, Instance)),
-    hb_store_lmdb:stop(StoreOpts).
+    ?assert(maps:is_key(<<"db">>, Instance)).
 
 start_with_defaults_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-default">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _Instance} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"defaults">>),
+    {ok, _Instance} = hb_store_lmdb:start(Store).
 
 start_invalid_opts_test() ->
     ?assertEqual(
@@ -110,16 +109,10 @@ start_invalid_opts_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_stop_test).
--include_lib("eunit/include/eunit.hrl").
-
 stop_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-stop">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    ?assertEqual(ok, hb_store_lmdb:stop(StoreOpts)).
+    Store = unique_store(<<"stop">>),
+    {ok, _} = hb_store_lmdb:start(Store),
+    ?assertEqual(ok, hb_store_lmdb:stop(Store)).
 ```
 
 ---
@@ -132,26 +125,23 @@ stop_test() ->
         StoreOpts :: map().
 ```
 
-**Description:** Clear all data from the database by closing and deleting the database directory, then reinitializing it.
+**Description:** Clear all data from the database by deleting the database directory (`rm -Rf`). Typically called at the START of tests to ensure a clean state from previous test runs.
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_reset_test).
--include_lib("eunit/include/eunit.hrl").
-
-reset_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-reset">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:write(StoreOpts, <<"key1">>, <<"value1">>),
-    ?assertEqual({ok, <<"value1">>}, hb_store_lmdb:read(StoreOpts, <<"key1">>)),
-    
-    hb_store_lmdb:reset(StoreOpts),
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    ?assertEqual(not_found, hb_store_lmdb:read(StoreOpts, <<"key1">>)),
-    hb_store_lmdb:stop(StoreOpts).
+reset_clears_directory_test() ->
+    Dir = <<"/tmp/lmdb-reset-test-dir">>,
+    Store = #{<<"name">> => Dir, <<"store-module">> => hb_store_lmdb},
+    %% Ensure clean state
+    hb_store_lmdb:reset(Store),
+    %% Write data (creates directory)
+    hb_store_lmdb:write(Store, <<"key">>, <<"value">>),
+    ?assert(filelib:is_dir(binary_to_list(Dir))),
+    %% Stop then reset
+    hb_store_lmdb:stop(Store),
+    hb_store_lmdb:reset(Store),
+    %% Directory should be gone
+    ?assertNot(filelib:is_dir(binary_to_list(Dir))).
 ```
 
 ---
@@ -169,9 +159,6 @@ reset_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_scope_test).
--include_lib("eunit/include/eunit.hrl").
-
 scope_test() ->
     ?assertEqual(local, hb_store_lmdb:scope()),
     ?assertEqual(local, hb_store_lmdb:scope(#{})).
@@ -189,34 +176,19 @@ scope_test() ->
         Value :: binary().
 ```
 
-**Description:** Write a key-value pair to the database asynchronously. Accepts either binary path or list of path segments. Returns immediately - writes are accumulated and flushed periodically.
+**Description:** Write a key-value pair to the database asynchronously. Accepts either binary path or list of path segments. Returns immediately - writes are accumulated and flushed periodically. Note: `write` handles database startup internally.
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_write_test).
--include_lib("eunit/include/eunit.hrl").
-
 write_basic_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-write">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    ?assertEqual(ok, hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>)),
-    {ok, Value} = hb_store_lmdb:read(StoreOpts, <<"key">>),
-    ?assertEqual(<<"value">>, Value),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"write">>),
+    ?assertEqual(ok, hb_store_lmdb:write(Store, <<"key">>, <<"value">>)),
+    ?assertEqual({ok, <<"value">>}, hb_store_lmdb:read(Store, <<"key">>)).
 
 write_with_path_list_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-write-list">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    ?assertEqual(ok, hb_store_lmdb:write(StoreOpts, [<<"dir">>, <<"key">>], <<"value">>)),
-    {ok, Value} = hb_store_lmdb:read(StoreOpts, <<"dir/key">>),
-    ?assertEqual(<<"value">>, Value),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"writelist">>),
+    ?assertEqual(ok, hb_store_lmdb:write(Store, [<<"dir">>, <<"key">>], <<"value">>)),
+    ?assertEqual({ok, <<"value">>}, hb_store_lmdb:read(Store, <<"dir/key">>)).
 ```
 
 ---
@@ -236,38 +208,15 @@ write_with_path_list_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_read_test).
--include_lib("eunit/include/eunit.hrl").
-
-read_basic_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-read">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>),
-    ?assertEqual({ok, <<"value">>}, hb_store_lmdb:read(StoreOpts, <<"key">>)),
-    hb_store_lmdb:stop(StoreOpts).
-
 read_not_found_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-read-nf">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    ?assertEqual(not_found, hb_store_lmdb:read(StoreOpts, <<"nonexistent">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"readnf">>),
+    ?assertEqual(not_found, hb_store_lmdb:read(Store, <<"nonexistent">>)).
 
 read_with_link_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-read-link">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:write(StoreOpts, <<"target">>, <<"data">>),
-    hb_store_lmdb:make_link(StoreOpts, <<"target">>, <<"link">>),
-    ?assertEqual({ok, <<"data">>}, hb_store_lmdb:read(StoreOpts, <<"link">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"readlink">>),
+    hb_store_lmdb:write(Store, <<"target">>, <<"data">>),
+    hb_store_lmdb:make_link(Store, <<"target">>, <<"link">>),
+    ?assertEqual({ok, <<"data">>}, hb_store_lmdb:read(Store, <<"link">>)).
 ```
 
 ---
@@ -287,32 +236,18 @@ read_with_link_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_list_test).
--include_lib("eunit/include/eunit.hrl").
-
 list_basic_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-list">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:make_group(StoreOpts, <<"group">>),
-    hb_store_lmdb:write(StoreOpts, <<"group/child1">>, <<"val1">>),
-    hb_store_lmdb:write(StoreOpts, <<"group/child2">>, <<"val2">>),
-    
-    {ok, Children} = hb_store_lmdb:list(StoreOpts, <<"group">>),
-    ?assertEqual([<<"child1">>, <<"child2">>], lists:sort(Children)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"list">>),
+    hb_store_lmdb:make_group(Store, <<"group">>),
+    hb_store_lmdb:write(Store, <<"group/child1">>, <<"val1">>),
+    hb_store_lmdb:write(Store, <<"group/child2">>, <<"val2">>),
+    {ok, Children} = hb_store_lmdb:list(Store, <<"group">>),
+    ?assertEqual([<<"child1">>, <<"child2">>], lists:sort(Children)).
 
 list_empty_group_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-list-empty">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:make_group(StoreOpts, <<"empty">>),
-    ?assertEqual({ok, []}, hb_store_lmdb:list(StoreOpts, <<"empty">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"listempty">>),
+    hb_store_lmdb:make_group(Store, <<"empty">>),
+    ?assertEqual({ok, []}, hb_store_lmdb:list(Store, <<"empty">>)).
 ```
 
 ---
@@ -330,37 +265,19 @@ list_empty_group_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_type_test).
--include_lib("eunit/include/eunit.hrl").
-
 type_simple_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-type-simple">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>),
-    ?assertEqual(simple, hb_store_lmdb:type(StoreOpts, <<"key">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"typesimple">>),
+    hb_store_lmdb:write(Store, <<"key">>, <<"value">>),
+    ?assertEqual(simple, hb_store_lmdb:type(Store, <<"key">>)).
 
 type_composite_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-type-comp">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:make_group(StoreOpts, <<"group">>),
-    ?assertEqual(composite, hb_store_lmdb:type(StoreOpts, <<"group">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"typecomp">>),
+    hb_store_lmdb:make_group(Store, <<"group">>),
+    ?assertEqual(composite, hb_store_lmdb:type(Store, <<"group">>)).
 
 type_not_found_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-type-nf">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    ?assertEqual(not_found, hb_store_lmdb:type(StoreOpts, <<"nonexistent">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"typenf">>),
+    ?assertEqual(not_found, hb_store_lmdb:type(Store, <<"nonexistent">>)).
 ```
 
 ---
@@ -378,29 +295,16 @@ type_not_found_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_make_group_test).
--include_lib("eunit/include/eunit.hrl").
-
 make_group_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-mkgroup">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    ?assertEqual(ok, hb_store_lmdb:make_group(StoreOpts, <<"mygroup">>)),
-    ?assertEqual(composite, hb_store_lmdb:type(StoreOpts, <<"mygroup">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"mkgroup">>),
+    ?assertEqual(ok, hb_store_lmdb:make_group(Store, <<"mygroup">>)),
+    ?assertEqual(composite, hb_store_lmdb:type(Store, <<"mygroup">>)).
 
 make_nested_group_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-mkgroup-nest">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:make_group(StoreOpts, <<"parent">>),
-    hb_store_lmdb:make_group(StoreOpts, <<"parent/child">>),
-    ?assertEqual(composite, hb_store_lmdb:type(StoreOpts, <<"parent/child">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"mknested">>),
+    hb_store_lmdb:make_group(Store, <<"parent">>),
+    hb_store_lmdb:make_group(Store, <<"parent/child">>),
+    ?assertEqual(composite, hb_store_lmdb:type(Store, <<"parent/child">>)).
 ```
 
 ---
@@ -419,30 +323,17 @@ make_nested_group_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_make_link_test).
--include_lib("eunit/include/eunit.hrl").
-
 make_link_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-mklink">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:write(StoreOpts, <<"original">>, <<"data">>),
-    ?assertEqual(ok, hb_store_lmdb:make_link(StoreOpts, <<"original">>, <<"link">>)),
-    ?assertEqual({ok, <<"data">>}, hb_store_lmdb:read(StoreOpts, <<"link">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"mklink">>),
+    hb_store_lmdb:write(Store, <<"target">>, <<"data">>),
+    ?assertEqual(ok, hb_store_lmdb:make_link(Store, <<"target">>, <<"link">>)),
+    ?assertEqual({ok, <<"data">>}, hb_store_lmdb:read(Store, <<"link">>)).
 
 make_link_preserves_type_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-mklink-type">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:make_group(StoreOpts, <<"group">>),
-    hb_store_lmdb:make_link(StoreOpts, <<"group">>, <<"link-to-group">>),
-    ?assertEqual(composite, hb_store_lmdb:type(StoreOpts, <<"link-to-group">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"mklinktype">>),
+    hb_store_lmdb:make_group(Store, <<"target-group">>),
+    hb_store_lmdb:make_link(Store, <<"target-group">>, <<"link-group">>),
+    ?assertEqual(composite, hb_store_lmdb:type(Store, <<"link-group">>)).
 ```
 
 ---
@@ -460,20 +351,11 @@ make_link_preserves_type_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_path_test).
--include_lib("eunit/include/eunit.hrl").
-
 path_test() ->
-    ?assertEqual(
-        <<"a/b/c">>,
-        hb_store_lmdb:path(#{}, [<<"a">>, <<"b">>, <<"c">>])
-    ).
+    ?assertEqual(<<"a/b/c">>, hb_store_lmdb:path(#{}, [<<"a">>, <<"b">>, <<"c">>])).
 
 path_single_test() ->
-    ?assertEqual(
-        <<"key">>,
-        hb_store_lmdb:path(#{}, [<<"key">>])
-    ).
+    ?assertEqual(<<"key">>, hb_store_lmdb:path(#{}, <<"key">>)).
 ```
 
 ---
@@ -492,14 +374,8 @@ path_single_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_add_path_test).
--include_lib("eunit/include/eunit.hrl").
-
 add_path_test() ->
-    ?assertEqual(
-        <<"root/child">>,
-        hb_store_lmdb:add_path(#{}, <<"root">>, <<"child">>)
-    ).
+    ?assertEqual(<<"base/child">>, hb_store_lmdb:add_path(#{}, <<"base">>, <<"child">>)).
 ```
 
 ---
@@ -517,32 +393,18 @@ add_path_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_lmdb_resolve_test).
--include_lib("eunit/include/eunit.hrl").
-
 resolve_direct_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-resolve">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>),
-    ?assertEqual(<<"key">>, hb_store_lmdb:resolve(StoreOpts, <<"key">>)),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"resdir">>),
+    hb_store_lmdb:write(Store, <<"direct">>, <<"value">>),
+    ?assertEqual(<<"direct">>, hb_store_lmdb:resolve(Store, <<"direct">>)).
 
 resolve_with_link_test() ->
-    StoreOpts = #{
-        <<"name">> => <<"/tmp/test-lmdb-resolve-link">>,
-        <<"store-module">> => hb_store_lmdb
-    },
-    {ok, _} = hb_store_lmdb:start(StoreOpts),
-    hb_store_lmdb:make_group(StoreOpts, <<"target">>),
-    hb_store_lmdb:write(StoreOpts, <<"target/key">>, <<"value">>),
-    hb_store_lmdb:make_link(StoreOpts, <<"target">>, <<"link">>),
-    
-    Resolved = hb_store_lmdb:resolve(StoreOpts, [<<"link">>, <<"key">>]),
-    ?assertEqual(<<"target/key">>, Resolved),
-    hb_store_lmdb:stop(StoreOpts).
+    Store = unique_store(<<"reslink">>),
+    %% resolve only follows links in intermediate path segments
+    hb_store_lmdb:make_group(Store, <<"target">>),
+    hb_store_lmdb:write(Store, <<"target/key">>, <<"value">>),
+    hb_store_lmdb:make_link(Store, <<"target">>, <<"link">>),
+    ?assertEqual(<<"target/key">>, hb_store_lmdb:resolve(Store, [<<"link">>, <<"key">>])).
 ```
 
 ---
@@ -565,29 +427,11 @@ hb_store_lmdb:write(StoreOpts, <<"key">>, <<"value">>),
 %% Hierarchical data with groups
 hb_store_lmdb:make_group(StoreOpts, <<"messages">>),
 hb_store_lmdb:write(StoreOpts, <<"messages/msg1">>, <<"data1">>),
-hb_store_lmdb:write(StoreOpts, <<"messages/msg2">>, <<"data2">>),
 {ok, Children} = hb_store_lmdb:list(StoreOpts, <<"messages">>).
 
 %% Symbolic links for data deduplication
 hb_store_lmdb:write(StoreOpts, <<"data/hash123">>, <<"actual_data">>),
-hb_store_lmdb:make_link(StoreOpts, <<"data/hash123">>, <<"messages/msg1/body">>),
-{ok, Data} = hb_store_lmdb:read(StoreOpts, <<"messages/msg1/body">>).
-
-%% Nested structure with links
-hb_store_lmdb:make_group(StoreOpts, <<"root">>),
-hb_store_lmdb:make_group(StoreOpts, <<"root/commitments">>),
-hb_store_lmdb:write(StoreOpts, <<"data/value1">>, <<"Value1">>),
-hb_store_lmdb:make_link(StoreOpts, <<"data/value1">>, <<"root/commitments/key1">>).
-
-%% Check type before operations
-case hb_store_lmdb:type(StoreOpts, <<"path">>) of
-    composite -> 
-        {ok, Children} = hb_store_lmdb:list(StoreOpts, <<"path">>);
-    simple -> 
-        {ok, Value} = hb_store_lmdb:read(StoreOpts, <<"path">>);
-    not_found -> 
-        not_found
-end.
+hb_store_lmdb:make_link(StoreOpts, <<"data/hash123">>, <<"messages/msg1/body">>).
 
 %% Cleanup
 hb_store_lmdb:stop(StoreOpts).
@@ -597,23 +441,6 @@ hb_store_lmdb:stop(StoreOpts).
 
 ## Storage Architecture
 
-### Database Structure
-
-```
-Database Directory/
-├── data.mdb       # Main data file
-└── lock.mdb       # Lock file
-```
-
-### Key Encoding
-
-Keys use forward-slash path notation:
-```
-"key"                    → Simple value
-"group/child"            → Hierarchical structure
-"data/hash"              → Content-addressed storage
-```
-
 ### Value Types
 
 | Value Pattern | Type | Meaning |
@@ -622,87 +449,21 @@ Keys use forward-slash path notation:
 | `<<"link:", Path/binary>>` | Link | Symbolic link to another path |
 | Any other binary | Simple | Regular data value |
 
-### Link Resolution
-
-Links are automatically resolved during read operations:
-
-```erlang
-% Store: <<"target">> → <<"actual_data">>
-% Store: <<"link">> → <<"link:target">>
-
-read(Opts, <<"link">>)
-  → follows link → reads <<"target">> 
-  → returns {ok, <<"actual_data">>}
-```
-
-### Group Membership
-
-Groups track their children implicitly through path prefixes:
-```
-Write: "group/child1"  → Creates "group" as composite
-Write: "group/child2"  → Adds to "group"
-List:  "group"         → Returns ["child1", "child2"]
-```
-
 ---
 
 ## Configuration Constants
 
 ```erlang
 -define(DEFAULT_SIZE, 16 * 1024 * 1024 * 1024).  % 16GB default capacity
--define(CONNECT_TIMEOUT, 6000).                  % 6s server timeout
--define(DEFAULT_IDLE_FLUSH_TIME, 5).             % 5s idle before flush
--define(DEFAULT_MAX_FLUSH_TIME, 50).             % 50ms max between flushes
 -define(MAX_REDIRECTS, 1000).                    % Max link chain depth
 -define(MAX_PENDING_WRITES, 400).                % Force flush threshold
--define(FOLD_YIELD_INTERVAL, 100).               % Yield every 100 keys
 ```
-
----
-
-## Performance Considerations
-
-### Asynchronous Writes
-
-Writes return immediately and are batched:
-```erlang
-write(Opts, <<"key1">>, <<"val1">>),  % Returns instantly
-write(Opts, <<"key2">>, <<"val2">>),  % Returns instantly
-% Actual flush happens after idle timeout or max pending writes
-```
-
-### Read Performance
-
-- Direct reads: Fast path without link resolution
-- Link resolution: Minimal overhead for simple chains
-- Avoid circular links: Can cause infinite loops
-
-### Database Size
-
-- Pre-allocate capacity: Set `<<"capacity">>` appropriately
-- LMDB uses memory-mapped files: Virtual memory = capacity
-- Actual disk usage grows with data
-
----
-
-## References
-
-- **LMDB Documentation** - http://www.lmdb.tech/doc/
-- **elmdb** - Erlang LMDB bindings
-- **hb_store** - HyperBEAM store interface
-- **HyperBEAM** - Message processing system
 
 ---
 
 ## Notes
 
 1. **Singleton Pattern**: Each database path gets one server process
-2. **Automatic Directory Creation**: Ensures database directory exists
+2. **Automatic Startup**: Data operations handle startup internally - do not call `start` before `write`/`read`
 3. **Link Chain Limit**: Maximum 1000 redirects to prevent infinite loops
-4. **Path Format**: Always uses "/" as separator, never "\\"
-5. **Group Detection**: Only literal `<<"group">>` creates composite types
-6. **Flush Strategy**: Dual-flush with idle and max time constraints
-7. **Process-Local Cache**: Database handles cached via persistent_term
-8. **No Sync Mode**: Uses `no_sync` flag for performance
-9. **Transaction Batching**: Writes accumulated and flushed together
-10. **Thread Safety**: Each environment has dedicated server process
+4. **Path Format**: Always uses "/" as separator

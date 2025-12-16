@@ -139,7 +139,6 @@ Persistent data storage with pluggable backends.
 | [hb_store_lmdb](/src/hb_store_lmdb) | LMDB backend via NIF—fast, reliable, default storage with concurrent readers |
 | [hb_store_rocksdb](/src/hb_store_rocksdb) | RocksDB LSM-tree backend via NIF for write-heavy workloads |
 | [hb_store_lru](/src/hb_store_lru) | Wraps any store with in-memory LRU cache for improved read performance |
-| [hb_volume](/src/hb_volume) | Manages storage partitions, handles mounting/unmounting and data routing |
 
 ---
 
@@ -252,6 +251,20 @@ OTP application structure and node lifecycle.
 | [hb_sup](/src/hb_sup) | Main supervisor defining the supervision tree and restart strategies |
 | [hb_app](/src/hb_app) | OTP application behavior with start/stop callbacks and initialization |
 | [hb](/src/hb) | Top-level API for starting/stopping nodes and convenience functions |
+
+---
+
+### Volume
+
+Storage partitions and data routing.
+
+:::info[Tutorial Coming Soon]
+*Volume Tutorial*
+:::
+
+| Module | Description |
+|--------|-------------|
+| [hb_volume](/src/hb_volume) | Manages storage partitions, handles mounting/unmounting and data routing |
 
 ---
 
@@ -434,6 +447,7 @@ Authentication, secrets, and trusted execution.
 | Module | Description |
 |--------|-------------|
 | [dev_secret](/src/dev_secret) | Stores and retrieves secrets securely with encryption and access control |
+| [dev_volume](/src/dev_volume) | Volume device for mounting, unmounting, and listing storage volumes |
 | [dev_auth_hook](/src/dev_auth_hook) | Verifies caller identity before processing and rejects unauthorized requests |
 | [dev_snp](/src/dev_snp) | AMD SEV-SNP attestation for hardware-backed Trusted Execution Environment |
 | [dev_snp_nif](/src/dev_snp_nif) | Native C interface for low-level AMD SEV-SNP operations |
@@ -510,7 +524,6 @@ Development and debugging tools.
 | Module | Description |
 |--------|-------------|
 | [dev_trie](/src/dev_trie) | Prefix tree implementation for efficient key lookup and iteration |
-| [dev_volume](/src/dev_volume) | Volume device for mounting, unmounting, and listing storage volumes |
 | [dev_profile](/src/dev_profile) | Records execution timing and memory allocation for profiling |
 | [dev_hyperbuddy](/src/dev_hyperbuddy) | Web-based interactive debugging UI for message and cache inspection |
 | [dev_cacheviz](/src/dev_cacheviz) | Generates visual representation of cache contents for debugging |

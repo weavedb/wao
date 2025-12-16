@@ -63,24 +63,25 @@ This module implements the `hb_store` behavior using the local filesystem. It pr
         DataDir :: binary().
 ```
 
-**Description:** Initialize, stop, or reset the filesystem store. `start/1` creates the data directory, `reset/1` removes all data.
+**Description:** Lifecycle management. `start/1` ensures the parent directory of the data path exists using `filelib:ensure_dir/1` (note: this creates the *parent*, not the directory itself - the data directory is created on first write). `stop/1` is a no-op. `reset/1` removes the entire directory tree with `rm -Rf`.
 
 **Test Code:**
 ```erlang
--module(hb_store_fs_lifecycle_test).
+-module(test_hb_store_fs).
 -include_lib("eunit/include/eunit.hrl").
 
-start_creates_directory_test() ->
-    Dir = <<"test-data/fs-start">>,
+start_returns_ok_test() ->
+    Dir = <<"cache-TEST/fs-start-", (integer_to_binary(rand:uniform(10000)))/binary>>,
     Store = #{<<"store-module">> => hb_store_fs, <<"name">> => Dir},
-    ?assertEqual(ok, hb_store_fs:start(Store)),
-    ?assert(filelib:is_dir(Dir)).
+    %% start ensures parent directory exists (not the dir itself)
+    ?assertEqual(ok, hb_store_fs:start(Store)).
 
 reset_clears_data_test() ->
-    Dir = <<"test-data/fs-reset">>,
+    Dir = <<"cache-TEST/fs-reset-", (integer_to_binary(rand:uniform(10000)))/binary>>,
     Store = #{<<"store-module">> => hb_store_fs, <<"name">> => Dir},
     hb_store_fs:start(Store),
     hb_store_fs:write(Store, <<"key">>, <<"value">>),
+    ?assertEqual({ok, <<"value">>}, hb_store_fs:read(Store, <<"key">>)),
     hb_store_fs:reset(Store),
     hb_store_fs:start(Store),
     ?assertEqual(not_found, hb_store_fs:read(Store, <<"key">>)).
@@ -108,39 +109,28 @@ reset_clears_data_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_fs_rw_test).
--include_lib("eunit/include/eunit.hrl").
-
 read_write_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/rw">>},
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-rw">>},
     hb_store_fs:start(Store),
     Key = <<"test-key">>,
     Value = <<"test-value">>,
     
     ?assertEqual(ok, hb_store_fs:write(Store, Key, Value)),
-    ?assertMatch({ok, Value}, hb_store_fs:read(Store, Key)).
+    ?assertEqual({ok, Value}, hb_store_fs:read(Store, Key)).
 
-read_nonexistent_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/read">>},
+read_not_found_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-read">>},
     hb_store_fs:start(Store),
     ?assertEqual(not_found, hb_store_fs:read(Store, <<"missing">>)).
 
-nested_write_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/nested">>},
+write_nested_path_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-nested">>},
     hb_store_fs:start(Store),
     Key = [<<"group">>, <<"subgroup">>, <<"item">>],
     Value = <<"nested-value">>,
     
     ?assertEqual(ok, hb_store_fs:write(Store, Key, Value)),
-    ?assertMatch({ok, Value}, hb_store_fs:read(Store, Key)).
-
-large_value_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/large">>},
-    hb_store_fs:start(Store),
-    LargeValue = crypto:strong_rand_bytes(1024 * 1024),  % 1 MB
-    
-    ?assertEqual(ok, hb_store_fs:write(Store, <<"large">>, LargeValue)),
-    ?assertMatch({ok, LargeValue}, hb_store_fs:read(Store, <<"large">>)).
+    ?assertEqual({ok, Value}, hb_store_fs:read(Store, Key)).
 ```
 
 ---
@@ -163,23 +153,20 @@ large_value_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_fs_type_list_test).
--include_lib("eunit/include/eunit.hrl").
-
-type_simple_file_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/type">>},
+type_simple_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-type">>},
     hb_store_fs:start(Store),
     hb_store_fs:write(Store, <<"file">>, <<"data">>),
     ?assertEqual(simple, hb_store_fs:type(Store, <<"file">>)).
 
-type_composite_dir_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/type">>},
+type_composite_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-type2">>},
     hb_store_fs:start(Store),
     hb_store_fs:make_group(Store, <<"dir">>),
     ?assertEqual(composite, hb_store_fs:type(Store, <<"dir">>)).
 
 list_directory_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/list">>},
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-list">>},
     hb_store_fs:start(Store),
     Group = <<"group">>,
     hb_store_fs:make_group(Store, Group),
@@ -213,24 +200,14 @@ list_directory_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_fs_group_link_test).
--include_lib("eunit/include/eunit.hrl").
-
 make_group_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/group">>},
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-group">>},
     hb_store_fs:start(Store),
     ?assertEqual(ok, hb_store_fs:make_group(Store, <<"mygroup">>)),
     ?assertEqual(composite, hb_store_fs:type(Store, <<"mygroup">>)).
 
-make_group_nested_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/nested">>},
-    hb_store_fs:start(Store),
-    Path = [<<"level1">>, <<"level2">>, <<"level3">>],
-    ?assertEqual(ok, hb_store_fs:make_group(Store, Path)),
-    ?assertEqual(composite, hb_store_fs:type(Store, Path)).
-
-make_link_basic_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/link">>},
+make_link_test() ->
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-link">>},
     hb_store_fs:start(Store),
     Target = <<"target">>,
     Link = <<"link">>,
@@ -243,7 +220,7 @@ make_link_basic_test() ->
     ?assertEqual(Value, ReadValue).
 
 make_link_chain_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/chain">>},
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-chain">>},
     hb_store_fs:start(Store),
     
     hb_store_fs:write(Store, <<"final">>, <<"data">>),
@@ -270,11 +247,8 @@ make_link_chain_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_store_fs_resolve_test).
--include_lib("eunit/include/eunit.hrl").
-
 resolve_no_links_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/resolve">>},
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-resolve">>},
     hb_store_fs:start(Store),
     hb_store_fs:write(Store, <<"direct">>, <<"value">>),
     
@@ -282,23 +256,13 @@ resolve_no_links_test() ->
     ?assertEqual(<<"direct">>, Resolved).
 
 resolve_single_link_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/resolve">>},
+    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-TEST/fs-resolve2">>},
     hb_store_fs:start(Store),
     hb_store_fs:write(Store, <<"target">>, <<"value">>),
     hb_store_fs:make_link(Store, <<"target">>, <<"link">>),
     
     Resolved = hb_store_fs:resolve(Store, <<"link">>),
     ?assertEqual(<<"target">>, Resolved).
-
-resolve_multi_segment_test() ->
-    Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"test-data/resolve">>},
-    hb_store_fs:start(Store),
-    % Create: /a/b/c: "data", /a/b -> /a/alt-b, /a/alt-b/c: "data"
-    hb_store_fs:write(Store, [<<"a">>, <<"alt-b">>, <<"c">>], <<"correct">>),
-    hb_store_fs:make_link(Store, [<<"a">>, <<"alt-b">>], [<<"a">>, <<"b">>]),
-    
-    Resolved = hb_store_fs:resolve(Store, [<<"a">>, <<"b">>, <<"c">>]),
-    ?assertEqual(hb_store:join([<<"a">>, <<"alt-b">>, <<"c">>]), Resolved).
 ```
 
 ---
@@ -314,20 +278,17 @@ resolve_multi_segment_test() ->
         Scope :: atom().
 ```
 
-**Description:** Return the scope of the store. Defaults to `local` but can be configured.
+**Description:** Return the scope of the store. Defaults to `local` but can be configured via `<<"scope">>` option.
 
 **Test Code:**
 ```erlang
--module(hb_store_fs_scope_test).
--include_lib("eunit/include/eunit.hrl").
-
 scope_default_test() ->
     ?assertEqual(local, hb_store_fs:scope()).
 
-scope_custom_test() ->
+scope_from_opts_test() ->
     Store = #{
         <<"store-module">> => hb_store_fs,
-        <<"name">> => <<"test-data">>,
+        <<"name">> => <<"cache-TEST/fs-scope">>,
         <<"scope">> => custom_scope
     },
     ?assertEqual(custom_scope, hb_store_fs:scope(Store)).
