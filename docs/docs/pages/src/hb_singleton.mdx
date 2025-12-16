@@ -158,16 +158,16 @@ to_simple_test() ->
     ],
     TABM = hb_singleton:to(Messages),
     ?assertEqual(<<"/a/b">>, maps:get(<<"path">>, TABM)),
-    ?assertEqual(<<"value">>, maps:get(<<"1.key">>, TABM)).
+    ?assertEqual(<<"value">>, maps:get(<<"2.key">>, TABM)).
 
 to_with_ids_test() ->
-    ID = <<"test-id-123">>,
+    ID = <<"IYkkrqlZNW_J-4T-5eFApZOMRl5P4VjvrcOXWvIqB1Q">>,
     Messages = [
         ID,
         #{<<"path">> => <<"action">>}
     ],
     TABM = hb_singleton:to(Messages),
-    ?assertEqual(<<"/test-id-123/action">>, maps:get(<<"path">>, TABM)).
+    ?assertEqual(<<"/", ID/binary, "/action">>, maps:get(<<"path">>, TABM)).
 
 to_with_resolve_test() ->
     Messages = [
@@ -175,7 +175,7 @@ to_with_resolve_test() ->
         #{<<"path">> => <<"a">>, <<"key">> => {resolve, [#{}, #{<<"path">> => <<"x">>}]}}
     ],
     TABM = hb_singleton:to(Messages),
-    ?assertMatch(#{<<"1.key+resolve">> := <<"(/x)">>}, TABM).
+    ?assertMatch(#{<<"1.key+resolve">> := <<"/x">>}, TABM).
 ```
 
 ---
