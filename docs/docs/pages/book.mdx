@@ -20,7 +20,7 @@ Written for [HyperBEAM v0.9-milestone-3-beta-3](https://github.com/permaweb/Hype
 
 Get HyperBEAM running on your machine.
 
-→ [Setup](/build/setup)
+→ [Setup](/book/setup)
 
 ---
 
@@ -28,7 +28,7 @@ Get HyperBEAM running on your machine.
 
 HyperBEAM is written in Erlang. You cannot read the code without learning the language first.
 
-→ [Erlang Crash Course](/build/erlang)
+→ [Erlang Crash Course](/book/erlang)
 
 ---
 
@@ -36,7 +36,7 @@ HyperBEAM is written in Erlang. You cannot read the code without learning the la
 
 Before reading modules, understand how the codebase is organized.
 
-→ [Project Structure](/build/structure)
+→ [Project Structure](/book/structure)
 
 ---
 
@@ -120,7 +120,6 @@ Messages are maps. These modules define how they're created, signed, linked, and
 | [hb_message](/src/hb_message) | Creates messages, computes IDs, signs with attestations, verifies signatures |
 | [hb_link](/src/hb_link) | Content-addressed references that resolve through cache with hashpath computation |
 | [hb_singleton](/src/hb_singleton) | Converts between flat path-based keys and nested hierarchical message formats |
-| [hb_format](/src/hb_format) | Detects message format (flat, nested, structured) and selects appropriate codec |
 
 ---
 
@@ -266,6 +265,7 @@ Logging, tracing, debugging, and metrics.
 
 | Module | Description |
 |--------|-------------|
+| [hb_format](/src/hb_format) | Pretty-prints messages, stack traces, and binaries for debugging output |
 | [hb_event](/src/hb_event) | Defines ?event macro for structured logging with levels and context |
 | [hb_logger](/src/hb_logger) | Formats log events and routes to console/file with rotation support |
 | [hb_tracer](/src/hb_tracer) | Records message flow through devices with trace IDs and timing data |

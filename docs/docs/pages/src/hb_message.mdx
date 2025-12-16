@@ -67,9 +67,10 @@ TABM → dev_codec_flat:to → Flat Maps
 %% Commitment Management
 -spec uncommitted(Msg) -> UncommittedMsg.
 -spec uncommitted(Msg, Opts) -> UncommittedMsg.
--spec committed(Msg, Key, Opts) -> CommittedValue.
+-spec committed(Msg, CommittersSpec, Opts) -> [Key].
 -spec commit(Msg, Wallet) -> SignedMsg.
 -spec commit(Msg, Wallet, Opts) -> SignedMsg.
+-spec normalize_commitments(Msg, Opts) -> NormalizedMsg.
 
 %% Verification
 -spec verify(Msg) -> boolean().
@@ -78,27 +79,38 @@ TABM → dev_codec_flat:to → Flat Maps
 
 %% Commitment Queries
 -spec signers(Msg, Opts) -> [Address].
--spec commitment(Msg, Key) -> Value | undefined.
--spec commitments(Msg, Committers, Opts) -> CommittedMsg.
+-spec commitment(IDOrSpec, Msg) -> Result.
+-spec commitment(IDOrSpec, Msg, Opts) -> Result.
+-spec commitments(Spec, Msg, Opts) -> #{CommID => Commitment}.
+-spec commitment_devices(Msg, Opts) -> [Device].
+-spec is_signed_key(Key, Msg, Opts) -> boolean().
 
-%% Message Manipulation
+%% Message Filtering
 -spec with_only_committers(Msg, Committers) -> FilteredMsg.
--spec with_only_committed(Msg, Opts) -> OnlyCommittedMsg.
+-spec with_only_committers(Msg, Committers, Opts) -> FilteredMsg.
+-spec with_only_committed(Msg, Opts) -> {ok, OnlyCommittedMsg} | {error, Reason}.
 -spec without_unless_signed(Keys, Msg, Opts) -> FilteredMsg.
--spec with_commitments(Keys, Msg, Opts) -> MsgWithCommitments.
--spec without_commitments(Keys, Msg, Opts) -> MsgWithoutCommitments.
+-spec with_commitments(Spec, Msg, Opts) -> MsgWithCommitments.
+-spec without_commitments(Spec, Msg, Opts) -> MsgWithoutCommitments.
+
+%% Message Comparison
+-spec match(Map1, Map2) -> true | {mismatch, Type, Path, Val1, Val2}.
+-spec match(Map1, Map2, Mode) -> true | {mismatch, Type, Path, Val1, Val2}.
+-spec match(Map1, Map2, Mode, Opts) -> true | {mismatch, Type, Path, Val1, Val2}.
+-spec diff(Msg1, Msg2, Opts) -> DiffMap.
 
 %% Utilities
--spec type(Msg) -> structured | ans104 | httpsig | flat.
+-spec type(Msg) -> tx | binary | deep | shallow.
 -spec minimize(Msg) -> MinimizedMsg.
--spec diff(Msg1, Msg2, Opts) -> Diff.
--spec match(Pattern, Msg) -> boolean().
+-spec find_target(Self, Req, Opts) -> {ok, TargetMsg}.
+-spec default_tx_list() -> [{Key, DefaultValue}].
+-spec filter_default_keys(Map) -> FilteredMap.
 -spec print(Msg) -> ok.
 ```
 
 ---
 
-## Key Public Functions
+## Public Functions
 
 ### 1. id/1, id/2, id/3
 
@@ -238,7 +250,7 @@ commit_with_device_test() ->
         Opts :: map().
 ```
 
-**Description:** Verify cryptographic commitments in message.
+**Description:** Verify cryptographic commitments in message. Returns `true` if all specified commitments are valid. Messages without commitments return `true` (nothing to fail).
 
 **Test Code:**
 ```erlang
@@ -252,7 +264,10 @@ verify_signed_test() ->
 
 verify_unsigned_test() ->
     Msg = #{<<"data">> => <<"value">>},
-    ?assertNot(hb_message:verify(Msg, all, #{})).
+    %% Unsigned message has no commitments, so verify returns true (nothing to fail)
+    ?assert(hb_message:verify(Msg, all, #{})),
+    %% But it has no signers
+    ?assertEqual([], hb_message:signers(Msg, #{})).
 
 verify_tampered_test() ->
     Wallet = ar_wallet:new(),
@@ -287,6 +302,499 @@ uncommitted_removes_sigs_test() ->
     Uncommitted = hb_message:uncommitted(Signed),
     ?assertNot(maps:is_key(<<"commitments">>, Uncommitted)),
     ?assertEqual(<<"value">>, maps:get(<<"data">>, Uncommitted)).
+```
+
+---
+
+### 6. committed/3
+
+```erlang
+-spec committed(Msg, CommittersSpec, Opts) -> [binary()]
+    when
+        Msg :: map(),
+        CommittersSpec :: all | none | [CommitterID] | map(),
+        Opts :: map().
+```
+
+**Description:** Return the list of keys that are covered by commitments.
+
+**Test Code:**
+```erlang
+committed_keys_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    Keys = hb_message:committed(Signed, all, #{}),
+    ?assert(is_list(Keys)),
+    ?assert(lists:member(<<"data">>, Keys)).
+```
+
+---
+
+### 7. signers/2
+
+```erlang
+-spec signers(Msg, Opts) -> [binary()]
+    when
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Return addresses of all committers with standard 256-bit addresses.
+
+**Test Code:**
+```erlang
+signers_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    Signers = hb_message:signers(Signed, #{}),
+    ?assert(is_list(Signers)),
+    ?assert(length(Signers) >= 1).
+```
+
+---
+
+### 8. type/1
+
+```erlang
+-spec type(Msg) -> tx | binary | deep | shallow
+    when
+        Msg :: term().
+```
+
+**Description:** Determine the type of an encoded message.
+
+**Test Code:**
+```erlang
+type_test() ->
+    ?assertEqual(shallow, hb_message:type(#{<<"key">> => <<"value">>})),
+    ?assertEqual(deep, hb_message:type(#{<<"nested">> => #{<<"key">> => <<"value">>}})),
+    ?assertEqual(binary, hb_message:type(<<"raw">>)).
+```
+
+---
+
+### 9. minimize/1
+
+```erlang
+-spec minimize(Msg) -> map()
+    when
+        Msg :: map().
+```
+
+**Description:** Remove keys that can be regenerated (`unsigned_id`, `content-digest`) and private keys.
+
+**Test Code:**
+```erlang
+minimize_test() ->
+    Msg = #{<<"data">> => <<"test">>, <<"unsigned_id">> => <<"abc">>, <<"priv">> => #{}},
+    Min = hb_message:minimize(Msg),
+    ?assert(maps:is_key(<<"data">>, Min)),
+    ?assertNot(maps:is_key(<<"unsigned_id">>, Min)),
+    ?assertNot(maps:is_key(<<"priv">>, Min)).
+```
+
+---
+
+### 10. normalize_commitments/2
+
+```erlang
+-spec normalize_commitments(Msg, Opts) -> map()
+    when
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Ensure message has at least one unsigned ID present in commitments. Forces ID calculation work to happen strategically.
+
+**Test Code:**
+```erlang
+normalize_commitments_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    Normalized = hb_message:normalize_commitments(Msg, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Normalized)).
+```
+
+---
+
+### 11. is_signed_key/3
+
+```erlang
+-spec is_signed_key(Key, Msg, Opts) -> boolean()
+    when
+        Key :: binary(),
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Check if a specific key is covered by message commitments.
+
+**Test Code:**
+```erlang
+is_signed_key_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    ?assert(hb_message:is_signed_key(<<"data">>, Signed, #{})).
+```
+
+---
+
+### 12. commitment/2, commitment/3
+
+```erlang
+-spec commitment(IDOrSpec, Msg, Opts) -> Commitment | not_found | {ok, CommID, Commitment} | multiple_matches
+    when
+        IDOrSpec :: binary() | map(),
+        Msg :: map(),
+        Opts :: map(),
+        Commitment :: map().
+```
+
+**Description:** Extract a single commitment by ID or spec. When given an existing commitment ID, returns the commitment map directly. When given a spec, returns `not_found`, `{ok, CommID, Commitment}`, or `multiple_matches`. Use `commitments/3` when expecting multiple matches.
+
+**Test Code:**
+```erlang
+commitment_by_id_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    Comms = maps:get(<<"commitments">>, Signed),
+    [FirstID | _] = maps:keys(Comms),
+    %% When given an existing ID, returns the commitment map directly
+    Result = hb_message:commitment(FirstID, Signed, #{}),
+    ?assert(is_map(Result)),
+    ?assert(maps:is_key(<<"signature">>, Result)).
+
+commitment_by_spec_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    %% Use commitments/3 to get all matching commitments by device
+    Matches = hb_message:commitments(#{<<"commitment-device">> => <<"httpsig@1.0">>}, Signed, #{}),
+    ?assert(map_size(Matches) >= 1).
+```
+
+---
+
+### 13. commitments/3
+
+```erlang
+-spec commitments(Spec, Msg, Opts) -> #{CommID => Commitment}
+    when
+        Spec :: binary() | map(),
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Return all commitments matching a spec.
+
+**Test Code:**
+```erlang
+commitments_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    %% Filter commitments by type
+    Matches = hb_message:commitments(#{<<"type">> => <<"rsa-pss-sha512">>}, Signed, #{}),
+    ?assert(is_map(Matches)).
+```
+
+---
+
+### 14. commitment_devices/2
+
+```erlang
+-spec commitment_devices(Msg, Opts) -> [binary()]
+    when
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Return the devices used to create commitments on a message.
+
+**Test Code:**
+```erlang
+commitment_devices_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    Devices = hb_message:commitment_devices(Signed, #{}),
+    ?assert(is_list(Devices)).
+```
+
+---
+
+### 15. with_only_committers/2, with_only_committers/3
+
+```erlang
+-spec with_only_committers(Msg, Committers, Opts) -> map()
+    when
+        Msg :: map(),
+        Committers :: [binary()],
+        Opts :: map().
+```
+
+**Description:** Filter message to include only specified committers' commitments.
+
+**Test Code:**
+```erlang
+with_only_committers_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    Address = ar_wallet:to_address(Wallet),
+    Filtered = hb_message:with_only_committers(Signed, [Address]),
+    ?assert(maps:is_key(<<"commitments">>, Filtered)).
+```
+
+---
+
+### 16. with_only_committed/2
+
+```erlang
+-spec with_only_committed(Msg, Opts) -> {ok, map()} | {error, Reason}
+    when
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Return message with only keys that are covered by commitments. Must verify message separately.
+
+**Test Code:**
+```erlang
+with_only_committed_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    {ok, Committed} = hb_message:with_only_committed(Signed, #{}),
+    ?assert(maps:is_key(<<"data">>, Committed)).
+```
+
+---
+
+### 17. without_unless_signed/3
+
+```erlang
+-spec without_unless_signed(Keys, Msg, Opts) -> map()
+    when
+        Keys :: binary() | [binary()],
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Remove specified keys unless they are signed.
+
+**Test Code:**
+```erlang
+without_unless_signed_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    WithExtra = Signed#{<<"unsigned_key">> => <<"extra">>},
+    Filtered = hb_message:without_unless_signed([<<"unsigned_key">>], WithExtra, #{}),
+    ?assertNot(maps:is_key(<<"unsigned_key">>, Filtered)).
+```
+
+---
+
+### 18. with_commitments/3
+
+```erlang
+-spec with_commitments(Spec, Msg, Opts) -> map()
+    when
+        Spec :: binary() | [binary()] | map(),
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Filter message commitments to only those matching a spec.
+
+**Test Code:**
+```erlang
+with_commitments_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    %% Get first commitment ID
+    Comms = maps:get(<<"commitments">>, Signed, #{}),
+    [FirstID | _] = maps:keys(Comms),
+    Filtered = hb_message:with_commitments([FirstID], Signed, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Filtered)).
+```
+
+---
+
+### 19. without_commitments/3
+
+```erlang
+-spec without_commitments(Spec, Msg, Opts) -> map()
+    when
+        Spec :: binary() | [binary()] | map(),
+        Msg :: map(),
+        Opts :: map().
+```
+
+**Description:** Remove commitments matching a spec from message.
+
+**Test Code:**
+```erlang
+without_commitments_test() ->
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(#{<<"data">> => <<"test">>}, #{priv_wallet => Wallet}),
+    %% Get all commitment IDs and remove them
+    Comms = maps:get(<<"commitments">>, Signed, #{}),
+    CommIDs = maps:keys(Comms),
+    Filtered = hb_message:without_commitments(CommIDs, Signed, #{}),
+    RemainingComms = maps:get(<<"commitments">>, Filtered, #{}),
+    ?assertEqual(0, map_size(RemainingComms)).
+```
+
+---
+
+### 20. match/2, match/3, match/4
+
+```erlang
+-spec match(Map1, Map2, Mode, Opts) -> true | {mismatch, Type, Path, Val1, Val2}
+    when
+        Map1 :: map(),
+        Map2 :: map(),
+        Mode :: strict | only_present | primary,
+        Opts :: map().
+```
+
+**Description:** Check if two messages match, with configurable matching modes.
+
+**Modes:**
+- `strict` - All keys in both maps must be present and match
+- `only_present` - Only present keys in both maps must match
+- `primary` - Only the primary map's keys must be present
+
+**Test Code:**
+```erlang
+match_strict_test() ->
+    Msg1 = #{<<"a">> => <<"1">>},
+    Msg2 = #{<<"a">> => <<"1">>},
+    ?assertEqual(true, hb_message:match(Msg1, Msg2, strict, #{})).
+
+match_mismatch_test() ->
+    Msg1 = #{<<"a">> => <<"1">>},
+    Msg2 = #{<<"a">> => <<"2">>},
+    ?assertMatch({mismatch, _, _, _, _}, hb_message:match(Msg1, Msg2)).
+
+match_only_present_test() ->
+    Msg1 = #{<<"a">> => <<"1">>},
+    Msg2 = #{<<"a">> => <<"1">>, <<"b">> => <<"2">>},
+    ?assertEqual(true, hb_message:match(Msg1, Msg2, only_present, #{})).
+```
+
+---
+
+### 21. diff/3
+
+```erlang
+-spec diff(Msg1, Msg2, Opts) -> map() | not_found
+    when
+        Msg1 :: map(),
+        Msg2 :: map(),
+        Opts :: map().
+```
+
+**Description:** Return numeric differences between two messages, recursively comparing nested maps. Non-numeric changes return the new value. Keys only in first message are dropped.
+
+**Test Code:**
+```erlang
+diff_numeric_test() ->
+    Msg1 = #{<<"count">> => 10},
+    Msg2 = #{<<"count">> => 15},
+    Diff = hb_message:diff(Msg1, Msg2, #{}),
+    ?assertEqual(5, maps:get(<<"count">>, Diff)).
+
+diff_new_key_test() ->
+    Msg1 = #{<<"a">> => <<"1">>},
+    Msg2 = #{<<"a">> => <<"1">>, <<"b">> => <<"new">>},
+    Diff = hb_message:diff(Msg1, Msg2, #{}),
+    ?assertEqual(<<"new">>, maps:get(<<"b">>, Diff)).
+```
+
+---
+
+### 22. find_target/3
+
+```erlang
+-spec find_target(Self, Req, Opts) -> {ok, TargetMsg}
+    when
+        Self :: map(),
+        Req :: map(),
+        Opts :: map().
+```
+
+**Description:** Find the target message for an operation. Looks for `target` key in request; returns `self` if not present or if target is `<<"self">>`.
+
+**Test Code:**
+```erlang
+find_target_self_test() ->
+    Self = #{<<"data">> => <<"self">>},
+    Req = #{},
+    {ok, Target} = hb_message:find_target(Self, Req, #{}),
+    ?assertEqual(Self, Target).
+
+find_target_key_test() ->
+    Self = #{<<"data">> => <<"self">>},
+    Req = #{<<"target">> => <<"other">>, <<"other">> => #{<<"data">> => <<"other">>}},
+    {ok, Target} = hb_message:find_target(Self, Req, #{}),
+    ?assertEqual(#{<<"data">> => <<"other">>}, Target).
+```
+
+---
+
+### 23. default_tx_list/0
+
+```erlang
+-spec default_tx_list() -> [{binary(), term()}].
+```
+
+**Description:** Return ordered list of `#tx{}` record fields with their default values as AO-Core keys.
+
+**Test Code:**
+```erlang
+default_tx_list_test() ->
+    List = hb_message:default_tx_list(),
+    ?assert(is_list(List)),
+    ?assert(length(List) > 0),
+    [{FirstKey, _} | _] = List,
+    ?assert(is_binary(FirstKey)).
+```
+
+---
+
+### 24. filter_default_keys/1
+
+```erlang
+-spec filter_default_keys(Map) -> map()
+    when
+        Map :: map().
+```
+
+**Description:** Remove keys from a map that have default `#tx{}` record values.
+
+**Test Code:**
+```erlang
+filter_default_keys_test() ->
+    %% quantity = 0 is a default
+    Msg = #{<<"quantity">> => 0, <<"data">> => <<"test">>},
+    Filtered = hb_message:filter_default_keys(Msg),
+    ?assertNot(maps:is_key(<<"quantity">>, Filtered)),
+    ?assert(maps:is_key(<<"data">>, Filtered)).
+```
+
+---
+
+### 25. print/1
+
+```erlang
+-spec print(Msg) -> ok
+    when
+        Msg :: map().
+```
+
+**Description:** Pretty-print a message to standard error for debugging.
+
+**Test Code:**
+```erlang
+print_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    ?assertEqual(ok, hb_message:print(Msg)).
 ```
 
 ---
