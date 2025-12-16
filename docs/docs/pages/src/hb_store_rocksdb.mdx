@@ -639,19 +639,42 @@ resolve_with_links_test() ->
 
 **Description:** Convert path to canonical form using `hb_store:path/1`.
 
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_path_test).
+-include_lib("eunit/include/eunit.hrl").
+
+path_binary_test() ->
+    ?assertEqual(<<"a/b/c">>, hb_store_rocksdb:path(#{}, <<"a/b/c">>)).
+
+path_list_test() ->
+    Result = hb_store_rocksdb:path(#{}, [<<"a">>, <<"b">>, <<"c">>]),
+    ?assertEqual(<<"a/b/c">>, Result).
+```
+
 ---
 
 ### 14. add_path/3
 
 ```erlang
--spec add_path(Opts, Path1, Path2) -> binary()
+-spec add_path(Opts, Path1, Path2) -> list()
     when
         Opts :: map(),
-        Path1 :: binary(),
-        Path2 :: binary().
+        Path1 :: list(),
+        Path2 :: list().
 ```
 
-**Description:** Concatenate two paths together (simple concatenation, no "/" added).
+**Description:** Concatenate two path lists together (simple list concatenation).
+
+**Test Code:**
+```erlang
+-module(hb_store_rocksdb_add_path_test).
+-include_lib("eunit/include/eunit.hrl").
+
+add_path_test() ->
+    Result = hb_store_rocksdb:add_path(#{}, [<<"a">>, <<"b">>], [<<"c">>, <<"d">>]),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>, <<"d">>], Result).
+```
 
 ---
 
