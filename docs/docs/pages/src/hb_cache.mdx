@@ -93,11 +93,12 @@ ensure_loaded_link_test() ->
     Data = #{<<"key">> => <<"value">>},
     {ok, ID} = hb_cache:write(Data, Opts),
     
-    % Create link
-    Link = {link, ID, #{store => Store}},
-    Loaded = hb_cache:ensure_loaded(Link, Opts),
+    % Read returns a map with links to subkeys
+    {ok, ReadMap} = hb_cache:read(ID, Opts),
+    ?assert(is_map(ReadMap)),
     
-    ?assert(is_map(Loaded)),
+    % ensure_all_loaded resolves all nested links
+    Loaded = hb_cache:ensure_all_loaded(ReadMap, Opts),
     ?assertEqual(<<"value">>, maps:get(<<"key">>, Loaded)).
 
 ensure_loaded_non_link_test() ->
@@ -107,21 +108,23 @@ ensure_loaded_non_link_test() ->
 
 ensure_loaded_nested_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
     Inner = #{<<"inner">> => <<"data">>},
-    {ok, InnerID} = hb_cache:write(Inner, Opts),
+    {ok, _InnerID} = hb_cache:write(Inner, Opts),
     
-    Outer = #{<<"outer">> => {link, InnerID, #{store => Store}}},
+    Outer = #{<<"outer">> => Inner},
     {ok, OuterID} = hb_cache:write(Outer, Opts),
     
-    Link = {link, OuterID, #{store => Store}},
-    Loaded = hb_cache:ensure_loaded(Link, Opts),
+    {ok, ReadOuter} = hb_cache:read(OuterID, Opts),
     
-    % Outer is loaded, inner is still a link
+    % ensure_all_loaded fully resolves nested structures
+    Loaded = hb_cache:ensure_all_loaded(ReadOuter, Opts),
     ?assert(is_map(Loaded)),
     OuterVal = maps:get(<<"outer">>, Loaded),
-    ?assertMatch({link, _, _}, OuterVal).
+    ?assert(is_map(OuterVal)),
+    ?assertEqual(<<"data">>, maps:get(<<"inner">>, OuterVal)).
 ```
 
 ---
@@ -145,46 +148,45 @@ ensure_loaded_nested_test() ->
 
 ensure_all_loaded_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
     % Create nested structure
     Deep = #{<<"deep">> => <<"value">>},
-    {ok, DeepID} = hb_cache:write(Deep, Opts),
+    Middle = #{<<"middle">> => Deep},
+    Top = #{<<"top">> => Middle},
     
-    Middle = #{<<"middle">> => {link, DeepID, #{store => Store}}},
-    {ok, MiddleID} = hb_cache:write(Middle, Opts),
+    {ok, TopID} = hb_cache:write(Top, Opts),
+    {ok, ReadTop} = hb_cache:read(TopID, Opts),
     
-    Top = #{<<"top">> => {link, MiddleID, #{store => Store}}},
+    % Fully load all nested links
+    Loaded = hb_cache:ensure_all_loaded(ReadTop, Opts),
     
-    % Fully load
-    Loaded = hb_cache:ensure_all_loaded(Top, Opts),
-    
-    % All links resolved
+    % All links resolved - navigate with direct map access
     ?assert(is_map(Loaded)),
-    ?assert(is_map(maps:get(<<"top">>, Loaded))),
-    ?assert(is_map(maps:get(<<"middle">>, maps:get(<<"top">>, Loaded)))),
-    ?assertEqual(<<"value">>, 
-        maps:get(<<"deep">>, 
-            maps:get(<<"middle">>, 
-                maps:get(<<"top">>, Loaded)))).
+    TopVal = maps:get(<<"top">>, Loaded),
+    ?assert(is_map(TopVal)),
+    MiddleVal = maps:get(<<"middle">>, TopVal),
+    ?assert(is_map(MiddleVal)),
+    ?assertEqual(<<"value">>, maps:get(<<"deep">>, MiddleVal)).
 
 ensure_all_loaded_list_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
     Item = #{<<"item">> => <<"data">>},
     {ok, ID} = hb_cache:write(Item, Opts),
+    {ok, ReadItem} = hb_cache:read(ID, Opts),
     
-    List = [
-        {link, ID, #{store => Store}},
-        {link, ID, #{store => Store}}
-    ],
+    List = [ReadItem, ReadItem],
     
     Loaded = hb_cache:ensure_all_loaded(List, Opts),
     
     ?assert(is_list(Loaded)),
     ?assertEqual(2, length(Loaded)),
-    ?assert(is_map(lists:nth(1, Loaded))).
+    [First, _Second] = Loaded,
+    ?assertEqual(<<"data">>, maps:get(<<"item">>, First)).
 ```
 
 ---
@@ -208,13 +210,15 @@ ensure_all_loaded_list_test() ->
 
 read_basic_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
     Msg = #{<<"key">> => <<"value">>},
     {ok, ID} = hb_cache:write(Msg, Opts),
     
     {ok, Read} = hb_cache:read(ID, Opts),
-    ?assertEqual(Msg, Read).
+    Loaded = hb_cache:ensure_all_loaded(Read, Opts),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, Loaded)).
 
 read_not_found_test() ->
     Store = hb_test_utils:test_store(),
@@ -263,6 +267,7 @@ read_signed_message_test() ->
 
 read_resolved_hit_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
     Msg1 = #{<<"key">> => <<"value">>},
@@ -281,15 +286,18 @@ read_resolved_hit_test() ->
     {hit, {ok, Cached}} = hb_cache:read_resolved(Msg1, Msg2, Opts),
     ?assertEqual(Result, Cached).
 
-read_resolved_miss_test() ->
+read_resolved_key_not_found_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
-    Msg1 = #{<<"key">> => <<"value">>},
-    Msg2 = #{<<"path">> => <<"key">>},
+    %% Message has one key, but we request a different key that doesn't exist
+    %% Returns {hit, not_found} - the message was found but key doesn't exist
+    Msg1 = #{<<"exists">> => <<"value">>},
+    Msg2 = #{<<"path">> => <<"nonexistent">>},
     
     Result = hb_cache:read_resolved(Msg1, Msg2, Opts),
-    ?assertEqual(miss, Result).
+    ?assertEqual({hit, not_found}, Result).
 ```
 
 ---
@@ -373,13 +381,19 @@ write_nested_test() ->
 
 write_binary_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
     Binary = <<"test data">>,
-    Path = <<"test-path">>,
+    Hashpath = <<"test-hashpath">>,
     
-    {ok, ResultPath} = hb_cache:write_binary(Path, Binary, Opts),
-    ?assertEqual(Path, ResultPath).
+    %% write_binary returns content-hash path, creates link at hashpath
+    {ok, DataPath} = hb_cache:write_binary(Hashpath, Binary, Opts),
+    ?assert(is_binary(DataPath)),
+    
+    %% Can read via hashpath (link)
+    {ok, Read} = hb_cache:read(Hashpath, Opts),
+    ?assertEqual(Binary, Read).
 
 write_hashpath_test() ->
     Store = hb_test_utils:test_store(),
@@ -410,31 +424,34 @@ write_hashpath_test() ->
 
 list_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
-    % Write some items
-    {ok, _} = hb_cache:write(#{<<"a">> => <<"1">>}, Opts),
-    {ok, _} = hb_cache:write(#{<<"b">> => <<"2">>}, Opts),
+    %% Write a message with multiple keys
+    Msg = #{<<"a">> => <<"1">>, <<"b">> => <<"2">>},
+    {ok, ID} = hb_cache:write(Msg, Opts),
     
-    List = hb_cache:list(<<"/">>, Opts),
-    ?assert(is_list(List)).
+    %% List returns the keys of the message
+    List = hb_cache:list(ID, Opts),
+    ?assert(is_list(List)),
+    ?assertEqual([<<"a">>, <<"b">>], lists:sort(List)).
 
 list_numbered_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
-    BasePath = <<"slots">>,
+    %% Write a message with numbered keys
+    Msg = #{
+        <<"1">> => <<"a">>,
+        <<"2">> => <<"b">>,
+        <<"3">> => <<"c">>,
+        <<"5">> => <<"e">>,
+        <<"10">> => <<"j">>
+    },
+    {ok, ID} = hb_cache:write(Msg, Opts),
     
-    % Write numbered items
-    lists:foreach(
-        fun(N) ->
-            Path = <<BasePath/binary, "/", (integer_to_binary(N))/binary>>,
-            hb_cache:write_binary(Path, <<N>>, Opts)
-        end,
-        [1, 2, 3, 5, 10]
-    ),
-    
-    Numbers = hb_cache:list_numbered(BasePath, Opts),
+    Numbers = hb_cache:list_numbered(ID, Opts),
     ?assertEqual([1, 2, 3, 5, 10], lists:sort(Numbers)).
 ```
 

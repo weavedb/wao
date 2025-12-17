@@ -35,21 +35,24 @@ This module manages cache control logic for the AO-Core resolver, deriving setti
 ### 1. maybe_store/4
 
 ```erlang
--spec maybe_store(Msg1, Msg2, Msg3, Opts) -> ok | not_caching.
+-spec maybe_store(Msg1, Msg2, Msg3, Opts) -> ok | {ok, Path} | not_caching | skip_caching.
 ```
 
-**Description:** Conditionally write Msg3 result to cache based on cache control settings from Msg2, Msg3, and Opts.
+**Description:** Conditionally write Msg3 result to cache based on cache control settings from Msg2, Msg3, and Opts. Returns `ok` for async writes, `{ok, Path}` for sync writes, or `not_caching` if caching disabled.
 
 **Test Code:**
 ```erlang
 maybe_store_enabled_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Msg1 = #{<<"key">> => <<"value">>},
-    Msg2 = #{<<"cache-control">> => [<<"store">>]},
+    Msg2 = #{<<"path">> => <<"key">>},
     Msg3 = <<"result">>,
-    Opts = #{store => hb_test_utils:test_store()},
+    %% <<"always">> directive enables both store and lookup
+    Opts = #{store => Store, cache_control => [<<"always">>]},
     
     Result = hb_cache_control:maybe_store(Msg1, Msg2, Msg3, Opts),
-    ?assertEqual(ok, Result).
+    ?assertMatch({ok, _}, Result).
 
 maybe_store_disabled_test() ->
     Msg1 = #{},
@@ -73,41 +76,40 @@ maybe_store_disabled_test() ->
 
 **Test Code:**
 ```erlang
+%% Test cache hit using hb_ao:resolve with <<"always">> then <<"only-if-cached">>
 maybe_lookup_hit_test() ->
-    Store = hb_test_utils:test_store(),
-    Opts = #{store => Store},
+    Msg1 = #{<<"key">> => <<"cached-value">>},
+    Msg2 = <<"key">>,
     
-    Msg1 = #{<<"key">> => <<"value">>},
-    Msg2 = #{<<"path">> => <<"key">>},
-    Result = <<"value">>,
+    %% First resolve with <<"always">> to cache the result
+    {ok, Res1} = hb_ao:resolve(Msg1, Msg2, #{cache_control => [<<"always">>]}),
+    ?assertEqual(<<"cached-value">>, Res1),
     
-    % Cache result
-    hb_cache:write(Msg1, Opts),
-    hb_cache:write(Msg2, Opts),
-    Hashpath = hb_path:hashpath(Msg1, Msg2, Opts),
-    hb_cache:write_binary(Hashpath, Result, Opts),
-    
-    % Lookup
-    {ok, Cached} = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts),
-    ?assertEqual(Result, Cached).
+    %% Now lookup with <<"only-if-cached">> - should hit cache
+    {ok, Res2} = hb_ao:resolve(Msg1, Msg2, #{cache_control => [<<"only-if-cached">>]}),
+    ?assertEqual(<<"cached-value">>, Res2).
 
 maybe_lookup_miss_test() ->
     Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
     Opts = #{store => Store},
     
-    Msg1 = #{<<"key">> => <<"value">>},
-    Msg2 = #{<<"path">> => <<"key">>},
+    %% Use unique keys to ensure cache miss
+    UniqueKey = base64:encode(crypto:strong_rand_bytes(8)),
+    Msg1 = #{UniqueKey => <<"value">>},
+    Msg2 = #{<<"path">> => <<"nonexistent">>},
     
     Result = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts),
     ?assertMatch({continue, _, _}, Result).
 
 maybe_lookup_only_if_cached_miss_test() ->
-    Msg1 = #{},
-    Msg2 = #{<<"cache-control">> => [<<"only-if-cached">>]},
-    Opts = #{store => hb_test_utils:test_store()},
+    %% Request key that doesn't exist with only-if-cached
+    %% Using in-memory map with nonexistent key path
+    Msg1 = #{<<"exists">> => <<"value">>},
+    Msg2 = <<"nonexistent-key">>,
     
-    Result = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts),
-    ?assertMatch({error, #{<<"status">> := 504}}, Result).
+    Result = hb_ao:resolve(Msg1, Msg2, #{cache_control => [<<"only-if-cached">>]}),
+    ?assertMatch({error, _}, Result).
 ```
 
 ---
