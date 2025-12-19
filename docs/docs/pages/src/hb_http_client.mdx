@@ -72,10 +72,22 @@ This module originates from the Arweave project and has been modified for use in
 
 **Description:** Start HTTP client gen_server under supervision.
 
-**Implementation:**
+**Test Code:**
 ```erlang
-start_link(Opts) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
+-module(hb_http_client_test).
+-include_lib("eunit/include/eunit.hrl").
+
+start_link_test() ->
+    %% Stop if already running
+    case whereis(hb_http_client) of
+        undefined -> ok;
+        ExistingPid -> gen_server:stop(ExistingPid)
+    end,
+    
+    {ok, Pid} = hb_http_client:start_link(#{}),
+    ?assert(is_pid(Pid)),
+    ?assert(is_process_alive(Pid)),
+    gen_server:stop(Pid).
 ```
 
 ---
@@ -100,6 +112,47 @@ start_link(Opts) ->
 ```
 
 **Description:** Execute HTTP request using Gun or HTTPC backend. Handles connection pooling, retry logic, and metrics recording.
+
+**Test Code:**
+```erlang
+req_httpc_success_test() ->
+    %% Start a simple HTTP server
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(ListenSock),
+    
+    %% Spawn server handler
+    spawn(fun() ->
+        {ok, Sock} = gen_tcp:accept(ListenSock),
+        {ok, _Request} = gen_tcp:recv(Sock, 0, 5000),
+        Response = <<"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok">>,
+        gen_tcp:send(Sock, Response),
+        gen_tcp:close(Sock),
+        gen_tcp:close(ListenSock)
+    end),
+    
+    %% Make request
+    Args = #{
+        peer => iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+        path => <<"/">>,
+        method => <<"GET">>,
+        headers => #{},
+        body => <<>>
+    },
+    Result = hb_http_client:req(Args, #{http_client => httpc}),
+    ?assertMatch({ok, 200, _, <<"ok">>}, Result).
+
+req_httpc_connection_refused_test() ->
+    %% Test httpc backend - connection to non-existent server
+    Args = #{
+        peer => <<"http://127.0.0.1:59999">>,
+        path => <<"/">>,
+        method => <<"GET">>,
+        headers => #{},
+        body => <<>>
+    },
+    Result = hb_http_client:req(Args, #{http_client => httpc}),
+    ?assertMatch({error, _}, Result).
+```
 
 **Args Structure:**
 ```erlang

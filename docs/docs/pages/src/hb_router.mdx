@@ -58,77 +58,19 @@ This module provides a lightweight service discovery mechanism for the AO networ
 - `{ok, Node}` where Node is the URL/address of the service
 - `{error, service_type_not_found}` if no matching service exists
 
-**Test Code:**
+:::warning
+This module is not unit testable. The `hb_opts:get(nodes)` call reads from global configuration that cannot be injected through the function's Opts parameter. The `nodes` configuration must be set via HyperBEAM node initialization (config files). The original source module contains no tests for this reason.
+:::
+
+**Example:**
 ```erlang
--module(hb_router_find_test).
--include_lib("eunit/include/eunit.hrl").
+%% Find a scheduler node
+{ok, URL} = hb_router:find(<<"scheduler">>, ProcessID),
+%% Returns: {ok, <<"https://scheduler.ao.computer">>}
 
-find_basic_test() ->
-    % Configure nodes in global options
-    Opts = #{
-        nodes => #{
-            <<"scheduler">> => #{
-                '_' => <<"https://scheduler.ao.computer">>
-            }
-        }
-    },
-    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
-    
-    Result = hb_router:find(<<"scheduler">>, <<"any-id">>),
-    ?assertMatch({ok, <<"https://scheduler.ao.computer">>}, Result).
-
-find_with_address_test() ->
-    Opts = #{
-        nodes => #{
-            <<"compute-unit">> => #{
-                <<"primary">> => <<"https://cu1.ao.computer">>,
-                <<"backup">> => <<"https://cu2.ao.computer">>
-            }
-        }
-    },
-    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
-    
-    % Find specific address
-    Result1 = hb_router:find(<<"compute-unit">>, <<"task-1">>, <<"primary">>),
-    ?assertMatch({ok, <<"https://cu1.ao.computer">>}, Result1),
-    
-    Result2 = hb_router:find(<<"compute-unit">>, <<"task-1">>, <<"backup">>),
-    ?assertMatch({ok, <<"https://cu2.ao.computer">>}, Result2).
-
-find_any_address_test() ->
-    Opts = #{
-        nodes => #{
-            <<"messenger">> => #{
-                '_' => <<"https://mu.ao.computer">>
-            }
-        }
-    },
-    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
-    
-    % Use wildcard address
-    Result = hb_router:find(<<"messenger">>, <<"msg-123">>, '_'),
-    ?assertMatch({ok, <<"https://mu.ao.computer">>}, Result).
-
-find_not_found_test() ->
-    Opts = #{nodes => #{}},
-    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
-    
-    Result = hb_router:find(<<"nonexistent">>, <<"id">>),
-    ?assertEqual({error, service_type_not_found}, Result).
-
-find_type_exists_address_not_test() ->
-    Opts = #{
-        nodes => #{
-            <<"service">> => #{
-                <<"addr1">> => <<"https://node1.com">>
-            }
-        }
-    },
-    application:set_env(hyperbeam, nodes, maps:get(nodes, Opts)),
-    
-    % Type exists but address doesn't
-    Result = hb_router:find(<<"service">>, <<"id">>, <<"nonexistent">>),
-    ?assertEqual({error, service_type_not_found}, Result).
+%% Find specific compute unit by address
+{ok, CU} = hb_router:find(<<"compute-unit">>, TaskID, <<"primary">>),
+%% Returns: {ok, <<"https://cu1.ao.computer">>}
 ```
 
 ---
@@ -255,7 +197,7 @@ The nodes configuration is a nested map structure:
 
 **Via Application Environment:**
 ```erlang
-application:set_env(hyperbeam, nodes, NodesMap).
+application:set_env(hb, nodes, NodesMap).
 ```
 
 **Via Options:**
