@@ -1,487 +1,468 @@
-# hb_http_multi.erl - Multi-Node HTTP Request Dispatcher
+# hb_http.erl - HyperBEAM HTTP Request/Reply Core
 
 ## Overview
 
-**Purpose:** Dispatch HTTP requests across multiple nodes with configurable response collection  
-**Module:** `hb_http_multi`  
-**Pattern:** Single request → Multiple nodes → Filtered responses  
-**Execution Modes:** Serial or parallel
+**Purpose:** Core HTTP request/reply functionality for HyperBEAM  
+**Module:** `hb_http`  
+**Protocol:** HTTP/HTTPS with message-based communication  
+**Pattern:** Message request → HTTP → Message response
 
-This module enables HyperBEAM to send the same HTTP request to multiple nodes simultaneously or sequentially, collecting responses based on configurable criteria. It supports response filtering by status code and custom admissibility checks via AO-Core resolution.
+This module provides HyperBEAM's primary HTTP functionality, converting messages to HTTP requests and processing responses back into message form. It handles both client requests (GET, POST) and server-side request processing, supporting multiple codec devices and serialization formats.
 
-## Use Cases
+## Core Responsibilities
 
-- **Gateway Redundancy:** Query multiple Arweave gateways for reliability
-- **Consensus:** Gather responses from multiple nodes for validation
-- **Race Conditions:** Accept first valid response from multiple sources
-- **Backup Nodes:** Try primary, fall back to secondaries
-- **Load Distribution:** Spread requests across multiple endpoints
+- **Client Requests:** GET/POST operations to remote nodes
+- **Message Conversion:** Transform HyperBEAM messages to/from HTTP
+- **Codec Support:** Handle `httpsig@1.0`, `ans104@1.0`, and structured messages
+- **Cookie Management:** Parse and normalize Set-Cookie headers
+- **Response Processing:** Convert HTTP responses to appropriate message formats
+- **Multi-Request:** Delegate to `hb_http_multi` for route-based requests
 
 ## Dependencies
 
-- **HyperBEAM:** `hb_http`, `hb_ao`, `hb_maps`, `hb_message`, `hb_opts`, `hb_util`
+- **HyperBEAM:** `hb_ao`, `hb_message`, `hb_util`, `hb_maps`, `hb_opts`, `hb_json`, `hb_singleton`
+- **Codecs:** `dev_codec_ans104`, `dev_codec_structured`, `dev_codec_cookie`, `dev_codec_httpsig`
+- **HTTP Client:** `hb_http_client`, `hb_http_multi`
+- **Arweave:** `ar_bundles`, `ar_wallet`
+- **External:** `cowboy_req`, `httpc`
 - **Includes:** `include/hb.hrl`
-
----
-
-## Configuration Fields
-
-The `Config` message supports the following fields:
-
-```erlang
-Config = #{
-    % Required
-    <<"nodes">> => [Node1, Node2, ...],
-    
-    % Optional (with defaults)
-    <<"responses">> => Integer,              % Default: 1 (race for first)
-    <<"stop-after">> => Boolean,             % Default: true
-    <<"parallel">> => Boolean,               % Default: false (serial)
-    <<"admissible">> => Message | undefined, % Default: undefined
-    <<"admissible-status">> => Status        % Default: <<"All">>
-}
-```
-
-### Field Descriptions
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `nodes` | `[binary() \| map()]` | Required | List of node URIs or node configs |
-| `responses` | `integer()` | `1` | Number of responses to collect |
-| `stop-after` | `boolean()` | `true` | Stop after collecting required responses |
-| `parallel` | `boolean()` | `false` | Execute requests in parallel |
-| `admissible` | `map() \| undefined` | `undefined` | AO-Core message for response validation |
-| `admissible-status` | `binary() \| integer() \| [integer()]` | `<<"All">>` | Allowed HTTP status codes |
 
 ---
 
 ## Public Functions Overview
 
 ```erlang
-%% Multi-Request Dispatcher
--spec request(Config, Method, Path, Message, Opts) -> 
-    {ok | error | failure, Response} | 
-    {ok | error | failure, [Response]} |
-    {error, no_viable_responses}.
+%% Initialization
+-spec start() -> ok.
+
+%% Client Requests
+-spec get(Node, Opts) -> {ok, Message} | {error, Reason}.
+-spec get(Node, Path, Opts) -> {ok, Message} | {error, Reason}.
+-spec get(Node, Message, Opts) -> {ok, Message} | {error, Reason}.
+
+-spec post(Node, Path, Opts) -> {ok, Message} | {error, Reason}.
+-spec post(Node, Message, Opts) -> {ok, Message} | {error, Reason}.
+-spec post(Node, Path, Message, Opts) -> {ok, Message} | {error, Reason}.
+
+%% Generic Request
+-spec request(Message, Opts) -> {ok | created | error | failure, Result}.
+-spec request(Method, Peer, Path, Opts) -> {ok | created | error | failure, Result}.
+-spec request(Method, Peer, Path, Message, Opts) -> {ok | created | error | failure, Result}.
+
+%% Message Conversion
+-spec message_to_request(Message, Opts) -> {ok, Method, Peer, Path, Message, Opts}.
+
+%% Server Processing
+-spec reply(Request, StatusCode, Headers, Body) -> cowboy_req:req().
+-spec accept_to_codec(Accept, Opts) -> CodecDevice.
+
+%% Utilities
+-spec req_to_tabm_singleton(Request, Message, Opts) -> Messages.
 ```
 
 ---
 
 ## Public Functions
 
-### 1. request/5
+### 1. start/0
 
 ```erlang
--spec request(Config, Method, Path, Message, Opts) -> Result
-    when
-        Config :: #{
-            <<"nodes">> := [Node],
-            <<"responses">> => integer(),
-            <<"stop-after">> => boolean(),
-            <<"parallel">> => boolean(),
-            <<"admissible">> => map(),
-            <<"admissible-status">> => binary() | integer() | [integer()]
-        },
-        Method :: binary(),
-        Path :: binary(),
-        Message :: map(),
-        Opts :: map(),
-        Node :: binary() | #{hostname := binary(), address => binary()},
-        Result :: {Status, Response} | {Status, [Response]} | {error, no_viable_responses},
-        Status :: ok | error | failure,
-        Response :: map().
+-spec start() -> ok.
 ```
 
-**Description:** Dispatch the same HTTP request to multiple nodes, collecting responses based on configuration. Returns single response or list based on `responses` setting.
-
-**Return Values:**
-- `{Status, Response}` - When `responses => 1` (single response)
-- `{Status, [Response]}` - When `responses > 1` (multiple responses)
-- `{error, no_viable_responses}` - No nodes returned admissible responses
-
-**Execution Flow:**
-```erlang
-Config + Message
-    ↓
-Parse Options
-    ↓
-Remove multirequest- prefixes from Message
-    ↓
-Choose: Serial or Parallel?
-    ↓
-Execute Requests
-    ↓
-Filter by Admissibility
-    ↓
-Collect Required Responses
-    ↓
-Return Results
-```
+**Description:** Initialize HTTP client by disabling keep-alive connections.
 
 **Test Code:**
 ```erlang
--module(hb_http_multi_test).
+-module(hb_http_test).
 -include_lib("eunit/include/eunit.hrl").
 
-race_for_first_response_test() ->
-    Node1 = hb_http_server:start_node(),
-    Node2 = hb_http_server:start_node(),
+%% Helper to start a mock HTTP server
+start_mock_server(ResponseBody, StatusCode) ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(ListenSock),
+    spawn(fun() -> mock_server_loop(ListenSock, ResponseBody, StatusCode) end),
+    {Port, ListenSock}.
+
+mock_server_loop(ListenSock, ResponseBody, StatusCode) ->
+    case gen_tcp:accept(ListenSock, 5000) of
+        {ok, Sock} ->
+            {ok, _Request} = gen_tcp:recv(Sock, 0, 5000),
+            ContentLength = integer_to_binary(byte_size(ResponseBody)),
+            Response = <<"HTTP/1.1 ", (integer_to_binary(StatusCode))/binary, " OK\r\n",
+                        "Content-Type: application/json\r\n",
+                        "Content-Length: ", ContentLength/binary, "\r\n\r\n",
+                        ResponseBody/binary>>,
+            gen_tcp:send(Sock, Response),
+            gen_tcp:close(Sock),
+            mock_server_loop(ListenSock, ResponseBody, StatusCode);
+        {error, timeout} ->
+            gen_tcp:close(ListenSock);
+        {error, _} ->
+            gen_tcp:close(ListenSock)
+    end.
+
+start_test() ->
+    ?assertEqual(ok, hb_http:start()).
+```
+
+---
+
+### 2. get/2, get/3
+
+```erlang
+-spec get(Node, Opts) -> {ok, Message} | {error, Reason}
+    when
+        Node :: binary(),
+        Opts :: map(),
+        Message :: map(),
+        Reason :: term().
+
+-spec get(Node, PathOrMessage, Opts) -> {ok, Message} | {error, Reason}
+    when
+        Node :: binary(),
+        PathOrMessage :: binary() | map(),
+        Opts :: map(),
+        Message :: map(),
+        Reason :: term().
+```
+
+**Description:** Perform HTTP GET request to a remote node, returning deserialized message response.
+
+**Test Code:**
+```erlang
+get_basic_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"key\":\"value\"}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
     
-    Config = #{
-        <<"nodes">> => [Node1, Node2],
-        <<"responses">> => 1,
-        <<"parallel">> => true
+    {ok, Res} = hb_http:get(URL, <<"/">>, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+get_with_path_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"data\":123}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:get(URL, <<"/api/data">>, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    
+    gen_tcp:close(Sock).
+```
+
+---
+
+### 3. post/3, post/4
+
+```erlang
+-spec post(Node, PathOrMessage, Opts) -> {ok, Message} | {error, Reason}
+    when
+        Node :: binary(),
+        PathOrMessage :: binary() | map(),
+        Opts :: map(),
+        Message :: map(),
+        Reason :: term().
+
+-spec post(Node, Path, Message, Opts) -> {ok, Message} | {error, Reason}
+    when
+        Node :: binary(),
+        Path :: binary(),
+        Message :: map(),
+        Opts :: map(),
+        Reason :: term().
+```
+
+**Description:** Post message to remote node via HTTP, returning deserialized response.
+
+**Test Code:**
+```erlang
+post_basic_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"result\":\"ok\"}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:post(URL, <<"/">>, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+post_with_message_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"saved\":true}">>, 201),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    Message = #{<<"key">> => <<"value">>},
+    {ok, Res} = hb_http:post(URL, <<"/api/save">>, Message, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    
+    gen_tcp:close(Sock).
+```
+
+---
+
+### 4. request/2, request/4, request/5
+
+```erlang
+-spec request(Message, Opts) -> {Status, Result}
+    when
+        Message :: map(),
+        Opts :: map(),
+        Status :: ok | created | error | failure,
+        Result :: term().
+
+-spec request(Method, Peer, Path, Message, Opts) -> {Status, Result}
+    when
+        Method :: binary(),
+        Peer :: binary() | map(),
+        Path :: binary(),
+        Message :: map(),
+        Opts :: map(),
+        Status :: ok | created | error | failure,
+        Result :: term().
+```
+
+**Description:** Generic HTTP request handler supporting GET, POST, PUT, DELETE. Handles routing, multi-requests, codec selection, and response processing.
+
+**Special Cases:**
+- **Routes:** Delegates to `hb_http_multi` when `<<"nodes">>` present
+- **URI Options:** Merges additional options from route configuration
+- **AO-Result:** Returns single key value when `ao-result` header present
+
+**Test Code:**
+```erlang
+request_get_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"method\":\"GET\"}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:request(<<"GET">>, URL, <<"/">>, #{}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+request_post_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"method\":\"POST\"}">>, 201),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:request(<<"POST">>, URL, <<"/data">>, #{<<"key">> => <<"val">>}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    
+    gen_tcp:close(Sock).
+
+request_error_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"error\":\"not found\"}">>, 404),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {error, Res} = hb_http:request(<<"GET">>, URL, <<"/missing">>, #{}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(404, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+request_failure_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"error\":\"internal\"}">>, 500),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {failure, Res} = hb_http:request(<<"GET">>, URL, <<"/fail">>, #{}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(500, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+```
+
+---
+
+### 5. message_to_request/2
+
+```erlang
+-spec message_to_request(Message, Opts) -> {ok, Method, Peer, Path, Message, Opts}
+    when
+        Message :: map(),
+        Opts :: map(),
+        Method :: binary(),
+        Peer :: binary(),
+        Path :: binary().
+```
+
+**Description:** Convert HyperBEAM message to HTTP request components, extracting method, peer, path, and preparing message for transmission.
+
+**Test Code:**
+```erlang
+message_to_request_basic_test() ->
+    Message = #{
+        <<"url">> => <<"http://example.com/api/data">>,
+        <<"method">> => <<"POST">>,
+        <<"body">> => <<"test">>
     },
-    
-    Message = #{<<"path">> => <<"/~meta@1.0/info">>},
-    {ok, Response} = hb_http_multi:request(Config, <<"GET">>, <<"/">>, Message, #{}),
-    
-    ?assert(is_map(Response)).
+    {ok, Method, Peer, Path, _Msg, _Opts} = hb_http:message_to_request(Message, #{}),
+    ?assertEqual(<<"POST">>, Method),
+    ?assertEqual(<<"http://example.com">>, Peer),
+    ?assertEqual(<<"/api/data">>, Path).
 
-collect_multiple_responses_test() ->
-    Nodes = [
-        hb_http_server:start_node(),
-        hb_http_server:start_node(),
-        hb_http_server:start_node()
-    ],
-    
-    Config = #{
-        <<"nodes">> => Nodes,
-        <<"responses">> => 3,
-        <<"parallel">> => true
+message_to_request_default_method_test() ->
+    Message = #{
+        <<"url">> => <<"http://example.com/path">>
     },
-    
-    {ok, Responses} = hb_http_multi:request(Config, <<"GET">>, <<"/">>, #{}, #{}),
-    ?assert(is_list(Responses)),
-    ?assertEqual(3, length(Responses)).
-
-status_filter_test() ->
-    Node1 = <<"http://node1.example.com">>,
-    Node2 = <<"http://node2.example.com">>,
-    
-    Config = #{
-        <<"nodes">> => [Node1, Node2],
-        <<"responses">> => 1,
-        <<"admissible-status">> => 200,
-        <<"parallel">> => true
-    },
-    
-    % Only 200 responses accepted
-    Result = hb_http_multi:request(Config, <<"GET">>, <<"/api">>, #{}, #{}).
+    {ok, Method, _Peer, _Path, _Msg, _Opts} = hb_http:message_to_request(Message, #{}),
+    ?assertEqual(<<"GET">>, Method).
 ```
 
 ---
 
-## Execution Modes
-
-### Serial Execution (Default)
+### 6. reply/4
 
 ```erlang
-Config = #{
-    <<"nodes">> => [Node1, Node2, Node3],
-    <<"parallel">> => false  % or omit (default)
-}
+-spec reply(Request, StatusCode, Headers, Body) -> cowboy_req:req()
+    when
+        Request :: cowboy_req:req(),
+        StatusCode :: integer(),
+        Headers :: map() | list(),
+        Body :: binary().
 ```
 
-**Behavior:**
-1. Request Node1
-2. Check if response is admissible
-3. If yes, add to results; if no, discard
-4. If collected enough responses, stop
-5. Otherwise, request Node2
-6. Repeat until responses collected or nodes exhausted
+**Description:** Send HTTP response to client via Cowboy, handling headers, status codes, and body serialization.
 
-**Advantages:**
-- Lower resource usage
-- Predictable order
-- Easy to debug
-- Fail-fast on first success
+**Note:** This function requires a Cowboy request object and is tested through integration tests with `hb_http_server`.
 
-**Disadvantages:**
-- Slower total time
-- Sequential latency accumulation
+**Features:**
+- Auto-detects content type from body
+- Converts headers map to list format
+- Handles binary and JSON bodies
+- Sets appropriate CORS headers
 
 ---
 
-### Parallel Execution
+### 7. accept_to_codec/2
 
 ```erlang
-Config = #{
-    <<"nodes">> => [Node1, Node2, Node3],
-    <<"parallel">> => true
-}
+-spec accept_to_codec(Accept, Opts) -> CodecDevice
+    when
+        Accept :: binary() | undefined,
+        CodecDevice :: binary().
 ```
 
-**Behavior:**
-1. Spawn worker for each node
-2. All workers request simultaneously
-3. Workers send responses to parent
-4. Parent collects until target reached
-5. Optional: Stop remaining workers
+**Description:** Convert HTTP Accept header to HyperBEAM codec device identifier.
 
-**Advantages:**
-- Faster response time
-- Race condition for fastest node
-- Natural load distribution
+**Test Code:**
+```erlang
+accept_to_codec_json_test() ->
+    ?assertEqual(<<"structured@1.0">>, hb_http:accept_to_codec(<<"application/json">>, #{})).
 
-**Disadvantages:**
-- Higher resource usage
-- Multiple concurrent connections
-- More complex error handling
+accept_to_codec_octet_stream_test() ->
+    ?assertEqual(<<"ans104@1.0">>, hb_http:accept_to_codec(<<"application/octet-stream">>, #{})).
+
+accept_to_codec_text_plain_test() ->
+    ?assertEqual(<<"structured@1.0">>, hb_http:accept_to_codec(<<"text/plain">>, #{})).
+
+accept_to_codec_undefined_test() ->
+    ?assertEqual(<<"structured@1.0">>, hb_http:accept_to_codec(undefined, #{})).
+```
 
 ---
 
-## Response Collection
-
-### Stop After (Default: true)
+### 8. req_to_tabm_singleton/3
 
 ```erlang
-Config = #{
-    <<"responses">> => 2,
-    <<"stop-after">> => true
-}
+-spec req_to_tabm_singleton(Request, Message, Opts) -> Messages
+    when
+        Request :: cowboy_req:req(),
+        Message :: map(),
+        Opts :: map(),
+        Messages :: [map()].
 ```
 
-**Behavior:**
-- Collect 2 responses
-- Kill/stop remaining workers immediately
-- Return collected responses
+**Description:** Convert Cowboy request to HyperBEAM message sequence for singleton execution.
 
-**Use Case:** First N valid responses
+**Note:** This function requires a Cowboy request object and is tested through integration tests with `hb_http_server`.
+
+**Processing Steps:**
+1. Extract HTTP method and path
+2. Parse query parameters
+3. Extract and normalize headers
+4. Handle cookie parsing
+5. Process request body based on content-type
+6. Detect codec device from Accept header
+7. Add peer information if `ao-peer-port` present
 
 ---
 
-### Continue After
+## Response Status Mapping
 
 ```erlang
-Config = #{
-    <<"responses">> => 2,
-    <<"stop-after">> => false
-}
-```
-
-**Behavior:**
-- Collect 2 responses (requirement met)
-- Allow remaining workers to complete
-- Discard additional responses
-- Return first 2 collected responses
-
-**Use Case:** Resource cleanup, don't kill workers abruptly
-
----
-
-## Admissibility Filtering
-
-### Status-Based Filtering
-
-#### Accept All Statuses (Default)
-
-```erlang
-Config = #{
-    <<"admissible-status">> => <<"All">>
-}
-```
-
-**Accepts:** Any HTTP status code
-
----
-
-#### Single Status
-
-```erlang
-Config = #{
-    <<"admissible-status">> => 200
-}
-```
-
-**Accepts:** Only HTTP 200
-
----
-
-#### Multiple Statuses
-
-```erlang
-Config = #{
-    <<"admissible-status">> => <<"200,201,204">>  % Binary comma-separated
-}
-
-% Or as list
-Config = #{
-    <<"admissible-status">> => [200, 201, 204]
-}
-```
-
-**Accepts:** HTTP 200, 201, or 204
-
----
-
-### Message-Based Filtering
-
-```erlang
-Config = #{
-    <<"admissible">> => #{
-        <<"device">> => <<"query@1.0">>,
-        <<"path">> => <<"is-valid">>
-    }
-}
-```
-
-**Behavior:**
-1. Receive response from node
-2. Execute: `hb_ao:resolve(AdmissibleMsg, Response#{<<"path">> => <<"is-valid">>}, Opts)`
-3. If result is `true` (as atom or binary), response is admissible
-4. If result is `false` or error, response is rejected
-
-**Admissible Message Execution:**
-```erlang
-Base = hb_message:without_unless_signed([<<"path">>], AdmissibleMsg, Opts),
-Req = Response#{<<"path">> => AdmissibleMsgPath},
-{ok, Result} = hb_ao:resolve(Base, Req, Opts),
-IsAdmissible = hb_util:atom(Result) == true
-```
-
-**Example Use Cases:**
-- Validate response schema
-- Check data consistency
-- Verify cryptographic proofs
-- Custom business logic
-
----
-
-## Configuration Precedence
-
-Options can be specified in both `Config` and `Message`. Message options take precedence:
-
-```erlang
-Config = #{
-    <<"responses">> => 2,
-    <<"parallel">> => false
-},
-
-Message = #{
-    <<"multirequest-responses">> => 3,  % Overrides config
-    <<"multirequest-parallel">> => true  % Overrides config
-},
-
-% Effective configuration:
-% responses => 3 (from message)
-% parallel => true (from message)
-```
-
-**Prefix Rule:** Message fields prefixed with `multirequest-` override config
-
----
-
-## Serial Implementation
-
-```erlang
-serial_multirequest([], _, _, _, _, _, _, _) -> 
-    [].  % No more nodes
-serial_multirequest(_Nodes, 0, _, _, _, _, _, _) -> 
-    [].  % Collected enough responses
-serial_multirequest([Node|Nodes], Remaining, Method, Path, Message, Admissible, Statuses, Opts) ->
-    {ErlStatus, Res} = hb_http:request(Method, Node, Path, Message, Opts),
-    case is_admissible(ErlStatus, Res, Admissible, Statuses, Opts) of
-        true ->
-            [{ErlStatus, Res} | serial_multirequest(
-                Nodes, Remaining - 1, Method, Path, Message, Admissible, Statuses, Opts
-            )];
-        false ->
-            serial_multirequest(
-                Nodes, Remaining, Method, Path, Message, Admissible, Statuses, Opts
-            )
+response_status_to_atom(Status) ->
+    case Status of
+        201 -> created;
+        X when X < 400 -> ok;
+        X when X < 500 -> error;
+        _ -> failure
     end.
 ```
 
-**Key Points:**
-- Recursive function
-- Stop when `Remaining == 0` or `Nodes == []`
-- Only include admissible responses
-- Tail-recursive for efficiency
+**Status Categories:**
+- `created` - HTTP 201
+- `ok` - HTTP 2xx-3xx (except 201)
+- `error` - HTTP 4xx (client errors)
+- `failure` - HTTP 5xx (server errors)
 
 ---
 
-## Parallel Implementation
+## Codec Device Handling
+
+### Outbound Requests
 
 ```erlang
-parallel_multirequest(Nodes, Responses, StopAfter, Method, Path, Message, Admissible, Statuses, Opts) ->
-    Ref = make_ref(),
-    Parent = self(),
-    
-    % Spawn worker for each node
-    Procs = lists:map(
-        fun(Node) ->
-            spawn(fun() ->
-                Res = hb_http:request(Method, Node, Path, Message, Opts),
-                receive no_reply -> stopping
-                after 0 -> Parent ! {Ref, self(), Res}
-                end
-            end)
-        end,
-        Nodes
-    ),
-    
-    % Collect responses
-    parallel_responses([], Procs, Ref, Responses, StopAfter, Admissible, Statuses, Opts).
+% Detect codec from message or use default
+CodecDev = hb_maps:get(<<"codec-device">>, Message, <<"httpsig@1.0">>, Opts),
+
+% Prepare request based on codec
+prepare_request(CodecDev, Method, Peer, Path, Message, Opts)
 ```
 
-**Worker Pattern:**
+### Inbound Responses
+
 ```erlang
-spawn(fun() ->
-    Res = do_request(),
-    receive no_reply -> exit(normal)  % Parent signaled stop
-    after 0 -> Parent ! {Ref, self(), Res}  % Send response
-    end
-end)
+% Find codec from response headers
+CodecDev = hb_maps:get(<<"codec-device">>, Headers, <<"httpsig@1.0">>, Opts),
+
+% Convert response to message
+outbound_result_to_message(CodecDev, Status, Headers, Body, Opts)
 ```
+
+**Supported Codecs:**
+- `httpsig@1.0` - HTTP Signature (default)
+- `ans104@1.0` - ANS-104 data items
+- `structured@1.0` - Structured messages
+- `json@1.0` - JSON encoding
 
 ---
 
-### Response Collection Loop
+## Cookie Handling
+
+### Set-Cookie Processing
 
 ```erlang
-parallel_responses(Results, Procs, Ref, 0, StopAfter, _, _, _) ->
-    % Collected enough responses
-    case StopAfter of
-        true ->
-            % Kill remaining workers
-            lists:foreach(fun(P) -> exit(P, kill) end, Procs),
-            empty_inbox(Ref),
-            Results;
-        false ->
-            % Let workers complete naturally
-            lists:foreach(fun(P) -> P ! no_reply end, Procs),
-            empty_inbox(Ref),
-            Results
-    end;
-parallel_responses(Results, Procs, Ref, Awaiting, StopAfter, Admissible, Statuses, Opts) ->
-    receive
-        {Ref, Pid, {Status, NewRes}} ->
-            case is_admissible(Status, NewRes, Admissible, Statuses, Opts) of
-                true ->
-                    parallel_responses(
-                        [NewRes | Results],
-                        lists:delete(Pid, Procs),
-                        Ref,
-                        Awaiting - 1,
-                        StopAfter,
-                        Admissible,
-                        Statuses,
-                        Opts
-                    );
-                false ->
-                    parallel_responses(
-                        Results,
-                        lists:delete(Pid, Procs),
-                        Ref,
-                        Awaiting,
-                        StopAfter,
-                        Admissible,
-                        Statuses,
-                        Opts
-                    )
-            end
-    end.
+% Extract Set-Cookie headers from response
+SetCookieLines = [{<<"set-cookie">>, KeyVal} || {<<"set-cookie">>, KeyVal} <- Headers],
+
+% Convert to cookie message
+{ok, MsgWithCookies} = dev_codec_cookie:from(
+    #{<<"set-cookie">> => SetCookieLines},
+    #{},
+    Opts
+),
+
+% Merge into response headers
+HeaderMap = hb_maps:merge(hb_maps:from_list(Headers), MsgWithCookies, Opts)
+```
+
+### Cookie Request Handling
+
+```erlang
+% Parse cookie from request
+{ok, WithCookie} = case maps:get(<<"cookie">>, RawHeaders, undefined) of
+    undefined -> {ok, BaseMsg};
+    Cookie -> dev_codec_cookie:from(BaseMsg#{<<"cookie">> => Cookie}, Req, Opts)
+end
 ```
 
 ---
@@ -489,124 +470,71 @@ parallel_responses(Results, Procs, Ref, Awaiting, StopAfter, Admissible, Statuse
 ## Common Patterns
 
 ```erlang
-%% Race for first response
-Config = #{
-    <<"nodes">> => [Node1, Node2, Node3],
-    <<"responses">> => 1,
-    <<"parallel">> => true,
-    <<"stop-after">> => true
-},
-{ok, Response} = hb_http_multi:request(Config, <<"GET">>, <<"/data">>, #{}, #{}).
+%% Simple GET request
+{ok, Response} = hb_http:get(<<"http://node.example.com">>, <<"/path">>, #{}).
 
-%% Consensus with 3 nodes
-Config = #{
-    <<"nodes">> => [Node1, Node2, Node3],
-    <<"responses">> => 3,
-    <<"parallel">> => true
-},
-{ok, [Res1, Res2, Res3]} = hb_http_multi:request(Config, <<"GET">>, <<"/state">>, #{}, #{}).
+%% POST with message
+Message = #{<<"key">> => <<"value">>},
+{ok, Response} = hb_http:post(Node, <<"/endpoint">>, Message, #{}).
 
-%% Fallback pattern (serial with status filter)
-Config = #{
-    <<"nodes">> => [Primary, Secondary, Tertiary],
-    <<"responses">> => 1,
-    <<"parallel">> => false,
-    <<"admissible-status">> => 200
-},
-{ok, Response} = hb_http_multi:request(Config, <<"GET">>, <<"/api">>, #{}, #{}).
+%% Signed POST request
+Wallet = hb:wallet(),
+SignedMsg = hb_message:commit(Message, #{priv_wallet => Wallet}),
+{ok, Response} = hb_http:post(Node, SignedMsg, #{}).
 
-%% Gateway query with custom validation
-Config = #{
-    <<"nodes">> => GatewayList,
-    <<"responses">> => 1,
-    <<"parallel">> => true,
-    <<"admissible">> => #{
-        <<"device">> => <<"query@1.0">>,
-        <<"path">> => <<"has-results">>
-    }
-},
-{ok, Result} = hb_http_multi:request(Config, <<"POST">>, <<"/graphql">>, Query, #{}).
+%% Request with specific codec
+Opts = #{<<"codec-device">> => <<"ans104@1.0">>},
+{ok, Response} = hb_http:post(Node, Message, Opts).
 
-%% Override config from message
-Config = #{
-    <<"nodes">> => Nodes,
-    <<"responses">> => 2
-},
-Message = #{
-    <<"multirequest-responses">> => 5,  % Override to 5
-    <<"multirequest-parallel">> => true,
-    <<"data">> => <<"payload">>
-},
-{ok, Responses} = hb_http_multi:request(Config, <<"POST">>, <<"/api">>, Message, #{}).
+%% Extract single result key
+Opts = #{http_only_result => true},
+Message = #{<<"path">> => <<"/data">>, <<"ao-result">> => <<"body">>},
+{ok, BodyOnly} = hb_http:post(Node, Message, Opts).
 
-%% No viable responses error handling
+%% Handle routes (multi-request)
 Config = #{
-    <<"nodes">> => [Node1, Node2],
-    <<"responses">> => 1,
-    <<"admissible-status">> => 200
+    <<"nodes">> => [
+        <<"http://node1.example.com">>,
+        <<"http://node2.example.com">>
+    ]
 },
-case hb_http_multi:request(Config, <<"GET">>, <<"/api">>, #{}, #{}) of
-    {ok, Response} -> process(Response);
-    {error, no_viable_responses} -> handle_failure()
-end.
+{ok, Response} = hb_http:request(<<"GET">>, Config, <<"/path">>, #{}, #{}).
 ```
 
 ---
 
-## Configuration Examples
-
-### Minimal (Race Condition)
+## Configuration Options
 
 ```erlang
-Config = #{
-    <<"nodes">> => [Node1, Node2]
-}
-% Defaults: responses=1, parallel=false, stop-after=true, admissible-status="All"
-```
-
----
-
-### High Reliability
-
-```erlang
-Config = #{
-    <<"nodes">> => [Gateway1, Gateway2, Gateway3, Gateway4],
-    <<"responses">> => 2,
-    <<"parallel">> => true,
-    <<"stop-after">> => true,
-    <<"admissible-status">> => <<"200,201">>
-}
-```
-
----
-
-### Consensus Validation
-
-```erlang
-Config = #{
-    <<"nodes">> => ValidatorNodes,
-    <<"responses">> => length(ValidatorNodes),  % All responses
-    <<"parallel">> => true,
-    <<"stop-after">> => false,  % Let all complete
-    <<"admissible">> => #{
-        <<"device">> => <<"validator@1.0">>,
-        <<"path">> => <<"is-valid-signature">>
-    }
-}
-```
-
----
-
-### Progressive Fallback
-
-```erlang
-Config = #{
-    <<"nodes">> => [Tier1Primary, Tier1Secondary, Tier2Primary, Tier2Secondary],
-    <<"responses">> => 1,
-    <<"parallel">> => false,  % Try in order
-    <<"stop-after">> => true,
-    <<"admissible-status">> => 200
-}
+Opts = #{
+    % HTTP client selection
+    http_client => gun | httpc,  % Default: gun
+    
+    % Result extraction
+    http_only_result => true | false,  % Default: true
+    
+    % Codec selection
+    <<"codec-device">> => <<"httpsig@1.0">> | <<"ans104@1.0">> | <<"structured@1.0">>,
+    
+    % Wallet for signing
+    priv_wallet => {PrivateKey, PublicKey},
+    
+    % Request timeout
+    http_request_send_timeout => Milliseconds,
+    
+    % Response size limit
+    limit => Bytes | infinity,
+    
+    % Peer identification
+    is_peer_request => boolean(),
+    
+    % HTTP monitoring
+    http_monitor => MonitorMessage,
+    http_reference => ReferenceValue,
+    
+    % Cache control
+    cache_control => [<<"no-cache">>, <<"no-store">>]
+}.
 ```
 
 ---
@@ -614,65 +542,79 @@ Config = #{
 ## Error Handling
 
 ```erlang
-% No admissible responses from any node
-{error, no_viable_responses}
+% Client errors (4xx)
+{error, Reason}
 
-% Some nodes returned responses, but not enough
-{error, no_viable_responses}
+% Server errors (5xx)
+{failure, Reason}
 
-% Network/connection errors are not propagated
-% They simply result in that node not contributing a response
+% Network errors
+{error, client_error}
+{error, connection_closed}
+{error, timeout}
+
+% Codec errors
+{error, unsupported_codec}
+{error, invalid_message}
 ```
 
 ---
 
-## Performance Considerations
+## Server-Side Processing
 
-1. **Parallel vs Serial:**
-   - Parallel: Use for latency-sensitive operations
-   - Serial: Use for resource-constrained environments
+### Request Normalization
 
-2. **Stop After:**
-   - `true`: Faster, kills workers immediately
-   - `false`: Cleaner, but slower
+```erlang
+% Convert Cowboy request to HyperBEAM message
+Messages = hb_http:req_to_tabm_singleton(Req, InitialMsg, Opts),
 
-3. **Response Count:**
-   - Higher count = more network usage
-   - Balance reliability vs cost
+% Process through singleton
+Results = hb_ao:resolve_many(Messages, Opts)
+```
 
-4. **Worker Management:**
-   - Parallel spawns N workers
-   - Monitor worker count for large node lists
+### Response Generation
 
-5. **Message Size:**
-   - Same message sent to all nodes
-   - Keep payloads reasonable for parallel
+```erlang
+% Send response back to client
+Reply = hb_http:reply(Req, 200, Headers, Body)
+```
+
+---
+
+## Performance Notes
+
+1. **Keep-Alive Disabled:** Connections don't persist between requests
+2. **Parallel Requests:** Use `hb_http_multi` for concurrent node access
+3. **Streaming:** Supports chunked transfer encoding via gun
+4. **Metrics:** Records request duration in Prometheus when enabled
+5. **Connection Pooling:** Managed by `hb_http_client` gen_server
 
 ---
 
 ## References
 
-- **HTTP Client** - `hb_http.erl`
-- **AO Resolution** - `hb_ao.erl`
-- **Message Handling** - `hb_message.erl`
-- **Gateway Client** - `hb_gateway_client.erl` (uses multi-request)
+- **HTTP Client** - `hb_http_client.erl`
+- **Multi-Request** - `hb_http_multi.erl`
+- **Message System** - `hb_message.erl`, `hb_ao.erl`
+- **Codecs** - `dev_codec_*.erl` modules
+- **Server** - `hb_http_server.erl`
 
 ---
 
 ## Notes
 
-1. **Default Behavior:** Race for first response (responses=1, parallel=false)
-2. **Configuration:** Message options override Config options
-3. **Prefix Stripping:** `multirequest-` prefix removed before sending to nodes
-4. **Worker Spawn:** One worker per node in parallel mode
-5. **Inbox Cleanup:** `empty_inbox/1` prevents message leaks
-6. **Admissibility:** Two-stage filtering (status + custom logic)
-7. **Erlang Status:** Must be `ok` for admissibility checks
-8. **Status Classes:** Supports integer, binary, and list formats
-9. **Custom Validation:** Via AO-Core resolution for complex checks
-10. **Response Format:** Single response or list based on `responses` value
-11. **Worker Termination:** `exit(P, kill)` for stop-after=true
-12. **Worker Signaling:** `P ! no_reply` for stop-after=false
-13. **Reference:** Unique ref prevents message confusion
-14. **Tail Recursion:** Serial implementation is tail-recursive
-15. **Use in Routes:** Automatically invoked by `hb_http` when route has `nodes` field
+1. **Default Codec:** `httpsig@1.0` used unless specified
+2. **Message Signing:** Optional, controlled by wallet presence
+3. **Cookie Support:** Full Set-Cookie and Cookie header processing
+4. **CORS:** Automatic CORS headers on responses
+5. **Query Parameters:** Extracted and added to message
+6. **Path Resolution:** Supports nested path traversal in messages
+7. **AO-Result:** Can extract single key from response for efficiency
+8. **Peer Detection:** Honors `x-real-ip` for accurate peer address
+9. **Body Streaming:** Large responses handled efficiently
+10. **Status Normalization:** Consistent status atom mapping
+11. **Multi-Gateway:** Seamless delegation to multi-request system
+12. **Header Filtering:** Default filter for `content-length`
+13. **Content-Type Detection:** Auto-detects from body or headers
+14. **Accept Header:** Maps to appropriate codec device
+15. **Monitoring:** Optional HTTP request monitoring via AO-Core# hb_http.erl - HyperBEAM HTTP Request/Reply Core
