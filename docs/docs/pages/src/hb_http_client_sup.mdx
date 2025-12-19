@@ -96,19 +96,33 @@ If `hb_http_client` crashes more than 5 times in 10 seconds, the supervisor term
 
 **Registration:** Registered locally as `hb_http_client_sup`
 
-**Implementation:**
+**Test Code:**
 ```erlang
-start_link(Opts) ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, Opts).
-```
+-module(hb_http_client_sup_test).
+-include_lib("eunit/include/eunit.hrl").
 
-**Usage:**
-```erlang
-% Start from application supervisor
-{ok, Pid} = hb_http_client_sup:start_link([Opts]).
-
-% Typically started by application controller
-% in hb_sup.erl or similar top-level supervisor
+start_link_test() ->
+    %% Stop if already running
+    case whereis(hb_http_client_sup) of
+        undefined -> ok;
+        ExistingPid -> 
+            unlink(ExistingPid),
+            exit(ExistingPid, shutdown),
+            timer:sleep(100)
+    end,
+    
+    {ok, Pid} = hb_http_client_sup:start_link([#{}]),
+    ?assert(is_pid(Pid)),
+    ?assertEqual(Pid, whereis(hb_http_client_sup)),
+    
+    %% Verify child is running
+    Children = supervisor:which_children(hb_http_client_sup),
+    ?assertMatch([{hb_http_client, _, worker, [hb_http_client]}], Children),
+    
+    %% Cleanup - unlink before killing to avoid test crash
+    unlink(Pid),
+    exit(Pid, shutdown),
+    timer:sleep(50).
 ```
 
 ---
@@ -127,6 +141,50 @@ start_link(Opts) ->
 ```
 
 **Description:** Initialize supervisor with child specification for `hb_http_client`.
+
+**Test Code:**
+```erlang
+init_spec_test() ->
+    Opts = [#{}],
+    {ok, {SupSpec, ChildSpecs}} = hb_http_client_sup:init(Opts),
+    
+    %% Verify supervisor spec
+    ?assertMatch({one_for_one, 5, 10}, SupSpec),
+    
+    %% Verify child specs
+    ?assertEqual(1, length(ChildSpecs)),
+    [ChildSpec] = ChildSpecs,
+    ?assertMatch({hb_http_client, {hb_http_client, start_link, _}, permanent, _, worker, [hb_http_client]}, ChildSpec).
+
+child_restart_test() ->
+    %% Stop if already running
+    case whereis(hb_http_client_sup) of
+        undefined -> ok;
+        ExistingPid -> 
+            unlink(ExistingPid),
+            exit(ExistingPid, shutdown),
+            timer:sleep(100)
+    end,
+    
+    {ok, SupPid} = hb_http_client_sup:start_link([#{}]),
+    
+    %% Get original child PID
+    [{_, ChildPid1, _, _}] = supervisor:which_children(hb_http_client_sup),
+    ?assert(is_pid(ChildPid1)),
+    
+    %% Kill child
+    exit(ChildPid1, kill),
+    timer:sleep(100),
+    
+    %% Verify new child started
+    [{_, ChildPid2, _, _}] = supervisor:which_children(hb_http_client_sup),
+    ?assertNotEqual(ChildPid1, ChildPid2),
+    
+    %% Cleanup
+    unlink(SupPid),
+    exit(SupPid, shutdown),
+    timer:sleep(50).
+```
 
 **Implementation:**
 ```erlang
@@ -338,59 +396,6 @@ sys:get_status(hb_http_client_sup).
 %    - Fresh restart counter
 % 4. If no parent:
 %    - Application may crash
-```
-
----
-
-## Testing Patterns
-
-```erlang
--module(hb_http_client_sup_test).
--include_lib("eunit/include/eunit.hrl").
-
-start_supervisor_test() ->
-    {ok, Pid} = hb_http_client_sup:start_link([#{}]),
-    ?assert(is_pid(Pid)),
-    ?assertEqual(Pid, whereis(hb_http_client_sup)),
-    
-    % Verify child is running
-    Children = supervisor:which_children(hb_http_client_sup),
-    ?assertMatch([{hb_http_client, _Pid, worker, [hb_http_client]}], Children),
-    
-    % Cleanup
-    exit(Pid, shutdown).
-
-child_restart_test() ->
-    {ok, _} = hb_http_client_sup:start_link([#{}]),
-    
-    % Get original child PID
-    [{_, ChildPid1, _, _}] = supervisor:which_children(hb_http_client_sup),
-    
-    % Kill child
-    exit(ChildPid1, kill),
-    timer:sleep(100),
-    
-    % Verify new child started
-    [{_, ChildPid2, _, _}] = supervisor:which_children(hb_http_client_sup),
-    ?assertNotEqual(ChildPid1, ChildPid2).
-
-supervisor_restart_intensity_test() ->
-    {ok, SupPid} = hb_http_client_sup:start_link([#{}]),
-    
-    % Crash child 6 times rapidly (exceeds 5 in 10s limit)
-    lists:foreach(
-        fun(_) ->
-            [{_, ChildPid, _, _}] = supervisor:which_children(hb_http_client_sup),
-            exit(ChildPid, kill),
-            timer:sleep(100)
-        end,
-        lists:seq(1, 6)
-    ),
-    
-    timer:sleep(100),
-    
-    % Supervisor should have terminated
-    ?assertEqual(undefined, whereis(hb_http_client_sup)).
 ```
 
 ---
