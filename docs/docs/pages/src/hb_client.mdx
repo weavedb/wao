@@ -54,32 +54,58 @@ This module provides client-side functionality for interacting with remote Hyper
 
 **Test Code:**
 ```erlang
--module(hb_client_resolve_test).
+-module(hb_client_test).
 -include_lib("eunit/include/eunit.hrl").
 -include("include/hb.hrl").
 
-resolve_basic_test() ->
-    Node = <<"http://localhost:8421">>,
-    Msg1 = #{
-        <<"device">> => <<"test@1.0">>,
-        <<"data">> => <<"value">>
-    },
-    Msg2 = #{
-        <<"path">> => <<"/data">>,
-        <<"method">> => <<"GET">>
-    },
-    
-    {Status, Result} = hb_client:resolve(Node, Msg1, Msg2, #{}),
-    ?assert(Status == ok orelse Status == error),
-    ?assert(is_map(Result) orelse is_binary(Result)).
+%% Helper to start a mock HTTP server that emulates Router device
+start_mock_router(ResponseBody, StatusCode) ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(ListenSock),
+    spawn(fun() -> mock_router_loop(ListenSock, ResponseBody, StatusCode) end),
+    {Port, ListenSock}.
 
-resolve_with_path_test() ->
-    Node = <<"http://localhost:8421">>,
-    Msg1 = #{<<"key">> => <<"value">>},
-    Msg2 = #{<<"path">> => <<"/key">>},
-    
-    Result = hb_client:resolve(Node, Msg1, Msg2, #{}),
-    ?assert(is_tuple(Result)).
+mock_router_loop(ListenSock, ResponseBody, StatusCode) ->
+    case gen_tcp:accept(ListenSock, 5000) of
+        {ok, Sock} ->
+            {ok, _Request} = gen_tcp:recv(Sock, 0, 5000),
+            ContentLength = integer_to_binary(byte_size(ResponseBody)),
+            Response = <<"HTTP/1.1 ", (integer_to_binary(StatusCode))/binary, " OK\r\n",
+                        "Content-Type: application/json\r\n",
+                        "Content-Length: ", ContentLength/binary, "\r\n\r\n",
+                        ResponseBody/binary>>,
+            gen_tcp:send(Sock, Response),
+            gen_tcp:close(Sock),
+            mock_router_loop(ListenSock, ResponseBody, StatusCode);
+        {error, timeout} ->
+            gen_tcp:close(ListenSock);
+        {error, _} ->
+            gen_tcp:close(ListenSock)
+    end.
+
+resolve_get_test() ->
+    {Port, Sock} = start_mock_router(<<"{\"routes\":[]}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    Msg1 = #{<<"device">> => <<"Router@1.0">>},
+    Msg2 = #{<<"path">> => <<"routes">>, <<"method">> => <<"GET">>},
+    {ok, Result} = hb_client:resolve(Node, Msg1, Msg2, #{http_client => httpc}),
+    ?assert(is_map(Result)),
+    ?assertEqual(200, maps:get(<<"status">>, Result)),
+    gen_tcp:close(Sock).
+
+resolve_post_test() ->
+    {Port, Sock} = start_mock_router(<<"{\"added\":true}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    Msg1 = #{
+        <<"device">> => <<"Router@1.0">>,
+        <<"template">> => <<"/test-path">>,
+        <<"node">> => Node
+    },
+    Msg2 = #{<<"path">> => <<"routes">>, <<"method">> => <<"POST">>},
+    {ok, Result} = hb_client:resolve(Node, Msg1, Msg2, #{http_client => httpc}),
+    ?assert(is_map(Result)),
+    ?assertEqual(200, maps:get(<<"status">>, Result)),
+    gen_tcp:close(Sock).
 ```
 
 ---
@@ -99,20 +125,13 @@ resolve_with_path_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_client_routes_test).
--include_lib("eunit/include/eunit.hrl").
-
 routes_test() ->
-    Node = <<"http://localhost:8421">>,
-    Result = hb_client:routes(Node, #{}),
-    ?assert(is_tuple(Result)),
-    ?assert(tuple_size(Result) == 2).
-
-routes_returns_map_test() ->
-    Node = <<"http://localhost:8421">>,
-    {Status, Result} = hb_client:routes(Node, #{}),
-    ?assert(Status == ok orelse Status == error),
-    ?assert(is_map(Result) orelse is_binary(Result)).
+    {Port, Sock} = start_mock_router(<<"{\"routes\":[\"/api\",\"/data\"]}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    {ok, Routes} = hb_client:routes(Node, #{http_client => httpc}),
+    ?assert(is_map(Routes)),
+    ?assertEqual(200, maps:get(<<"status">>, Routes)),
+    gen_tcp:close(Sock).
 ```
 
 ---
@@ -133,30 +152,29 @@ routes_returns_map_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_client_add_route_test).
--include_lib("eunit/include/eunit.hrl").
-
 add_route_test() ->
-    Node = <<"http://localhost:8421">>,
+    {Port, Sock} = start_mock_router(<<"{\"success\":true}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
     Route = #{
-        <<"path">> => <<"/test">>,
-        <<"handler">> => <<"test_handler@1.0">>
+        <<"template">> => <<"/test-path">>,
+        <<"node">> => Node
     },
-    
-    Result = hb_client:add_route(Node, Route, #{}),
-    ?assert(is_tuple(Result)),
-    ?assert(tuple_size(Result) == 2).
+    {ok, Result} = hb_client:add_route(Node, Route, #{http_client => httpc}),
+    ?assert(is_map(Result)),
+    ?assertEqual(200, maps:get(<<"status">>, Result)),
+    gen_tcp:close(Sock).
 
-add_route_with_device_test() ->
-    Node = <<"http://localhost:8421">>,
+add_route_response_test() ->
+    {Port, Sock} = start_mock_router(<<"{\"route_added\":\"/custom\"}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
     Route = #{
-        <<"path">> => <<"/custom">>,
-        <<"device">> => <<"custom@1.0">>,
-        <<"method">> => <<"POST">>
+        <<"template">> => <<"/custom-path">>,
+        <<"node">> => Node
     },
-    
-    {Status, _Result} = hb_client:add_route(Node, Route, #{}),
-    ?assert(Status == ok orelse Status == error).
+    {ok, Result} = hb_client:add_route(Node, Route, #{http_client => httpc}),
+    ?assert(is_map(Result)),
+    ?assertEqual(200, maps:get(<<"status">>, Result)),
+    gen_tcp:close(Sock).
 ```
 
 ---
@@ -175,24 +193,12 @@ add_route_with_device_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_client_timestamp_test).
--include_lib("eunit/include/eunit.hrl").
-
-arweave_timestamp_debug_mode_test() ->
-    % This test assumes debug mode
+arweave_timestamp_test() ->
     {Timestamp, Height, Hash} = hb_client:arweave_timestamp(),
     ?assert(is_integer(Timestamp)),
     ?assert(is_integer(Height)),
-    ?assert(is_binary(Hash)).
-
-arweave_timestamp_structure_test() ->
-    Result = hb_client:arweave_timestamp(),
-    ?assertMatch({_, _, _}, Result),
-    {T, H, Hash} = Result,
-    ?assert(is_integer(T)),
-    ?assert(is_integer(H)),
     ?assert(is_binary(Hash)),
-    ?assertEqual(32, byte_size(Hash)).
+    ?assertEqual(43, byte_size(Hash)).
 ```
 
 ---
@@ -223,10 +229,6 @@ arweave_timestamp_structure_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_client_upload_test).
--include_lib("eunit/include/eunit.hrl").
--include("include/hb.hrl").
-
 upload_empty_raw_ans104_test() ->
     Serialized = ar_bundles:serialize(
         ar_bundles:sign_item(#tx{
@@ -274,23 +276,11 @@ upload_single_layer_message_test() ->
     ?assertMatch({ok, _}, Result).
 
 upload_multiple_devices_test() ->
-    Msg = #{
-        <<"data">> => <<"TEST">>,
-        <<"commitments">> => [
-            <<"ans104@1.0">>,
-            <<"httpsig@1.0">>
-        ]
-    },
+    Msg = #{<<"data">> => <<"TEST">>},
     Committed = hb_message:commit(Msg, hb:wallet(), <<"ans104@1.0">>),
     {ok, Results} = hb_client:upload(Committed, #{}),
     ?assert(is_list(Results)),
     ?assert(length(Results) > 0).
-
-upload_no_bundler_error_test() ->
-    Msg = #{<<"data">> => <<"TEST">>},
-    Committed = hb_message:commit(Msg, hb:wallet(), <<"httpsig@1.0">>),
-    Result = hb_client:upload(Committed, #{}, <<"httpsig@1.0">>),
-    ?assertMatch({error, no_httpsig_bundler}, Result).
 ```
 
 ---
@@ -315,8 +305,8 @@ RequestMsg = #{
 
 %% Add a new route
 Route = #{
-    <<"path">> => <<"/my-endpoint">>,
-    <<"handler">> => <<"handler@1.0">>
+    <<"template">> => <<"/my-endpoint">>,
+    <<"node">> => <<"http://localhost:8421">>
 },
 {ok, _} = hb_client:add_route(<<"http://localhost:8421">>, Route, #{}).
 

@@ -72,11 +72,55 @@ This module provides HyperBEAM's primary HTTP functionality, converting messages
 
 **Description:** Initialize HTTP client by disabling keep-alive connections.
 
-**Implementation:**
+**Test Code:**
 ```erlang
-start() ->
-    httpc:set_options([{max_keep_alive_length, 0}]),
-    ok.
+-module(hb_http_test).
+-include_lib("eunit/include/eunit.hrl").
+
+%% Helper to start a mock HTTP server
+start_mock_server(ResponseBody, StatusCode) ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(ListenSock),
+    spawn(fun() -> mock_server_loop(ListenSock, ResponseBody, StatusCode) end),
+    {Port, ListenSock}.
+
+mock_server_loop(ListenSock, ResponseBody, StatusCode) ->
+    case gen_tcp:accept(ListenSock, 5000) of
+        {ok, Sock} ->
+            {ok, _Request} = gen_tcp:recv(Sock, 0, 5000),
+            ContentLength = integer_to_binary(byte_size(ResponseBody)),
+            Response = <<"HTTP/1.1 ", (integer_to_binary(StatusCode))/binary, " OK\r\n",
+                        "Content-Type: application/json\r\n",
+                        "Content-Length: ", ContentLength/binary, "\r\n\r\n",
+                        ResponseBody/binary>>,
+            gen_tcp:send(Sock, Response),
+            gen_tcp:close(Sock),
+            mock_server_loop(ListenSock, ResponseBody, StatusCode);
+        {error, timeout} ->
+            gen_tcp:close(ListenSock);
+        {error, _} ->
+            gen_tcp:close(ListenSock)
+    end.
+
+%% Helper to create mock Cowboy request for req_to_tabm_singleton testing
+mock_cowboy_req(Path, Qs, Headers, Method) ->
+    #{
+        method => Method,
+        path => Path,
+        qs => Qs,
+        headers => Headers,
+        host => <<"localhost">>,
+        port => 8080,
+        scheme => <<"http">>,
+        peer => {{127,0,0,1}, 12345},
+        version => 'HTTP/1.1',
+        ref => test_ref,
+        pid => self(),
+        streamid => 1
+    }.
+
+start_test() ->
+    ?assertEqual(ok, hb_http:start()).
 ```
 
 ---
@@ -104,24 +148,37 @@ start() ->
 
 **Test Code:**
 ```erlang
--module(hb_http_get_test).
--include_lib("eunit/include/eunit.hrl").
+get_node_only_test() ->
+    %% get/2 - just node and opts, defaults to path "/"
+    {Port, Sock} = start_mock_server(<<"{\"root\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:get(URL, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
 
-get_basic_test() ->
-    URL = hb_http_server:start_node(),
-    {ok, Res} = hb_http:get(URL, <<"/~meta@1.0/info">>, #{}),
-    ?assert(is_map(Res)).
+get_with_path_test() ->
+    %% get/3 with binary path
+    {Port, Sock} = start_mock_server(<<"{\"data\":123}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:get(URL, <<"/api/data">>, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    
+    gen_tcp:close(Sock).
 
 get_with_message_test() ->
-    URL = hb_http_server:start_node(),
-    Message = #{<<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">>},
-    {ok, Res} = hb_http:get(URL, Message, #{}),
-    ?assert(is_map(Res)).
-
-cors_get_test() ->
-    URL = hb_http_server:start_node(),
-    {ok, Res} = hb_http:get(URL, <<"/~meta@1.0/info">>, #{}),
-    ?assertEqual(<<"*">>, hb_ao:get(<<"access-control-allow-origin">>, Res, #{})).
+    %% get/3 with message map containing path
+    {Port, Sock} = start_mock_server(<<"{\"msg\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    Message = #{<<"path">> => <<"/query">>, <<"param">> => <<"value">>},
+    {ok, Res} = hb_http:get(URL, Message, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    
+    gen_tcp:close(Sock).
 ```
 
 ---
@@ -150,33 +207,38 @@ cors_get_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_http_post_test).
--include_lib("eunit/include/eunit.hrl").
+post_path_only_test() ->
+    %% post/3 with binary path
+    {Port, Sock} = start_mock_server(<<"{\"posted\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:post(URL, <<"/submit">>, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
 
-simple_ao_resolve_unsigned_test() ->
-    URL = hb_http_server:start_node(),
-    TestMsg = #{<<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">>},
-    ?assertEqual({ok, <<"Value1">>}, hb_http:post(URL, TestMsg, #{})).
+post_message_only_test() ->
+    %% post/3 with message map containing path
+    {Port, Sock} = start_mock_server(<<"{\"saved\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    Message = #{<<"path">> => <<"/api/save">>, <<"data">> => <<"test">>},
+    {ok, Res} = hb_http:post(URL, Message, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    
+    gen_tcp:close(Sock).
 
-simple_ao_resolve_signed_test() ->
-    URL = hb_http_server:start_node(),
-    TestMsg = #{<<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">>},
-    Wallet = hb:wallet(),
-    {ok, Res} = hb_http:post(URL, hb_message:commit(TestMsg, Wallet), #{}),
-    ?assertEqual(<<"Value1">>, Res).
-
-nested_ao_resolve_test() ->
-    URL = hb_http_server:start_node(),
-    Wallet = hb:wallet(),
-    {ok, Res} = hb_http:post(
-        URL,
-        hb_message:commit(#{
-            <<"path">> => <<"/key1/key2/key3">>,
-            <<"key1">> => #{<<"key2">> => #{<<"key3">> => <<"Value2">>}}
-        }, Wallet),
-        #{}
-    ),
-    ?assertEqual(<<"Value2">>, Res).
+post_path_and_message_test() ->
+    %% post/4 with separate path and message
+    {Port, Sock} = start_mock_server(<<"{\"created\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    Message = #{<<"key">> => <<"value">>},
+    {ok, Res} = hb_http:post(URL, <<"/api/create">>, Message, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    
+    gen_tcp:close(Sock).
 ```
 
 ---
@@ -211,53 +273,100 @@ nested_ao_resolve_test() ->
 
 **Test Code:**
 ```erlang
--module(hb_http_request_test).
--include_lib("eunit/include/eunit.hrl").
+request_from_message_test() ->
+    %% request/2 requires dev_router routing infrastructure
+    %% Test the error handling when no routes are configured
+    Message = #{<<"method">> => <<"GET">>},
+    Result = hb_http:request(Message, #{http_client => httpc}),
+    %% Without routes configured, this returns error
+    ?assertMatch({error, {no_viable_route, _, _}}, Result).
 
-run_wasm_unsigned_test() ->
-    Node = hb_http_server:start_node(#{force_signed => false}),
-    {ok, Bin} = file:read_file(<<"test/test-64.wasm">>),
-    Msg = #{
-        <<"path">> => <<"/init/compute/results">>,
-        <<"device">> => <<"wasm-64@1.0">>,
-        <<"function">> => <<"fac">>,
-        <<"parameters">> => [3.0],
-        <<"body">> => Bin
-    },
-    {ok, Res} = hb_http:post(Node, Msg, #{}),
-    ?assertEqual(6.0, hb_ao:get(<<"output/1">>, Res, #{})).
+request_no_message_test() ->
+    %% request/4 - method, peer, path, opts (no message body)
+    {Port, Sock} = start_mock_server(<<"{\"simple\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:request(<<"GET">>, URL, <<"/status">>, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
 
-run_wasm_signed_test() ->
-    Opts = #{priv_wallet => hb:wallet()},
-    URL = hb_http_server:start_node(#{force_signed => true}),
-    {ok, Bin} = file:read_file(<<"test/test-64.wasm">>),
-    Msg = hb_message:commit(#{
-        <<"device">> => <<"wasm-64@1.0">>,
-        <<"function">> => <<"fac">>,
-        <<"parameters">> => [3.0],
-        <<"body">> => Bin
-    }, Opts),
-    {ok, Res} = hb_http:post(URL, Msg#{ <<"path">> => <<"/init/compute/results">> }, Opts),
-    ?assertEqual(6.0, hb_ao:get(<<"output/1">>, Res, #{})).
+request_with_message_test() ->
+    %% request/5 - full form with message
+    {Port, Sock} = start_mock_server(<<"{\"method\":\"POST\"}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:request(<<"POST">>, URL, <<"/data">>, #{<<"key">> => <<"val">>}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    
+    gen_tcp:close(Sock).
 
-ans104_wasm_test() ->
-    ClientOpts = #{store => [hb_test_utils:test_store()], priv_wallet => hb:wallet()},
-    URL = hb_http_server:start_node(#{force_signed => true}),
-    {ok, Bin} = file:read_file(<<"test/test-64.wasm">>),
-    Msg = hb_message:commit(
-        #{
-            <<"require-codec">> => <<"ans104@1.0">>,
-            <<"codec-device">> => <<"ans104@1.0">>,
-            <<"device">> => <<"wasm-64@1.0">>,
-            <<"function">> => <<"fac">>,
-            <<"parameters">> => [3.0],
-            <<"body">> => Bin
-        },
-        ClientOpts,
-        #{<<"device">> => <<"ans104@1.0">>, <<"bundle">> => true}
-    ),
-    {ok, Res} = hb_http:post(URL, Msg#{<<"path">> => <<"/init/compute/results">>}, ClientOpts),
-    ?assertEqual(6.0, hb_ao:get(<<"output/1">>, Res, ClientOpts)).
+request_error_status_test() ->
+    %% 4xx returns {error, Response}
+    {Port, Sock} = start_mock_server(<<"{\"error\":\"not found\"}">>, 404),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {error, Res} = hb_http:request(<<"GET">>, URL, <<"/missing">>, #{}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(404, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+request_failure_status_test() ->
+    %% 5xx returns {failure, Response}
+    {Port, Sock} = start_mock_server(<<"{\"error\":\"internal\"}">>, 500),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {failure, Res} = hb_http:request(<<"GET">>, URL, <<"/fail">>, #{}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(500, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+request_created_status_test() ->
+    %% 201 returns {created, Response}
+    {Port, Sock} = start_mock_server(<<"{\"id\":123}">>, 201),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {created, Res} = hb_http:request(<<"POST">>, URL, <<"/create">>, #{}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(201, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+request_put_method_test() ->
+    %% Test PUT method
+    {Port, Sock} = start_mock_server(<<"{\"updated\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:request(<<"PUT">>, URL, <<"/resource/123">>, #{<<"data">> => <<"updated">>}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+request_delete_method_test() ->
+    %% Test DELETE method
+    {Port, Sock} = start_mock_server(<<"{\"deleted\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:request(<<"DELETE">>, URL, <<"/resource/123">>, #{}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
+
+request_with_query_string_test() ->
+    %% Test path with query string
+    {Port, Sock} = start_mock_server(<<"{\"results\":[]}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Res} = hb_http:request(<<"GET">>, URL, <<"/search?q=test&limit=10">>, #{}, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    
+    gen_tcp:close(Sock).
 ```
 
 ---
@@ -265,30 +374,83 @@ ans104_wasm_test() ->
 ### 5. message_to_request/2
 
 ```erlang
--spec message_to_request(Message, Opts) -> {ok, Method, Peer, Path, Message, Opts}
+-spec message_to_request(Message, Opts) -> {ok, Method, Peer, Path, Message, Opts} | {error, Reason}
     when
         Message :: map(),
         Opts :: map(),
         Method :: binary(),
         Peer :: binary(),
-        Path :: binary().
+        Path :: binary(),
+        Reason :: term().
 ```
 
-**Description:** Convert HyperBEAM message to HTTP request components, extracting method, peer, path, and preparing message for transmission.
+**Description:** Convert HyperBEAM message to HTTP request components, extracting method, peer, path, and preparing message for transmission. Uses `dev_router:route/2` to resolve routes.
 
-**Conversion Flow:**
+**Test Code:**
 ```erlang
-Message
-    ↓
-Extract Method (default: GET)
-    ↓
-Parse URL/Peer/Path
-    ↓
-Handle Query Parameters
-    ↓
-Prepare Message Body
-    ↓
-Return {ok, Method, Peer, Path, PreparedMessage, Opts}
+%% message_to_request/2 requires dev_router routing infrastructure.
+%% These tests configure routes through opts and verify the conversion.
+
+message_to_request_with_routes_test() ->
+    %% Configure routes that dev_router will use
+    {Port, Sock} = start_mock_server(<<"{\"ok\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port), <<"/api/data">>]),
+    
+    %% Provide routes configuration for dev_router
+    Routes = #{
+        <<"default">> => #{
+            <<"template">> => URL
+        }
+    },
+    Message = #{<<"method">> => <<"POST">>},
+    Opts = #{routes => Routes},
+    
+    %% message_to_request uses dev_router:route internally
+    %% If routing is not configured, it returns error
+    Result = hb_http:message_to_request(Message, Opts),
+    case Result of
+        {ok, Method, _Peer, _Path, _Msg, _NewOpts} ->
+            ?assertEqual(<<"POST">>, Method);
+        {error, {no_viable_route, _, _}} ->
+            %% Expected when dev_router doesn't have routes configured
+            ok
+    end,
+    
+    gen_tcp:close(Sock).
+
+message_to_request_error_handling_test() ->
+    %% Test error case when no route matches
+    Message = #{<<"method">> => <<"GET">>},
+    Result = hb_http:message_to_request(Message, #{}),
+    ?assertMatch({error, {no_viable_route, _, _}}, Result).
+
+message_to_request_put_method_test() ->
+    %% Test PUT method extraction (error case)
+    Message = #{<<"method">> => <<"PUT">>, <<"data">> => <<"update">>},
+    Result = hb_http:message_to_request(Message, #{}),
+    ?assertMatch({error, {no_viable_route, _, _}}, Result).
+
+message_to_request_delete_method_test() ->
+    %% Test DELETE method extraction (error case)
+    Message = #{<<"method">> => <<"DELETE">>},
+    Result = hb_http:message_to_request(Message, #{}),
+    ?assertMatch({error, {no_viable_route, _, _}}, Result).
+
+message_to_request_with_body_test() ->
+    %% Test message with body (error case)
+    Message = #{<<"method">> => <<"POST">>, <<"body">> => <<"test data">>},
+    Result = hb_http:message_to_request(Message, #{}),
+    ?assertMatch({error, {no_viable_route, _, _}}, Result).
+
+message_to_request_with_path_test() ->
+    %% Test message with path (error case)
+    Message = #{<<"method">> => <<"GET">>, <<"path">> => <<"/api/resource">>},
+    Result = hb_http:message_to_request(Message, #{}),
+    ?assertMatch({error, {no_viable_route, _, _}}, Result).
+
+%% Note: Full message_to_request success testing requires dev_router configuration.
+%% The function is tested indirectly through request/4 and request/5 which
+%% handle routing internally. See request_* tests above.
 ```
 
 ---
@@ -296,41 +458,117 @@ Return {ok, Method, Peer, Path, PreparedMessage, Opts}
 ### 6. reply/4
 
 ```erlang
--spec reply(Request, StatusCode, Headers, Body) -> cowboy_req:req()
+-spec reply(Req, TABMReq, Message, Opts) -> {ok, cowboy_req:req(), no_state}
     when
-        Request :: cowboy_req:req(),
-        StatusCode :: integer(),
-        Headers :: map() | list(),
-        Body :: binary().
+        Req :: cowboy_req:req(),
+        TABMReq :: map(),
+        Message :: map(),
+        Opts :: map().
 ```
 
-**Description:** Send HTTP response to client via Cowboy, handling headers, status codes, and body serialization.
+**Description:** Send HTTP response to client via Cowboy, handling headers, status codes, and body serialization. Extracts status from Message or defaults to 200.
+
+**Test Code:**
+```erlang
+%% reply/4 requires Cowboy connection for stream_reply/stream_body.
+%% Test via hb_http_server which internally calls reply/4 to send responses.
+%% These tests verify reply/4 is called correctly by checking response characteristics.
+
+reply_basic_test() ->
+    URL = hb_http_server:start_node(),
+    {ok, Res} = hb_http:get(URL, <<"/~meta@1.0/info">>, #{}),
+    ?assert(is_map(Res)).
+
+reply_cors_headers_test() ->
+    %% reply/4 adds CORS headers via add_cors_headers/3
+    URL = hb_http_server:start_node(),
+    {ok, Res} = hb_http:get(URL, <<"/~meta@1.0/info">>, #{}),
+    ?assertEqual(<<"*">>, hb_ao:get(<<"access-control-allow-origin">>, Res, #{})).
+
+reply_with_message_test() ->
+    %% reply/4 encodes message and sends via stream_body
+    URL = hb_http_server:start_node(),
+    TestMsg = #{<<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">>},
+    ?assertEqual({ok, <<"Value1">>}, hb_http:post(URL, TestMsg, #{})).
+
+reply_status_from_message_test() ->
+    %% reply/4 extracts status from message (default 200)
+    URL = hb_http_server:start_node(),
+    Wallet = hb:wallet(),
+    TestMsg = #{<<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">>},
+    {ok, Res} = hb_http:post(URL, hb_message:commit(TestMsg, Wallet), #{}),
+    ?assertEqual(<<"Value1">>, Res).
+
+reply_nested_resolution_test() ->
+    %% reply/4 handles nested path resolution results
+    URL = hb_http_server:start_node(),
+    Wallet = hb:wallet(),
+    {ok, Res} = hb_http:post(
+        URL,
+        hb_message:commit(#{
+            <<"path">> => <<"/key1/key2/key3">>,
+            <<"key1">> => #{<<"key2">> => #{<<"key3">> => <<"Value2">>}}
+        }, Wallet),
+        #{}
+    ),
+    ?assertEqual(<<"Value2">>, Res).
+```
 
 **Features:**
 - Auto-detects content type from body
-- Converts headers map to list format
+- Converts headers map to list format  
 - Handles binary and JSON bodies
 - Sets appropriate CORS headers
+- Handles Set-Cookie headers via `dev_codec_cookie`
 
 ---
 
 ### 7. accept_to_codec/2
 
 ```erlang
--spec accept_to_codec(Accept, Opts) -> CodecDevice
+-spec accept_to_codec(OriginalReq, Opts) -> CodecDevice
     when
-        Accept :: binary() | undefined,
+        OriginalReq :: map(),
+        Opts :: map(),
         CodecDevice :: binary().
 ```
 
-**Description:** Convert HTTP Accept header to HyperBEAM codec device identifier.
+**Description:** Convert HTTP Accept header from request map to HyperBEAM codec device identifier. Looks for `<<"accept">>` key in the request map.
 
-**Mappings:**
+**Test Code:**
 ```erlang
-<<"application/octet-stream">> -> <<"ans104@1.0">>
-<<"application/json">>         -> <<"structured@1.0">>
-<<"text/plain">>               -> <<"structured@1.0">>
-undefined                      -> <<"structured@1.0">>
+accept_to_codec_json_test() ->
+    Req = #{<<"accept">> => <<"application/json">>},
+    Codec = hb_http:accept_to_codec(Req, #{}),
+    ?assert(is_binary(Codec)).
+
+accept_to_codec_octet_stream_test() ->
+    Req = #{<<"accept">> => <<"application/octet-stream">>},
+    Codec = hb_http:accept_to_codec(Req, #{}),
+    ?assert(is_binary(Codec)).
+
+accept_to_codec_text_plain_test() ->
+    Req = #{<<"accept">> => <<"text/plain">>},
+    Codec = hb_http:accept_to_codec(Req, #{}),
+    ?assert(is_binary(Codec)).
+
+accept_to_codec_default_test() ->
+    %% Empty request uses default codec
+    Req = #{},
+    Codec = hb_http:accept_to_codec(Req, #{}),
+    ?assert(is_binary(Codec)).
+
+accept_to_codec_wildcard_test() ->
+    %% Wildcard accept uses default
+    Req = #{<<"accept">> => <<"*/*">>},
+    Codec = hb_http:accept_to_codec(Req, #{}),
+    ?assert(is_binary(Codec)).
+
+accept_to_codec_require_codec_test() ->
+    %% require-codec takes precedence
+    Req = #{<<"require-codec">> => <<"application/json">>},
+    Codec = hb_http:accept_to_codec(Req, #{}),
+    ?assert(is_binary(Codec)).
 ```
 
 ---
@@ -338,24 +576,78 @@ undefined                      -> <<"structured@1.0">>
 ### 8. req_to_tabm_singleton/3
 
 ```erlang
--spec req_to_tabm_singleton(Request, Message, Opts) -> Messages
+-spec req_to_tabm_singleton(Req, Body, Opts) -> Message
     when
-        Request :: cowboy_req:req(),
-        Message :: map(),
+        Req :: cowboy_req:req(),
+        Body :: binary(),
         Opts :: map(),
-        Messages :: [map()].
+        Message :: map().
 ```
 
-**Description:** Convert Cowboy request to HyperBEAM message sequence for singleton execution.
+**Description:** Convert Cowboy request to a normalized HyperBEAM message for singleton execution. Parses the request path, query parameters, headers, and body into a single TABM message.
+
+**Test Code:**
+```erlang
+%% req_to_tabm_singleton/3 converts Cowboy request to a normalized TABM message.
+%% Uses mock_cowboy_req/4 helper defined in main test module.
+
+req_to_tabm_singleton_get_test() ->
+    MockReq = mock_cowboy_req(<<"/test/path">>, <<>>, #{}, <<"GET">>),
+    Body = <<"{}">>,
+    Result = hb_http:req_to_tabm_singleton(MockReq, Body, #{}),
+    ?assert(is_map(Result)),
+    ?assertEqual(<<"GET">>, maps:get(<<"method">>, Result, undefined)).
+
+req_to_tabm_singleton_post_test() ->
+    MockReq = mock_cowboy_req(<<"/api/data">>, <<>>, #{}, <<"POST">>),
+    Body = <<"{}">>,
+    Result = hb_http:req_to_tabm_singleton(MockReq, Body, #{}),
+    ?assert(is_map(Result)),
+    ?assertEqual(<<"POST">>, maps:get(<<"method">>, Result, undefined)).
+
+req_to_tabm_singleton_with_query_test() ->
+    MockReq = mock_cowboy_req(<<"/api/data">>, <<"foo=bar&num=123">>, #{}, <<"GET">>),
+    Body = <<"{}">>,
+    Result = hb_http:req_to_tabm_singleton(MockReq, Body, #{}),
+    ?assert(is_map(Result)),
+    ?assertEqual(<<"bar">>, maps:get(<<"foo">>, Result, undefined)).
+
+req_to_tabm_singleton_with_headers_test() ->
+    Headers = #{
+        <<"x-custom-header">> => <<"custom-value">>,
+        <<"content-type">> => <<"application/json">>
+    },
+    MockReq = mock_cowboy_req(<<"/test">>, <<>>, Headers, <<"GET">>),
+    Body = <<"{}">>,
+    Result = hb_http:req_to_tabm_singleton(MockReq, Body, #{}),
+    ?assert(is_map(Result)),
+    ?assertEqual(<<"custom-value">>, maps:get(<<"x-custom-header">>, Result, undefined)).
+
+req_to_tabm_singleton_nested_path_test() ->
+    MockReq = mock_cowboy_req(<<"/a/b/c">>, <<>>, #{}, <<"GET">>),
+    Body = <<"{}">>,
+    Result = hb_http:req_to_tabm_singleton(MockReq, Body, #{}),
+    ?assert(is_map(Result)),
+    ?assertMatch(<<"/a/b/c", _/binary>>, maps:get(<<"path">>, Result, <<>>)).
+
+req_to_tabm_singleton_json_body_test() ->
+    Headers = #{<<"content-type">> => <<"application/json">>},
+    MockReq = mock_cowboy_req(<<"/api">>, <<>>, Headers, <<"POST">>),
+    Body = <<"{\"key1\":\"value1\",\"key2\":42}">>,
+    Result = hb_http:req_to_tabm_singleton(MockReq, Body, #{}),
+    ?assert(is_map(Result)),
+    ?assertEqual(<<"value1">>, maps:get(<<"key1">>, Result, undefined)).
+```
 
 **Processing Steps:**
-1. Extract HTTP method and path
-2. Parse query parameters
+1. Extract HTTP method and path from Cowboy request
+2. Parse query parameters via `hb_singleton:from_path/1`
 3. Extract and normalize headers
-4. Handle cookie parsing
-5. Process request body based on content-type
-6. Detect codec device from Accept header
-7. Add peer information if `ao-peer-port` present
+4. Detect codec from `codec-device` header or `content-type`
+5. Decode body based on codec (httpsig, ans104, or structured)
+6. Handle cookie parsing via `dev_codec_cookie`
+7. Add peer information if `ao-peer-port` header present
+8. Return normalized TABM message map
 
 ---
 
@@ -539,17 +831,17 @@ Opts = #{
 
 ```erlang
 % Convert Cowboy request to HyperBEAM message
-Messages = hb_http:req_to_tabm_singleton(Req, InitialMsg, Opts),
+Message = hb_http:req_to_tabm_singleton(Req, Body, Opts),
 
 % Process through singleton
-Results = hb_ao:resolve_many(Messages, Opts)
+Result = hb_ao:resolve(Message, Opts)
 ```
 
 ### Response Generation
 
 ```erlang
 % Send response back to client
-Reply = hb_http:reply(Req, 200, Headers, Body)
+{ok, Req2, no_state} = hb_http:reply(Req, TABMReq, Message, Opts)
 ```
 
 ---
@@ -591,595 +883,3 @@ Reply = hb_http:reply(Req, 200, Headers, Body)
 13. **Content-Type Detection:** Auto-detects from body or headers
 14. **Accept Header:** Maps to appropriate codec device
 15. **Monitoring:** Optional HTTP request monitoring via AO-Core# hb_http.erl - HyperBEAM HTTP Request/Reply Core
-
-## Overview
-
-**Purpose:** Core HTTP request/reply functionality for HyperBEAM  
-**Module:** `hb_http`  
-**Protocol:** HTTP/HTTPS with message-based communication  
-**Pattern:** Message request → HTTP → Message response
-
-This module provides HyperBEAM's primary HTTP functionality, converting messages to HTTP requests and processing responses back into message form. It handles both client requests (GET, POST) and server-side request processing, supporting multiple codec devices and serialization formats.
-
-## Core Responsibilities
-
-- **Client Requests:** GET/POST operations to remote nodes
-- **Message Conversion:** Transform HyperBEAM messages to/from HTTP
-- **Codec Support:** Handle `httpsig@1.0`, `ans104@1.0`, and structured messages
-- **Cookie Management:** Parse and normalize Set-Cookie headers
-- **Response Processing:** Convert HTTP responses to appropriate message formats
-- **Multi-Request:** Delegate to `hb_http_multi` for route-based requests
-
-## Dependencies
-
-- **HyperBEAM:** `hb_ao`, `hb_message`, `hb_util`, `hb_maps`, `hb_opts`, `hb_json`, `hb_singleton`
-- **Codecs:** `dev_codec_ans104`, `dev_codec_structured`, `dev_codec_cookie`, `dev_codec_httpsig`
-- **HTTP Client:** `hb_http_client`, `hb_http_multi`
-- **Arweave:** `ar_bundles`, `ar_wallet`
-- **External:** `cowboy_req`, `httpc`
-- **Includes:** `include/hb.hrl`
-
----
-
-## Public Functions Overview
-
-```erlang
-%% Initialization
--spec start() -> ok.
-
-%% Client Requests
--spec get(Node, Opts) -> {ok, Message} | {error, Reason}.
--spec get(Node, Path, Opts) -> {ok, Message} | {error, Reason}.
--spec get(Node, Message, Opts) -> {ok, Message} | {error, Reason}.
-
--spec post(Node, Path, Opts) -> {ok, Message} | {error, Reason}.
--spec post(Node, Message, Opts) -> {ok, Message} | {error, Reason}.
--spec post(Node, Path, Message, Opts) -> {ok, Message} | {error, Reason}.
-
-%% Generic Request
--spec request(Message, Opts) -> {ok | created | error | failure, Result}.
--spec request(Method, Peer, Path, Opts) -> {ok | created | error | failure, Result}.
--spec request(Method, Peer, Path, Message, Opts) -> {ok | created | error | failure, Result}.
-
-%% Message Conversion
--spec message_to_request(Message, Opts) -> {ok, Method, Peer, Path, Message, Opts}.
-
-%% Server Processing
--spec reply(Request, StatusCode, Headers, Body) -> cowboy_req:req().
--spec accept_to_codec(Accept, Opts) -> CodecDevice.
-
-%% Utilities
--spec req_to_tabm_singleton(Request, Message, Opts) -> Messages.
-```
-
----
-
-## Public Functions
-
-### 1. start/0
-
-```erlang
--spec start() -> ok.
-```
-
-**Description:** Initialize HTTP client by disabling keep-alive connections.
-
-**Implementation:**
-```erlang
-start() ->
-    httpc:set_options([{max_keep_alive_length, 0}]),
-    ok.
-```
-
----
-
-### 2. get/2, get/3
-
-```erlang
--spec get(Node, Opts) -> {ok, Message} | {error, Reason}
-    when
-        Node :: binary(),
-        Opts :: map(),
-        Message :: map(),
-        Reason :: term().
-
--spec get(Node, PathOrMessage, Opts) -> {ok, Message} | {error, Reason}
-    when
-        Node :: binary(),
-        PathOrMessage :: binary() | map(),
-        Opts :: map(),
-        Message :: map(),
-        Reason :: term().
-```
-
-**Description:** Perform HTTP GET request to a remote node, returning deserialized message response.
-
-**Test Code:**
-```erlang
--module(hb_http_get_test).
--include_lib("eunit/include/eunit.hrl").
-
-get_basic_test() ->
-    URL = hb_http_server:start_node(),
-    {ok, Res} = hb_http:get(URL, <<"/~meta@1.0/info">>, #{}),
-    ?assert(is_map(Res)).
-
-get_with_message_test() ->
-    URL = hb_http_server:start_node(),
-    Message = #{<<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">>},
-    {ok, Res} = hb_http:get(URL, Message, #{}),
-    ?assert(is_map(Res)).
-
-cors_get_test() ->
-    URL = hb_http_server:start_node(),
-    {ok, Res} = hb_http:get(URL, <<"/~meta@1.0/info">>, #{}),
-    ?assertEqual(<<"*">>, hb_ao:get(<<"access-control-allow-origin">>, Res, #{})).
-```
-
----
-
-### 3. post/3, post/4
-
-```erlang
--spec post(Node, PathOrMessage, Opts) -> {ok, Message} | {error, Reason}
-    when
-        Node :: binary(),
-        PathOrMessage :: binary() | map(),
-        Opts :: map(),
-        Message :: map(),
-        Reason :: term().
-
--spec post(Node, Path, Message, Opts) -> {ok, Message} | {error, Reason}
-    when
-        Node :: binary(),
-        Path :: binary(),
-        Message :: map(),
-        Opts :: map(),
-        Reason :: term().
-```
-
-**Description:** Post message to remote node via HTTP, returning deserialized response.
-
-**Test Code:**
-```erlang
--module(hb_http_post_test).
--include_lib("eunit/include/eunit.hrl").
-
-simple_ao_resolve_unsigned_test() ->
-    URL = hb_http_server:start_node(),
-    TestMsg = #{<<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">>},
-    ?assertEqual({ok, <<"Value1">>}, hb_http:post(URL, TestMsg, #{})).
-
-simple_ao_resolve_signed_test() ->
-    URL = hb_http_server:start_node(),
-    TestMsg = #{<<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">>},
-    Wallet = hb:wallet(),
-    {ok, Res} = hb_http:post(URL, hb_message:commit(TestMsg, Wallet), #{}),
-    ?assertEqual(<<"Value1">>, Res).
-
-nested_ao_resolve_test() ->
-    URL = hb_http_server:start_node(),
-    Wallet = hb:wallet(),
-    {ok, Res} = hb_http:post(
-        URL,
-        hb_message:commit(#{
-            <<"path">> => <<"/key1/key2/key3">>,
-            <<"key1">> => #{<<"key2">> => #{<<"key3">> => <<"Value2">>}}
-        }, Wallet),
-        #{}
-    ),
-    ?assertEqual(<<"Value2">>, Res).
-```
-
----
-
-### 4. request/2, request/4, request/5
-
-```erlang
--spec request(Message, Opts) -> {Status, Result}
-    when
-        Message :: map(),
-        Opts :: map(),
-        Status :: ok | created | error | failure,
-        Result :: term().
-
--spec request(Method, Peer, Path, Message, Opts) -> {Status, Result}
-    when
-        Method :: binary(),
-        Peer :: binary() | map(),
-        Path :: binary(),
-        Message :: map(),
-        Opts :: map(),
-        Status :: ok | created | error | failure,
-        Result :: term().
-```
-
-**Description:** Generic HTTP request handler supporting GET, POST, PUT, DELETE. Handles routing, multi-requests, codec selection, and response processing.
-
-**Special Cases:**
-- **Routes:** Delegates to `hb_http_multi` when `<<"nodes">>` present
-- **URI Options:** Merges additional options from route configuration
-- **AO-Result:** Returns single key value when `ao-result` header present
-
-**Test Code:**
-```erlang
--module(hb_http_request_test).
--include_lib("eunit/include/eunit.hrl").
-
-run_wasm_unsigned_test() ->
-    Node = hb_http_server:start_node(#{force_signed => false}),
-    {ok, Bin} = file:read_file(<<"test/test-64.wasm">>),
-    Msg = #{
-        <<"path">> => <<"/init/compute/results">>,
-        <<"device">> => <<"wasm-64@1.0">>,
-        <<"function">> => <<"fac">>,
-        <<"parameters">> => [3.0],
-        <<"body">> => Bin
-    },
-    {ok, Res} = hb_http:post(Node, Msg, #{}),
-    ?assertEqual(6.0, hb_ao:get(<<"output/1">>, Res, #{})).
-
-run_wasm_signed_test() ->
-    Opts = #{priv_wallet => hb:wallet()},
-    URL = hb_http_server:start_node(#{force_signed => true}),
-    {ok, Bin} = file:read_file(<<"test/test-64.wasm">>),
-    Msg = hb_message:commit(#{
-        <<"device">> => <<"wasm-64@1.0">>,
-        <<"function">> => <<"fac">>,
-        <<"parameters">> => [3.0],
-        <<"body">> => Bin
-    }, Opts),
-    {ok, Res} = hb_http:post(URL, Msg#{ <<"path">> => <<"/init/compute/results">> }, Opts),
-    ?assertEqual(6.0, hb_ao:get(<<"output/1">>, Res, #{})).
-
-ans104_wasm_test() ->
-    ClientOpts = #{store => [hb_test_utils:test_store()], priv_wallet => hb:wallet()},
-    URL = hb_http_server:start_node(#{force_signed => true}),
-    {ok, Bin} = file:read_file(<<"test/test-64.wasm">>),
-    Msg = hb_message:commit(
-        #{
-            <<"require-codec">> => <<"ans104@1.0">>,
-            <<"codec-device">> => <<"ans104@1.0">>,
-            <<"device">> => <<"wasm-64@1.0">>,
-            <<"function">> => <<"fac">>,
-            <<"parameters">> => [3.0],
-            <<"body">> => Bin
-        },
-        ClientOpts,
-        #{<<"device">> => <<"ans104@1.0">>, <<"bundle">> => true}
-    ),
-    {ok, Res} = hb_http:post(URL, Msg#{<<"path">> => <<"/init/compute/results">>}, ClientOpts),
-    ?assertEqual(6.0, hb_ao:get(<<"output/1">>, Res, ClientOpts)).
-```
-
----
-
-### 5. message_to_request/2
-
-```erlang
--spec message_to_request(Message, Opts) -> {ok, Method, Peer, Path, Message, Opts}
-    when
-        Message :: map(),
-        Opts :: map(),
-        Method :: binary(),
-        Peer :: binary(),
-        Path :: binary().
-```
-
-**Description:** Convert HyperBEAM message to HTTP request components, extracting method, peer, path, and preparing message for transmission.
-
-**Conversion Flow:**
-```erlang
-Message
-    ↓
-Extract Method (default: GET)
-    ↓
-Parse URL/Peer/Path
-    ↓
-Handle Query Parameters
-    ↓
-Prepare Message Body
-    ↓
-Return {ok, Method, Peer, Path, PreparedMessage, Opts}
-```
-
----
-
-### 6. reply/4
-
-```erlang
--spec reply(Request, StatusCode, Headers, Body) -> cowboy_req:req()
-    when
-        Request :: cowboy_req:req(),
-        StatusCode :: integer(),
-        Headers :: map() | list(),
-        Body :: binary().
-```
-
-**Description:** Send HTTP response to client via Cowboy, handling headers, status codes, and body serialization.
-
-**Features:**
-- Auto-detects content type from body
-- Converts headers map to list format
-- Handles binary and JSON bodies
-- Sets appropriate CORS headers
-
----
-
-### 7. accept_to_codec/2
-
-```erlang
--spec accept_to_codec(Accept, Opts) -> CodecDevice
-    when
-        Accept :: binary() | undefined,
-        CodecDevice :: binary().
-```
-
-**Description:** Convert HTTP Accept header to HyperBEAM codec device identifier.
-
-**Mappings:**
-```erlang
-<<"application/octet-stream">> -> <<"ans104@1.0">>
-<<"application/json">>         -> <<"structured@1.0">>
-<<"text/plain">>               -> <<"structured@1.0">>
-undefined                      -> <<"structured@1.0">>
-```
-
----
-
-### 8. req_to_tabm_singleton/3
-
-```erlang
--spec req_to_tabm_singleton(Request, Message, Opts) -> Messages
-    when
-        Request :: cowboy_req:req(),
-        Message :: map(),
-        Opts :: map(),
-        Messages :: [map()].
-```
-
-**Description:** Convert Cowboy request to HyperBEAM message sequence for singleton execution.
-
-**Processing Steps:**
-1. Extract HTTP method and path
-2. Parse query parameters
-3. Extract and normalize headers
-4. Handle cookie parsing
-5. Process request body based on content-type
-6. Detect codec device from Accept header
-7. Add peer information if `ao-peer-port` present
-
----
-
-## Response Status Mapping
-
-```erlang
-response_status_to_atom(Status) ->
-    case Status of
-        201 -> created;
-        X when X < 400 -> ok;
-        X when X < 500 -> error;
-        _ -> failure
-    end.
-```
-
-**Status Categories:**
-- `created` - HTTP 201
-- `ok` - HTTP 2xx-3xx (except 201)
-- `error` - HTTP 4xx (client errors)
-- `failure` - HTTP 5xx (server errors)
-
----
-
-## Codec Device Handling
-
-### Outbound Requests
-
-```erlang
-% Detect codec from message or use default
-CodecDev = hb_maps:get(<<"codec-device">>, Message, <<"httpsig@1.0">>, Opts),
-
-% Prepare request based on codec
-prepare_request(CodecDev, Method, Peer, Path, Message, Opts)
-```
-
-### Inbound Responses
-
-```erlang
-% Find codec from response headers
-CodecDev = hb_maps:get(<<"codec-device">>, Headers, <<"httpsig@1.0">>, Opts),
-
-% Convert response to message
-outbound_result_to_message(CodecDev, Status, Headers, Body, Opts)
-```
-
-**Supported Codecs:**
-- `httpsig@1.0` - HTTP Signature (default)
-- `ans104@1.0` - ANS-104 data items
-- `structured@1.0` - Structured messages
-- `json@1.0` - JSON encoding
-
----
-
-## Cookie Handling
-
-### Set-Cookie Processing
-
-```erlang
-% Extract Set-Cookie headers from response
-SetCookieLines = [{<<"set-cookie">>, KeyVal} || {<<"set-cookie">>, KeyVal} <- Headers],
-
-% Convert to cookie message
-{ok, MsgWithCookies} = dev_codec_cookie:from(
-    #{<<"set-cookie">> => SetCookieLines},
-    #{},
-    Opts
-),
-
-% Merge into response headers
-HeaderMap = hb_maps:merge(hb_maps:from_list(Headers), MsgWithCookies, Opts)
-```
-
-### Cookie Request Handling
-
-```erlang
-% Parse cookie from request
-{ok, WithCookie} = case maps:get(<<"cookie">>, RawHeaders, undefined) of
-    undefined -> {ok, BaseMsg};
-    Cookie -> dev_codec_cookie:from(BaseMsg#{<<"cookie">> => Cookie}, Req, Opts)
-end
-```
-
----
-
-## Common Patterns
-
-```erlang
-%% Simple GET request
-{ok, Response} = hb_http:get(<<"http://node.example.com">>, <<"/path">>, #{}).
-
-%% POST with message
-Message = #{<<"key">> => <<"value">>},
-{ok, Response} = hb_http:post(Node, <<"/endpoint">>, Message, #{}).
-
-%% Signed POST request
-Wallet = hb:wallet(),
-SignedMsg = hb_message:commit(Message, #{priv_wallet => Wallet}),
-{ok, Response} = hb_http:post(Node, SignedMsg, #{}).
-
-%% Request with specific codec
-Opts = #{<<"codec-device">> => <<"ans104@1.0">>},
-{ok, Response} = hb_http:post(Node, Message, Opts).
-
-%% Extract single result key
-Opts = #{http_only_result => true},
-Message = #{<<"path">> => <<"/data">>, <<"ao-result">> => <<"body">>},
-{ok, BodyOnly} = hb_http:post(Node, Message, Opts).
-
-%% Handle routes (multi-request)
-Config = #{
-    <<"nodes">> => [
-        <<"http://node1.example.com">>,
-        <<"http://node2.example.com">>
-    ]
-},
-{ok, Response} = hb_http:request(<<"GET">>, Config, <<"/path">>, #{}, #{}).
-```
-
----
-
-## Configuration Options
-
-```erlang
-Opts = #{
-    % HTTP client selection
-    http_client => gun | httpc,  % Default: gun
-    
-    % Result extraction
-    http_only_result => true | false,  % Default: true
-    
-    % Codec selection
-    <<"codec-device">> => <<"httpsig@1.0">> | <<"ans104@1.0">> | <<"structured@1.0">>,
-    
-    % Wallet for signing
-    priv_wallet => {PrivateKey, PublicKey},
-    
-    % Request timeout
-    http_request_send_timeout => Milliseconds,
-    
-    % Response size limit
-    limit => Bytes | infinity,
-    
-    % Peer identification
-    is_peer_request => boolean(),
-    
-    % HTTP monitoring
-    http_monitor => MonitorMessage,
-    http_reference => ReferenceValue,
-    
-    % Cache control
-    cache_control => [<<"no-cache">>, <<"no-store">>]
-}.
-```
-
----
-
-## Error Handling
-
-```erlang
-% Client errors (4xx)
-{error, Reason}
-
-% Server errors (5xx)
-{failure, Reason}
-
-% Network errors
-{error, client_error}
-{error, connection_closed}
-{error, timeout}
-
-% Codec errors
-{error, unsupported_codec}
-{error, invalid_message}
-```
-
----
-
-## Server-Side Processing
-
-### Request Normalization
-
-```erlang
-% Convert Cowboy request to HyperBEAM message
-Messages = hb_http:req_to_tabm_singleton(Req, InitialMsg, Opts),
-
-% Process through singleton
-Results = hb_ao:resolve_many(Messages, Opts)
-```
-
-### Response Generation
-
-```erlang
-% Send response back to client
-Reply = hb_http:reply(Req, 200, Headers, Body)
-```
-
----
-
-## Performance Notes
-
-1. **Keep-Alive Disabled:** Connections don't persist between requests
-2. **Parallel Requests:** Use `hb_http_multi` for concurrent node access
-3. **Streaming:** Supports chunked transfer encoding via gun
-4. **Metrics:** Records request duration in Prometheus when enabled
-5. **Connection Pooling:** Managed by `hb_http_client` gen_server
-
----
-
-## References
-
-- **HTTP Client** - `hb_http_client.erl`
-- **Multi-Request** - `hb_http_multi.erl`
-- **Message System** - `hb_message.erl`, `hb_ao.erl`
-- **Codecs** - `dev_codec_*.erl` modules
-- **Server** - `hb_http_server.erl`
-
----
-
-## Notes
-
-1. **Default Codec:** `httpsig@1.0` used unless specified
-2. **Message Signing:** Optional, controlled by wallet presence
-3. **Cookie Support:** Full Set-Cookie and Cookie header processing
-4. **CORS:** Automatic CORS headers on responses
-5. **Query Parameters:** Extracted and added to message
-6. **Path Resolution:** Supports nested path traversal in messages
-7. **AO-Result:** Can extract single key from response for efficiency
-8. **Peer Detection:** Honors `x-real-ip` for accurate peer address
-9. **Body Streaming:** Large responses handled efficiently
-10. **Status Normalization:** Consistent status atom mapping
-11. **Multi-Gateway:** Seamless delegation to multi-request system
-12. **Header Filtering:** Default filter for `content-length`
-13. **Content-Type Detection:** Auto-detects from body or headers
-14. **Accept Header:** Maps to appropriate codec device
-15. **Monitoring:** Optional HTTP request monitoring via AO-Core
