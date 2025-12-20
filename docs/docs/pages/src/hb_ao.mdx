@@ -100,14 +100,15 @@ The resolver operates in 13 discrete phases:
 ```erlang
 -module(hb_ao_resolve_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 resolve_path_test() ->
     Msg = #{
-        <<"path">> => <<"/test">>,
+        <<"path">> => <<"/data">>,
         <<"data">> => <<"value">>
     },
     {ok, Result} = hb_ao:resolve(Msg, #{}),
-    ?assert(is_map(Result)).
+    ?assertEqual(<<"value">>, Result).
 
 resolve_binary_path_test() ->
     {ok, Result} = hb_ao:resolve(<<"/id">>, #{}),
@@ -139,6 +140,7 @@ resolve_no_path_error_test() ->
 ```erlang
 -module(hb_ao_resolve3_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 resolve_with_base_test() ->
     Base = #{
@@ -192,16 +194,7 @@ resolve_nested_test() ->
 ```erlang
 -module(hb_ao_resolve_many_test).
 -include_lib("eunit/include/eunit.hrl").
-
-resolve_many_single_id_test() ->
-    ID = crypto:strong_rand_bytes(32),
-    Msg = #{<<"data">> => <<"test">>},
-    
-    % Store message
-    hb_cache:write(hb_opts:get(store), ID, Msg),
-    
-    {ok, Result} = hb_ao:resolve_many([ID], #{}),
-    ?assertEqual(Msg, Result).
+-include("include/hb.hrl").
 
 resolve_many_sequence_test() ->
     Base = #{<<"count">> => 0},
@@ -211,14 +204,12 @@ resolve_many_sequence_test() ->
     {ok, Result} = hb_ao:resolve_many([Base, Req1, Req2], #{}),
     ?assertEqual(2, maps:get(<<"count">>, Result)).
 
-resolve_many_ordered_map_test() ->
-    OrderedMap = #{
-        <<"1">> => #{<<"data">> => <<"first">>},
-        <<"2">> => #{<<"path">> => <<"/data">>}
-    },
+resolve_many_simple_path_test() ->
+    Base = #{<<"data">> => <<"value">>},
+    Req = #{<<"path">> => <<"/data">>},
     
-    {ok, Result} = hb_ao:resolve_many(OrderedMap, #{}),
-    ?assertEqual(<<"first">>, Result).
+    {ok, Result} = hb_ao:resolve_many([Base, Req], #{}),
+    ?assertEqual(<<"value">>, Result).
 ```
 
 ---
@@ -226,26 +217,27 @@ resolve_many_ordered_map_test() ->
 ### 4. get/2, get/3, get/4
 
 ```erlang
--spec get(Msg, Key) -> Result.
--spec get(Msg, Key, Opts) -> Result.
--spec get(Msg, Key, Default, Opts) -> Result.
+-spec get(Path, Msg) -> Result.
+-spec get(Path, Msg, Opts) -> Result.
+-spec get(Path, Msg, Default, Opts) -> Result.
 ```
 
-**Description:** Get value of a key from message. Resolves via device if needed.
+**Description:** Get value of a key/path from message. Resolves via device if needed.
 
 **Test Code:**
 ```erlang
 -module(hb_ao_get_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 get_simple_test() ->
     Msg = #{<<"key">> => <<"value">>},
-    Result = hb_ao:get(Msg, <<"key">>),
+    Result = hb_ao:get(<<"key">>, Msg),
     ?assertEqual(<<"value">>, Result).
 
 get_with_default_test() ->
     Msg = #{<<"existing">> => <<"value">>},
-    Result = hb_ao:get(Msg, <<"missing">>, <<"default">>, #{}),
+    Result = hb_ao:get(<<"missing">>, Msg, <<"default">>, #{}),
     ?assertEqual(<<"default">>, Result).
 
 get_nested_test() ->
@@ -254,17 +246,13 @@ get_nested_test() ->
             <<"inner">> => <<"value">>
         }
     },
-    Result = hb_ao:get(Msg, <<"/outer/inner">>, #{}),
+    Result = hb_ao:get(<<"/outer/inner">>, Msg, #{}),
     ?assertEqual(<<"value">>, Result).
 
-get_with_device_test() ->
-    Msg = #{
-        <<"device">> => <<"test@1.0">>,
-        <<"data">> => <<"value">>
-    },
-    % Device would process the get request
-    Result = hb_ao:get(Msg, <<"data">>, #{}),
-    ?assert(is_binary(Result) orelse is_map(Result)).
+get_missing_key_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    Result = hb_ao:get(<<"nonexistent">>, Msg, undefined, #{}),
+    ?assertEqual(undefined, Result).
 ```
 
 ---
@@ -282,6 +270,7 @@ get_with_device_test() ->
 ```erlang
 -module(hb_ao_set_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 set_single_key_test() ->
     Msg = #{<<"old">> => <<"value">>},
@@ -322,6 +311,7 @@ set_override_test() ->
 ```erlang
 -module(hb_ao_remove_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 remove_key_test() ->
     Msg = #{<<"key">> => <<"value">>, <<"keep">> => <<"this">>},
@@ -351,6 +341,7 @@ remove_nonexistent_test() ->
 ```erlang
 -module(hb_ao_keys_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 keys_simple_test() ->
     Msg = #{<<"a">> => 1, <<"b">> => 2, <<"c">> => 3},
@@ -360,13 +351,10 @@ keys_simple_test() ->
     ?assert(lists:member(<<"b">>, Keys)),
     ?assert(lists:member(<<"c">>, Keys)).
 
-keys_with_device_test() ->
-    Msg = #{
-        <<"device">> => <<"test@1.0">>,
-        <<"data">> => <<"value">>
-    },
-    Keys = hb_ao:keys(Msg, #{}),
-    ?assert(is_list(Keys)).
+keys_empty_map_test() ->
+    Msg = #{},
+    Keys = hb_ao:keys(Msg),
+    ?assertEqual([], Keys).
 ```
 
 ---
@@ -386,6 +374,7 @@ keys_with_device_test() ->
 ```erlang
 -module(hb_ao_normalize_key_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 normalize_binary_test() ->
     ?assertEqual(<<"test">>, hb_ao:normalize_key(<<"test">>)).
@@ -420,6 +409,7 @@ normalize_path_list_test() ->
 ```erlang
 -module(hb_ao_normalize_keys_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 normalize_keys_map_test() ->
     Msg = #{atom_key => <<"value">>, 123 => <<"number">>},
@@ -482,7 +472,7 @@ Increment2 = #{<<"path">> => <<"set">>, <<"count">> => 2},
 {ok, Final} = hb_ao:resolve_many([Base, Increment1, Increment2], #{}).
 
 %% Get with default
-Value = hb_ao:get(Msg, <<"key">>, <<"default">>, #{}).
+Value = hb_ao:get(<<"key">>, Msg, <<"default">>, #{}).
 
 %% Set nested value
 Updated = hb_ao:set(Msg, <<"/path/to/key">>, <<"value">>, #{}).
