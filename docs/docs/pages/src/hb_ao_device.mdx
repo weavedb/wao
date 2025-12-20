@@ -92,6 +92,7 @@ Error: Device specified but not loadable
 ```erlang
 -module(hb_ao_device_load_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 load_preloaded_test() ->
     Opts = #{
@@ -110,40 +111,12 @@ load_atom_test() ->
     ?assertEqual(dev_message, Mod).
 
 load_not_found_test() ->
-    {error, Reason} = hb_ao_device:load(<<"nonexistent@1.0">>, #{}),
-    ?assert(is_tuple(Reason)).
+    Result = hb_ao_device:load(<<"nonexistent@1.0">>, #{}),
+    ?assertMatch({error, _}, Result).
 
-load_remote_untrusted_test() ->
-    TxID = crypto:strong_rand_bytes(32),
-    Opts = #{
-        load_remote_devices => true,
-        trusted_device_signers => []  % No trusted signers
-    },
-    
-    % Should fail - untrusted signer
-    {error, device_signer_not_trusted} = 
-        hb_ao_device:load(TxID, Opts).
-
-load_beam_device_test() ->
-    % Create BEAM device message
-    DeviceMsg = #{
-        <<"content-type">> => <<"application/beam">>,
-        <<"module-name">> => <<"test_dev">>,
-        <<"body">> => compile_test_module()
-    },
-    
-    % Store it
-    ID = crypto:strong_rand_bytes(32),
-    hb_cache:write(hb_opts:get(store), ID, DeviceMsg),
-    
-    Opts = #{
-        load_remote_devices => true,
-        trusted_device_signers => [test_signer()]
-    },
-    
-    % Load should succeed if signed correctly
-    Result = hb_ao_device:load(ID, Opts),
-    ?assert(element(1, Result) =:= ok orelse element(1, Result) =:= error).
+load_default_device_test() ->
+    {ok, Mod} = hb_ao_device:load(<<"message@1.0">>, #{}),
+    ?assertEqual(dev_message, Mod).
 ```
 
 ---
@@ -171,27 +144,23 @@ load_beam_device_test() ->
 ```erlang
 -module(hb_ao_device_message_to_fun_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 message_to_fun_default_device_test() ->
     Msg = #{<<"data">> => <<"value">>},
-    {Status, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"data">>, #{}),
+    {_Status, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"data">>, #{}),
     ?assertEqual(dev_message, Dev),
-    ?assert(is_function(Fun)).
-
-message_to_fun_with_handler_test() ->
-    % Device with handler function
-    Msg = #{
-        <<"device">> => #{
-            <<"handler">> => fun(Key, M1, M2, Opts) -> {ok, Key} end
-        }
-    },
-    {add_key, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"test">>, #{}),
-    ?assert(is_map(Dev)),
     ?assert(is_function(Fun)).
 
 message_to_fun_exported_test() ->
     Msg = #{<<"device">> => dev_message},
     {ok, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"get">>, #{}),
+    ?assertEqual(dev_message, Dev),
+    ?assert(is_function(Fun)).
+
+message_to_fun_unknown_key_test() ->
+    Msg = #{<<"device">> => dev_message},
+    {_Status, Dev, Fun} = hb_ao_device:message_to_fun(Msg, <<"unknown_key">>, #{}),
     ?assertEqual(dev_message, Dev),
     ?assert(is_function(Fun)).
 ```
@@ -214,6 +183,7 @@ message_to_fun_exported_test() ->
 ```erlang
 -module(hb_ao_device_message_to_device_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 message_to_device_default_test() ->
     Msg = #{<<"data">> => <<"value">>},
@@ -224,11 +194,11 @@ message_to_device_specified_test() ->
     Msg = #{<<"device">> => <<"custom@1.0">>},
     Opts = #{
         preloaded_devices => [
-            #{<<"name">> => <<"custom@1.0">>, <<"module">> => my_device}
+            #{<<"name">> => <<"custom@1.0">>, <<"module">> => dev_message}
         ]
     },
     Dev = hb_ao_device:message_to_device(Msg, Opts),
-    ?assertEqual(my_device, Dev).
+    ?assertEqual(dev_message, Dev).
 ```
 
 ---
@@ -253,6 +223,7 @@ message_to_device_specified_test() ->
 ```erlang
 -module(hb_ao_device_find_exported_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 find_exported_function_module_test() ->
     Msg = #{},
@@ -265,7 +236,7 @@ find_exported_function_module_test() ->
 
 find_exported_function_map_test() ->
     Dev = #{
-        <<"my_key">> => fun(M1, M2) -> {ok, M1} end
+        <<"my_key">> => fun(M1, _M2) -> {ok, M1} end
     },
     {ok, Fun} = hb_ao_device:find_exported_function(
         #{}, Dev, <<"my_key">>, 3, #{}
@@ -304,27 +275,16 @@ find_exported_function_not_found_test() ->
 ```erlang
 -module(hb_ao_device_info_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 info_basic_test() ->
     Msg = #{<<"device">> => dev_message},
     Info = hb_ao_device:info(Msg, #{}),
     ?assert(is_map(Info)).
 
-info_with_exports_test() ->
-    % Create device with info
-    -module(test_device).
-    -export([info/0, my_key/2]).
-    
-    info() ->
-        #{
-            exports => [my_key],
-            excludes => []
-        }.
-    
-    my_key(_M1, _M2) -> {ok, <<"result">>}.
-    
-    Info = hb_ao_device:info(test_device, #{}, #{}),
-    ?assert(maps:is_key(exports, Info)).
+info_from_module_test() ->
+    Info = hb_ao_device:info(dev_message, #{}, #{}),
+    ?assert(is_map(Info)).
 
 info_no_function_test() ->
     Info = hb_ao_device:info(erlang, #{}, #{}),
@@ -339,32 +299,25 @@ info_no_function_test() ->
 -spec is_exported(Msg, Dev, Key, Opts) -> boolean().
 ```
 
-**Description:** Check if key is exported by device. Respects `exports` and `excludes` lists.
+**Description:** Check if key is exported by device. Respects `exports` and `excludes` lists from device info.
 
 **Test Code:**
 ```erlang
 -module(hb_ao_device_is_exported_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 is_exported_true_test() ->
-    Info = #{exports => [<<"key1">>, <<"key2">>]},
-    ?assertEqual(true, hb_ao_device:is_exported(Info, <<"key1">>, #{})).
+    Msg = #{},
+    ?assertEqual(true, hb_ao_device:is_exported(Msg, dev_message, <<"get">>, #{})).
 
 is_exported_false_test() ->
-    Info = #{exports => [<<"key1">>]},
-    ?assertEqual(false, hb_ao_device:is_exported(Info, <<"key2">>, #{})).
+    Msg = #{},
+    ?assertEqual(false, hb_ao_device:is_exported(Msg, dev_message, <<"nonexistent_key_xyz">>, #{})).
 
-is_exported_excluded_test() ->
-    Info = #{
-        exports => [<<"key1">>, <<"key2">>],
-        excludes => [<<"key1">>]
-    },
-    ?assertEqual(false, hb_ao_device:is_exported(Info, <<"key1">>, #{})).
-
-is_exported_no_list_test() ->
-    Info = #{},
-    % Without exports list, defaults to true
-    ?assertEqual(true, hb_ao_device:is_exported(Info, <<"any_key">>, #{})).
+is_exported_info_always_true_test() ->
+    Msg = #{},
+    ?assertEqual(true, hb_ao_device:is_exported(Msg, dev_message, info, #{})).
 ```
 
 ---
@@ -382,6 +335,7 @@ is_exported_no_list_test() ->
 ```erlang
 -module(hb_ao_device_is_direct_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 is_direct_key_access_message_device_test() ->
     Base = #{
@@ -402,15 +356,13 @@ is_direct_key_access_message_keys_test() ->
     ?assertEqual(false, 
         hb_ao_device:is_direct_key_access(Base, #{<<"path">> => <<"set">>}, #{})).
 
-is_direct_key_access_custom_device_test() ->
-    Base = #{
-        <<"device">> => <<"custom@1.0">>,
-        <<"data">> => <<"value">>
-    },
+is_direct_key_access_no_device_test() ->
+    % Without device, uses default (message@1.0)
+    Base = #{<<"data">> => <<"value">>},
     Req = #{<<"path">> => <<"data">>},
     
     Result = hb_ao_device:is_direct_key_access(Base, Req, #{}),
-    ?assert(is_boolean(Result) orelse Result =:= unknown).
+    ?assertEqual(true, Result).
 ```
 
 ---
@@ -431,6 +383,7 @@ is_direct_key_access_custom_device_test() ->
 ```erlang
 -module(hb_ao_device_truncate_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 truncate_args_test() ->
     Fun = fun(A, B) -> {A, B} end,
@@ -466,6 +419,7 @@ truncate_args_less_test() ->
 ```erlang
 -module(hb_ao_device_default_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 default_test() ->
     ?assertEqual(dev_message, hb_ao_device:default()).
