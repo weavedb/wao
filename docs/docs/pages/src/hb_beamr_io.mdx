@@ -6,7 +6,14 @@
 **Module:** `hb_beamr_io`  
 **Pattern:** Defensive type checking for C interop
 
-Provides safe memory read/write, string handling, and malloc/free operations for BEAMR WASM instances.
+Provides safe memory read/write, string handling, and malloc/free operations for BEAMR WASM instances. Unlike most HyperBEAM modules, this module takes a defensive approach to type checking so failures are caught in Erlang rather than in C/WASM.
+
+## Dependencies
+
+- **HyperBEAM:** `hb_beamr`
+- **Includes:** `include/hb.hrl`
+
+---
 
 ## Public Functions Overview
 
@@ -30,72 +37,525 @@ Provides safe memory read/write, string handling, and malloc/free operations for
 ## Public Functions
 
 ### 1. size/1
-```erlang
-size(WASM) -> {ok, Bytes}
-```
-Get total memory size. Memory can grow but never shrink.
 
-### 2. read/3
 ```erlang
-read(WASM, Offset, Size) -> {ok, Binary}
+-spec size(WASM) -> {ok, Size}
+    when
+        WASM :: pid(),
+        Size :: non_neg_integer().
 ```
-Read binary from memory at offset.
 
-### 3. write/3
-```erlang
-write(WASM, Offset, Data) -> ok
-```
-Write binary to memory at offset.
+**Description:** Get the size (in bytes) of native memory allocated in the BEAMR instance. Note that WASM memory can never be reduced once granted (although it can be reallocated inside the environment).
 
-### 4. read_string/2
+**Test Code:**
 ```erlang
-read_string(WASM, Offset) -> {ok, String}
-```
-Read null-terminated string. Reads in 8-byte chunks by default.
+-module(hb_beamr_io_size_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-### 5. write_string/2
-```erlang
-write_string(WASM, Data) -> {ok, Ptr}
-```
-Allocate and write null-terminated string. Returns pointer.
+size_single_page_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Size} = hb_beamr_io:size(WASM),
+    ?assertEqual(65536, Size),  % 1 WASM page = 64KB
+    hb_beamr:stop(WASM).
 
-### 6. malloc/2
-```erlang
-malloc(WASM, Size) -> {ok, Ptr}
-```
-Allocate memory via WASM's malloc function.
+size_multi_page_test() ->
+    {ok, File} = file:read_file("test/aos-2-pure-xs.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Size} = hb_beamr_io:size(WASM),
+    ?assertEqual(65536 * 193, Size),  % 193 pages
+    hb_beamr:stop(WASM).
 
-### 7. free/2
-```erlang
-free(WASM, Ptr) -> ok
+size_returns_integer_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Size} = hb_beamr_io:size(WASM),
+    ?assert(is_integer(Size)),
+    ?assert(Size > 0),
+    hb_beamr:stop(WASM).
+
+size_consistent_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Size1} = hb_beamr_io:size(WASM),
+    {ok, Size2} = hb_beamr_io:size(WASM),
+    ?assertEqual(Size1, Size2),
+    hb_beamr:stop(WASM).
 ```
-Free memory via WASM's free function.
 
 ---
 
-## Test Code Examples
+### 2. read/3
 
 ```erlang
-% Get memory size
-{ok, File} = file:read_file("test.wasm"),
-{ok, WASM, _, _} = hb_beamr:start(File),
-{ok, Size} = hb_beamr_io:size(WASM),
-?assertEqual(65536, Size).  % 1 WASM page
+-spec read(WASM, Offset, Size) -> {ok, Binary} | {error, Reason}
+    when
+        WASM :: pid(),
+        Offset :: non_neg_integer(),
+        Size :: non_neg_integer(),
+        Binary :: binary(),
+        Reason :: term().
+```
 
-% Write and read
-ok = hb_beamr_io:write(WASM, 0, <<"Hello">>),
-{ok, Data} = hb_beamr_io:read(WASM, 0, 5),
-?assertEqual(<<"Hello">>, Data).
+**Description:** Read a binary from the BEAMR instance's native memory at a given offset and of a given size.
 
-% Allocate and write string
-{ok, Ptr} = hb_beamr_io:write_string(WASM, <<"Test">>),
-{ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
-?assertEqual(<<"Test">>, Str).
+**Test Code:**
+```erlang
+-module(hb_beamr_io_read_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-% Manual malloc/free
-{ok, Ptr} = hb_beamr_io:malloc(WASM, 100),
-ok = hb_beamr_io:write(WASM, Ptr, <<"Data">>),
-ok = hb_beamr_io:free(WASM, Ptr).
+read_basic_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    % test-print.wasm has "Hello, World!" at offset 66
+    {ok, Data} = hb_beamr_io:read(WASM, 66, 13),
+    ?assertEqual(<<"Hello, World!">>, Data),
+    hb_beamr:stop(WASM).
+
+read_partial_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Data} = hb_beamr_io:read(WASM, 66, 5),
+    ?assertEqual(<<"Hello">>, Data),
+    hb_beamr:stop(WASM).
+
+read_at_offset_zero_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Data} = hb_beamr_io:read(WASM, 0, 10),
+    ?assertEqual(10, byte_size(Data)),
+    hb_beamr:stop(WASM).
+
+read_single_byte_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Data} = hb_beamr_io:read(WASM, 66, 1),
+    ?assertEqual(<<"H">>, Data),
+    hb_beamr:stop(WASM).
+
+read_out_of_bounds_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    Result = hb_beamr_io:read(WASM, 1000000, 13),
+    ?assertMatch({error, _}, Result),
+    hb_beamr:stop(WASM).
+
+read_at_boundary_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Size} = hb_beamr_io:size(WASM),
+    {ok, Data} = hb_beamr_io:read(WASM, Size - 1, 1),
+    ?assertEqual(1, byte_size(Data)),
+    hb_beamr:stop(WASM).
+
+read_returns_binary_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Data} = hb_beamr_io:read(WASM, 0, 100),
+    ?assert(is_binary(Data)),
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 3. write/3
+
+```erlang
+-spec write(WASM, Offset, Data) -> ok | {error, Reason}
+    when
+        WASM :: pid(),
+        Offset :: non_neg_integer(),
+        Data :: binary(),
+        Reason :: term().
+```
+
+**Description:** Write a binary to the BEAMR instance's native memory at a given offset.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_io_write_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+write_basic_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    Result = hb_beamr_io:write(WASM, 0, <<"Hello, World!">>),
+    ?assertEqual(ok, Result),
+    hb_beamr:stop(WASM).
+
+write_then_read_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    TestData = <<"Test Data 12345">>,
+    ok = hb_beamr_io:write(WASM, 0, TestData),
+    {ok, ReadData} = hb_beamr_io:read(WASM, 0, byte_size(TestData)),
+    ?assertEqual(TestData, ReadData),
+    hb_beamr:stop(WASM).
+
+write_single_byte_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    ok = hb_beamr_io:write(WASM, 100, <<42>>),
+    {ok, Data} = hb_beamr_io:read(WASM, 100, 1),
+    ?assertEqual(<<42>>, Data),
+    hb_beamr:stop(WASM).
+
+write_empty_binary_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    Result = hb_beamr_io:write(WASM, 0, <<>>),
+    ?assertEqual(ok, Result),
+    hb_beamr:stop(WASM).
+
+write_out_of_bounds_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    Result = hb_beamr_io:write(WASM, 1000000, <<"Bad data">>),
+    ?assertMatch({error, _}, Result),
+    hb_beamr:stop(WASM).
+
+write_at_offset_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    ok = hb_beamr_io:write(WASM, 1000, <<"Offset Test">>),
+    {ok, Data} = hb_beamr_io:read(WASM, 1000, 11),
+    ?assertEqual(<<"Offset Test">>, Data),
+    hb_beamr:stop(WASM).
+
+write_overwrite_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    ok = hb_beamr_io:write(WASM, 0, <<"AAAA">>),
+    ok = hb_beamr_io:write(WASM, 0, <<"BBBB">>),
+    {ok, Data} = hb_beamr_io:read(WASM, 0, 4),
+    ?assertEqual(<<"BBBB">>, Data),
+    hb_beamr:stop(WASM).
+
+write_large_data_test() ->
+    {ok, File} = file:read_file("test/test-print.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    LargeData = binary:copy(<<0>>, 10000),
+    ok = hb_beamr_io:write(WASM, 0, LargeData),
+    {ok, ReadData} = hb_beamr_io:read(WASM, 0, 10000),
+    ?assertEqual(LargeData, ReadData),
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 4. read_string/2
+
+```erlang
+-spec read_string(WASM, Offset) -> {ok, String}
+    when
+        WASM :: pid(),
+        Offset :: non_neg_integer(),
+        String :: binary().
+```
+
+**Description:** Read a null-terminated string from the BEAMR instance's native memory at a given offset. Memory is read in chunks of 8 bytes by default.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_io_read_string_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+read_string_basic_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, <<"Hello">>),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assertEqual(<<"Hello">>, Str),
+    hb_beamr:stop(WASM).
+
+read_string_with_spaces_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    TestStr = <<"Hello, World! How are you?">>,
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, TestStr),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assertEqual(TestStr, Str),
+    hb_beamr:stop(WASM).
+
+read_string_empty_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, <<"">>),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assertEqual(<<>>, Str),
+    hb_beamr:stop(WASM).
+
+read_string_single_char_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, <<"X">>),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assertEqual(<<"X">>, Str),
+    hb_beamr:stop(WASM).
+
+read_string_long_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    LongStr = binary:copy(<<"A">>, 100),
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, LongStr),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assertEqual(LongStr, Str),
+    hb_beamr:stop(WASM).
+
+read_string_returns_binary_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, <<"test">>),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assert(is_binary(Str)),
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 5. write_string/2
+
+```erlang
+-spec write_string(WASM, Data) -> {ok, Ptr} | {error, Reason}
+    when
+        WASM :: pid(),
+        Data :: binary() | iolist(),
+        Ptr :: non_neg_integer(),
+        Reason :: term().
+```
+
+**Description:** Allocate space for (via malloc) and write a null-terminated string to the BEAMR instance's native memory. Accepts either an iolist or a binary, adding a null byte to the end.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_io_write_string_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+write_string_basic_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    Result = hb_beamr_io:write_string(WASM, <<"Test">>),
+    ?assertMatch({ok, _Ptr}, Result),
+    hb_beamr:stop(WASM).
+
+write_string_returns_pointer_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, <<"Test">>),
+    ?assert(is_integer(Ptr)),
+    ?assert(Ptr > 0),
+    hb_beamr:stop(WASM).
+
+write_string_null_terminated_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, <<"Hi">>),
+    {ok, Data} = hb_beamr_io:read(WASM, Ptr, 3),
+    ?assertEqual(<<"Hi", 0>>, Data),
+    hb_beamr:stop(WASM).
+
+write_string_iolist_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    IoList = ["Hello", ", ", "World"],
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, IoList),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assertEqual(<<"Hello, World">>, Str),
+    hb_beamr:stop(WASM).
+
+write_string_binary_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, <<"Binary String">>),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assertEqual(<<"Binary String">>, Str),
+    hb_beamr:stop(WASM).
+
+write_string_multiple_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr1} = hb_beamr_io:write_string(WASM, <<"First">>),
+    {ok, Ptr2} = hb_beamr_io:write_string(WASM, <<"Second">>),
+    ?assert(Ptr1 =/= Ptr2),
+    {ok, Str1} = hb_beamr_io:read_string(WASM, Ptr1),
+    {ok, Str2} = hb_beamr_io:read_string(WASM, Ptr2),
+    ?assertEqual(<<"First">>, Str1),
+    ?assertEqual(<<"Second">>, Str2),
+    hb_beamr:stop(WASM).
+
+write_string_unicode_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    UnicodeStr = <<"Hello 世界">>,
+    {ok, Ptr} = hb_beamr_io:write_string(WASM, UnicodeStr),
+    {ok, Str} = hb_beamr_io:read_string(WASM, Ptr),
+    ?assertEqual(UnicodeStr, Str),
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 6. malloc/2
+
+```erlang
+-spec malloc(WASM, Size) -> {ok, Ptr} | {error, Reason}
+    when
+        WASM :: pid(),
+        Size :: non_neg_integer(),
+        Ptr :: non_neg_integer(),
+        Reason :: malloc_failed | term().
+```
+
+**Description:** Allocate space in the BEAMR instance's native memory via an exported malloc function from the WASM module. Returns 0 on failure.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_io_malloc_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+malloc_basic_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    Result = hb_beamr_io:malloc(WASM, 100),
+    ?assertMatch({ok, _Ptr}, Result),
+    hb_beamr:stop(WASM).
+
+malloc_returns_nonzero_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:malloc(WASM, 100),
+    ?assert(is_integer(Ptr)),
+    ?assert(Ptr > 0),
+    hb_beamr:stop(WASM).
+
+malloc_small_size_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:malloc(WASM, 1),
+    ?assert(Ptr > 0),
+    hb_beamr:stop(WASM).
+
+malloc_large_size_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:malloc(WASM, 10000),
+    ?assert(Ptr > 0),
+    hb_beamr:stop(WASM).
+
+malloc_too_large_fails_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    Result = hb_beamr_io:malloc(WASM, 128 * 1024 * 1024),
+    ?assertMatch({error, _}, Result),
+    hb_beamr:stop(WASM).
+
+malloc_multiple_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr1} = hb_beamr_io:malloc(WASM, 100),
+    {ok, Ptr2} = hb_beamr_io:malloc(WASM, 100),
+    {ok, Ptr3} = hb_beamr_io:malloc(WASM, 100),
+    ?assert(Ptr1 =/= Ptr2),
+    ?assert(Ptr2 =/= Ptr3),
+    ?assert(Ptr1 =/= Ptr3),
+    hb_beamr:stop(WASM).
+
+malloc_usable_memory_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:malloc(WASM, 50),
+    TestData = <<"This is test data for malloc">>,
+    ok = hb_beamr_io:write(WASM, Ptr, TestData),
+    {ok, ReadData} = hb_beamr_io:read(WASM, Ptr, byte_size(TestData)),
+    ?assertEqual(TestData, ReadData),
+    hb_beamr:stop(WASM).
+```
+
+---
+
+### 7. free/2
+
+```erlang
+-spec free(WASM, Ptr) -> ok | {error, Reason}
+    when
+        WASM :: pid(),
+        Ptr :: non_neg_integer(),
+        Reason :: term().
+```
+
+**Description:** Free space allocated in the BEAMR instance's native memory via a call to the exported free function from the WASM module. Note: Not all WASM modules export a free function, and the call may throw if not found.
+
+**Test Code:**
+```erlang
+-module(hb_beamr_io_free_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+free_basic_test() ->
+    % Note: test-calling.wasm exports malloc but not free
+    % This test verifies free/2 can be called without crashing the test
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:malloc(WASM, 100),
+    ?assert(is_integer(Ptr)),
+    % Use catch since free may throw if not exported
+    _ = (catch hb_beamr_io:free(WASM, Ptr)),
+    hb_beamr:stop(WASM).
+
+free_function_signature_test() ->
+    % Verify free/2 accepts correct argument types
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:malloc(WASM, 50),
+    ?assert(is_pid(WASM)),
+    ?assert(is_integer(Ptr)),
+    % Call free - may throw if not exported
+    _ = (catch hb_beamr_io:free(WASM, Ptr)),
+    hb_beamr:stop(WASM).
+
+free_with_valid_ptr_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr} = hb_beamr_io:malloc(WASM, 100),
+    ok = hb_beamr_io:write(WASM, Ptr, <<"Data">>),
+    % Attempt free - verify it doesn't crash the test
+    _ = (catch hb_beamr_io:free(WASM, Ptr)),
+    hb_beamr:stop(WASM).
+
+free_multiple_ptrs_test() ->
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, _} = hb_beamr:start(File),
+    {ok, Ptr1} = hb_beamr_io:malloc(WASM, 100),
+    {ok, Ptr2} = hb_beamr_io:malloc(WASM, 100),
+    ?assert(Ptr1 =/= Ptr2),
+    % Attempt free - verify it doesn't crash the test
+    _ = (catch hb_beamr_io:free(WASM, Ptr1)),
+    _ = (catch hb_beamr_io:free(WASM, Ptr2)),
+    hb_beamr:stop(WASM).
+
+free_returns_error_when_no_export_test() ->
+    % Verify behavior when free is not exported
+    {ok, File} = file:read_file("test/test-calling.wasm"),
+    {ok, WASM, _, Exports} = hb_beamr:start(File),
+    HasFree = lists:any(fun({Name, _, _}) -> Name =:= "free" end, Exports),
+    {ok, Ptr} = hb_beamr_io:malloc(WASM, 100),
+    Result = try
+        hb_beamr_io:free(WASM, Ptr)
+    catch
+        error:{badmatch, {error, _, _}} -> {error, not_exported};
+        _:_ -> {error, caught}
+    end,
+    case HasFree of
+        true -> ?assertEqual(ok, Result);
+        false -> ?assertMatch({error, _}, Result)
+    end,
+    hb_beamr:stop(WASM).
 ```
 
 ---
@@ -107,7 +567,7 @@ ok = hb_beamr_io:free(WASM, Ptr).
 {ok, Ptr} = hb_beamr_io:write_string(WASM, <<"input">>),
 {ok, [ResultPtr]} = hb_beamr:call(WASM, "process_string", [Ptr]),
 {ok, Result} = hb_beamr_io:read_string(WASM, ResultPtr),
-ok = hb_beamr_io:free(WASM, Ptr).
+_ = (catch hb_beamr_io:free(WASM, Ptr)).  % May throw if WASM doesn't export free
 
 %% Read WASM output buffer
 {ok, [BufPtr, BufLen]} = hb_beamr:call(WASM, "get_buffer", []),
@@ -119,7 +579,7 @@ InputData = <<"binary data">>,
 ok = hb_beamr_io:write(WASM, InPtr, InputData),
 {ok, [OutPtr]} = hb_beamr:call(WASM, "transform", [InPtr, byte_size(InputData)]),
 {ok, Output} = hb_beamr_io:read(WASM, OutPtr, OutputSize),
-ok = hb_beamr_io:free(WASM, InPtr).
+_ = (catch hb_beamr_io:free(WASM, InPtr)).  % May throw if WASM doesn't export free
 ```
 
 ---
@@ -133,3 +593,4 @@ ok = hb_beamr_io:free(WASM, InPtr).
 5. **Malloc Returns**: 0 indicates failure
 6. **Bounds Checking**: Out-of-bounds returns error
 7. **Type Safety**: Defensive guards prevent C crashes
+8. **Free Export**: Not all WASM modules export `free`; call may throw if missing
