@@ -95,22 +95,24 @@ Return {ok, ListenerPID}
 ```erlang
 -module(hb_http_server_start_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-start_basic_test() ->
-    {ok, _Pid} = hb_http_server:start(#{
-        port => 8734,
-        priv_wallet => ar_wallet:new()
-    }),
-    ?assert(true).
-
-start_with_config_test() ->
+start_with_opts_test() ->
     Config = #{
-        port => 9000,
+        port => 10000 + rand:uniform(10000),
         store => [hb_test_utils:test_store()],
         priv_wallet => ar_wallet:new()
     },
-    {ok, _Pid} = hb_http_server:start(Config),
-    ?assert(true).
+    {ok, Pid} = hb_http_server:start(Config),
+    ?assert(is_pid(Pid)).
+
+start_returns_listener_test() ->
+    Config = #{
+        port => 10000 + rand:uniform(10000),
+        priv_wallet => ar_wallet:new()
+    },
+    Result = hb_http_server:start(Config),
+    ?assertMatch({ok, _}, Result).
 ```
 
 ---
@@ -145,6 +147,7 @@ start_node(Opts) ->
 ```erlang
 -module(hb_http_server_node_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
 start_node_test() ->
     Node = hb_http_server:start_node(),
@@ -157,6 +160,17 @@ start_node_with_opts_test() ->
     }),
     {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
     ?assertEqual(<<"test-value">>, hb_ao:get(<<"test-key">>, Info, #{})).
+
+start_node_returns_url_test() ->
+    Node = hb_http_server:start_node(#{}),
+    % URL should end with /
+    ?assertEqual(<<"/">>, binary:part(Node, byte_size(Node) - 1, 1)).
+
+start_node_accessible_test() ->
+    Node = hb_http_server:start_node(#{}),
+    % Should be able to get info from the node
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assert(is_map(Info)).
 ```
 
 ---
@@ -208,10 +222,11 @@ set_opts(Request, Opts) ->
 ```erlang
 -module(hb_http_server_set_opts_test).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-set_opts_test() ->
+set_opts_merge_test() ->
     Wallet = ar_wallet:new(),
-    Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
     
     % Get initial options
     Opts = hb_http_server:get_opts(#{
@@ -222,10 +237,36 @@ set_opts_test() ->
     Request = #{<<"hello">> => <<"world">>},
     {ok, UpdatedOpts} = hb_http_server:set_opts(Request, Opts),
     
-    % Verify history was tracked
-    History = hb_opts:get(node_history, [], UpdatedOpts),
-    ?assertEqual(1, length(History)),
+    % Verify merge happened
     ?assertEqual(<<"world">>, hb_opts:get(<<"hello">>, not_found, UpdatedOpts)).
+
+set_opts_history_test() ->
+    Wallet = ar_wallet:new(),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    
+    Opts = hb_http_server:get_opts(#{
+        http_server => hb_util:human_id(ar_wallet:to_address(Wallet))
+    }),
+    
+    % First update
+    {ok, Opts1} = hb_http_server:set_opts(#{<<"key1">> => <<"val1">>}, Opts),
+    History1 = hb_opts:get(node_history, [], Opts1),
+    ?assertEqual(1, length(History1)),
+    
+    % Second update
+    {ok, Opts2} = hb_http_server:set_opts(#{<<"key2">> => <<"val2">>}, Opts1),
+    History2 = hb_opts:get(node_history, [], Opts2),
+    ?assertEqual(2, length(History2)).
+
+set_opts_preserves_server_ref_test() ->
+    Wallet = ar_wallet:new(),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    ServerRef = hb_util:human_id(ar_wallet:to_address(Wallet)),
+    
+    Opts = hb_http_server:get_opts(#{http_server => ServerRef}),
+    {ok, UpdatedOpts} = hb_http_server:set_opts(#{<<"new">> => <<"data">>}, Opts),
+    
+    ?assertEqual(ServerRef, hb_opts:get(http_server, not_found, UpdatedOpts)).
 ```
 
 ---
@@ -255,6 +296,50 @@ get_opts(NodeMsg) ->
     cowboy:get_env(ServerRef, node_msg, no_node_msg).
 ```
 
+**Test Code:**
+```erlang
+-module(hb_http_server_get_opts_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+get_opts_returns_map_test() ->
+    Wallet = ar_wallet:new(),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    
+    Opts = hb_http_server:get_opts(#{
+        http_server => hb_util:human_id(ar_wallet:to_address(Wallet))
+    }),
+    ?assert(is_map(Opts)).
+
+get_opts_contains_wallet_test() ->
+    Wallet = ar_wallet:new(),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    
+    Opts = hb_http_server:get_opts(#{
+        http_server => hb_util:human_id(ar_wallet:to_address(Wallet))
+    }),
+    ?assert(maps:is_key(priv_wallet, Opts)).
+
+get_opts_contains_port_test() ->
+    Wallet = ar_wallet:new(),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    
+    Opts = hb_http_server:get_opts(#{
+        http_server => hb_util:human_id(ar_wallet:to_address(Wallet))
+    }),
+    Port = hb_opts:get(port, not_found, Opts),
+    ?assert(is_integer(Port)).
+
+get_opts_contains_store_test() ->
+    Wallet = ar_wallet:new(),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    
+    Opts = hb_http_server:get_opts(#{
+        http_server => hb_util:human_id(ar_wallet:to_address(Wallet))
+    }),
+    ?assert(maps:is_key(store, Opts)).
+```
+
 ---
 
 ### 5. set_default_opts/1
@@ -279,6 +364,46 @@ get_opts(NodeMsg) ->
 }
 ```
 
+**Test Code:**
+```erlang
+-module(hb_http_server_set_default_opts_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+set_default_opts_adds_port_test() ->
+    Opts = hb_http_server:set_default_opts(#{}),
+    Port = maps:get(port, Opts),
+    ?assert(is_integer(Port)),
+    ?assert(Port >= 10000),
+    ?assert(Port =< 60000).
+
+set_default_opts_adds_wallet_test() ->
+    Opts = hb_http_server:set_default_opts(#{}),
+    ?assert(maps:is_key(priv_wallet, Opts)).
+
+set_default_opts_adds_store_test() ->
+    Opts = hb_http_server:set_default_opts(#{}),
+    ?assert(maps:is_key(store, Opts)).
+
+set_default_opts_adds_address_test() ->
+    Opts = hb_http_server:set_default_opts(#{}),
+    Address = maps:get(address, Opts),
+    ?assert(is_binary(Address)).
+
+set_default_opts_preserves_passed_port_test() ->
+    Opts = hb_http_server:set_default_opts(#{port => 9999}),
+    ?assertEqual(9999, maps:get(port, Opts)).
+
+set_default_opts_preserves_passed_wallet_test() ->
+    Wallet = ar_wallet:new(),
+    Opts = hb_http_server:set_default_opts(#{priv_wallet => Wallet}),
+    ?assertEqual(Wallet, maps:get(priv_wallet, Opts)).
+
+set_default_opts_force_signed_test() ->
+    Opts = hb_http_server:set_default_opts(#{}),
+    ?assertEqual(true, maps:get(force_signed, Opts)).
+```
+
 ---
 
 ### 6. set_proc_server_id/1
@@ -295,6 +420,29 @@ get_opts(NodeMsg) ->
 ```erlang
 set_proc_server_id(ServerID) ->
     put(server_id, ServerID).
+```
+
+**Test Code:**
+```erlang
+-module(hb_http_server_proc_id_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+set_proc_server_id_test() ->
+    ServerID = <<"test-server-id">>,
+    hb_http_server:set_proc_server_id(ServerID),
+    ?assertEqual(ServerID, get(server_id)).
+
+set_proc_server_id_overwrites_test() ->
+    hb_http_server:set_proc_server_id(<<"first">>),
+    hb_http_server:set_proc_server_id(<<"second">>),
+    ?assertEqual(<<"second">>, get(server_id)).
+
+set_proc_server_id_binary_test() ->
+    Wallet = ar_wallet:new(),
+    ServerID = hb_util:human_id(ar_wallet:to_address(Wallet)),
+    hb_http_server:set_proc_server_id(ServerID),
+    ?assert(is_binary(get(server_id))).
 ```
 
 ---
@@ -347,6 +495,35 @@ catch
 end.
 ```
 
+**Test Code:**
+```erlang
+-module(hb_http_server_init_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+init_handles_get_request_test() ->
+    Node = hb_http_server:start_node(#{}),
+    {ok, Response} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assert(is_map(Response)).
+
+init_handles_path_request_test() ->
+    Node = hb_http_server:start_node(#{}),
+    {ok, Response} = hb_http:get(Node, <<"/~meta@1.0/info/port">>, #{}),
+    ?assert(is_integer(Response)).
+
+init_sets_server_id_test() ->
+    Wallet = ar_wallet:new(),
+    Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    Address = hb_ao:get(<<"address">>, Info, #{}),
+    ?assert(is_binary(Address)).
+
+init_returns_node_config_test() ->
+    Node = hb_http_server:start_node(#{<<"custom-key">> => <<"custom-value">>}),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assertEqual(<<"custom-value">>, hb_ao:get(<<"custom-key">>, Info, #{})).
+```
+
 ---
 
 ### 8. allowed_methods/2 (Cowboy Callback)
@@ -365,6 +542,34 @@ end.
 ```erlang
 allowed_methods(Req, State) ->
     {[<<"GET">>, <<"POST">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>, <<"PATCH">>], Req, State}.
+```
+
+**Test Code:**
+```erlang
+-module(hb_http_server_methods_test).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+allowed_methods_test() ->
+    MockReq = #{},
+    MockState = <<"test-state">>,
+    {Methods, _Req, _State} = hb_http_server:allowed_methods(MockReq, MockState),
+    ?assert(is_list(Methods)),
+    ?assert(lists:member(<<"GET">>, Methods)),
+    ?assert(lists:member(<<"POST">>, Methods)),
+    ?assert(lists:member(<<"PUT">>, Methods)),
+    ?assert(lists:member(<<"DELETE">>, Methods)),
+    ?assert(lists:member(<<"OPTIONS">>, Methods)),
+    ?assert(lists:member(<<"PATCH">>, Methods)).
+
+allowed_methods_returns_six_test() ->
+    {Methods, _, _} = hb_http_server:allowed_methods(#{}, #{}),
+    ?assertEqual(6, length(Methods)).
+
+allowed_methods_preserves_state_test() ->
+    MockState = <<"my-state">>,
+    {_Methods, _Req, ReturnedState} = hb_http_server:allowed_methods(#{}, MockState),
+    ?assertEqual(MockState, ReturnedState).
 ```
 
 ---
