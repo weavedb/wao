@@ -122,7 +122,7 @@ start_scheduler_registry_test() ->
     when State :: term().
 ```
 
-**Description:** Stop the HyperBEAM application. Clean shutdown of all services.
+**Description:** Application stop callback. Called by the OTP application controller after the supervisor tree has been stopped. This callback just returns `ok`; actual process termination is handled by the supervisor and application controller.
 
 **Test Code:**
 ```erlang
@@ -130,19 +130,19 @@ start_scheduler_registry_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 stop_test() ->
-    {ok, SupPid} = hb_app:start(normal, []),
+    % Ensure application is started
+    {ok, _} = hb_app:start(normal, []),
     
-    ok = hb_app:stop([]),
-    
-    % Process should be stopped
-    timer:sleep(100),
-    ?assert(not is_process_alive(SupPid)).
+    % stop/1 is a callback that just returns ok
+    % It doesn't actually stop processes - that's done by application controller
+    ok = hb_app:stop([]).
 
 stop_idempotent_test() ->
     {ok, _} = hb_app:start(normal, []),
     
+    % stop/1 callback can be called multiple times
     ok = hb_app:stop([]),
-    ok = hb_app:stop([]),  % Should not crash
+    ok = hb_app:stop([]),
     
     ok.
 ```
