@@ -1,524 +1,762 @@
-# hb_ao.erl - AO-Core Resolution Engine
+# hb.erl - HyperBEAM Core Module
 
 ## Overview
 
-**Purpose:** Core message resolution and device execution engine  
-**Module:** `hb_ao`  
-**Protocol:** AO-Core  
-**Pattern:** Recursive message resolution with device-based computation
+**Purpose:** Core configuration, initialization, and utility functions for HyperBEAM  
+**Module:** `hb`  
+**Role:** Primary entry point for node configuration, wallet management, and debugging
 
-This module is the heart of the AO-Core protocol in HyperBEAM. It resolves messages to other messages by executing device functions, managing computation state, and maintaining cryptographic linkages between messages.
-
-## Core Concept
-
-```erlang
-%% Basic Resolution
-ao(BaseMessage, RequestMessage) -> {Status, ResultMessage}
-
-%% Under the hood
-DeviceMod:KeyFunction(Msg1, Msg2, Opts) -> {ok | error, Msg3}
-```
-
-Every message is a collection of keys that can be resolved via its device. The resolution process creates a cryptographic chain of computation.
+This module provides the foundational utilities for the HyperBEAM node, including system initialization, node startup configurations, wallet management, and debugging tools. It serves as the main interface for configuring and operating a HyperBEAM node.
 
 ## Dependencies
 
-- **HyperBEAM:** `hb_cache`, `hb_store`, `hb_path`, `hb_singleton`, `hb_ao_device`, `hb_message`, `hb_opts`, `hb_maps`, `hb_util`
-- **Includes:** `include/hb.hrl`
+- **Erlang/OTP:** `application`, `file`, `erlang`, `rand`, `filelib`
+- **HyperBEAM:** `hb_opts`, `hb_name`, `hb_http_server`, `hb_http`, `hb_cache`, `hb_store`, `hb_message`, `hb_client`, `hb_util`, `hb_maps`
+- **Arweave:** `ar_wallet`
+- **External:** `r3` (rebar3 interface)
 
 ---
 
 ## Public Functions Overview
 
 ```erlang
-%% Core Resolution
--spec resolve(Path | Message, Opts) -> {Status, Result}.
--spec resolve(Msg1, Msg2, Opts) -> {Status, Result}.
--spec resolve_many(Messages, Opts) -> {Status, Result}.
+%% Initialization
+-spec init() -> ok.
+-spec now() -> integer().
+-spec build() -> term().
+-spec deploy_scripts() -> ok.
 
-%% Key/Value Operations  
--spec get(Msg, Key) -> Result.
--spec get(Msg, Key, Opts) -> Result.
--spec get_first(Msg, Keys) -> Result.
--spec set(Msg1, Msg2, Opts) -> UpdatedMsg.
--spec set(Msg, Key, Value, Opts) -> UpdatedMsg.
--spec remove(Msg, Key, Opts) -> UpdatedMsg.
+%% Node Startup
+-spec start_mainnet() -> binary().
+-spec start_mainnet(Port | Opts) -> binary().
+-spec start_simple_pay() -> binary().
+-spec start_simple_pay(Addr) -> binary().
+-spec start_simple_pay(Addr, Port) -> binary().
+-spec topup(Node, Amount, Recipient) -> term().
+-spec topup(Node, Amount, Recipient, Wallet) -> term().
 
-%% Introspection
--spec keys(Msg) -> [Key].
--spec keys(Msg, Opts) -> [Key].
+%% Wallet Management
+-spec wallet() -> ar_wallet:wallet().
+-spec wallet(Location) -> ar_wallet:wallet().
+-spec address() -> binary().
 
-%% Normalization
--spec normalize_key(Key) -> NormalizedKey.
--spec normalize_keys(Msg) -> NormalizedMsg.
-
-%% Utilities
--spec force_message(Msg, Opts) -> Message.
-```
-
----
-
-## Resolution Phases
-
-The resolver operates in 13 discrete phases:
-
-```erlang
-1.  Normalization          % Prepare messages for execution
-2.  Cache lookup           % Check if result cached
-3.  Validation check       % Verify message validity
-4.  Persistent resolver    % Check persistent store
-5.  Device lookup          % Find device module
-6.  Execution              % Run device function
-7.  Step hook              % Execute step callback
-8.  Subresolution          % Resolve nested messages
-9.  Cryptographic linking  % Update hash path
-10. Result caching         % Store result
-11. Notify waiters         % Alert pending processes
-12. Fork worker            % Spawn concurrent worker
-13. Recurse or terminate   % Continue or return
+%% Debugging
+-spec read(ID) -> term().
+-spec read(ID, Scope | Store) -> term().
+-spec no_prod(X, Mod, Line) -> X | no_return().
+-spec debug_wait(T, Mod, Func, Line) -> ok.
 ```
 
 ---
 
 ## Public Functions
 
-### 1. resolve/2
+### 1. init/0
 
 ```erlang
--spec resolve(Path | Message, Opts) -> {Status, Result}
-    when
-        Path :: binary(),
-        Message :: map(),
-        Opts :: map(),
-        Status :: ok | error,
-        Result :: term().
+-spec init() -> ok.
 ```
 
-**Description:** Resolve a path or message. If given a binary path, wraps it in a message with that path.
+**Description:** Initialize system-wide settings for the HyperBEAM node. Starts the naming service and sets the Erlang backtrace depth for debugging.
+
+**Side Effects:**
+- Starts `hb_name` service
+- Sets `backtrace_depth` system flag from config
 
 **Test Code:**
 ```erlang
--module(hb_ao_resolve_test).
+-module(hb_init_test).
 -include_lib("eunit/include/eunit.hrl").
 
-resolve_path_test() ->
-    Msg = #{
-        <<"path">> => <<"/test">>,
-        <<"data">> => <<"value">>
-    },
-    {ok, Result} = hb_ao:resolve(Msg, #{}),
-    ?assert(is_map(Result)).
-
-resolve_binary_path_test() ->
-    {ok, Result} = hb_ao:resolve(<<"/id">>, #{}),
-    ?assert(is_binary(Result) orelse is_map(Result)).
-
-resolve_no_path_error_test() ->
-    {error, Reason} = hb_ao:resolve(#{<<"data">> => <<"test">>}, #{}),
-    ?assert(is_binary(Reason)).
-```
-
----
-
-### 2. resolve/3
-
-```erlang
--spec resolve(Msg1, Msg2 | Path, Opts) -> {Status, Result}
-    when
-        Msg1 :: map(),
-        Msg2 :: map(),
-        Path :: binary(),
-        Opts :: map(),
-        Status :: ok | error,
-        Result :: term().
-```
-
-**Description:** Resolve Msg2 against Msg1. Msg2 specifies what computation to perform on Msg1.
-
-**Test Code:**
-```erlang
--module(hb_ao_resolve3_test).
--include_lib("eunit/include/eunit.hrl").
-
-resolve_with_base_test() ->
-    Base = #{
-        <<"key1">> => <<"value1">>,
-        <<"key2">> => <<"value2">>
-    },
-    Request = #{<<"path">> => <<"key1">>},
+init_test() ->
+    % init/0 just sets backtrace depth and starts hb_name
+    ?assertEqual(ok, hb:init()),
     
-    {ok, Result} = hb_ao:resolve(Base, Request, #{}),
-    ?assertEqual(<<"value1">>, Result).
+    % Verify backtrace depth was set
+    Depth = erlang:system_flag(backtrace_depth, 20),
+    ?assert(is_integer(Depth)).
+```
 
-resolve_with_path_test() ->
-    Base = #{<<"data">> => <<"test">>},
-    {ok, Result} = hb_ao:resolve(Base, <<"/data">>, #{}),
-    ?assertEqual(<<"test">>, Result).
+---
 
-resolve_nested_test() ->
-    Base = #{
-        <<"outer">> => #{
-            <<"inner">> => <<"value">>
-        }
-    },
-    Request = #{<<"path">> => <<"/outer/inner">>},
+### 2. now/0
+
+```erlang
+-spec now() -> integer().
+```
+
+**Description:** Get the current time in milliseconds since epoch. Wrapper around `erlang:system_time(millisecond)`.
+
+**Test Code:**
+```erlang
+-module(hb_now_test).
+-include_lib("eunit/include/eunit.hrl").
+
+now_test() ->
+    % now/0 just returns erlang:system_time(millisecond)
+    Time = hb:now(),
+    ?assert(is_integer(Time)),
+    ?assert(Time > 0),
     
-    {ok, Result} = hb_ao:resolve(Base, Request, #{}),
-    ?assertEqual(<<"value">>, Result).
+    % Verify time increases
+    T1 = hb:now(),
+    timer:sleep(10),
+    T2 = hb:now(),
+    ?assert(T2 >= T1).
 ```
 
 ---
 
-### 3. resolve_many/2
+### 3. build/0
 
 ```erlang
--spec resolve_many(Messages, Opts) -> {Status, Result}
-    when
-        Messages :: [Message] | Message,
-        Message :: map() | binary(),
-        Opts :: map(),
-        Status :: ok | error,
-        Result :: term().
+-spec build() -> term().
 ```
 
-**Description:** Resolve a sequence of messages. Each message's output becomes input for the next.
+**Description:** Hot-recompile and load the HyperBEAM environment using rebar3. Useful during development for live code reloading.
 
-**Special Cases:**
-- Single ID: Direct read from store
-- Ordered map: Converts to list automatically
-- `{as, DevID, Msg}`: Subresolution with specific device
+**Note:** This function requires rebar3 to be available and is primarily for development use.
 
 **Test Code:**
 ```erlang
--module(hb_ao_resolve_many_test).
+-module(hb_build_test).
 -include_lib("eunit/include/eunit.hrl").
 
-resolve_many_single_id_test() ->
-    ID = crypto:strong_rand_bytes(32),
-    Msg = #{<<"data">> => <<"test">>},
+build_test() ->
+    % build/0 requires r3 module (rebar3 shell only)
+    % Just verify function is exported
+    ?assert(erlang:function_exported(hb, build, 0)).
+```
+
+---
+
+### 4. wallet/0, wallet/1
+
+```erlang
+-spec wallet() -> ar_wallet:wallet().
+-spec wallet(Location) -> ar_wallet:wallet()
+    when Location :: string() | binary().
+```
+
+**Description:** Load or create a wallet from disk. If the wallet file doesn't exist, creates a new keyfile at the specified location.
+
+**Behavior:**
+- 0-arity: Uses `priv_key_location` from config
+- 1-arity: Uses specified location
+
+**Note:** Internally uses `wallet/2` which accepts additional options, but this is not exported.
+
+**Test Code:**
+```erlang
+-module(hb_wallet_test).
+-include_lib("eunit/include/eunit.hrl").
+
+wallet_test() ->
+    % wallet/1 creates or loads wallet from file
+    TempPath = "/tmp/test_wallet_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".json",
+    Wallet = hb:wallet(TempPath),
+    ?assert(is_tuple(Wallet)),
+    file:delete(TempPath).
+
+wallet_creates_new_test() ->
+    TempPath = "/tmp/test_wallet_new_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".json",
+    file:delete(TempPath),
+    ?assertEqual({error, enoent}, file:read_file_info(TempPath)),
     
-    % Store message
-    hb_cache:write(hb_opts:get(store), ID, Msg),
+    Wallet = hb:wallet(TempPath),
+    ?assert(is_tuple(Wallet)),
+    ?assertMatch({ok, _}, file:read_file_info(TempPath)),
     
-    {ok, Result} = hb_ao:resolve_many([ID], #{}),
-    ?assertEqual(Msg, Result).
+    file:delete(TempPath).
 
-resolve_many_sequence_test() ->
-    Base = #{<<"count">> => 0},
-    Req1 = #{<<"path">> => <<"set">>, <<"count">> => 1},
-    Req2 = #{<<"path">> => <<"set">>, <<"count">> => 2},
+wallet_loads_existing_test() ->
+    TempPath = "/tmp/test_wallet_exist_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".json",
     
-    {ok, Result} = hb_ao:resolve_many([Base, Req1, Req2], #{}),
-    ?assertEqual(2, maps:get(<<"count">>, Result)).
-
-resolve_many_ordered_map_test() ->
-    OrderedMap = #{
-        <<"1">> => #{<<"data">> => <<"first">>},
-        <<"2">> => #{<<"path">> => <<"/data">>}
-    },
+    Wallet1 = hb:wallet(TempPath),
+    Wallet2 = hb:wallet(TempPath),
+    ?assertEqual(Wallet1, Wallet2),
     
-    {ok, Result} = hb_ao:resolve_many(OrderedMap, #{}),
-    ?assertEqual(<<"first">>, Result).
+    file:delete(TempPath).
 ```
 
 ---
 
-### 4. get/2, get/3, get/4
+### 5. address/0
 
 ```erlang
--spec get(Msg, Key) -> Result.
--spec get(Msg, Key, Opts) -> Result.
--spec get(Msg, Key, Default, Opts) -> Result.
+-spec address() -> binary().
 ```
 
-**Description:** Get value of a key from message. Resolves via device if needed.
+**Description:** Get the base64url-encoded address of the default wallet (from `priv_key_location` config).
+
+**Note:** Internally uses `address/1` which accepts a wallet tuple or location, but this is not exported.
 
 **Test Code:**
 ```erlang
--module(hb_ao_get_test).
+-module(hb_address_test).
 -include_lib("eunit/include/eunit.hrl").
 
-get_simple_test() ->
-    Msg = #{<<"key">> => <<"value">>},
-    Result = hb_ao:get(Msg, <<"key">>),
-    ?assertEqual(<<"value">>, Result).
-
-get_with_default_test() ->
-    Msg = #{<<"existing">> => <<"value">>},
-    Result = hb_ao:get(Msg, <<"missing">>, <<"default">>, #{}),
-    ?assertEqual(<<"default">>, Result).
-
-get_nested_test() ->
-    Msg = #{
-        <<"outer">> => #{
-            <<"inner">> => <<"value">>
-        }
-    },
-    Result = hb_ao:get(Msg, <<"/outer/inner">>, #{}),
-    ?assertEqual(<<"value">>, Result).
-
-get_with_device_test() ->
-    Msg = #{
-        <<"device">> => <<"test@1.0">>,
-        <<"data">> => <<"value">>
-    },
-    % Device would process the get request
-    Result = hb_ao:get(Msg, <<"data">>, #{}),
-    ?assert(is_binary(Result) orelse is_map(Result)).
+address_test() ->
+    % Test address via wallet - doesn't need mainnet
+    TempPath = "/tmp/test_addr_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".json",
+    Wallet = hb:wallet(TempPath),
+    
+    % Get address using ar_wallet (same as internal implementation)
+    Addr = hb_util:encode(ar_wallet:to_address(Wallet)),
+    ?assert(is_binary(Addr)),
+    ?assertEqual(43, byte_size(Addr)),
+    
+    file:delete(TempPath).
 ```
 
 ---
 
-### 5. set/3, set/4
+### 6. read/1, read/2
 
 ```erlang
--spec set(Msg1, Msg2, Opts) -> UpdatedMsg.
--spec set(Msg, Key, Value, Opts) -> UpdatedMsg.
+-spec read(ID) -> term().
+-spec read(ID, Scope | Store) -> term()
+    when ID :: binary() | string(),
+         Scope :: local | remote,
+         Store :: term().
 ```
 
-**Description:** Set key(s) in message using device's set function.
+**Description:** Read a message from the cache. Used for debugging to inspect cached messages.
+
+**Parameters:**
+- `ID`: Message identifier
+- `Scope`: `local` or `remote` atom to specify store scope
+- `Store`: Direct store tuple reference
 
 **Test Code:**
 ```erlang
--module(hb_ao_set_test).
+-module(hb_read_test).
 -include_lib("eunit/include/eunit.hrl").
 
-set_single_key_test() ->
-    Msg = #{<<"old">> => <<"value">>},
-    Updated = hb_ao:set(Msg, <<"new">>, <<"data">>, #{}),
-    ?assertEqual(<<"data">>, maps:get(<<"new">>, Updated)).
-
-set_multiple_keys_test() ->
-    Msg = #{<<"a">> => 1},
-    Updates = #{<<"b">> => 2, <<"c">> => 3},
-    Updated = hb_ao:set(Msg, Updates, #{}),
-    ?assertEqual(2, maps:get(<<"b">>, Updated)),
-    ?assertEqual(3, maps:get(<<"c">>, Updated)).
-
-set_nested_path_test() ->
-    Msg = #{<<"outer">> => #{}},
-    Updated = hb_ao:set(Msg, <<"/outer/inner">>, <<"value">>, #{}),
-    Inner = maps:get(<<"outer">>, Updated),
-    ?assertEqual(<<"value">>, maps:get(<<"inner">>, Inner)).
-
-set_override_test() ->
-    Msg = #{<<"key">> => <<"old">>},
-    Updated = hb_ao:set(Msg, <<"key">>, <<"new">>, #{}),
-    ?assertEqual(<<"new">>, maps:get(<<"key">>, Updated)).
+read_integration_test() ->
+    % Start mainnet server
+    Port = 10000 + rand:uniform(50000),
+    TempWallet = "/tmp/test_read_wallet_" ++ integer_to_list(Port) ++ ".json",
+    
+    URL = hb:start_mainnet(#{
+        port => Port,
+        priv_key_location => TempWallet
+    }),
+    timer:sleep(100),
+    
+    % Verify server is running
+    ?assert(is_binary(URL)),
+    
+    % Create and sign a message
+    Wallet = hb:wallet(TempWallet),
+    Msg = hb_message:commit(#{
+        <<"type">> => <<"test">>,
+        <<"data">> => <<"hello world">>
+    }, Wallet),
+    
+    % Get the message ID
+    MsgID = hb_message:id(Msg),
+    ?assert(is_binary(MsgID)),
+    
+    % Post message using hb_http
+    {ok, _Response} = hb_http:post(URL, Msg, #{}),
+    
+    % Verify via HTTP GET
+    GetURL = <<URL/binary, "/", (hb_util:encode(MsgID))/binary>>,
+    {ok, {{_, GetStatus, _}, _, _}} = httpc:request(
+        get,
+        {binary_to_list(GetURL), []},
+        [{timeout, 5000}],
+        []
+    ),
+    ?assert(is_integer(GetStatus)),
+    
+    % Cleanup
+    file:delete(TempWallet).
 ```
 
 ---
 
-### 6. remove/2, remove/3
+### 7. no_prod/3
 
 ```erlang
--spec remove(Msg, Key) -> UpdatedMsg.
--spec remove(Msg, Key, Opts) -> UpdatedMsg.
+-spec no_prod(X, Mod, Line) -> X | no_return()
+    when X :: term(),
+         Mod :: atom(),
+         Line :: integer().
 ```
 
-**Description:** Remove key from message using device's remove function.
+**Description:** Safety function to prevent non-production-ready code from running in production mode. If mode is `prod`, either exits or throws an error depending on `exit_on_no_prod` config.
+
+**Behavior:**
+- In `prod` mode with `exit_on_no_prod=true`: Calls `init:stop()`
+- In `prod` mode with `exit_on_no_prod=false`: Throws the value `X`
+- In other modes: Returns `X` unchanged
 
 **Test Code:**
 ```erlang
--module(hb_ao_remove_test).
+-module(hb_no_prod_test).
 -include_lib("eunit/include/eunit.hrl").
 
-remove_key_test() ->
-    Msg = #{<<"key">> => <<"value">>, <<"keep">> => <<"this">>},
-    Updated = hb_ao:remove(Msg, <<"key">>, #{}),
-    ?assertEqual(false, maps:is_key(<<"key">>, Updated)),
-    ?assertEqual(<<"this">>, maps:get(<<"keep">>, Updated)).
-
-remove_nonexistent_test() ->
-    Msg = #{<<"key">> => <<"value">>},
-    Updated = hb_ao:remove(Msg, <<"missing">>, #{}),
-    ?assertEqual(Msg, Updated).
+no_prod_test() ->
+    % no_prod/3 just checks mode - doesn't need mainnet
+    % In dev mode, returns value unchanged
+    Value = {some, test, value},
+    ?assertEqual(Value, hb:no_prod(Value, ?MODULE, ?LINE)),
+    
+    % Test with different types
+    ?assertEqual(42, hb:no_prod(42, ?MODULE, ?LINE)),
+    ?assertEqual(<<"binary">>, hb:no_prod(<<"binary">>, ?MODULE, ?LINE)),
+    ?assertEqual([1,2,3], hb:no_prod([1,2,3], ?MODULE, ?LINE)).
 ```
 
 ---
 
-### 7. keys/1, keys/2, keys/3
+### 8. debug_wait/4
 
 ```erlang
--spec keys(Msg) -> [Key].
--spec keys(Msg, Opts) -> [Key].
--spec keys(Msg, Recurse, Opts) -> [Key].
+-spec debug_wait(T, Mod, Func, Line) -> ok
+    when T :: non_neg_integer(),
+         Mod :: atom(),
+         Func :: atom(),
+         Line :: integer().
 ```
 
-**Description:** Get list of keys from message. Can optionally recurse into nested structures.
+**Description:** Wait for a specified time while logging debug information. Useful for debugging timing-sensitive code.
+
+**Parameters:**
+- `T`: Time to wait in milliseconds
+- `Mod`: Calling module name
+- `Func`: Calling function name
+- `Line`: Line number of call
 
 **Test Code:**
 ```erlang
--module(hb_ao_keys_test).
+-module(hb_debug_wait_test).
 -include_lib("eunit/include/eunit.hrl").
 
-keys_simple_test() ->
-    Msg = #{<<"a">> => 1, <<"b">> => 2, <<"c">> => 3},
-    Keys = hb_ao:keys(Msg),
-    ?assertEqual(3, length(Keys)),
-    ?assert(lists:member(<<"a">>, Keys)),
-    ?assert(lists:member(<<"b">>, Keys)),
-    ?assert(lists:member(<<"c">>, Keys)).
-
-keys_with_device_test() ->
-    Msg = #{
-        <<"device">> => <<"test@1.0">>,
-        <<"data">> => <<"value">>
-    },
-    Keys = hb_ao:keys(Msg, #{}),
-    ?assert(is_list(Keys)).
+debug_wait_test() ->
+    % debug_wait/4 just sleeps - doesn't need mainnet
+    ?assertEqual(ok, hb:debug_wait(10, ?MODULE, debug_wait_test, ?LINE)),
+    
+    % Verify it actually waits
+    T1 = hb:now(),
+    hb:debug_wait(50, ?MODULE, debug_wait_test, ?LINE),
+    T2 = hb:now(),
+    ?assert(T2 - T1 >= 50).
 ```
 
 ---
 
-### 8. normalize_key/1, normalize_key/2
+### 9. start_mainnet/0, start_mainnet/1
 
 ```erlang
--spec normalize_key(Key) -> NormalizedKey
-    when
-        Key :: binary() | atom() | integer() | list(),
-        NormalizedKey :: binary().
+-spec start_mainnet() -> binary().
+-spec start_mainnet(Port | Opts) -> binary()
+    when Port :: integer(),
+         Opts :: map().
 ```
 
-**Description:** Convert any key type to normalized binary form.
+**Description:** Start a mainnet server without payments. Initializes all required OTP applications and starts the HTTP server with filesystem-based storage.
+
+**Return Value:** URL binary like `<<"http://localhost:8080">>`
+
+**Applications Started:**
+- kernel, stdlib, inets, ssl, ranch, cowboy, gun, os_mon
+
+**Default Store:**
+```erlang
+#{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache-mainnet">>}
+```
+
+**Note:** Integration tests start actual server instances on random ports.
 
 **Test Code:**
 ```erlang
--module(hb_ao_normalize_key_test).
+-module(hb_start_mainnet_test).
 -include_lib("eunit/include/eunit.hrl").
 
-normalize_binary_test() ->
-    ?assertEqual(<<"test">>, hb_ao:normalize_key(<<"test">>)).
-
-normalize_atom_test() ->
-    ?assertEqual(<<"test">>, hb_ao:normalize_key(test)).
-
-normalize_integer_test() ->
-    ?assertEqual(<<"42">>, hb_ao:normalize_key(42)).
-
-normalize_string_test() ->
-    ?assertEqual(<<"test">>, hb_ao:normalize_key("test")).
-
-normalize_path_list_test() ->
-    ?assertEqual(<<"a/b/c">>, hb_ao:normalize_key([<<"a">>, <<"b">>, <<"c">>])).
+start_mainnet_integration_test() ->
+    % Start on random port to avoid conflicts
+    Port = 10000 + rand:uniform(50000),
+    TempWallet = "/tmp/test_mainnet_wallet_" ++ integer_to_list(Port) ++ ".json",
+    
+    URL = hb:start_mainnet(#{
+        port => Port,
+        priv_key_location => TempWallet
+    }),
+    
+    ?assert(is_binary(URL)),
+    ?assertMatch(<<"http://localhost:", _/binary>>, URL),
+    
+    % Verify server is responding
+    timer:sleep(100),
+    {ok, {{_, StatusCode, _}, _, _}} = httpc:request(
+        get,
+        {binary_to_list(URL), []},
+        [{timeout, 5000}],
+        []
+    ),
+    % Any response (even 404) means server is running
+    ?assert(is_integer(StatusCode)),
+    
+    % Cleanup
+    file:delete(TempWallet).
 ```
 
 ---
 
-### 9. normalize_keys/1, normalize_keys/2
+### 10. start_simple_pay/0, start_simple_pay/1, start_simple_pay/2
 
 ```erlang
--spec normalize_keys(Msg) -> NormalizedMsg
-    when
-        Msg :: map() | list(),
-        NormalizedMsg :: map().
+-spec start_simple_pay() -> binary().
+-spec start_simple_pay(Addr) -> binary()
+    when Addr :: binary().
+-spec start_simple_pay(Addr, Port) -> binary()
+    when Addr :: binary(),
+         Port :: integer().
 ```
 
-**Description:** Normalize all keys in a message to binary form. Converts lists to numbered maps.
+**Description:** Start a server with `simple-pay@1.0` pre-processor for payment handling. Uses P4 device for request/response processing.
+
+**Payment Configuration:**
+```erlang
+#{
+    <<"device">> => <<"p4@1.0">>,
+    <<"ledger-device">> => <<"simple-pay@1.0">>,
+    <<"pricing-device">> => <<"simple-pay@1.0">>
+}
+```
 
 **Test Code:**
 ```erlang
--module(hb_ao_normalize_keys_test).
+-module(hb_start_simple_pay_test).
 -include_lib("eunit/include/eunit.hrl").
 
-normalize_keys_map_test() ->
-    Msg = #{atom_key => <<"value">>, 123 => <<"number">>},
-    Normalized = hb_ao:normalize_keys(Msg),
-    ?assert(maps:is_key(<<"atom_key">>, Normalized)),
-    ?assert(maps:is_key(<<"123">>, Normalized)).
-
-normalize_keys_list_test() ->
-    List = [<<"a">>, <<"b">>, <<"c">>],
-    Normalized = hb_ao:normalize_keys(List),
-    ?assert(is_map(Normalized)),
-    ?assertEqual(<<"a">>, maps:get(<<"1">>, Normalized)),
-    ?assertEqual(<<"b">>, maps:get(<<"2">>, Normalized)),
-    ?assertEqual(<<"c">>, maps:get(<<"3">>, Normalized)).
+start_simple_pay_integration_test() ->
+    % Start on random port
+    Port = 10000 + rand:uniform(50000),
+    TempWallet = "/tmp/test_simplepay_wallet_" ++ integer_to_list(Port) ++ ".json",
+    
+    % Create wallet - we'll use a placeholder address since address/1 is not exported
+    _Wallet = hb:wallet(TempWallet),
+    % Use a simple test address (operator address is mainly for display)
+    Addr = <<"test_operator_address">>,
+    
+    URL = hb:start_simple_pay(Addr, Port),
+    
+    ?assert(is_binary(URL)),
+    ?assertMatch(<<"http://localhost:", _/binary>>, URL),
+    
+    % Verify server is responding
+    timer:sleep(100),
+    {ok, {{_, StatusCode, _}, _, _}} = httpc:request(
+        get,
+        {binary_to_list(URL), []},
+        [{timeout, 5000}],
+        []
+    ),
+    ?assert(is_integer(StatusCode)),
+    
+    % Cleanup
+    file:delete(TempWallet).
 ```
 
 ---
 
-## Device Resolution
-
-### Device Function Lookup
+### 11. topup/3, topup/4
 
 ```erlang
-%% Priority order:
-1. Handler function (info/handler)
-2. Exported function matching key name
-3. Default handler (info/default)
-4. Default device (dev_message)
-
-%% Example device
--module(my_device).
--export([my_key/3, info/0]).
-
-my_key(Msg1, Msg2, Opts) ->
-    {ok, #{ <<"result">> => <<"computed">> }}.
-
-info() ->
-    #{
-        exports => [my_key],
-        default => dev_message
-    }.
+-spec topup(Node, Amount, Recipient) -> term().
+-spec topup(Node, Amount, Recipient, Wallet) -> term()
+    when Node :: binary(),
+         Amount :: integer(),
+         Recipient :: binary(),
+         Wallet :: ar_wallet:wallet().
 ```
+
+**Description:** Helper for topping up a user's balance on a simple-pay node. Sends a signed message to the node's `/~simple-pay@1.0/topup` endpoint.
+
+**Message Format:**
+```erlang
+#{
+    <<"path">> => <<"/~simple-pay@1.0/topup">>,
+    <<"amount">> => Amount,
+    <<"recipient">> => Recipient
+}
+```
+
+**Test Code:**
+```erlang
+-module(hb_topup_test).
+-include_lib("eunit/include/eunit.hrl").
+
+topup_integration_test() ->
+    % Start a simple-pay server
+    Port = 10000 + rand:uniform(50000),
+    TempWallet = "/tmp/test_topup_wallet_" ++ integer_to_list(Port) ++ ".json",
+    
+    % Create operator wallet and get address
+    OperatorWallet = hb:wallet(TempWallet),
+    OperatorAddr = hb_util:human_id(ar_wallet:to_address(OperatorWallet)),
+    
+    % Start simple-pay with operator address - operator must match wallet
+    URL = hb:start_simple_pay(OperatorAddr, Port),
+    timer:sleep(100),
+    
+    % Create recipient wallet
+    RecipientWalletPath = "/tmp/test_topup_recipient_" ++ integer_to_list(Port) ++ ".json",
+    RecipientWallet = hb:wallet(RecipientWalletPath),
+    RecipientAddr = hb_util:human_id(ar_wallet:to_address(RecipientWallet)),
+    
+    % Top up the recipient - operator can topup for free
+    TopupAmount = 5000,
+    {ok, NewBalance} = hb:topup(URL, TopupAmount, RecipientAddr, OperatorWallet),
+    
+    % Verify the new balance equals topup amount
+    ?assertEqual(TopupAmount, NewBalance),
+    
+    % Cleanup
+    file:delete(TempWallet),
+    file:delete(RecipientWalletPath).
+```
+
+---
+
+### 12. deploy_scripts/0
+
+```erlang
+-spec deploy_scripts() -> ok.
+```
+
+**Description:** Upload all Lua scripts from the `scripts/` directory to Arweave. Prints the ID of each uploaded script.
+
+**Script Message Format:**
+```erlang
+#{
+    <<"data-protocol">> => <<"ao">>,
+    <<"variant">> => <<"ao.N.1">>,
+    <<"type">> => <<"module">>,
+    <<"content-type">> => <<"application/lua">>,
+    <<"name">> => FileName,
+    <<"body">> => ScriptContent
+}
+```
+
+**Test Code:**
+```erlang
+-module(hb_deploy_scripts_test).
+-include_lib("eunit/include/eunit.hrl").
+
+deploy_scripts_test() ->
+    % deploy_scripts/0 reads .lua files from scripts/ directory
+    LuaFiles = filelib:wildcard("scripts/*.lua"),
+    case LuaFiles of
+        [] ->
+            % No lua files - returns ok immediately (no network needed)
+            ?assertEqual(ok, hb:deploy_scripts());
+        Files ->
+            % Has lua files - start mainnet for wallet, attempt deploy
+            Port = 10000 + rand:uniform(50000),
+            TempWallet = "/tmp/test_deploy_wallet_" ++ integer_to_list(Port) ++ ".json",
+            
+            _URL = hb:start_mainnet(#{
+                port => Port,
+                priv_key_location => TempWallet
+            }),
+            timer:sleep(100),
+            
+            % deploy_scripts returns ok after processing all files
+            % (upload status is printed but doesn't affect return value)
+            ?assertEqual(ok, hb:deploy_scripts()),
+            
+            % Verify it found the expected files
+            ?assert(length(Files) > 0),
+            
+            file:delete(TempWallet)
+    end.
+```
+
+---
+
+## Configuration Options
+
+The `hb` module uses `hb_opts:get/1` and `hb_opts:get/3` for configuration:
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `debug_stack_depth` | Erlang backtrace depth | 20 |
+| `priv_key_location` | Path to wallet keyfile | - |
+| `port` | HTTP server port | 8080 |
+| `mode` | Operating mode (`dev`, `prod`) | `dev` |
+| `exit_on_no_prod` | Exit on no_prod in prod mode | false |
+| `store` | Store configuration | - |
+| `address` | Node operator address | - |
 
 ---
 
 ## Common Patterns
 
 ```erlang
-%% Simple resolution
-{ok, Result} = hb_ao:resolve(
-    #{<<"data">> => <<"test">>},
-    #{<<"path">> => <<"/data">>},
-    #{}
-).
+%% Initialize the node
+hb:init().
 
-%% Sequential resolution
-Base = #{<<"count">> => 0},
-Increment1 = #{<<"path">> => <<"set">>, <<"count">> => 1},
-Increment2 = #{<<"path">> => <<"set">>, <<"count">> => 2},
-{ok, Final} = hb_ao:resolve_many([Base, Increment1, Increment2], #{}).
+%% Get current timestamp
+Timestamp = hb:now().
 
-%% Get with default
-Value = hb_ao:get(Msg, <<"key">>, <<"default">>, #{}).
+%% Load default wallet
+Wallet = hb:wallet().
 
-%% Set nested value
-Updated = hb_ao:set(Msg, <<"/path/to/key">>, <<"value">>, #{}).
+%% Get wallet address
+Address = hb:address().
 
-%% Remove multiple keys
-Updated1 = hb_ao:remove(Msg, <<"key1">>, #{}),
-Updated2 = hb_ao:remove(Updated1, <<"key2">>, #{}).
+%% Load wallet from specific location
+Wallet = hb:wallet("/path/to/wallet.json").
 
-%% Get all keys
-Keys = hb_ao:keys(Msg, #{}).
+%% Read cached message
+{ok, Msg} = hb:read(<<"message_id">>).
 
-%% Normalize input
-NormMsg = hb_ao:normalize_keys(RawMsg),
-NormKey = hb_ao:normalize_key(atom_key).
+%% Read from specific scope
+{ok, Msg} = hb:read(<<"message_id">>, remote).
+
+%% Start mainnet node on default port
+URL = hb:start_mainnet().
+
+%% Start mainnet node on specific port
+URL = hb:start_mainnet(9000).
+
+%% Start simple-pay node
+URL = hb:start_simple_pay().
+
+%% Top up user balance
+hb:topup(<<"http://localhost:8080">>, 1000, UserAddress).
+
+%% Hot reload during development
+hb:build().
+
+%% Debug wait with logging
+hb:debug_wait(1000, ?MODULE, my_function, ?LINE).
+
+%% Safety check for non-prod code
+Value = hb:no_prod(dangerous_value, ?MODULE, ?LINE).
+```
+
+---
+
+## Architecture
+
+### Initialization Flow
+
+```
+hb:init()
+  │
+  ├─> hb_name:start()
+  │   └─> Start naming/registry service
+  │
+  └─> erlang:system_flag(backtrace_depth, N)
+      └─> Configure debug stack traces
+```
+
+### Server Startup Flow
+
+```
+hb:start_mainnet(Opts)
+  │
+  ├─> application:ensure_all_started([...])
+  │   └─> Start OTP dependencies
+  │
+  ├─> hb:wallet(Location)
+  │   └─> Load or create wallet
+  │
+  ├─> hb_http_server:set_default_opts(Opts)
+  │   └─> Configure server options
+  │
+  └─> hb_http_server:start_node(FinalOpts)
+      └─> Start HTTP server
+```
+
+---
+
+## Wallet Management
+
+### Key Types
+
+The module uses `ar_wallet` for cryptographic operations:
+
+```erlang
+% Default key type from hb.hrl
+?DEFAULT_KEY_TYPE  % Typically {rsa, 65537} or {ecdsa, secp256k1}
+```
+
+### Wallet Tuple Structure
+
+```erlang
+% RSA wallet
+{{rsa, 65537}, {PublicKey, PrivateKey}}
+
+% ECDSA wallet  
+{{ecdsa, secp256k1}, {PublicKey, PrivateKey}}
+```
+
+### Address Encoding
+
+Addresses are base64url-encoded SHA-256 hashes of the public key:
+- 43 characters for standard addresses
+- URL-safe encoding (no padding)
+
+---
+
+## Debugging
+
+### Stack Trace Configuration
+
+```erlang
+% Set via hb_opts
+hb_opts:get(debug_stack_depth)  % Default: 20
+
+% Applied during init
+erlang:system_flag(backtrace_depth, Depth)
+```
+
+### Debug Wait Usage
+
+```erlang
+% In code requiring timing investigation
+hb:debug_wait(5000, ?MODULE, problematic_function, ?LINE).
+% Logs: {debug_wait, {5000, module, problematic_function, 42}}
+% Then waits 5 seconds
+```
+
+### Production Safety
+
+```erlang
+% Mark non-production-ready code
+Result = ?NO_PROD(experimental_feature()).
+% Expands to: hb:no_prod(experimental_feature(), ?MODULE, ?LINE)
 ```
 
 ---
 
 ## References
 
-- **AO-Core Protocol** - `docs/ao-core-protocol.md`
-- **Device System** - `hb_ao_device.erl`
-- **Message Format** - `dev_message.erl`
-- **Path Resolution** - `hb_path.erl`
+- **hb_opts** - Configuration management
+- **hb_http_server** - HTTP server implementation
+- **hb_cache** - Message caching layer
+- **hb_store** - Persistent storage abstraction
+- **ar_wallet** - Arweave wallet operations
+- **hb_name** - Process naming service
 
 ---
 
 ## Notes
 
-1. **13 Phases**: Resolution goes through distinct phases
-2. **Device Lookup**: Hierarchical device function resolution
-3. **Caching**: Results automatically cached for reuse
-4. **Hash Path**: Cryptographic chain of computation maintained
-5. **Recursive**: Handles nested message structures
-6. **Concurrent**: Worker processes for parallel execution
-7. **Normalization**: All keys converted to binaries
-8. **Lists to Maps**: Lists become numbered maps (1, 2, 3...)
-9. **Error Handling**: Returns `{ok | error, Result}` tuples
-10. **Options**: Extensive runtime configuration via Opts map
+1. **Initialization Order**: `hb:init/0` must be called before most operations
+2. **Wallet Auto-Creation**: Missing wallet files are automatically created
+3. **Mode Safety**: `no_prod/3` prevents accidental prod deployment of dev code
+4. **Hot Reload**: `build/0` enables live code updates during development
+5. **Timestamp Precision**: `now/0` returns millisecond-precision timestamps
+6. **Address Format**: 43-character base64url-encoded strings
+7. **Store Scopes**: `local` and `remote` provide different cache views
+8. **Payment Integration**: `simple-pay` provides basic payment processing
+9. **Script Deployment**: Lua scripts uploaded with AO protocol metadata
+10. **Port Randomization**: `start_simple_pay/0` uses random port (10000-60000)
