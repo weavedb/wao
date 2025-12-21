@@ -76,8 +76,9 @@ start(Client) ->
 ```
 
 **Behavior:**
-- **With Client:** Sends `{hb_logger, LoggerPID, done, Activity}` when all processes terminate
+- **With Client:** Intended to send `{hb_logger, LoggerPID, done, Activity}` when all processes terminate, but process monitoring is currently disabled
 - **Without Client:** Logger terminates when all processes complete
+- **Note:** Process monitoring (`erlang:monitor/2`) is commented out, so `done` messages are not sent in practice
 
 **Test Code:**
 ```erlang
@@ -93,17 +94,16 @@ start_with_client_test() ->
     ClientPID = self(),
     Logger = hb_logger:start(ClientPID),
     ?assert(is_pid(Logger)),
+    ?assert(is_process_alive(Logger)),
     
-    % Register and complete
+    % Register and log something
     hb_logger:register(Logger),
+    hb_logger:log(Logger, {test, event, data}),
     
-    % Should receive done message
-    receive
-        {hb_logger, Logger, done, Activity} ->
-            ?assert(is_list(Activity))
-    after 1000 ->
-        ?assert(false)
-    end.
+    % Verify via report (done message requires process monitoring which is disabled)
+    Activity = hb_logger:report(Logger),
+    ?assert(is_list(Activity)),
+    ?assert(length(Activity) >= 2).
 ```
 
 ---
@@ -194,28 +194,24 @@ register_process_test() ->
     )).
 
 multiple_processes_test() ->
-    ClientPID = self(),
-    Logger = hb_logger:start(ClientPID),
+    Logger = hb_logger:start(),
     
     % Spawn multiple workers
-    Workers = [
+    lists:foreach(fun(N) ->
         spawn(fun() ->
             hb_logger:register(Logger),
             hb_logger:log(Logger, {worker, N, started}),
             timer:sleep(10),
             hb_logger:log(Logger, {worker, N, done})
         end)
-        || N <- lists:seq(1, 5)
-    ],
+    end, lists:seq(1, 5)),
     
-    % Wait for all to complete
-    receive
-        {hb_logger, Logger, done, Activity} ->
-            % Should have logs from all 5 workers
-            ?assert(length(Activity) >= 10)
-    after 5000 ->
-        ?assert(false)
-    end.
+    % Wait for workers to finish
+    timer:sleep(100),
+    
+    % Verify via report (done message requires process monitoring which is disabled)
+    Activity = hb_logger:report(Logger),
+    ?assert(length(Activity) >= 10).  % 5 registers + 5 started + 5 done = 15 min
 ```
 
 ---
@@ -391,9 +387,8 @@ hb_logger:log(Logger, {info, completed, Result}),
 % Get activity report
 Activity = hb_logger:report(Logger).
 
-%% Multi-process coordination
-ClientPID = self(),
-Logger = hb_logger:start(ClientPID),
+%% Multi-process coordination (using report instead of done message)
+Logger = hb_logger:start(),
 
 % Spawn workers
 Workers = [
@@ -406,11 +401,10 @@ Workers = [
     || N <- lists:seq(1, 10)
 ],
 
-% Wait for completion notification
-receive
-    {hb_logger, Logger, done, Activity} ->
-        analyze_activity(Activity)
-end.
+% Wait for workers and get report
+timer:sleep(1000),  % Or use more sophisticated synchronization
+Activity = hb_logger:report(Logger),
+analyze_activity(Activity).
 
 %% Silent logging (no console output)
 Logger = hb_logger:start(),
@@ -489,8 +483,7 @@ test_concurrent_operations() ->
 
 ```erlang
 benchmark_with_logging() ->
-    ClientPID = self(),
-    Logger = hb_logger:start(ClientPID),
+    Logger = hb_logger:start(),
     
     spawn(fun() ->
         hb_logger:register(Logger),
@@ -506,10 +499,10 @@ benchmark_with_logging() ->
         hb_logger:log(Logger, {benchmark, end, {Duration, Result}})
     end),
     
-    receive
-        {hb_logger, Logger, done, Activity} ->
-            analyze_benchmark_results(Activity)
-    end.
+    % Wait for worker and get report
+    timer:sleep(1000),
+    Activity = hb_logger:report(Logger),
+    analyze_benchmark_results(Activity).
 ```
 
 ---
@@ -518,7 +511,7 @@ benchmark_with_logging() ->
 
 ```erlang
 coordinate_workers(Tasks) ->
-    Logger = hb_logger:start(self()),
+    Logger = hb_logger:start(),
     
     % Spawn workers
     lists:foreach(
@@ -535,23 +528,23 @@ coordinate_workers(Tasks) ->
         Tasks
     ),
     
-    % Wait for all workers
-    receive
-        {hb_logger, Logger, done, Activity} ->
-            {ok, Activity}
-    end.
+    % Wait for workers and get report
+    timer:sleep(length(Tasks) * 100),  % Adjust based on expected task duration
+    Activity = hb_logger:report(Logger),
+    {ok, Activity}.
 ```
 
 ---
 
 ## Limitations
 
-1. **No Process Monitoring:** `erlang:monitor/2` call is commented out
-2. **Console Only:** No file logging support
-3. **Memory:** All activity kept in memory
-4. **No Filtering:** Cannot filter by log level or type
-5. **Simple Format:** Basic console output format
-6. **Reverse Order:** Activity stored newest-first
+1. **Process Monitoring Disabled:** `erlang:monitor/2` call is commented out - logger won't detect process termination
+2. **No Done Messages:** Client won't receive `done` message since monitoring is disabled
+3. **Console Only:** No file logging support
+4. **Memory:** All activity kept in memory
+5. **No Filtering:** Cannot filter by log level or type
+6. **Simple Format:** Basic console output format
+7. **Reverse Order:** Activity stored newest-first
 
 ---
 
