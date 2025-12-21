@@ -27,38 +27,9 @@ This module provides extensive test coverage for the `hb_ao` resolution engine, 
 
 ---
 
-## Public Functions
+## Module Type
 
-### 1. run_test/0
-
-```erlang
--spec run_test() -> ok | skip.
-```
-
-**Description:** Command-line hook for running specific tests. Execute via:
-```bash
-rebar3 eunit --test hb_ao_test_vectors:run_test
-```
-
----
-
-### 2. suite_test_/0
-
-```erlang
--spec suite_test_() -> TestSuite.
-```
-
-**Description:** Main test suite generator. Runs all tests with different option combinations.
-
----
-
-### 3. benchmark_test_/0
-
-```erlang
--spec benchmark_test_() -> BenchmarkSuite.
-```
-
-**Description:** Performance benchmark suite for resolution operations.
+This module has no explicitly exported public functions - it is a pure EUnit test module. The `suite_test_/0` and `benchmark_test_/0` generator functions are auto-discovered by EUnit. This module IS the test suite for `hb_ao` resolution engine.
 
 ---
 
