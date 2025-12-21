@@ -23,7 +23,7 @@ This module provides request lifecycle tracing capabilities, allowing tracking o
 -spec start_trace() -> TracePID.
 
 %% Event Recording
--spec record_step(TracePID, Step) -> ok.
+-spec record_step(TracePID, Step) -> {record_step, Step}.
 
 %% Trace Retrieval
 -spec get_trace(TracePID) -> Trace.
@@ -69,13 +69,13 @@ start_multiple_traces_test() ->
 ### 2. record_step/2
 
 ```erlang
--spec record_step(TracePID, Step) -> ok
+-spec record_step(TracePID, Step) -> {record_step, Step}
     when
         TracePID :: pid(),
         Step :: term().
 ```
 
-**Description:** Record an event/step in the trace queue. Steps are stored in order and can be retrieved later with `get_trace/1`. Does not block - sends async message to tracer process.
+**Description:** Record an event/step in the trace queue. Steps are stored in order and can be retrieved later with `get_trace/1`. Does not block - sends async message to tracer process. Returns the sent message tuple.
 
 **Test Code:**
 ```erlang
@@ -85,8 +85,9 @@ start_multiple_traces_test() ->
 record_step_test() ->
     TracePID = hb_tracer:start_trace(),
     
-    ?assertEqual(ok, hb_tracer:record_step(TracePID, {step1, data1})),
-    ?assertEqual(ok, hb_tracer:record_step(TracePID, {step2, data2})),
+    % Returns the sent message tuple
+    ?assertMatch({record_step, _}, hb_tracer:record_step(TracePID, {step1, data1})),
+    ?assertMatch({record_step, _}, hb_tracer:record_step(TracePID, {step2, data2})),
     
     Trace = hb_tracer:get_trace(TracePID),
     Steps = maps:get(steps, Trace),
