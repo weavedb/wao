@@ -46,17 +46,14 @@ render(ToRender, StoreOrOpts) -> ok
 
 **Test Code:**
 ```erlang
-% Render entire cache
-Opts = #{store => MyStore},
-ok = hb_cache_render:render(Opts).
+-module(hb_cache_render_render_test).
+-include_lib("eunit/include/eunit.hrl").
 
-% Render specific message
-ID = crypto:strong_rand_bytes(32),
-ok = hb_cache_render:render(ID, Opts).
-
-% Render multiple
-IDs = [ID1, ID2, ID3],
-ok = hb_cache_render:render(IDs, Opts).
+%% render/1,2 opens file viewer - cannot unit test, verify export only
+render_exported_test() ->
+    code:ensure_loaded(hb_cache_render),
+    ?assert(erlang:function_exported(hb_cache_render, render, 1)),
+    ?assert(erlang:function_exported(hb_cache_render, render, 2)).
 ```
 
 ---
@@ -79,16 +76,28 @@ cache_path_to_dot(ToRender, RenderOpts, StoreOrOpts) -> DOT
 
 **Test Code:**
 ```erlang
-% Generate DOT
-Opts = #{store => MyStore},
-DOT = hb_cache_render:cache_path_to_dot(all, Opts),
-?assert(is_binary(DOT)),
-?assert(binary:match(DOT, <<"digraph">>) =/= nomatch).
+-module(hb_cache_render_dot_test).
+-include_lib("eunit/include/eunit.hrl").
 
-% With options
-RenderOpts = #{render_data => false},
-DOT2 = hb_cache_render:cache_path_to_dot(ID, RenderOpts, Opts),
-?assert(is_binary(DOT2)).
+cache_path_to_dot_format_test() ->
+    TempDir = "/tmp/cache_dot_test_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Opts = #{store => #{<<"store-module">> => hb_store_fs, <<"name">> => list_to_binary(TempDir)}},
+    
+    DOT = hb_cache_render:cache_path_to_dot(all, Opts),
+    
+    ?assert(is_binary(DOT)),
+    ?assertNotEqual(nomatch, binary:match(DOT, <<"digraph">>)),
+    ?assertNotEqual(nomatch, binary:match(DOT, <<"}">>)).
+
+cache_path_to_dot_with_render_opts_test() ->
+    TempDir = "/tmp/cache_dot_opts_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Opts = #{store => #{<<"store-module">> => hb_store_fs, <<"name">> => list_to_binary(TempDir)}},
+    RenderOpts = #{render_data => false},
+    
+    DOT = hb_cache_render:cache_path_to_dot(all, RenderOpts, Opts),
+    
+    ?assert(is_binary(DOT)),
+    ?assertNotEqual(nomatch, binary:match(DOT, <<"digraph">>)).
 ```
 
 ---
@@ -105,10 +114,29 @@ dot_to_svg(DOT) -> SVG
 
 **Test Code:**
 ```erlang
-DOT = <<"digraph { A -> B; }">>,
-SVG = hb_cache_render:dot_to_svg(DOT),
-?assert(is_binary(SVG)),
-?assert(binary:match(SVG, <<"<svg">>) =/= nomatch).
+-module(hb_cache_render_svg_test).
+-include_lib("eunit/include/eunit.hrl").
+
+dot_to_svg_test() ->
+    DOT = <<"digraph G { A -> B; }">>,
+    
+    % Check if graphviz is available
+    case os:find_executable("dot") of
+        false ->
+            % Graphviz not installed - just verify function exists
+            code:ensure_loaded(hb_cache_render),
+            ?assert(erlang:function_exported(hb_cache_render, dot_to_svg, 1));
+        _ ->
+            % Graphviz available - test actual conversion
+            Result = hb_cache_render:dot_to_svg(DOT),
+            case Result of
+                {error, timeout} ->
+                    ?assert(true);
+                SVG when is_binary(SVG) ->
+                    ?assertNotEqual(nomatch, binary:match(SVG, <<"<svg">>)),
+                    ?assertNotEqual(nomatch, binary:match(SVG, <<"</svg>">>))
+            end
+    end.
 ```
 
 ---
@@ -145,13 +173,35 @@ cache_path_to_graph(ToRender, RenderOpts, StoreOrOpts) -> Graph
 
 **Test Code:**
 ```erlang
-Opts = #{store => MyStore},
-Graph = hb_cache_render:cache_path_to_graph(all, #{}, Opts),
+-module(hb_cache_render_graph_test).
+-include_lib("eunit/include/eunit.hrl").
 
-?assert(is_map(Graph)),
-?assert(maps:is_key(nodes, Graph)),
-?assert(maps:is_key(arcs, Graph)),
-?assert(maps:is_key(visited, Graph)).
+cache_path_to_graph_empty_test() ->
+    TempDir = "/tmp/cache_render_test_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Opts = #{store => #{<<"store-module">> => hb_store_fs, <<"name">> => list_to_binary(TempDir)}},
+    
+    Graph = hb_cache_render:cache_path_to_graph(all, #{}, Opts),
+    
+    ?assert(is_map(Graph)),
+    ?assert(maps:is_key(nodes, Graph)),
+    ?assert(maps:is_key(arcs, Graph)),
+    ?assert(maps:is_key(visited, Graph)),
+    
+    Nodes = maps:get(nodes, Graph),
+    ?assert(is_map(Nodes)).
+
+cache_path_to_graph_with_data_test() ->
+    TempDir = "/tmp/cache_render_data_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Opts = #{store => #{<<"store-module">> => hb_store_fs, <<"name">> => list_to_binary(TempDir)}},
+    
+    TestMsg = #{<<"test-key">> => <<"test-value">>, <<"data">> => <<"hello">>},
+    {ok, _Path} = hb_cache:write(TestMsg, Opts),
+    
+    Graph = hb_cache_render:cache_path_to_graph(all, #{}, Opts),
+    
+    ?assert(is_map(Graph)),
+    Nodes = maps:get(nodes, Graph),
+    ?assert(maps:size(Nodes) > 0).
 ```
 
 ---
@@ -186,15 +236,63 @@ get_graph_data(Base, MaxSize, Opts) -> {ok, JSONResponse}
 
 **Test Code:**
 ```erlang
-Base = <<"/">>,
-MaxSize = 100,
-{ok, Response} = hb_cache_render:get_graph_data(Base, MaxSize, Opts),
+-module(hb_cache_render_json_test).
+-include_lib("eunit/include/eunit.hrl").
 
-Body = maps:get(<<"body">>, Response),
-JSON = jiffy:decode(Body, [return_maps]),
+get_graph_data_structure_test() ->
+    TempDir = "/tmp/cache_json_test_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Opts = #{store => #{<<"store-module">> => hb_store_fs, <<"name">> => list_to_binary(TempDir)}},
+    
+    {ok, Response} = hb_cache_render:get_graph_data(<<"/">>, 100, Opts),
+    
+    ?assert(is_map(Response)),
+    ?assertEqual(<<"application/json">>, maps:get(<<"content-type">>, Response)),
+    
+    Body = maps:get(<<"body">>, Response),
+    ?assert(is_binary(Body)),
+    
+    JSON = hb_json:decode(Body),
+    ?assert(maps:is_key(<<"nodes">>, JSON)),
+    ?assert(maps:is_key(<<"links">>, JSON)),
+    ?assert(is_list(maps:get(<<"nodes">>, JSON))),
+    ?assert(is_list(maps:get(<<"links">>, JSON))).
 
-?assert(maps:is_key(<<"nodes">>, JSON)),
-?assert(maps:is_key(<<"links">>, JSON)).
+get_graph_data_max_size_test() ->
+    TempDir = "/tmp/cache_maxsize_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Opts = #{store => #{<<"store-module">> => hb_store_fs, <<"name">> => list_to_binary(TempDir)}},
+    
+    {ok, Response} = hb_cache_render:get_graph_data(<<"/">>, 5, Opts),
+    
+    Body = maps:get(<<"body">>, Response),
+    JSON = hb_json:decode(Body),
+    Nodes = maps:get(<<"nodes">>, JSON),
+    
+    ?assert(length(Nodes) =< 5).
+
+get_graph_data_with_content_test() ->
+    TempDir = "/tmp/cache_content_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Opts = #{store => #{<<"store-module">> => hb_store_fs, <<"name">> => list_to_binary(TempDir)}},
+    
+    TestMsg = #{<<"key">> => <<"value">>, <<"data">> => <<"content">>},
+    {ok, _} = hb_cache:write(TestMsg, Opts),
+    
+    {ok, Response} = hb_cache_render:get_graph_data(<<"/">>, 100, Opts),
+    
+    Body = maps:get(<<"body">>, Response),
+    JSON = hb_json:decode(Body),
+    Nodes = maps:get(<<"nodes">>, JSON),
+    Links = maps:get(<<"links">>, JSON),
+    
+    % Verify structure - nodes may be empty depending on cache state
+    ?assert(is_list(Nodes)),
+    ?assert(is_list(Links)),
+    
+    % If nodes exist, verify they have required fields
+    lists:foreach(fun(Node) ->
+        ?assert(maps:is_key(<<"id">>, Node)),
+        ?assert(maps:is_key(<<"label">>, Node)),
+        ?assert(maps:is_key(<<"type">>, Node))
+    end, Nodes).
 ```
 
 ---

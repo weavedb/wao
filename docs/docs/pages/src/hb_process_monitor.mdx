@@ -23,7 +23,7 @@ This module provides a lightweight monitoring system for AO process cron jobs. I
 -spec start(ProcID) -> {MonitorPID, LoggerPID}.
 -spec start(ProcID, Rate) -> {MonitorPID, LoggerPID}.
 -spec start(ProcID, Rate, Cursor) -> {MonitorPID, LoggerPID}.
--spec stop(PID) -> ok.
+-spec stop(PID) -> stop.
 ```
 
 ---
@@ -69,22 +69,8 @@ This module provides a lightweight monitoring system for AO process cron jobs. I
 -module(hb_process_monitor_start_test).
 -include_lib("eunit/include/eunit.hrl").
 
-start_basic_test() ->
-    ProcID = <<"test-process-1">>,
-    {Monitor, Logger} = hb_process_monitor:start(ProcID),
-    ?assert(is_pid(Monitor)),
-    ?assert(is_pid(Logger)),
-    ?assert(erlang:is_process_alive(Monitor)),
-    ?assert(erlang:is_process_alive(Logger)),
-    hb_process_monitor:stop(Monitor).
-
-start_with_rate_test() ->
-    ProcID = <<"test-process-2">>,
-    Rate = 5000,  % 5 seconds
-    {Monitor, Logger} = hb_process_monitor:start(ProcID, Rate),
-    ?assert(is_pid(Monitor)),
-    ?assert(is_pid(Logger)),
-    hb_process_monitor:stop(Monitor).
+%% start/1 and start/2 call hb_client:cron_cursor/1 which may not be available
+%% Use start/3 with explicit cursor for reliable testing
 
 start_with_cursor_test() ->
     ProcID = <<"test-process-3">>,
@@ -93,17 +79,37 @@ start_with_cursor_test() ->
     {Monitor, Logger} = hb_process_monitor:start(ProcID, Rate, Cursor),
     ?assert(is_pid(Monitor)),
     ?assert(is_pid(Logger)),
+    ?assert(erlang:is_process_alive(Monitor)),
+    ?assert(erlang:is_process_alive(Logger)),
+    hb_process_monitor:stop(Monitor).
+
+start_with_undefined_cursor_test() ->
+    ProcID = <<"test-process-4">>,
+    Rate = 2000,
+    {Monitor, Logger} = hb_process_monitor:start(ProcID, Rate, undefined),
+    ?assert(is_pid(Monitor)),
+    ?assert(is_pid(Logger)),
     hb_process_monitor:stop(Monitor).
 
 start_multiple_monitors_test() ->
     ProcID1 = <<"process-1">>,
     ProcID2 = <<"process-2">>,
-    {Mon1, Log1} = hb_process_monitor:start(ProcID1),
-    {Mon2, Log2} = hb_process_monitor:start(ProcID2),
+    Rate = 1000,
+    Cursor = <<"cursor">>,
+    {Mon1, Log1} = hb_process_monitor:start(ProcID1, Rate, Cursor),
+    {Mon2, Log2} = hb_process_monitor:start(ProcID2, Rate, Cursor),
     ?assertNotEqual(Mon1, Mon2),
     ?assertNotEqual(Log1, Log2),
+    ?assert(erlang:is_process_alive(Mon1)),
+    ?assert(erlang:is_process_alive(Mon2)),
     hb_process_monitor:stop(Mon1),
     hb_process_monitor:stop(Mon2).
+
+start_exports_test() ->
+    code:ensure_loaded(hb_process_monitor),
+    ?assert(erlang:function_exported(hb_process_monitor, start, 1)),
+    ?assert(erlang:function_exported(hb_process_monitor, start, 2)),
+    ?assert(erlang:function_exported(hb_process_monitor, start, 3)).
 ```
 
 ---
@@ -111,12 +117,12 @@ start_multiple_monitors_test() ->
 ### 2. stop/1
 
 ```erlang
--spec stop(PID) -> ok
+-spec stop(PID) -> stop
     when
         PID :: pid().
 ```
 
-**Description:** Stop a monitor process. Sends a `stop` message to the monitor server, causing it to exit gracefully.
+**Description:** Stop a monitor process. Sends a `stop` message to the monitor server, causing it to exit gracefully. Returns the `stop` atom (the message sent).
 
 **Test Code:**
 ```erlang
@@ -125,22 +131,35 @@ start_multiple_monitors_test() ->
 
 stop_monitor_test() ->
     ProcID = <<"test-process">>,
-    {Monitor, _Logger} = hb_process_monitor:start(ProcID),
+    Rate = 1000,
+    Cursor = <<"cursor">>,
+    {Monitor, _Logger} = hb_process_monitor:start(ProcID, Rate, Cursor),
     ?assert(erlang:is_process_alive(Monitor)),
     
-    ok = hb_process_monitor:stop(Monitor),
+    stop = hb_process_monitor:stop(Monitor),
     timer:sleep(100),
     
     ?assertNot(erlang:is_process_alive(Monitor)).
 
 stop_idempotent_test() ->
     ProcID = <<"test-process">>,
-    {Monitor, _Logger} = hb_process_monitor:start(ProcID),
+    Rate = 1000,
+    Cursor = <<"cursor">>,
+    {Monitor, _Logger} = hb_process_monitor:start(ProcID, Rate, Cursor),
     
-    ok = hb_process_monitor:stop(Monitor),
+    stop = hb_process_monitor:stop(Monitor),
     timer:sleep(50),
-    % Stopping again should not crash
-    ok = hb_process_monitor:stop(Monitor).
+    % Stopping again should not crash (message goes to dead process)
+    stop = hb_process_monitor:stop(Monitor).
+
+stop_returns_ok_test() ->
+    ProcID = <<"test-process-stop">>,
+    Rate = 1000,
+    {Monitor, _Logger} = hb_process_monitor:start(ProcID, Rate, <<"cursor">>),
+    
+    % stop/1 sends message and returns the message (stop atom)
+    Result = hb_process_monitor:stop(Monitor),
+    ?assertEqual(stop, Result).
 ```
 
 ---

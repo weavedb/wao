@@ -25,12 +25,12 @@ This module provides operations for partitioning, formatting, mounting, and mana
 %% Partition Management
 -spec create_partition(Device, PartType) -> {ok, map()} | {error, binary()}.
 
-%% Disk Operations
--spec format_disk(Device, FSType) -> {ok, map()} | {error, binary()}.
--spec mount_disk(Device, MountPoint, FSType, Passphrase) -> {ok, map()} | {error, binary()}.
+%% Disk Operations (LUKS encryption)
+-spec format_disk(Partition, EncKey) -> {ok, map()} | {error, binary()}.
+-spec mount_disk(Partition, EncKey, MountPoint, VolumeName) -> {ok, map()} | {error, binary()}.
 
 %% Store Migration
--spec change_node_store(EncryptionKey, DevicePath) -> {ok, map()} | {error, binary()}.
+-spec change_node_store(StorePath, CurrentStore) -> {ok, map()} | {error, binary()}.
 
 %% Utilities
 -spec check_for_device(Device) -> boolean().
@@ -132,18 +132,17 @@ create_partition_validation_test() ->
 ### 3. format_disk/2
 
 ```erlang
--spec format_disk(Device, FSType) -> {ok, map()} | {error, binary()}
+-spec format_disk(Partition, EncKey) -> {ok, map()} | {error, binary()}
     when
-        Device :: binary(),
-        FSType :: binary().
+        Partition :: binary(),
+        EncKey :: binary().
 ```
 
-**Description:** Format a device with the specified filesystem type using `mkfs`.
+**Description:** Format a partition with LUKS encryption using `cryptsetup luksFormat`.
 
-**Supported Filesystems:**
-- `<<"ext4">>`
-- `<<"xfs">>`
-- Other filesystems supported by `mkfs`
+**Parameters:**
+- `Partition`: Partition path (e.g., `<<"/dev/sdb1">>`)
+- `EncKey`: Encryption key/passphrase for LUKS
 
 **Test Code:**
 ```erlang
@@ -151,9 +150,16 @@ create_partition_validation_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 format_disk_validation_test() ->
-    % Test without actual device
-    Result = hb_volume:format_disk(<<"/dev/nonexistent">>, <<"ext4">>),
-    ?assert(element(1, Result) == error).
+    % Test with undefined partition
+    ?assertEqual(
+        {error, <<"Partition path not specified">>},
+        hb_volume:format_disk(undefined, <<"test-key">>)
+    ),
+    % Test with undefined key
+    ?assertEqual(
+        {error, <<"Encryption key not specified">>},
+        hb_volume:format_disk(<<"/dev/sdb1">>, undefined)
+    ).
 ```
 
 ---
@@ -161,21 +167,27 @@ format_disk_validation_test() ->
 ### 4. mount_disk/4
 
 ```erlang
--spec mount_disk(Device, MountPoint, FSType, Passphrase) -> {ok, map()} | {error, binary()}
+-spec mount_disk(Partition, EncKey, MountPoint, VolumeName) -> {ok, map()} | {error, binary()}
     when
-        Device :: binary(),
+        Partition :: binary(),
+        EncKey :: binary(),
         MountPoint :: binary(),
-        FSType :: binary(),
-        Passphrase :: binary().
+        VolumeName :: binary().
 ```
 
-**Description:** Mount an encrypted device using LUKS. Opens the encrypted device with `cryptsetup`, formats if needed, and mounts to the specified mount point.
+**Description:** Mount a LUKS-encrypted partition. Opens the encrypted device with `cryptsetup luksOpen`, then mounts to the specified mount point.
+
+**Parameters:**
+- `Partition`: Partition path (e.g., `<<"/dev/sdb1">>`)
+- `EncKey`: Encryption key/passphrase for LUKS
+- `MountPoint`: Directory to mount to (e.g., `<<"/encrypted">>`)
+- `VolumeName`: Name for decrypted volume (e.g., `<<"encrypted_data">>`)
 
 **Process:**
-1. Decrypt device with LUKS using passphrase
-2. Format decrypted device if needed
+1. Write key to secure temp file
+2. Open LUKS volume with `cryptsetup luksOpen`
 3. Create mount point directory
-4. Mount filesystem
+4. Mount decrypted device
 
 **Test Code:**
 ```erlang
@@ -183,14 +195,21 @@ format_disk_validation_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 mount_disk_validation_test() ->
-    Device = <<"/dev/sdb1">>,
-    MountPoint = <<"/mnt/encrypted">>,
-    FSType = <<"ext4">>,
-    Passphrase = <<"test-passphrase">>,
-    
-    % This would require actual encrypted device
-    Result = hb_volume:mount_disk(Device, MountPoint, FSType, Passphrase),
-    ?assert(is_tuple(Result)).
+    % Test with undefined partition
+    ?assertEqual(
+        {error, <<"Partition path not specified">>},
+        hb_volume:mount_disk(undefined, <<"key">>, <<"/mnt">>, <<"vol">>)
+    ),
+    % Test with undefined key
+    ?assertEqual(
+        {error, <<"Encryption key not specified">>},
+        hb_volume:mount_disk(<<"/dev/sdb1">>, undefined, <<"/mnt">>, <<"vol">>)
+    ),
+    % Test with undefined mount point
+    ?assertEqual(
+        {error, <<"Mount point not specified">>},
+        hb_volume:mount_disk(<<"/dev/sdb1">>, <<"key">>, undefined, <<"vol">>)
+    ).
 ```
 
 ---
@@ -198,35 +217,46 @@ mount_disk_validation_test() ->
 ### 5. change_node_store/2
 
 ```erlang
--spec change_node_store(EncryptionKey, DevicePath) -> {ok, map()} | {error, binary()}
+-spec change_node_store(StorePath, CurrentStore) -> {ok, map()} | {error, binary()}
     when
-        EncryptionKey :: binary(),
-        DevicePath :: binary().
+        StorePath :: binary(),
+        CurrentStore :: list().
 ```
 
-**Description:** Migrate HyperBEAM node storage to a new encrypted device. Comprehensive operation that partitions, encrypts, formats, mounts device, and updates store configuration.
+**Description:** Update HyperBEAM node store configuration to use a new path. Creates the directory and updates all store configs to prefix paths with the new location.
 
-**Process:**
-1. Check device exists
-2. Create partition
-3. Setup LUKS encryption
-4. Format encrypted volume
-5. Mount to `/encrypted`
-6. Update store configuration to use new mount point
-7. Restart affected stores
+**Parameters:**
+- `StorePath`: New base path for stores (e.g., `<<"/encrypted">>`)
+- `CurrentStore`: Current store configuration list
+
+**Returns:**
+```erlang
+{ok, #{
+    <<"status">> => 200,
+    <<"message">> => <<"Node store updated to use encrypted disk.">>,
+    <<"store_path">> => StorePath,
+    <<"store">> => UpdatedStoreConfig
+}}
+```
 
 **Test Code:**
 ```erlang
 -module(hb_volume_change_store_test).
 -include_lib("eunit/include/eunit.hrl").
 
-change_node_store_device_check_test() ->
-    % Test with non-existent device
-    Result = hb_volume:change_node_store(
-        <<"test-key">>,
-        <<"/dev/nonexistent">>
-    ),
-    ?assertEqual({error, <<"Device not found">>}, Result).
+change_node_store_validation_test() ->
+    % Test with undefined store path
+    ?assertEqual(
+        {error, <<"Store path not specified">>},
+        hb_volume:change_node_store(undefined, [])
+    ).
+
+change_node_store_updates_config_test() ->
+    % Test config update with valid path
+    StoreConfig = [#{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache">>}],
+    {ok, Result} = hb_volume:change_node_store(<<"/encrypted">>, StoreConfig),
+    ?assertEqual(200, maps:get(<<"status">>, Result)),
+    ?assertEqual(<<"/encrypted">>, maps:get(<<"store_path">>, Result)).
 ```
 
 ---
@@ -261,29 +291,27 @@ check_for_device_test() ->
 Body = hb_json:decode(maps:get(<<"body">>, Response)),
 Disks = maps:get(<<"disks">>, Body).
 
-%% Setup encrypted storage
-EncryptionKey = <<"my-secure-passphrase">>,
-DevicePath = <<"/dev/sdb">>,
-
-% Full setup: partition, encrypt, format, mount, migrate
-{ok, Result} = hb_volume:change_node_store(EncryptionKey, DevicePath).
-
-%% Manual setup process
+%% Full encrypted disk setup
 Device = <<"/dev/sdb">>,
+EncKey = <<"my-secure-passphrase">>,
 
 % 1. Create partition
 {ok, _} = hb_volume:create_partition(Device, <<"ext4">>),
 
-% 2. Format
-{ok, _} = hb_volume:format_disk(<<"/dev/sdb1">>, <<"ext4">>),
+% 2. Format with LUKS encryption
+{ok, _} = hb_volume:format_disk(<<"/dev/sdb1">>, EncKey),
 
-% 3. Mount with encryption
+% 3. Mount encrypted volume
 {ok, _} = hb_volume:mount_disk(
     <<"/dev/sdb1">>,
-    <<"/mnt/data">>,
-    <<"ext4">>,
-    <<"passphrase">>
-).
+    EncKey,
+    <<"/encrypted">>,
+    <<"encrypted_data">>
+),
+
+% 4. Update store config to use new mount point
+CurrentStore = hb_opts:get(store),
+{ok, _} = hb_volume:change_node_store(<<"/encrypted">>, CurrentStore).
 
 %% Check device before operations
 case hb_volume:check_for_device(Device) of
@@ -299,17 +327,14 @@ end.
 ### Encryption Process
 
 ```erlang
-% 1. Setup LUKS on device
-Command = "echo 'passphrase' | sudo cryptsetup luksFormat /dev/sdb1 --batch-mode -"
+% 1. Setup LUKS on partition (via format_disk/2)
+"sudo cryptsetup luksFormat --batch-mode --key-file /root/tmp/key /dev/sdb1"
 
-% 2. Open encrypted device
-"echo 'passphrase' | sudo cryptsetup luksOpen /dev/sdb1 encrypted_device -"
+% 2. Open encrypted device (via mount_disk/4)
+"sudo cryptsetup luksOpen --key-file /root/tmp/key /dev/sdb1 volume_name"
 
-% 3. Format mapped device
-"sudo mkfs.ext4 /dev/mapper/encrypted_device"
-
-% 4. Mount
-"sudo mount /dev/mapper/encrypted_device /encrypted"
+% 3. Mount mapped device
+"sudo mount /dev/mapper/volume_name /encrypted"
 ```
 
 ### Security Features

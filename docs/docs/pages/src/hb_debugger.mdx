@@ -61,17 +61,12 @@ The debugger spawns HyperBEAM, attaches the debugger, and executes specified fun
 -module(hb_debugger_start_test).
 -include_lib("eunit/include/eunit.hrl").
 
-start_manual_test() ->
-    % This test requires manual debugger attachment
-    % Start debugger and connect within 5 seconds
-    spawn(fun() ->
-        timer:sleep(5000),
-        net_kernel:connect_node('debugger@localhost')
-    end),
-    
-    Seconds = hb_debugger:start(),
-    ?assert(is_integer(Seconds)),
-    ?assert(Seconds >= 0).
+% NOTE: start/0 blocks waiting for external debugger - cannot unit test
+% Just verify function is exported
+
+start_exported_test() ->
+    code:ensure_loaded(hb_debugger),
+    ?assert(erlang:function_exported(hb_debugger, start, 0)).
 ```
 
 **Usage:**
@@ -113,31 +108,14 @@ my_function().
 -module(hb_debugger_break_test).
 -include_lib("eunit/include/eunit.hrl").
 
--export([test_function/0, test_function/1]).
+% NOTE: start_and_break/* blocks waiting for external debugger - cannot unit test
+% Just verify functions are exported
 
-test_function() ->
-    <<"test result">>.
-
-test_function(Arg) ->
-    {result, Arg}.
-
-start_and_break_no_args_manual_test() ->
-    % This test requires manual debugger attachment
-    % Will set breakpoint on test_function/0
-    hb_debugger:start_and_break(?MODULE, test_function).
-
-start_and_break_with_args_manual_test() ->
-    % Will set breakpoint on test_function/1
-    hb_debugger:start_and_break(?MODULE, test_function, [<<"arg">>]).
-
-start_and_break_with_scope_manual_test() ->
-    % Will interpret all hb_* modules and set breakpoint
-    hb_debugger:start_and_break(
-        ?MODULE, 
-        test_function, 
-        [],
-        <<"hb_,dev_">>  % Interpret hb_* and dev_* modules
-    ).
+start_and_break_exported_test() ->
+    code:ensure_loaded(hb_debugger),
+    ?assert(erlang:function_exported(hb_debugger, start_and_break, 2)),
+    ?assert(erlang:function_exported(hb_debugger, start_and_break, 3)),
+    ?assert(erlang:function_exported(hb_debugger, start_and_break, 4)).
 ```
 
 **Usage:**
@@ -174,28 +152,12 @@ hb_debugger:start_and_break(
 -module(hb_debugger_profile_test).
 -include_lib("eunit/include/eunit.hrl").
 
-profile_function_test() ->
-    % This test will stop the node, so skip in normal test runs
-    % Uncomment to profile a specific function
-    
-    % Fun = fun() ->
-    %     lists:seq(1, 10000),
-    %     lists:sum(lists:seq(1, 1000))
-    % end,
-    % hb_debugger:profile_and_stop(Fun).
-    
-    ?assertEqual(skipped, skipped).
+% NOTE: profile_and_stop/1 halts the node - cannot unit test
+% Just verify function is exported
 
-profile_with_complex_work_test() ->
-    % Example of profiling complex work
-    
-    % ComplexWork = fun() ->
-    %     Data = lists:duplicate(1000, <<"data">>),
-    %     lists:map(fun(X) -> crypto:hash(sha256, X) end, Data)
-    % end,
-    % hb_debugger:profile_and_stop(ComplexWork).
-    
-    ?assertEqual(skipped, skipped).
+profile_and_stop_exported_test() ->
+    code:ensure_loaded(hb_debugger),
+    ?assert(erlang:function_exported(hb_debugger, profile_and_stop, 1)).
 ```
 
 **Usage:**
@@ -227,23 +189,12 @@ hb_debugger:profile_and_stop(Fun).
 -module(hb_debugger_await_test).
 -include_lib("eunit/include/eunit.hrl").
 
--export([breakpoint_function/0]).
+% NOTE: await_breakpoint/0 blocks waiting for breakpoint - cannot unit test
+% Just verify function is exported
 
-breakpoint_function() ->
-    <<"will break here">>.
-
-await_breakpoint_manual_test() ->
-    % This test requires manual interaction:
-    % 1. Attach debugger
-    % 2. Set breakpoint on breakpoint_function/0
-    
-    spawn(fun() ->
-        timer:sleep(5000),
-        int:break_in(?MODULE, breakpoint_function, 0)
-    end),
-    
-    Breakpoint = hb_debugger:await_breakpoint(),
-    ?assert(is_tuple(Breakpoint)).
+await_breakpoint_exported_test() ->
+    code:ensure_loaded(hb_debugger),
+    ?assert(erlang:function_exported(hb_debugger, await_breakpoint, 0)).
 ```
 
 **Usage:**
