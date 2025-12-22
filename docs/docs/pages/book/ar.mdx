@@ -1,0 +1,605 @@
+# Storing Data Permanently on Arweave
+
+A beginner's guide to the permaweb with HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Wallets** — Your identity on Arweave
+2. **Data Items** — Content you want to store permanently
+3. **Bundles** — Efficient packaging for multiple items
+4. **Uploading** — How to send data to the permaweb
+5. How these pieces connect to form the **permaweb**
+
+No prior Arweave knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+Arweave is a **permanent information storage protocol**. Its core data structure is called a **blockweave**—each block links not only to the previous block (like a blockchain) but also to a random historical "recall block." This weaving pattern economically incentivizes miners to store all data, since they need access to random historical blocks to mine new ones.
+
+When you store data on Arweave, you pay once for permanent storage. The protocol uses a **storage endowment** that pays miners over time, leveraging the declining cost of storage technology to make permanence economically sustainable.
+
+Here's the mental model:
+
+```
+You (Wallet) → Sign → Data Item → Bundle → Arweave Network
+     ↓                    ↓           ↓
+  Identity            Content     Package
+```
+
+Think of it like sending a certified letter:
+- **Wallet** = Your signature and return address
+- **Data Item** = The letter you're sending
+- **Bundle** = An envelope containing multiple letters
+- **Signing** = Proving you wrote it
+
+Let's build each piece.
+
+---
+
+## Part 1: Your Wallet
+
+> 📖 Reference: [ar_wallet](/src/ar_wallet)
+
+A wallet is your identity. It contains:
+- A **private key** (secret — used to sign)
+- A **public key** (shared — used to verify)
+- An **address** (your unique identifier, derived from public key)
+
+### Creating a Wallet
+
+```erlang
+%% Create a new wallet
+{PrivateKey, PublicKey} = ar_wallet:new().
+```
+
+That's it. You now have a wallet. The function returns two things:
+- `PrivateKey` — Keep this secret! Used for signing.
+- `PublicKey` — Share freely. Others use it to verify your signatures.
+
+### Getting Your Address
+
+Your address is a 32-byte identifier derived from your public key:
+
+```erlang
+Address = ar_wallet:to_address(PublicKey).
+
+%% To see it as a readable string
+io:format("My address: ~s~n", [hb_util:encode(Address)]).
+%% Output: "My address: abc123..."
+```
+
+### Saving Your Wallet
+
+Never lose your private key! Save it to a file:
+
+```erlang
+%% Export to JSON format
+JSON = ar_wallet:to_json(PrivateKey),
+file:write_file("my-wallet.json", JSON).
+```
+
+### Loading Your Wallet
+
+```erlang
+{ok, JSON} = file:read_file("my-wallet.json"),
+{PrivateKey, PublicKey} = ar_wallet:from_json(JSON).
+```
+
+### Quick Reference: Wallet Functions
+
+| Function | What it does |
+|----------|--------------|
+| `ar_wallet:new()` | Create new wallet |
+| `ar_wallet:to_address(Key)` | Get 32-byte address |
+| `ar_wallet:to_json(Key)` | Export to JSON |
+| `ar_wallet:from_json(JSON)` | Import from JSON |
+
+---
+
+## Part 2: Data Items
+
+> 📖 Reference: [ar_bundles](/src/ar_bundles)
+
+A **data item** is a piece of content you want to store. It has:
+- **Data** — The actual content (text, JSON, image bytes, anything)
+- **Tags** — Metadata key-value pairs (like file headers)
+- **Signature** — Proof that you created it
+- **ID** — Unique identifier (calculated from content)
+
+### Creating a Data Item
+
+```erlang
+Item = ar_bundles:new_item(
+    <<>>,                                      % Target (usually empty)
+    <<>>,                                      % Anchor (usually empty)
+    [{<<"Content-Type">>, <<"text/plain">>}],  % Tags
+    <<"Hello, Arweave!">>                      % Your data
+).
+```
+
+The four parameters:
+1. **Target** — Recipient address (leave empty `<<>>` for data storage)
+2. **Anchor** — For ordering (leave empty `<<>>` for now)
+3. **Tags** — List of `{Name, Value}` pairs
+4. **Data** — Your content as binary
+
+### Signing a Data Item
+
+An unsigned item is just a draft. Signing makes it official:
+
+```erlang
+%% You need your wallet
+{PrivateKey, PublicKey} = ar_wallet:new(),
+Wallet = {PrivateKey, PublicKey},
+
+%% Create and sign
+Item = ar_bundles:new_item(<<>>, <<>>, [], <<"Hello!">>),
+SignedItem = ar_bundles:sign_item(Item, Wallet).
+```
+
+After signing, the item has:
+- A **signature** (cryptographic proof you created it)
+- An **ID** (unique hash of the content)
+- An **owner** (your public key)
+
+### Verifying a Data Item
+
+Anyone can verify that a signed item is authentic:
+
+```erlang
+true = ar_bundles:verify_item(SignedItem).
+```
+
+Returns `true` if valid, `false` if tampered with.
+
+### Getting the Item ID
+
+Every signed item has a unique ID:
+
+```erlang
+ID = ar_bundles:id(SignedItem).
+
+%% To see it as a string
+io:format("Item ID: ~s~n", [hb_util:encode(ID)]).
+```
+
+### Who Signed This?
+
+```erlang
+SignerAddress = ar_bundles:signer(SignedItem).
+%% Returns the 32-byte address of whoever signed it
+```
+
+### Complete Example
+
+```erlang
+%% 1. Create wallet
+{Priv, Pub} = ar_wallet:new(),
+Wallet = {Priv, Pub},
+
+%% 2. Create data item with tags
+Item = ar_bundles:new_item(
+    <<>>,
+    <<>>,
+    [
+        {<<"Content-Type">>, <<"application/json">>},
+        {<<"App-Name">>, <<"My First App">>},
+        {<<"Version">>, <<"1.0">>}
+    ],
+    <<"{\"message\": \"Hello, World!\"}">>
+),
+
+%% 3. Sign it
+SignedItem = ar_bundles:sign_item(Item, Wallet),
+
+%% 4. Verify it worked
+true = ar_bundles:verify_item(SignedItem),
+
+%% 5. Get the ID
+ID = ar_bundles:id(SignedItem),
+io:format("Created item: ~s~n", [hb_util:encode(ID)]).
+```
+
+### Quick Reference: Data Item Functions
+
+| Function | What it does |
+|----------|--------------|
+| `ar_bundles:new_item(Target, Anchor, Tags, Data)` | Create unsigned item |
+| `ar_bundles:sign_item(Item, Wallet)` | Sign an item |
+| `ar_bundles:verify_item(Item)` | Check if signature is valid |
+| `ar_bundles:id(Item)` | Get unique ID |
+| `ar_bundles:signer(Item)` | Get signer's address |
+| `ar_bundles:is_signed(Item)` | Check if item is signed |
+
+---
+
+## Part 3: Serialization
+
+> 📖 Reference: [ar_bundles](/src/ar_bundles)
+
+To store or transmit data items, you need to convert them to binary format and back.
+
+### Serialize (Item → Binary)
+
+```erlang
+Binary = ar_bundles:serialize(SignedItem).
+%% Now you can save to file, send over network, etc.
+```
+
+### Deserialize (Binary → Item)
+
+```erlang
+RecoveredItem = ar_bundles:deserialize(Binary).
+
+%% It's still valid!
+true = ar_bundles:verify_item(RecoveredItem).
+```
+
+### Save to File
+
+```erlang
+%% Save
+Binary = ar_bundles:serialize(SignedItem),
+file:write_file("my-item.bin", Binary).
+
+%% Load
+{ok, Binary} = file:read_file("my-item.bin"),
+Item = ar_bundles:deserialize(Binary).
+```
+
+---
+
+## Part 4: Bundles
+
+> 📖 Reference: [ar_bundles](/src/ar_bundles)
+
+A **bundle** packages multiple data items together following the **ANS-104** standard (Bundled Data v2.0). Why bundle?
+
+- **Delegate payment** — A 3rd party pays while you keep your signature
+- **Scalability** — Bundles can nest recursively (bundles within bundles)  
+- **Throughput** — Increases writes to the network dramatically
+- **Cost** — One base layer transaction for many data items
+
+ANS-104 is the foundation of **AO** (Arweave's compute layer) — every AO message is an ANS-104 DataItem.
+
+### Creating a Bundle
+
+```erlang
+Wallet = ar_wallet:new(),
+
+%% Create several items
+Item1 = ar_bundles:sign_item(
+    ar_bundles:new_item(<<>>, <<>>, 
+        [{<<"Content-Type">>, <<"text/html">>}],
+        <<"<h1>Hello</h1>">>),
+    Wallet
+),
+
+Item2 = ar_bundles:sign_item(
+    ar_bundles:new_item(<<>>, <<>>, 
+        [{<<"Content-Type">>, <<"text/css">>}],
+        <<"h1 { color: blue; }">>),
+    Wallet
+),
+
+Item3 = ar_bundles:sign_item(
+    ar_bundles:new_item(<<>>, <<>>, 
+        [{<<"Content-Type">>, <<"application/javascript">>}],
+        <<"console.log('Hi!');">>),
+    Wallet
+),
+
+%% Bundle them together
+Bundle = ar_bundles:serialize([Item1, Item2, Item3]).
+```
+
+### Reading a Bundle
+
+```erlang
+%% Deserialize the bundle
+BundleItem = ar_bundles:deserialize(Bundle),
+
+%% Get first item
+FirstItem = ar_bundles:hd(BundleItem),
+
+%% Get all items as a map
+AllItems = ar_bundles:map(BundleItem),
+%% Keys are <<"1">>, <<"2">>, <<"3">>
+
+%% Access specific item
+SecondItem = maps:get(<<"2">>, AllItems).
+```
+
+### Searching in Bundles
+
+```erlang
+%% Check if an item exists
+true = ar_bundles:member(<<"1">>, BundleItem),
+
+%% Find item by key
+FoundItem = ar_bundles:find(<<"2">>, BundleItem).
+```
+
+### Quick Reference: Bundle Functions
+
+| Function | What it does |
+|----------|--------------|
+| `ar_bundles:serialize(Items)` | Convert to binary |
+| `ar_bundles:deserialize(Binary)` | Parse from binary |
+| `ar_bundles:hd(Bundle)` | Get first item |
+| `ar_bundles:map(Bundle)` | Get all items as map |
+| `ar_bundles:find(Key, Bundle)` | Find item by key |
+| `ar_bundles:member(Key, Bundle)` | Check if key exists |
+
+---
+
+## Part 5: Putting It All Together
+
+> 📖 Reference: [ar_wallet](/src/ar_wallet) | [ar_bundles](/src/ar_bundles)
+
+Here's a complete example that creates a simple website bundle:
+
+```erlang
+-module(my_first_upload).
+-export([create_website/0]).
+
+create_website() ->
+    %% Step 1: Create or load wallet
+    Wallet = ar_wallet:new(),
+    Address = ar_wallet:to_address(Wallet),
+    io:format("Wallet: ~s~n", [hb_util:encode(Address)]),
+    
+    %% Step 2: Create the HTML page
+    Html = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [
+            {<<"Content-Type">>, <<"text/html">>},
+            {<<"filename">>, <<"index.html">>}
+        ], <<"
+<!DOCTYPE html>
+<html>
+<head><title>My Site</title></head>
+<body>
+    <h1>Welcome!</h1>
+    <p>This page lives permanently on Arweave.</p>
+</body>
+</html>
+        ">>),
+        Wallet
+    ),
+    
+    %% Step 3: Create a data file
+    Data = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [
+            {<<"Content-Type">>, <<"application/json">>},
+            {<<"filename">>, <<"data.json">>}
+        ], <<"{\"created\": \"2024\", \"author\": \"me\"}">>),
+        Wallet
+    ),
+    
+    %% Step 4: Bundle everything
+    Bundle = ar_bundles:serialize([Html, Data]),
+    io:format("Bundle size: ~p bytes~n", [byte_size(Bundle)]),
+    
+    %% Step 5: Save locally (for now)
+    file:write_file("my-website.bundle", Bundle),
+    io:format("Saved to my-website.bundle~n"),
+    
+    %% Step 6: Verify we can read it back
+    {ok, Loaded} = file:read_file("my-website.bundle"),
+    BundleItem = ar_bundles:deserialize(Loaded),
+    
+    FirstItem = ar_bundles:hd(BundleItem),
+    io:format("First item type: ~p~n", [
+        proplists:get_value(<<"Content-Type">>, FirstItem#tx.tags)
+    ]),
+    
+    ok.
+```
+
+---
+
+## Part 6: Uploading to Arweave
+
+Once you have a signed data item, you can upload it to Arweave via a bundler service. The bundler accepts signed ANS-104 data items via a simple HTTP POST.
+
+### Upload a Signed Item
+
+```erlang
+upload_to_arweave(SignedItem) ->
+    %% Serialize the signed item to binary
+    Binary = ar_bundles:serialize(SignedItem),
+    
+    %% Start inets application (if not already started)
+    inets:start(),
+    ssl:start(),
+    
+    %% POST to bundler service
+    {ok, {{_, 200, _}, _, Response}} = httpc:request(post, {
+        "https://up.arweave.net/tx",
+        [],
+        "application/octet-stream",
+        Binary
+    }, [], []),
+    
+    %% Response is JSON with the transaction ID
+    Response.
+```
+
+### Complete Upload Example
+
+```erlang
+-module(upload_example).
+-export([upload/0]).
+
+upload() ->
+    %% Create and sign a data item
+    Wallet = ar_wallet:new(),
+    Item = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [
+            {<<"Content-Type">>, <<"text/plain">>}
+        ], <<"Hello, Permaweb!">>),
+        Wallet
+    ),
+    
+    %% Serialize and upload
+    Binary = ar_bundles:serialize(Item),
+    
+    inets:start(),
+    ssl:start(),
+    
+    case httpc:request(post, {
+        "https://up.arweave.net/tx",
+        [],
+        "application/octet-stream",
+        Binary
+    }, [], []) of
+        {ok, {{_, 200, _}, _, Response}} ->
+            io:format("Uploaded! Response: ~s~n", [Response]),
+            %% Your data is now on Arweave permanently
+            {ok, Response};
+        {ok, {{_, Status, _}, _, Body}} ->
+            io:format("Error ~p: ~s~n", [Status, Body]),
+            {error, Status};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+```
+
+> **Note:** The bundler service (`up.arweave.net`) handles small uploads for free. Your data will be permanently stored on Arweave.
+
+---
+
+## Common Patterns
+
+### Pattern 1: Create → Sign → Serialize
+
+```erlang
+Wallet = ar_wallet:new(),
+
+SignedItem = ar_bundles:sign_item(
+    ar_bundles:new_item(<<>>, <<>>, Tags, Data),
+    Wallet
+),
+
+Binary = ar_bundles:serialize(SignedItem).
+```
+
+### Pattern 2: Deserialize → Verify → Use
+
+```erlang
+Item = ar_bundles:deserialize(Binary),
+
+case ar_bundles:verify_item(Item) of
+    true -> 
+        %% Safe to use
+        process(Item#tx.data);
+    false -> 
+        error(invalid_signature)
+end.
+```
+
+### Pattern 3: Tagged Content
+
+```erlang
+%% Always tag your content for discoverability
+Tags = [
+    {<<"Content-Type">>, <<"application/json">>},  % What format
+    {<<"App-Name">>, <<"MyApp">>},                 % Your app
+    {<<"App-Version">>, <<"1.0.0">>},              % Version
+    {<<"Type">>, <<"user-profile">>}               % Content type
+],
+
+Item = ar_bundles:new_item(<<>>, <<>>, Tags, JsonData).
+```
+
+---
+
+## What's Next?
+
+You now understand the core concepts:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Wallet | [`ar_wallet`](/src/ar_wallet) | `new`, `to_address`, `to_json`, `from_json` |
+| Data Items | [`ar_bundles`](/src/ar_bundles) | `new_item`, `sign_item`, `verify_item`, `id`, `signer` |
+| Serialization | [`ar_bundles`](/src/ar_bundles) | `serialize`, `deserialize` |
+| Bundles | [`ar_bundles`](/src/ar_bundles) | `hd`, `map`, `find`, `member` |
+| Uploading | `httpc` | POST to `up.arweave.net` |
+
+### Going Further
+
+1. **The Permaweb** — Applications and websites stored permanently, accessible via normal browsers
+2. **Build with HyperBEAM** — These primitives power all HyperBEAM devices ([Book](/book))
+3. **Explore AO** — Arweave's compute layer where every message is an ANS-104 DataItem
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [ar_wallet](/src/ar_wallet) | [ar_bundles](/src/ar_bundles)
+
+```erlang
+%% === WALLET ===
+{Priv, Pub} = ar_wallet:new().
+Address = ar_wallet:to_address(Pub).
+JSON = ar_wallet:to_json(Priv).
+{Priv, Pub} = ar_wallet:from_json(JSON).
+
+%% === DATA ITEM ===
+Item = ar_bundles:new_item(<<>>, <<>>, Tags, Data).
+Signed = ar_bundles:sign_item(Item, Wallet).
+true = ar_bundles:verify_item(Signed).
+ID = ar_bundles:id(Signed).
+Addr = ar_bundles:signer(Signed).
+
+%% === SERIALIZE ===
+Binary = ar_bundles:serialize(Item).
+Item = ar_bundles:deserialize(Binary).
+
+%% === BUNDLE ===
+Bundle = ar_bundles:serialize([Item1, Item2, Item3]).
+BundleItem = ar_bundles:deserialize(Bundle).
+First = ar_bundles:hd(BundleItem).
+Map = ar_bundles:map(BundleItem).
+Found = ar_bundles:find(Key, BundleItem).
+true = ar_bundles:member(Key, BundleItem).
+
+%% === UPLOAD ===
+inets:start(), ssl:start().
+{ok, {{_, 200, _}, _, Resp}} = httpc:request(post, {
+    "https://up.arweave.net/tx", [],
+    "application/octet-stream", Binary
+}, [], []).
+```
+
+---
+
+*Now go build something permanent!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [ar_wallet Reference](/src/ar_wallet) — Wallet functions
+- [ar_bundles Reference](/src/ar_bundles) — Data items and bundles
+- [Full Reference](/hyperbeam) — All modules
+
+**Protocol Documentation**
+- [Arweave Lightpaper](https://arweave.org/files/arweave-lightpaper.pdf) — Protocol overview
+- [Arweave Yellow Paper](https://arweave.org/yellow-paper.pdf) — Technical deep dive
+- [Arweave 2.6 Spec](https://2-6-spec.arweave.net/) — Mining mechanism details
+- [Arweave Node](https://github.com/ArweaveTeam/arweave) — Reference implementation (Erlang)
+
+**Standards (ANS)**
+- [ANS-104](https://github.com/ArweaveTeam/arweave-standards/blob/master/ans/ANS-104.md) — Bundled Data v2.0 (what this tutorial covers)
+- [All Standards](https://github.com/ArweaveTeam/arweave-standards/tree/master/ans)
+
+**Ecosystem**
+- [AO Cookbook](https://cookbook_ao.g8way.io/) — Build on Arweave's compute layer
