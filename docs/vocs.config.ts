@@ -262,6 +262,10 @@ export default defineConfig({
           text: "Structure",
           link: "/book/structure",
         },
+        {
+          text: "Arweave Utils",
+          link: "/book/ar",
+        },
       ],
     },
     {
