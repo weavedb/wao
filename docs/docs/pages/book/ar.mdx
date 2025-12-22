@@ -55,32 +55,31 @@ A wallet is your identity. It contains:
 
 ```erlang
 %% Create a new wallet
-{PrivateKey, PublicKey} = ar_wallet:new().
+Wallet = ar_wallet:new().
 ```
 
-That's it. You now have a wallet. The function returns two things:
-- `PrivateKey` — Keep this secret! Used for signing.
-- `PublicKey` — Share freely. Others use it to verify your signatures.
+That's it. You now have a wallet. The wallet contains both your private key (for signing) and public key (for verification).
 
 ### Getting Your Address
 
 Your address is a 32-byte identifier derived from your public key:
 
 ```erlang
-Address = ar_wallet:to_address(PublicKey).
+Address = ar_wallet:to_address(Wallet).
+%% Address is a 32-byte binary
 
-%% To see it as a readable string
-io:format("My address: ~s~n", [hb_util:encode(Address)]).
-%% Output: "My address: abc123..."
+%% To see it as a readable base64url string:
+hb_util:encode(Address).
+%% => <<"abc123...">>
 ```
 
 ### Saving Your Wallet
 
-Never lose your private key! Save it to a file:
+Never lose your wallet! Save it to a file:
 
 ```erlang
-%% Export to JSON format
-JSON = ar_wallet:to_json(PrivateKey),
+%% Export to JSON format (JWK)
+JSON = ar_wallet:to_json(Wallet),
 file:write_file("my-wallet.json", JSON).
 ```
 
@@ -88,7 +87,7 @@ file:write_file("my-wallet.json", JSON).
 
 ```erlang
 {ok, JSON} = file:read_file("my-wallet.json"),
-{PrivateKey, PublicKey} = ar_wallet:from_json(JSON).
+Wallet = ar_wallet:from_json(JSON).
 ```
 
 ### Quick Reference: Wallet Functions
@@ -96,8 +95,8 @@ file:write_file("my-wallet.json", JSON).
 | Function | What it does |
 |----------|--------------|
 | `ar_wallet:new()` | Create new wallet |
-| `ar_wallet:to_address(Key)` | Get 32-byte address |
-| `ar_wallet:to_json(Key)` | Export to JSON |
+| `ar_wallet:to_address(Wallet)` | Get 32-byte address |
+| `ar_wallet:to_json(Wallet)` | Export to JSON (JWK) |
 | `ar_wallet:from_json(JSON)` | Import from JSON |
 
 ---
@@ -135,8 +134,7 @@ An unsigned item is just a draft. Signing makes it official:
 
 ```erlang
 %% You need your wallet
-{PrivateKey, PublicKey} = ar_wallet:new(),
-Wallet = {PrivateKey, PublicKey},
+Wallet = ar_wallet:new(),
 
 %% Create and sign
 Item = ar_bundles:new_item(<<>>, <<>>, [], <<"Hello!">>),
@@ -164,9 +162,11 @@ Every signed item has a unique ID:
 
 ```erlang
 ID = ar_bundles:id(SignedItem).
+%% ID is a 32-byte binary
 
-%% To see it as a string
-io:format("Item ID: ~s~n", [hb_util:encode(ID)]).
+%% To see it as a readable base64url string:
+hb_util:encode(ID).
+%% => <<"47oNEhBtGP2A...">>
 ```
 
 ### Who Signed This?
@@ -180,8 +180,7 @@ SignerAddress = ar_bundles:signer(SignedItem).
 
 ```erlang
 %% 1. Create wallet
-{Priv, Pub} = ar_wallet:new(),
-Wallet = {Priv, Pub},
+Wallet = ar_wallet:new(),
 
 %% 2. Create data item with tags
 Item = ar_bundles:new_item(
@@ -202,8 +201,8 @@ SignedItem = ar_bundles:sign_item(Item, Wallet),
 true = ar_bundles:verify_item(SignedItem),
 
 %% 5. Get the ID
-ID = ar_bundles:id(SignedItem),
-io:format("Created item: ~s~n", [hb_util:encode(ID)]).
+ID = ar_bundles:id(SignedItem).
+%% ID is a 32-byte binary
 ```
 
 ### Quick Reference: Data Item Functions
@@ -343,63 +342,143 @@ FoundItem = ar_bundles:find(<<"2">>, BundleItem).
 
 > 📖 Reference: [ar_wallet](/src/ar_wallet) | [ar_bundles](/src/ar_bundles)
 
-Here's a complete example that creates a simple website bundle:
+Create a test file at `src/test/test_ar.erl`:
 
 ```erlang
--module(my_first_upload).
--export([create_website/0]).
+-module(test_ar).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-create_website() ->
-    %% Step 1: Create or load wallet
+%% Run with: rebar3 eunit --module=test_ar
+
+wallet_test() ->
+    %% Create a new wallet
     Wallet = ar_wallet:new(),
     Address = ar_wallet:to_address(Wallet),
-    io:format("Wallet: ~s~n", [hb_util:encode(Address)]),
+    ?debugFmt("Wallet address: ~s", [hb_util:encode(Address)]),
     
-    %% Step 2: Create the HTML page
+    %% Wallet should produce 32-byte address
+    ?assertEqual(32, byte_size(Address)),
+    
+    %% Save and load wallet
+    JSON = ar_wallet:to_json(Wallet),
+    LoadedWallet = ar_wallet:from_json(JSON),
+    ?assertEqual(Address, ar_wallet:to_address(LoadedWallet)).
+
+data_item_test() ->
+    Wallet = ar_wallet:new(),
+    
+    %% Create and sign a data item
+    Item = ar_bundles:new_item(<<>>, <<>>, [
+        {<<"Content-Type">>, <<"text/plain">>},
+        {<<"App-Name">>, <<"test">>}
+    ], <<"Hello, Arweave!">>),
+    
+    SignedItem = ar_bundles:sign_item(Item, Wallet),
+    
+    %% Verify the signature
+    ?assert(ar_bundles:is_signed(SignedItem)),
+    ?assert(ar_bundles:verify_item(SignedItem)),
+    
+    %% Get ID and signer
+    ID = ar_bundles:id(SignedItem),
+    Signer = ar_bundles:signer(SignedItem),
+    ?debugFmt("Item ID: ~s", [hb_util:encode(ID)]),
+    ?debugFmt("Signer: ~s", [hb_util:encode(Signer)]),
+    
+    ?assertEqual(32, byte_size(ID)),
+    ?assertEqual(ar_wallet:to_address(Wallet), Signer).
+
+serialization_test() ->
+    Wallet = ar_wallet:new(),
+    
+    Item = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [], <<"test data">>),
+        Wallet
+    ),
+    
+    %% Serialize to binary
+    Binary = ar_bundles:serialize(Item),
+    ?debugFmt("Serialized size: ~p bytes", [byte_size(Binary)]),
+    
+    %% Deserialize and verify
+    Recovered = ar_bundles:deserialize(Binary),
+    ?assert(ar_bundles:verify_item(Recovered)),
+    ?assertEqual(<<"test data">>, Recovered#tx.data).
+
+bundle_test() ->
+    Wallet = ar_wallet:new(),
+    
+    %% Create multiple items
+    Item1 = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [
+            {<<"Content-Type">>, <<"text/html">>}
+        ], <<"<h1>Hello</h1>">>),
+        Wallet
+    ),
+    
+    Item2 = ar_bundles:sign_item(
+        ar_bundles:new_item(<<>>, <<>>, [
+            {<<"Content-Type">>, <<"application/json">>}
+        ], <<"{\"key\": \"value\"}">>),
+        Wallet
+    ),
+    
+    %% Bundle them
+    Bundle = ar_bundles:serialize([Item1, Item2]),
+    ?debugFmt("Bundle size: ~p bytes", [byte_size(Bundle)]),
+    
+    %% Read back
+    BundleItem = ar_bundles:deserialize(Bundle),
+    
+    %% Navigate the bundle
+    First = ar_bundles:hd(BundleItem),
+    ?assertEqual(<<"<h1>Hello</h1>">>, First#tx.data),
+    
+    %% Check membership
+    Map = ar_bundles:map(BundleItem),
+    ?assertEqual(2, maps:size(Map)),
+    ?assert(ar_bundles:member(<<"1">>, BundleItem)),
+    ?assert(ar_bundles:member(<<"2">>, BundleItem)).
+
+website_bundle_test() ->
+    Wallet = ar_wallet:new(),
+    ?debugFmt("Creating website bundle...", []),
+    
+    %% HTML page
     Html = ar_bundles:sign_item(
         ar_bundles:new_item(<<>>, <<>>, [
             {<<"Content-Type">>, <<"text/html">>},
             {<<"filename">>, <<"index.html">>}
-        ], <<"
-<!DOCTYPE html>
-<html>
-<head><title>My Site</title></head>
-<body>
-    <h1>Welcome!</h1>
-    <p>This page lives permanently on Arweave.</p>
-</body>
-</html>
-        ">>),
+        ], <<"<!DOCTYPE html><html><body><h1>Welcome!</h1></body></html>">>),
         Wallet
     ),
     
-    %% Step 3: Create a data file
+    %% JSON data
     Data = ar_bundles:sign_item(
         ar_bundles:new_item(<<>>, <<>>, [
             {<<"Content-Type">>, <<"application/json">>},
             {<<"filename">>, <<"data.json">>}
-        ], <<"{\"created\": \"2024\", \"author\": \"me\"}">>),
+        ], <<"{\"created\": \"2024\"}">>),
         Wallet
     ),
     
-    %% Step 4: Bundle everything
+    %% Bundle and save
     Bundle = ar_bundles:serialize([Html, Data]),
-    io:format("Bundle size: ~p bytes~n", [byte_size(Bundle)]),
+    ?debugFmt("Bundle size: ~p bytes", [byte_size(Bundle)]),
     
-    %% Step 5: Save locally (for now)
-    file:write_file("my-website.bundle", Bundle),
-    io:format("Saved to my-website.bundle~n"),
-    
-    %% Step 6: Verify we can read it back
-    {ok, Loaded} = file:read_file("my-website.bundle"),
-    BundleItem = ar_bundles:deserialize(Loaded),
-    
+    %% Verify roundtrip
+    BundleItem = ar_bundles:deserialize(Bundle),
     FirstItem = ar_bundles:hd(BundleItem),
-    io:format("First item type: ~p~n", [
-        proplists:get_value(<<"Content-Type">>, FirstItem#tx.tags)
-    ]),
-    
-    ok.
+    ContentType = proplists:get_value(<<"Content-Type">>, FirstItem#tx.tags),
+    ?assertEqual(<<"text/html">>, ContentType),
+    ?debugFmt("First item Content-Type: ~s", [ContentType]).
+```
+
+Run the tests:
+
+```bash
+rebar3 eunit --module=test_ar
 ```
 
 ---
@@ -408,48 +487,26 @@ create_website() ->
 
 Once you have a signed data item, you can upload it to Arweave via a bundler service. The bundler accepts signed ANS-104 data items via a simple HTTP POST.
 
-### Upload a Signed Item
+Add this to your `src/test/test_ar.erl`:
 
 ```erlang
-upload_to_arweave(SignedItem) ->
-    %% Serialize the signed item to binary
-    Binary = ar_bundles:serialize(SignedItem),
-    
-    %% Start inets application (if not already started)
-    inets:start(),
-    ssl:start(),
-    
-    %% POST to bundler service
-    {ok, {{_, 200, _}, _, Response}} = httpc:request(post, {
-        "https://up.arweave.net/tx",
-        [],
-        "application/octet-stream",
-        Binary
-    }, [], []),
-    
-    %% Response is JSON with the transaction ID
-    Response.
-```
-
-### Complete Upload Example
-
-```erlang
--module(upload_example).
--export([upload/0]).
-
-upload() ->
+%% Upload test - actually uploads to Arweave!
+%% Run with: rebar3 eunit --module=test_ar --test=upload_test
+upload_test() ->
     %% Create and sign a data item
     Wallet = ar_wallet:new(),
     Item = ar_bundles:sign_item(
         ar_bundles:new_item(<<>>, <<>>, [
             {<<"Content-Type">>, <<"text/plain">>}
-        ], <<"Hello, Permaweb!">>),
+        ], <<"Hello from HyperBEAM!">>),
         Wallet
     ),
     
-    %% Serialize and upload
+    %% Serialize
     Binary = ar_bundles:serialize(Item),
+    ?debugFmt("Uploading ~p bytes...", [byte_size(Binary)]),
     
+    %% Upload
     inets:start(),
     ssl:start(),
     
@@ -460,16 +517,44 @@ upload() ->
         Binary
     }, [], []) of
         {ok, {{_, 200, _}, _, Response}} ->
-            io:format("Uploaded! Response: ~s~n", [Response]),
-            %% Your data is now on Arweave permanently
-            {ok, Response};
+            ?debugFmt("Response: ~s", [Response]),
+            
+            %% Parse the ID from response
+            #{<<"id">> := ID} = hb_json:decode(list_to_binary(Response)),
+            ?debugFmt("Uploaded! View at: https://arweave.net/~s", [ID]),
+            
+            ?assert(is_binary(ID));
         {ok, {{_, Status, _}, _, Body}} ->
-            io:format("Error ~p: ~s~n", [Status, Body]),
-            {error, Status};
+            ?debugFmt("Error ~p: ~s", [Status, Body]),
+            ?assert(false);
         {error, Reason} ->
-            {error, Reason}
+            ?debugFmt("Request failed: ~p", [Reason]),
+            ?assert(false)
     end.
 ```
+
+### Response Format
+
+The bundler returns JSON with your transaction details:
+
+```json
+{
+  "id": "47oNEhBtGP2Alimt8tdSJ9RtSb2qaPLe3ye7i--jyg8",
+  "timestamp": 1766369047433,
+  "winc": "0",
+  "dataCaches": ["arweave.net"],
+  "fastFinalityIndexes": ["arweave.net"],
+  ...
+}
+```
+
+Your data is now permanently accessible at:
+
+```
+https://arweave.net/{id}
+```
+
+For example: `https://arweave.net/47oNEhBtGP2Alimt8tdSJ9RtSb2qaPLe3ye7i--jyg8`
 
 > **Note:** The bundler service (`up.arweave.net`) handles small uploads for free. Your data will be permanently stored on Arweave.
 
@@ -546,10 +631,10 @@ You now understand the core concepts:
 
 ```erlang
 %% === WALLET ===
-{Priv, Pub} = ar_wallet:new().
-Address = ar_wallet:to_address(Pub).
-JSON = ar_wallet:to_json(Priv).
-{Priv, Pub} = ar_wallet:from_json(JSON).
+Wallet = ar_wallet:new().
+Address = ar_wallet:to_address(Wallet).
+JSON = ar_wallet:to_json(Wallet).
+Wallet = ar_wallet:from_json(JSON).
 
 %% === DATA ITEM ===
 Item = ar_bundles:new_item(<<>>, <<>>, Tags, Data).
@@ -559,7 +644,7 @@ ID = ar_bundles:id(Signed).
 Addr = ar_bundles:signer(Signed).
 
 %% === SERIALIZE ===
-Binary = ar_bundles:serialize(Item).
+Binary = ar_bundles:serialize(Signed).
 Item = ar_bundles:deserialize(Binary).
 
 %% === BUNDLE ===
