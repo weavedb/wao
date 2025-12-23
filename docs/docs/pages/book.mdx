@@ -62,19 +62,13 @@ Arweave blockchain primitives. HyperBEAM stores everything on Arweave—these mo
 
 Core HyperBEAM infrastructure.
 
-:::info[Tutorial Coming Soon]
-*HyperBEAM Core Tutorial*
-:::
-
 ---
 
 ### Utilities
 
 Pure helper functions used throughout the codebase.
 
-:::info[Tutorial Coming Soon]
-*Utilities Tutorial*
-:::
+→ [Utilities Tutorial](/book/hb1)
 
 | Module | Description |
 |--------|-------------|
@@ -91,9 +85,7 @@ Pure helper functions used throughout the codebase.
 
 How HyperBEAM settings flow from defaults through node config to per-message overrides.
 
-:::info[Tutorial Coming Soon]
-*Configuration Tutorial*
-:::
+→ [Configuration Tutorial](/book/hb2)
 
 | Module | Description |
 |--------|-------------|
@@ -108,9 +100,7 @@ How HyperBEAM settings flow from defaults through node config to per-message ove
 
 Messages are maps. These modules define how they're created, signed, linked, and transformed.
 
-:::info[Tutorial Coming Soon]
-*Data Structures Tutorial*
-:::
+→ [Data Structures Tutorial](/book/hb3)
 
 | Module | Description |
 |--------|-------------|
@@ -125,9 +115,7 @@ Messages are maps. These modules define how they're created, signed, linked, and
 
 Persistent data storage with pluggable backends.
 
-:::info[Tutorial Coming Soon]
-*Storage Tutorial*
-:::
+→ [Storage Tutorial](/book/hb4)
 
 | Module | Description |
 |--------|-------------|
@@ -144,9 +132,7 @@ Persistent data storage with pluggable backends.
 
 Content-addressed caching layer on top of storage.
 
-:::info[Tutorial Coming Soon]
-*Caching Tutorial*
-:::
+→ [Caching Tutorial](/book/hb5)
 
 | Module | Description |
 |--------|-------------|
@@ -159,9 +145,7 @@ Content-addressed caching layer on top of storage.
 
 Outbound HTTP requests to gateways and other nodes.
 
-:::info[Tutorial Coming Soon]
-*HTTP Client Tutorial*
-:::
+→ [HTTP Client Tutorial](/book/hb6)
 
 | Module | Description |
 |--------|-------------|
@@ -179,9 +163,7 @@ Outbound HTTP requests to gateways and other nodes.
 
 Storage backends that fetch data over the network.
 
-:::info[Tutorial Coming Soon]
-*Remote Storage Tutorial*
-:::
+→ [Remote Storage Tutorial](/book/hb7)
 
 | Module | Description |
 |--------|-------------|
@@ -194,9 +176,7 @@ Storage backends that fetch data over the network.
 
 The heart of HyperBEAM. Every request flows through `hb_ao:resolve/3`.
 
-:::info[Tutorial Coming Soon]
-*Protocol Tutorial*
-:::
+→ [Protocol Tutorial](/book/hb8)
 
 | Module | Description |
 |--------|-------------|
@@ -209,9 +189,7 @@ The heart of HyperBEAM. Every request flows through `hb_ao:resolve/3`.
 
 Inbound HTTP handling.
 
-:::info[Tutorial Coming Soon]
-*HTTP Server Tutorial*
-:::
+→ [HTTP Server Tutorial](/book/hb9)
 
 | Module | Description |
 |--------|-------------|
@@ -223,9 +201,7 @@ Inbound HTTP handling.
 
 WebAssembly execution environment.
 
-:::info[Tutorial Coming Soon]
-*WASM Tutorial*
-:::
+→ [WASM Tutorial](/book/hb10)
 
 | Module | Description |
 |--------|-------------|
@@ -238,9 +214,7 @@ WebAssembly execution environment.
 
 OTP application structure and node lifecycle.
 
-:::info[Tutorial Coming Soon]
-*Application Tutorial*
-:::
+→ [Application Tutorial](/book/hb11)
 
 | Module | Description |
 |--------|-------------|
@@ -256,10 +230,6 @@ OTP application structure and node lifecycle.
 
 Storage partitions and data routing.
 
-:::info[Tutorial Coming Soon]
-*Volume Tutorial*
-:::
-
 | Module | Description |
 |--------|-------------|
 | [hb_volume](/src/hb_volume) | Manages storage partitions, handles mounting/unmounting and data routing |
@@ -269,10 +239,6 @@ Storage partitions and data routing.
 ### Monitoring
 
 Logging, tracing, debugging, and metrics.
-
-:::info[Tutorial Coming Soon]
-*Monitoring Tutorial*
-:::
 
 | Module | Description |
 |--------|-------------|
@@ -291,10 +257,6 @@ Logging, tracing, debugging, and metrics.
 
 Test utilities and conformance tests.
 
-:::info[Tutorial Coming Soon]
-*Testing Tutorial*
-:::
-
 | Module | Description |
 |--------|-------------|
 | [hb_test_utils](/src/hb_test_utils) | Common test fixtures, assertion helpers, and mock setup utilities |
@@ -305,19 +267,29 @@ Test utilities and conformance tests.
 
 ---
 
-## Chapter 6: Preloaded Devices
+## Chapter 6: Devices
 
-Pluggable handlers that extend HyperBEAM. Each device handles specific message keys.
+Built-in devices implementing AO-Core protocol behaviors.
+
+---
+
+### Core Message Device
+
+The foundation device that every other device builds upon.
 
 :::info[Tutorial Coming Soon]
-*Preloaded Devices Tutorial*
+*Core Message Device Tutorial*
 :::
+
+| Module | Description |
+|--------|-------------|
+| [dev_message](/src/dev_message) | Core device implementing get, set, keys, remove—the foundation of all devices |
 
 ---
 
 ### Codecs
 
-Transform data between formats. Every message passes through at least one codec.
+Message encoding and decoding for different wire formats.
 
 :::info[Tutorial Coming Soon]
 *Codecs Tutorial*
@@ -325,46 +297,45 @@ Transform data between formats. Every message passes through at least one codec.
 
 | Module | Description |
 |--------|-------------|
-| [dev_codec_httpsig](/src/dev_codec_httpsig) | HTTP Message Signatures (RFC-9421) for signing and verifying with Arweave keys |
-| [dev_codec_httpsig_conv](/src/dev_codec_httpsig_conv) | Converts between HyperBEAM internal format and HTTP signature wire format |
-| [dev_codec_httpsig_keyid](/src/dev_codec_httpsig_keyid) | Extracts key IDs from signatures and resolves them to public keys |
-| [dev_codec_httpsig_siginfo](/src/dev_codec_httpsig_siginfo) | Extracts and validates signature parameters like algorithm and timestamps |
-| [dev_codec_httpsig_proxy](/src/dev_codec_httpsig_proxy) | Forwards signed messages between nodes preserving signature validity |
-| [dev_codec_flat](/src/dev_codec_flat) | Simplest codec representing messages as path-based key-value pairs |
-| [dev_codec_structured](/src/dev_codec_structured) | Rich typed messages with explicit type annotations preserved through serialization |
-| [dev_codec_json](/src/dev_codec_json) | Encodes messages as JSON with type mapping between Erlang and JSON |
-| [dev_codec_ans104](/src/dev_codec_ans104) | Encodes and decodes messages as Arweave ANS-104 data items |
-| [dev_codec_ans104_from](/src/dev_codec_ans104_from) | Parses binary ANS-104 data into message maps with all fields |
-| [dev_codec_ans104_to](/src/dev_codec_ans104_to) | Converts message maps to binary ANS-104 format with signing |
-| [dev_codec_cookie](/src/dev_codec_cookie) | Parses Cookie headers and serializes Set-Cookie for browser clients |
-| [dev_codec_cookie_auth](/src/dev_codec_cookie_auth) | Issues and validates session cookies integrated with httpsig verification |
-| [dev_codec_http_auth](/src/dev_codec_http_auth) | Parses HTTP Authorization headers including Bearer and Basic schemes |
+| [dev_codec_ans104](/src/dev_codec_ans104) | Converts messages to/from ANS-104 data items for Arweave storage |
+| [dev_codec_ans104_from](/src/dev_codec_ans104_from) | Decodes ANS-104 binary format into HyperBEAM messages |
+| [dev_codec_ans104_to](/src/dev_codec_ans104_to) | Encodes HyperBEAM messages into ANS-104 binary format |
+| [dev_codec_flat](/src/dev_codec_flat) | Simple key-value encoding for debugging and simple wire format |
+| [dev_codec_json](/src/dev_codec_json) | JSON encoding/decoding for HTTP APIs and debugging |
+| [dev_codec_structured](/src/dev_codec_structured) | RFC 9651 Structured Fields for HTTP header encoding |
+| [dev_codec_httpsig](/src/dev_codec_httpsig) | HTTP Message Signatures for request/response signing |
+| [dev_codec_httpsig_conv](/src/dev_codec_httpsig_conv) | Conversions for HTTP signature components |
+| [dev_codec_httpsig_keyid](/src/dev_codec_httpsig_keyid) | Key ID management for HTTP signatures |
+| [dev_codec_httpsig_proxy](/src/dev_codec_httpsig_proxy) | Proxy support for HTTP signature forwarding |
+| [dev_codec_httpsig_siginfo](/src/dev_codec_httpsig_siginfo) | Signature metadata extraction and validation |
+| [dev_codec_cookie](/src/dev_codec_cookie) | Cookie-based authentication encoding |
+| [dev_codec_cookie_auth](/src/dev_codec_cookie_auth) | Cookie authentication validation and generation |
+| [dev_codec_http_auth](/src/dev_codec_http_auth) | HTTP authentication header processing |
 
 ---
 
-### Message Operations
+### Composition
 
-Basic message manipulation—get, set, transform, compose.
+Combining devices into stacks and pipelines.
 
 :::info[Tutorial Coming Soon]
-*Message Operations Tutorial*
+*Composition Tutorial*
 :::
 
 | Module | Description |
 |--------|-------------|
-| [dev_message](/src/dev_message) | Default device handling get, set, keys, remove, id, type operations |
-| [dev_stack](/src/dev_stack) | Composes multiple devices into a pipeline processing messages in order |
-| [dev_multipass](/src/dev_multipass) | Runs messages through device pipeline multiple times until stable |
-| [dev_apply](/src/dev_apply) | Resolves a path on a message then applies the result as a device |
-| [dev_hook](/src/dev_hook) | Executes before/after handlers around device calls for cross-cutting concerns |
-| [dev_dedup](/src/dev_dedup) | Tracks seen message IDs and skips duplicates for exactly-once processing |
-| [dev_patch](/src/dev_patch) | Merges patch data into messages with deep merge and conditional operations |
+| [dev_stack](/src/dev_stack) | Chains devices into ordered execution pipelines with pass-through |
+| [dev_multipass](/src/dev_multipass) | Runs message through stack multiple times until stable or limit |
+| [dev_hook](/src/dev_hook) | Registers callbacks triggered before/after device execution |
+| [dev_apply](/src/dev_apply) | Applies messages to each other enabling higher-order operations |
+| [dev_patch](/src/dev_patch) | Merges partial updates into messages preserving unmodified keys |
+| [dev_dedup](/src/dev_dedup) | Prevents duplicate message processing with configurable detection |
 
 ---
 
 ### Infrastructure
 
-Routing, naming, and node configuration.
+Node and network management.
 
 :::info[Tutorial Coming Soon]
 *Infrastructure Tutorial*

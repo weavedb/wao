@@ -1,0 +1,802 @@
+# Configuring HyperBEAM
+
+A beginner's guide to node and message configuration
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Options** — Hierarchical configuration with local and global settings
+2. **Feature Flags** — Compile-time features enabled at build time
+3. **Private State** — Non-serialized data for temporary storage
+4. **Paths** — Request routing and cryptographic message history
+
+No prior HyperBEAM knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM's configuration system flows through multiple layers, from compile-time flags to runtime options to per-message overrides. Understanding this hierarchy is essential for building and operating nodes.
+
+Here's the mental model:
+
+```
+Compile-Time → Node Config → Message Options → Private State
+     ↓              ↓              ↓                ↓
+  Features      Defaults      Overrides         Temporary
+```
+
+Think of it like a restaurant:
+- **Feature Flags** = Kitchen equipment (what's installed)
+- **Node Config** = House rules (default behavior)
+- **Message Options** = Customer preferences (per-request overrides)
+- **Private State** = Kitchen notes (internal, never served)
+
+Let's build each piece.
+
+---
+
+## Part 1: Options System
+
+> 📖 Reference: [hb_opts](/src/hb_opts)
+
+The **options system** manages configuration at three levels:
+- **Global** — Application-wide defaults
+- **Local** — Per-message overrides in `Opts` maps
+- **Environment** — OS environment variable overrides
+
+### Getting Configuration Values
+
+```erlang
+%% Get a global option
+Port = hb_opts:get(port).
+
+%% Get with a default fallback
+Gateway = hb_opts:get(gateway, <<"https://arweave.net">>).
+
+%% Get with local override
+Opts = #{gateway => <<"https://custom.gateway">>},
+Gateway = hb_opts:get(gateway, <<"default">>, Opts).
+%% => <<"https://custom.gateway">>
+```
+
+### Precedence Rules
+
+Local options override global by default:
+
+```erlang
+%% Global setting
+application:set_env(hb, mode, production).
+
+%% Local override wins
+Opts = #{mode => debug},
+hb_opts:get(mode, undefined, Opts).
+%% => debug
+```
+
+Force global to win with `prefer`:
+
+```erlang
+%% Prefer global value
+Opts = #{mode => debug, prefer => global},
+hb_opts:get(mode, undefined, Opts).
+%% => production (from global)
+```
+
+### Loading Configuration Files
+
+HyperBEAM supports two configuration formats:
+
+**Flat Format (.flat):**
+
+```
+port: 8734
+host: https://ao.computer
+gateway: https://arweave.net
+http-client: gun
+await-inprogress: false
+```
+
+**JSON Format (.json):**
+
+```json
+{
+  "port": 8734,
+  "host": "https://ao.computer",
+  "gateway": "https://arweave.net",
+  "http_client": "gun",
+  "await_inprogress": false,
+  "store": [
+    {
+      "name": "cache-mainnet/lmdb",
+      "store-module": "hb_store_lmdb"
+    }
+  ]
+}
+```
+
+Load either format:
+
+```erlang
+%% Load flat config
+{ok, Config} = hb_opts:load("config.flat").
+
+%% Load JSON config
+{ok, Config} = hb_opts:load("config.json").
+
+%% Merge with defaults
+NodeOpts = hb_maps:merge(hb_opts:default_message(), Config).
+```
+
+### Default Configuration
+
+Get the full default configuration:
+
+```erlang
+Defaults = hb_opts:default_message().
+%% Returns: #{
+%%   http_client => gun,
+%%   scheduling_mode => local_confirmation,
+%%   compute_mode => lazy,
+%%   gateway => <<"https://arweave.net">>,
+%%   bundler_ans104 => <<"https://up.arweave.net:443">>,
+%%   priv_key_location => <<"hyperbeam-key.json">>,
+%%   ...
+%% }
+```
+
+Include environment variable overrides:
+
+```erlang
+Defaults = hb_opts:default_message_with_env().
+%% Includes HB_PORT, HB_MODE, HB_PRINT, etc.
+```
+
+### Environment Variables
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `HB_KEY` | string | `hyperbeam-key.json` | Private key file location |
+| `HB_CONFIG` | string | `config.flat` | Configuration file path |
+| `HB_PORT` | integer | `8734` | HTTP server port |
+| `HB_MODE` | atom | - | Operating mode (prod/debug) |
+| `HB_PRINT` | string | - | Debug print topics |
+
+### Quick Reference: Options Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_opts:get(Key)` | Get global option |
+| `hb_opts:get(Key, Default)` | Get with fallback |
+| `hb_opts:get(Key, Default, Opts)` | Get with local override |
+| `hb_opts:load(Path)` | Load config from file |
+| `hb_opts:default_message()` | Get all defaults |
+| `hb_opts:default_message_with_env()` | Defaults + env vars |
+
+---
+
+## Part 2: Feature Flags
+
+> 📖 Reference: [hb_features](/src/hb_features)
+
+**Feature flags** are compile-time switches that enable optional functionality. They're set during build and cannot be changed at runtime.
+
+### Checking Features
+
+```erlang
+%% Check a specific feature
+case hb_features:enabled(http3) of
+    true -> start_http3_server();
+    false -> start_http2_server()
+end.
+
+%% Direct function call
+true = hb_features:rocksdb().
+false = hb_features:http3().
+```
+
+### Available Features
+
+| Feature | Flag | Description |
+|---------|------|-------------|
+| `http3` | `ENABLE_HTTP3` | HTTP/3 QUIC protocol support |
+| `rocksdb` | `ENABLE_ROCKSDB` | RocksDB storage backend |
+| `test` | `TEST` | Test mode (auto-enabled by EUnit) |
+| `genesis_wasm` | `ENABLE_GENESIS_WASM` | Genesis WASM module support |
+| `eflame` | `ENABLE_EFLAME` | Profiler support |
+
+### Listing All Features
+
+```erlang
+Features = hb_features:all().
+%% => #{
+%%   http3 => false,
+%%   rocksdb => true,
+%%   test => true,
+%%   genesis_wasm => false,
+%%   eflame => false
+%% }
+```
+
+### Enabling Features at Build Time
+
+**Via Compiler Flags:**
+
+```bash
+# Single feature
+rebar3 compile -D ENABLE_HTTP3
+
+# Multiple features
+rebar3 compile -D ENABLE_HTTP3 -D ENABLE_ROCKSDB
+
+# All optional features
+rebar3 compile -D ENABLE_HTTP3 -D ENABLE_ROCKSDB -D ENABLE_GENESIS_WASM -D ENABLE_EFLAME
+```
+
+**Via rebar.config:**
+
+```erlang
+{erl_opts, [
+    {d, 'ENABLE_HTTP3'},
+    {d, 'ENABLE_ROCKSDB'},
+    {d, 'ENABLE_EFLAME'}
+]}.
+```
+
+### Feature-Dependent Code
+
+```erlang
+%% Select storage backend based on feature
+select_store() ->
+    case hb_features:enabled(rocksdb) of
+        true -> 
+            {hb_store_rocksdb, #{path => "/data/rocksdb"}};
+        false ->
+            {hb_store_ets, #{}}
+    end.
+
+%% Conditional profiling
+maybe_profile(Fun) ->
+    case hb_features:enabled(eflame) of
+        true -> eflame:apply(Fun, []);
+        false -> Fun()
+    end.
+```
+
+### Quick Reference: Feature Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_features:all()` | Get all features as map |
+| `hb_features:enabled(Feature)` | Check if feature is on |
+| `hb_features:http3()` | HTTP/3 support |
+| `hb_features:rocksdb()` | RocksDB backend |
+| `hb_features:test()` | Test mode |
+| `hb_features:genesis_wasm()` | Genesis WASM |
+| `hb_features:eflame()` | Profiler support |
+
+---
+
+## Part 3: Private State
+
+> 📖 Reference: [hb_private](/src/hb_private)
+
+**Private state** is data stored in a message's `priv` field. It is:
+- **Not serialized** — Never sent over the network
+- **Not cached** — Excluded from content-addressed storage
+- **Temporary** — For internal state during execution
+
+### Why Private State?
+
+Private state is essential for:
+- Caching expensive computations
+- Storing device execution context
+- Keeping secrets during processing
+- Tracking non-deterministic data
+
+### Getting and Setting Private Data
+
+```erlang
+%% Set a private value
+Msg1 = #{<<"data">> => <<"public">>},
+Msg2 = hb_private:set(Msg1, <<"cache/result">>, 42, #{}).
+%% => #{<<"data">> => <<"public">>, <<"priv">> => #{<<"cache">> => #{<<"result">> => 42}}}
+
+%% Get a private value
+Result = hb_private:get(<<"cache/result">>, Msg2, #{}).
+%% => 42
+
+%% Get with default
+Missing = hb_private:get(<<"missing">>, Msg2, <<"default">>, #{}).
+%% => <<"default">>
+```
+
+### Deep Path Access
+
+Private state supports AO-Core path resolution:
+
+```erlang
+%% Set deeply nested value
+Msg = hb_private:set(#{}, <<"device/state/counter">>, 42, #{}),
+
+%% Access via path
+Counter = hb_private:get(<<"device/state/counter">>, Msg, #{}).
+%% => 42
+
+%% Path prefix is auto-removed
+Value = hb_private:get(<<"priv/device/state/counter">>, Msg, #{}).
+%% => 42 (same result)
+```
+
+### Extracting Private Data
+
+```erlang
+Msg = #{
+    <<"data">> => <<"public">>,
+    <<"priv">> => #{<<"secret">> => <<"hidden">>}
+},
+
+%% Get the entire private map
+Priv = hb_private:from_message(Msg).
+%% => #{<<"secret">> => <<"hidden">>}
+
+%% No private data returns empty map
+Empty = hb_private:from_message(#{<<"data">> => <<"public">>}).
+%% => #{}
+```
+
+### Merging Private State
+
+When combining messages, private state can be merged:
+
+```erlang
+Msg1 = #{<<"priv">> => #{<<"a">> => 1, <<"shared">> => <<"old">>}},
+Msg2 = #{<<"priv">> => #{<<"b">> => 2, <<"shared">> => <<"new">>}},
+
+Merged = hb_private:merge(Msg1, Msg2, #{}).
+%% Priv => #{<<"a">> => 1, <<"b">> => 2, <<"shared">> => <<"new">>}
+%% Msg2 values override Msg1
+```
+
+### Cleaning Private Data
+
+**Critical:** Always remove private data before serialization!
+
+```erlang
+%% Message with secrets
+Msg = #{
+    <<"data">> => <<"public">>,
+    <<"priv">> => #{<<"wallet">> => PrivateKey}
+},
+
+%% Clean before sending
+CleanMsg = hb_private:reset(Msg).
+%% => #{<<"data">> => <<"public">>}
+
+%% Now safe to serialize
+Binary = hb_message:serialize(CleanMsg).
+```
+
+The `reset/1` function recursively removes all private fields:
+
+```erlang
+%% Nested private data
+Nested = #{
+    <<"outer">> => #{
+        <<"inner">> => <<"value">>,
+        <<"priv">> => <<"hidden">>
+    }
+},
+
+Cleaned = hb_private:reset(Nested).
+%% => #{<<"outer">> => #{<<"inner">> => <<"value">>}}
+```
+
+### Checking Private Keys
+
+```erlang
+%% Check if a key is private
+hb_private:is_private(<<"priv">>).     %% => true
+hb_private:is_private(<<"private">>).  %% => true
+hb_private:is_private(<<"priv-data">>). %% => true
+hb_private:is_private(<<"data">>).     %% => false
+```
+
+### Quick Reference: Private Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_private:get(Key, Msg, Opts)` | Get private value |
+| `hb_private:get(Key, Msg, Default, Opts)` | Get with default |
+| `hb_private:set(Msg, Key, Value, Opts)` | Set private value |
+| `hb_private:set(Msg, PrivMap, Opts)` | Merge private map |
+| `hb_private:from_message(Msg)` | Extract private map |
+| `hb_private:merge(Msg1, Msg2, Opts)` | Merge private states |
+| `hb_private:reset(Term)` | Remove all private data |
+| `hb_private:is_private(Key)` | Check if key is private |
+
+---
+
+## Part 4: Path Management
+
+> 📖 Reference: [hb_path](/src/hb_path)
+
+Paths serve two purposes in HyperBEAM:
+1. **Request Paths** — Route messages to handlers
+2. **HashPaths** — Cryptographic message history
+
+### Request Paths
+
+Request paths control message routing:
+
+```erlang
+%% Get first path element
+Head = hb_path:hd(#{<<"path">> => [<<"a">>, <<"b">>, <<"c">>]}, #{}).
+%% => <<"a">>
+
+%% Get remaining path
+Tail = hb_path:tl(#{<<"path">> => [<<"a">>, <<"b">>, <<"c">>]}, #{}).
+%% => #{<<"path">> => [<<"b">>, <<"c">>]}
+
+%% Pop both at once
+{Head, Rest} = hb_path:pop_request(#{<<"path">> => [<<"a">>, <<"b">>]}, #{}).
+%% => {<<"a">>, #{<<"path">> => [<<"b">>]}}
+```
+
+### Building Paths
+
+**Push** adds to the front (next to execute):
+
+```erlang
+Msg1 = hb_path:push_request(#{}, <<"a">>),  %% path: [<<"a">>]
+Msg2 = hb_path:push_request(Msg1, <<"b">>). %% path: [<<"b">>, <<"a">>]
+```
+
+**Queue** adds to the back:
+
+```erlang
+Msg1 = hb_path:queue_request(#{}, <<"a">>),  %% path: [<<"a">>]
+Msg2 = hb_path:queue_request(Msg1, <<"b">>). %% path: [<<"a">>, <<"b">>]
+```
+
+### Path Conversion
+
+```erlang
+%% Binary to list
+Parts = hb_path:term_to_path_parts(<<"a/b/c">>).
+%% => [<<"a">>, <<"b">>, <<"c">>]
+
+%% List to binary
+Binary = hb_path:to_binary([<<"a">>, <<"b">>, <<"c">>]).
+%% => <<"a/b/c">>
+
+%% Normalize (add leading slash)
+Normalized = hb_path:normalize(<<"test">>).
+%% => <<"/test">>
+```
+
+### Path Matching
+
+```erlang
+%% Case-insensitive matching
+hb_path:matches(<<"Test">>, <<"test">>).
+%% => true
+
+%% Regex matching
+hb_path:regex_matches(<<"a/b/c">>, <<"a/.*/c">>).
+%% => true
+
+hb_path:regex_matches(<<"a/anything/c">>, <<"a/.*/c">>).
+%% => true
+```
+
+### HashPaths
+
+HashPaths create a cryptographic chain of message history:
+
+```erlang
+%% Single message
+Msg1 = #{<<"data">> => <<"initial">>},
+HP1 = hb_path:hashpath(Msg1, #{}).
+%% => <<"vKk...abc">> (43 bytes)
+
+%% Apply second message
+Msg2 = #{<<"action">> => <<"update">>},
+HP2 = hb_path:hashpath(Msg1, Msg2, #{}).
+%% => <<"vKk...abc/wLl...def">> (87 bytes)
+
+%% Store hashpath for next operation
+Msg3 = #{priv => #{<<"hashpath">> => HP2}}.
+```
+
+### Verifying HashPaths
+
+```erlang
+%% Build message chain
+Msg1 = #{<<"data">> => <<"initial">>},
+Msg2 = #{<<"action">> => <<"update">>},
+Msg3 = #{priv => #{<<"hashpath">> => hb_path:hashpath(Msg1, Msg2, #{})}},
+Msg4 = #{priv => #{<<"hashpath">> => hb_path:hashpath(Msg2, Msg3, #{})}},
+
+%% Verify the chain
+true = hb_path:verify_hashpath([Msg1, Msg2, Msg3, Msg4], #{}).
+```
+
+### Quick Reference: Path Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_path:hd(Msg, Opts)` | Get first path element |
+| `hb_path:tl(Msg, Opts)` | Get remaining path |
+| `hb_path:pop_request(Msg, Opts)` | Get head and tail |
+| `hb_path:push_request(Msg, Path)` | Add to front of path |
+| `hb_path:queue_request(Msg, Path)` | Add to end of path |
+| `hb_path:term_to_path_parts(Path)` | Convert to list |
+| `hb_path:to_binary(Path)` | Convert to binary |
+| `hb_path:normalize(Path)` | Add leading slash |
+| `hb_path:matches(Key1, Key2)` | Case-insensitive match |
+| `hb_path:regex_matches(Path, Pattern)` | Regex match |
+| `hb_path:hashpath(Msg, Opts)` | Get message hashpath |
+| `hb_path:hashpath(Msg1, Msg2, Opts)` | Chain two messages |
+| `hb_path:verify_hashpath(Msgs, Opts)` | Verify chain |
+
+---
+
+## Part 5: Putting It Together
+
+### Complete Configuration Example
+
+```erlang
+-module(test_config).
+-include_lib("eunit/include/eunit.hrl").
+
+full_config_test() ->
+    %% 1. Check available features
+    Features = hb_features:all(),
+    ?debugFmt("Features: ~p", [Features]),
+    
+    %% 2. Load configuration
+    {ok, FileConfig} = hb_opts:load("config.json"),
+    
+    %% 3. Merge with defaults
+    Defaults = hb_opts:default_message_with_env(),
+    NodeConfig = hb_maps:merge(Defaults, FileConfig),
+    
+    %% 4. Create message with options
+    Msg = #{
+        <<"device">> => <<"Process@1.0">>,
+        <<"path">> => <<"execute">>
+    },
+    
+    %% 5. Add private state
+    MsgWithPriv = hb_private:set(Msg, <<"cache/state">>, #{counter => 0}, #{}),
+    
+    %% 6. Use local override
+    LocalOpts = NodeConfig#{gateway => <<"https://custom.gateway">>},
+    Gateway = hb_opts:get(gateway, <<"default">>, LocalOpts),
+    ?assertEqual(<<"https://custom.gateway">>, Gateway),
+    
+    %% 7. Verify private data not serialized
+    Serialized = hb_message:serialize(hb_private:reset(MsgWithPriv)),
+    Recovered = hb_message:deserialize(Serialized),
+    ?assertEqual(#{}, hb_private:from_message(Recovered)).
+```
+
+### Multi-Identity Operations
+
+```erlang
+identity_test() ->
+    %% Create wallets
+    MainWallet = ar_wallet:new(),
+    AliceWallet = ar_wallet:new(),
+    BobWallet = ar_wallet:new(),
+    
+    %% Configure identities
+    Opts = #{
+        priv_wallet => MainWallet,
+        identities => #{
+            <<"alice">> => #{priv_wallet => AliceWallet},
+            <<"bob">> => #{priv_wallet => BobWallet}
+        }
+    },
+    
+    %% Switch identity
+    {ok, AliceOpts} = hb_opts:as(<<"alice">>, Opts),
+    {ok, BobOpts} = hb_opts:as(<<"bob">>, Opts),
+    
+    %% Each identity has its own wallet
+    AliceAddr = ar_wallet:to_address(maps:get(priv_wallet, AliceOpts)),
+    BobAddr = ar_wallet:to_address(maps:get(priv_wallet, BobOpts)),
+    ?assertNotEqual(AliceAddr, BobAddr).
+```
+
+### Feature-Conditional Initialization
+
+```erlang
+init_node(Opts) ->
+    %% Check required features
+    Required = [rocksdb],
+    Missing = [F || F <- Required, not hb_features:enabled(F)],
+    case Missing of
+        [] -> 
+            ok;
+        _ -> 
+            error({missing_features, Missing})
+    end,
+    
+    %% Select store based on features
+    Store = case hb_features:enabled(rocksdb) of
+        true -> hb_store_rocksdb;
+        false -> hb_store_lmdb
+    end,
+    
+    %% Configure node
+    NodeOpts = Opts#{
+        store => Store,
+        store_path => hb_opts:get(data_dir, <<"/data">>, Opts)
+    },
+    
+    {ok, NodeOpts}.
+```
+
+### Request Path Processing
+
+```erlang
+process_path(Msg, Opts) ->
+    case hb_path:pop_request(Msg, Opts) of
+        undefined -> 
+            %% No more path elements
+            {ok, Msg};
+        {Head, Rest} ->
+            %% Process current element
+            io:format("Processing: ~s~n", [Head]),
+            
+            %% Store progress in private state
+            UpdatedRest = hb_private:set(Rest, <<"processed">>, Head, Opts),
+            
+            %% Continue with remaining path
+            process_path(UpdatedRest, Opts)
+    end.
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Configuration Loading
+
+```erlang
+%% Load config with fallback
+load_config() ->
+    ConfigPath = hb_opts:get(config_path, "config.flat"),
+    case hb_opts:load(ConfigPath) of
+        {ok, Config} -> 
+            hb_maps:merge(hb_opts:default_message(), Config);
+        {error, _} ->
+            hb_opts:default_message()
+    end.
+```
+
+### Pattern 2: Feature Guards
+
+```erlang
+%% Guard function execution with feature check
+with_feature(Feature, Fun) ->
+    case hb_features:enabled(Feature) of
+        true -> Fun();
+        false -> {error, {feature_disabled, Feature}}
+    end.
+
+%% Usage
+Result = with_feature(http3, fun() -> 
+    start_http3_listener(Port) 
+end).
+```
+
+### Pattern 3: Private Cache
+
+```erlang
+%% Cache expensive computation
+cached_compute(Msg, Key, ComputeFun, Opts) ->
+    CacheKey = <<"cache/", Key/binary>>,
+    case hb_private:get(CacheKey, Msg, Opts) of
+        not_found ->
+            Result = ComputeFun(),
+            UpdatedMsg = hb_private:set(Msg, CacheKey, Result, Opts),
+            {Result, UpdatedMsg};
+        Cached ->
+            {Cached, Msg}
+    end.
+```
+
+### Pattern 4: Clean Serialization
+
+```erlang
+%% Always clean before sending
+serialize_message(Msg) ->
+    CleanMsg = hb_private:reset(Msg),
+    hb_message:serialize(CleanMsg).
+```
+
+---
+
+## What's Next?
+
+You now understand HyperBEAM configuration:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Options | [`hb_opts`](/src/hb_opts) | `get`, `load`, `default_message` |
+| Features | [`hb_features`](/src/hb_features) | `all`, `enabled`, feature checks |
+| Private State | [`hb_private`](/src/hb_private) | `get`, `set`, `reset`, `from_message` |
+| Paths | [`hb_path`](/src/hb_path) | `hd`, `tl`, `push_request`, `hashpath` |
+
+### Going Further
+
+1. **Storage System** — How data is persisted ([hb_store](/src/hb_store))
+2. **Message System** — Creating and signing messages ([hb_message](/src/hb_message))
+3. **AO Protocol** — The core execution engine ([hb_ao](/src/hb_ao))
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_opts](/src/hb_opts) | [hb_features](/src/hb_features) | [hb_private](/src/hb_private) | [hb_path](/src/hb_path)
+
+```erlang
+%% === OPTIONS ===
+Val = hb_opts:get(key).
+Val = hb_opts:get(key, default).
+Val = hb_opts:get(key, default, Opts).
+{ok, Cfg} = hb_opts:load("config.json").
+Defaults = hb_opts:default_message().
+
+%% === FEATURES ===
+Features = hb_features:all().
+Enabled = hb_features:enabled(feature).
+true = hb_features:rocksdb().
+false = hb_features:http3().
+
+%% === PRIVATE STATE ===
+Val = hb_private:get(Key, Msg, Opts).
+Val = hb_private:get(Key, Msg, Default, Opts).
+Msg2 = hb_private:set(Msg, Key, Value, Opts).
+Msg2 = hb_private:set(Msg, PrivMap, Opts).
+Priv = hb_private:from_message(Msg).
+Clean = hb_private:reset(Msg).
+true = hb_private:is_private(<<"priv">>).
+
+%% === PATHS ===
+Head = hb_path:hd(Msg, Opts).
+Tail = hb_path:tl(Msg, Opts).
+{H, T} = hb_path:pop_request(Msg, Opts).
+Msg2 = hb_path:push_request(Msg, Path).
+Msg2 = hb_path:queue_request(Msg, Path).
+Parts = hb_path:term_to_path_parts(<<"a/b/c">>).
+Bin = hb_path:to_binary([<<"a">>, <<"b">>]).
+true = hb_path:matches(<<"A">>, <<"a">>).
+HP = hb_path:hashpath(Msg1, Msg2, Opts).
+true = hb_path:verify_hashpath(Msgs, Opts).
+```
+
+---
+
+*Now go configure something permanent!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_opts Reference](/src/hb_opts) — Options system
+- [hb_features Reference](/src/hb_features) — Feature flags
+- [hb_private Reference](/src/hb_private) — Private state
+- [hb_path Reference](/src/hb_path) — Path management
+- [Full Reference](/hyperbeam) — All modules
+
+**Related Tutorials**
+- [Arweave Primitives](/book/ar) — Wallets, data items, bundles
+- [The HyperBEAM Book](/book) — Complete learning path

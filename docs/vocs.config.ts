@@ -266,6 +266,56 @@ export default defineConfig({
           text: "Arweave Utils",
           link: "/book/ar",
         },
+        {
+          text: "HB Core",
+          collapsed: true,
+          items: [
+            {
+              text: "Utilities",
+              link: "/book/hb1",
+            },
+            {
+              text: "Configuration",
+              link: "/book/hb2",
+            },
+            {
+              text: "Data Structure",
+              link: "/book/hb3",
+            },
+            {
+              text: "Storage",
+              link: "/book/hb4",
+            },
+            {
+              text: "Caching",
+              link: "/book/hb5",
+            },
+            {
+              text: "HTTP Client",
+              link: "/book/hb6",
+            },
+            {
+              text: "Remote Storage",
+              link: "/book/hb7",
+            },
+            {
+              text: "Protocol",
+              link: "/book/hb8",
+            },
+            {
+              text: "HTTP Server",
+              link: "/book/hb9",
+            },
+            {
+              text: "WASM",
+              link: "/book/hb10",
+            },
+            {
+              text: "Application",
+              link: "/book/hb11",
+            },
+          ],
+        },
       ],
     },
     {

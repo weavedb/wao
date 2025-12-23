@@ -1,0 +1,870 @@
+# Storing Data with HyperBEAM
+
+A guide to pluggable storage backends and caching
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Storage Abstraction** — The unified interface for all storage operations
+2. **Backend Selection** — Choosing between Filesystem, LMDB, RocksDB, and LRU
+3. **Store Chains** — Fallback patterns for tiered storage
+4. **Groups and Links** — Hierarchical data organization with symlinks
+5. How these pieces form HyperBEAM's **persistent data layer**
+
+Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM uses a **pluggable storage architecture**. All storage operations flow through a unified interface (`hb_store`), which delegates to backend-specific implementations. This lets you swap storage engines without changing application code.
+
+Here's the mental model:
+
+```
+Application → hb_store → Backend (FS, LMDB, RocksDB, LRU)
+                ↓               ↓
+           Unified API     Actual Storage
+```
+
+Think of it like database drivers:
+- **hb_store** = The database interface (like JDBC/ODBC)
+- **Backends** = Specific database drivers (PostgreSQL, MySQL, SQLite)
+- **Store Chains** = Connection pooling with fallbacks
+- **Groups/Links** = Directories and symbolic links
+
+Let's build each piece.
+
+---
+
+## Part 1: The Store Interface
+
+> 📖 Reference: [hb_store](/src/hb_store)
+
+The `hb_store` module provides a unified API for all storage operations. Every backend implements the same behavior, so you can swap implementations without changing your code.
+
+### Creating a Store
+
+A store is a map with configuration options:
+
+```erlang
+%% Create a filesystem store
+Store = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"data/storage">>
+}.
+
+%% Start the store (ensures it's ready)
+ok = hb_store:start(Store).
+```
+
+The two essential fields:
+1. **`<<"store-module">>`** — Which backend to use
+2. **`<<"name">>`** — Store identifier (usually a path)
+
+### Basic Operations
+
+```erlang
+%% Write a value
+ok = hb_store:write(Store, <<"user">>, <<"alice">>).
+
+%% Read it back
+{ok, <<"alice">>} = hb_store:read(Store, <<"user">>).
+
+%% Check if key exists and its type
+simple = hb_store:type(Store, <<"user">>).
+
+%% Not found returns atom, not error
+not_found = hb_store:read(Store, <<"missing">>).
+```
+
+### Hierarchical Keys
+
+Keys can be flat binaries or nested lists:
+
+```erlang
+%% Create a group (directory)
+ok = hb_store:make_group(Store, <<"users">>).
+
+%% Write with nested path
+ok = hb_store:write(Store, [<<"users">>, <<"alice">>], <<"data1">>).
+ok = hb_store:write(Store, [<<"users">>, <<"bob">>], <<"data2">>).
+
+%% List group contents
+{ok, [<<"alice">>, <<"bob">>]} = hb_store:list(Store, <<"users">>).
+```
+
+### Symbolic Links
+
+Create aliases that resolve to other keys:
+
+```erlang
+%% Write original data
+ok = hb_store:write(Store, <<"original">>, <<"content">>).
+
+%% Create a link
+ok = hb_store:make_link(Store, <<"original">>, <<"alias">>).
+
+%% Reading alias returns original's value
+{ok, <<"content">>} = hb_store:read(Store, <<"alias">>).
+
+%% Resolve to see where link points
+<<"original">> = hb_store:resolve(Store, <<"alias">>).
+```
+
+### Quick Reference: Store Operations
+
+| Function | What it does |
+|----------|--------------|
+| `hb_store:start(Store)` | Initialize store |
+| `hb_store:stop(Store)` | Shutdown store |
+| `hb_store:reset(Store)` | Clear all data |
+| `hb_store:read(Store, Key)` | Get value |
+| `hb_store:write(Store, Key, Value)` | Set value |
+| `hb_store:type(Store, Key)` | Check `simple` / `composite` / `not_found` |
+| `hb_store:list(Store, Key)` | List group contents |
+| `hb_store:make_group(Store, Key)` | Create directory |
+| `hb_store:make_link(Store, Existing, New)` | Create symlink |
+| `hb_store:resolve(Store, Key)` | Follow all links |
+
+---
+
+## Part 2: Filesystem Backend
+
+> 📖 Reference: [hb_store_fs](/src/hb_store_fs)
+
+The filesystem backend stores data as regular files. It's the simplest option—values become files, groups become directories, links become symlinks.
+
+### Configuration
+
+```erlang
+%% Basic filesystem store
+FSStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"data/cache">>
+}.
+
+%% With absolute path
+FSStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"/var/hyperbeam/storage">>
+}.
+```
+
+### File Structure
+
+```erlang
+%% These operations...
+hb_store:write(Store, <<"key">>, <<"value">>),
+hb_store:make_group(Store, <<"users">>),
+hb_store:write(Store, [<<"users">>, <<"alice">>], <<"data">>),
+
+%% ...create this filesystem structure:
+%% data/cache/
+%% ├── key           (file containing "value")
+%% └── users/        (directory)
+%%     └── alice     (file containing "data")
+```
+
+### Symlink Resolution
+
+The filesystem backend uses real OS symlinks:
+
+```erlang
+%% Create data and link
+hb_store_fs:write(Store, <<"target">>, <<"data">>),
+hb_store_fs:make_link(Store, <<"target">>, <<"link">>),
+
+%% On disk: link -> target (actual symlink)
+%% Reading link follows it automatically
+{ok, <<"data">>} = hb_store_fs:read(Store, <<"link">>).
+```
+
+### FUSE Integration
+
+Because it's real filesystem access, you can mount cloud storage:
+
+```erlang
+%% Mount S3 bucket via s3fs
+%% $ s3fs mybucket /mnt/s3-storage
+
+%% Use as HyperBEAM store
+S3Store = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"/mnt/s3-storage">>
+},
+hb_store_fs:start(S3Store),
+ok = hb_store_fs:write(S3Store, <<"key">>, <<"value">>).
+%% Data written to S3!
+```
+
+### When to Use
+
+- Development and testing
+- Small deployments
+- When you need direct file access
+- With FUSE for cloud storage
+- When simplicity matters most
+
+---
+
+## Part 3: LMDB Backend
+
+> 📖 Reference: [hb_store_lmdb](/src/hb_store_lmdb)
+
+LMDB (Lightning Memory-Mapped Database) is the **default backend** for HyperBEAM. It's fast, reliable, and supports concurrent readers with a single writer.
+
+### Configuration
+
+```erlang
+%% Basic LMDB store
+LMDBStore = #{
+    <<"store-module">> => hb_store_lmdb,
+    <<"name">> => <<"cache-mainnet/lmdb">>,
+    <<"capacity">> => 16 * 1024 * 1024 * 1024  % 16GB
+}.
+
+%% Start initializes database
+{ok, Instance} = hb_store_lmdb:start(LMDBStore).
+```
+
+The `capacity` sets the maximum database size. LMDB pre-allocates this space using memory-mapped files.
+
+### Asynchronous Writes
+
+LMDB batches writes for performance:
+
+```erlang
+%% Writes return immediately
+ok = hb_store_lmdb:write(Store, <<"key1">>, <<"value1">>),
+ok = hb_store_lmdb:write(Store, <<"key2">>, <<"value2">>),
+ok = hb_store_lmdb:write(Store, <<"key3">>, <<"value3">>).
+%% Flushed to disk periodically or when buffer fills
+```
+
+### Link Format
+
+LMDB stores links as prefixed values:
+
+```erlang
+%% Links stored as "link:target"
+hb_store_lmdb:make_link(Store, <<"target">>, <<"link">>),
+%% Internally: <<"link">> → <<"link:target">>
+
+%% Reading automatically follows
+{ok, <<"data">>} = hb_store_lmdb:read(Store, <<"link">>).
+```
+
+### When to Use
+
+- Production deployments (it's the default)
+- Read-heavy workloads (concurrent readers)
+- When you need ACID transactions
+- Memory-constrained environments
+- Most general-purpose storage needs
+
+---
+
+## Part 4: RocksDB Backend
+
+> 📖 Reference: [hb_store_rocksdb](/src/hb_store_rocksdb)
+
+RocksDB is an LSM-tree database optimized for write-heavy workloads. It must be enabled at compile time.
+
+### Enabling RocksDB
+
+```bash
+# Compile with RocksDB support
+ENABLE_ROCKSDB=1 rebar3 compile
+```
+
+### Configuration
+
+```erlang
+%% Check if available
+true = hb_store_rocksdb:enabled().
+
+%% Create store
+RocksStore = #{
+    <<"store-module">> => hb_store_rocksdb,
+    <<"name">> => <<"cache-mainnet/rocksdb">>
+}.
+
+%% Start the gen_server
+{ok, Pid} = hb_store_rocksdb:start_link(RocksStore).
+```
+
+### Value Encoding
+
+RocksDB uses prefix bytes to encode types:
+
+```erlang
+%% Internal encoding:
+%% Raw data:  <<0, Data/binary>>
+%% Links:     <<1, Target/binary>>
+%% Groups:    <<2, EncodedSet/binary>>
+
+%% You don't see this—the API handles it
+hb_store_rocksdb:write(Store, <<"key">>, <<"value">>),
+{ok, <<"value">>} = hb_store_rocksdb:read(Store, <<"key">>).
+```
+
+### Automatic Folder Creation
+
+Writing to nested paths creates parent groups:
+
+```erlang
+%% Writing to a/b/c/item...
+hb_store_rocksdb:write(Store, <<"a/b/c/item">>, <<"value">>).
+
+%% ...automatically creates:
+%% <<"a">>       → group([<<"b">>])
+%% <<"a/b">>     → group([<<"c">>])
+%% <<"a/b/c">>   → group([<<"item">>])
+%% <<"a/b/c/item">> → raw(<<"value">>)
+```
+
+### When to Use
+
+- Write-heavy workloads
+- Large datasets with compaction needs
+- When you need LSM-tree benefits
+- High-throughput ingestion
+
+---
+
+## Part 5: LRU Cache Layer
+
+> 📖 Reference: [hb_store_lru](/src/hb_store_lru)
+
+The LRU (Least Recently Used) store wraps any backend with an in-memory cache. Hot data stays in RAM; cold data evicts to the backing store.
+
+### Configuration
+
+```erlang
+%% Persistent backing store
+PersistentStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"cache-mainnet">>
+},
+
+%% LRU cache wrapping it
+LRUStore = #{
+    <<"store-module">> => hb_store_lru,
+    <<"name">> => <<"main-cache">>,
+    <<"capacity">> => 4_000_000_000,  % 4GB in-memory
+    <<"persistent-store">> => PersistentStore
+},
+
+{ok, _Instance} = hb_store_lru:start(LRUStore).
+```
+
+### Automatic Eviction
+
+When cache fills up, least-recently-used entries move to persistent storage:
+
+```erlang
+%% Write some data
+hb_store_lru:write(Store, <<"key1">>, LargeData1),
+hb_store_lru:write(Store, <<"key2">>, LargeData2),
+
+%% Access key1 (makes it "recent")
+hb_store_lru:read(Store, <<"key1">>),
+
+%% Write more (triggers eviction of key2)
+hb_store_lru:write(Store, <<"key3">>, LargeData3).
+
+%% key2 evicted to persistent store, but still accessible
+{ok, LargeData2} = hb_store_lru:read(Store, <<"key2">>).
+```
+
+### Cache Miss Handling
+
+On cache miss, LRU checks the persistent store:
+
+```erlang
+%% Data not in RAM cache
+not_in_cache = ets:lookup(CacheTable, <<"cold-key">>),
+
+%% But read still works (fetches from persistent store)
+{ok, Value} = hb_store_lru:read(Store, <<"cold-key">>).
+```
+
+### Shutdown Offload
+
+When stopping, all cached data moves to persistent storage:
+
+```erlang
+%% Write to cache
+hb_store_lru:write(Store, <<"key1">>, <<"value1">>),
+hb_store_lru:write(Store, <<"key2">>, <<"value2">>),
+
+%% Stop (offloads everything)
+ok = hb_store_lru:stop(Store).
+
+%% Later, persistent store has the data
+{ok, <<"value1">>} = hb_store:read(PersistentStore, <<"key1">>).
+```
+
+### When to Use
+
+- Frequently accessed data
+- When RAM is plentiful
+- Read-heavy workloads
+- As a caching layer over slow storage
+
+---
+
+## Part 6: Store Chains
+
+> 📖 Reference: [hb_store](/src/hb_store)
+
+Store chains let you combine multiple backends with automatic fallback. Operations try each store in order until one succeeds.
+
+### Fallback Pattern
+
+```erlang
+%% Define a chain: try fast first, then slow
+Stores = [
+    #{<<"store-module">> => hb_store_lru, <<"name">> => <<"hot">>},
+    #{<<"store-module">> => hb_store_lmdb, <<"name">> => <<"warm">>},
+    #{<<"store-module">> => hb_store_gateway, <<"name">> => <<"cold">>}
+],
+
+%% Read checks each in order
+{ok, Value} = hb_store:read(Stores, Key).
+%% Tries LRU → LMDB → Gateway
+```
+
+### Tiered Storage
+
+Combine scopes for sophisticated data flow:
+
+```erlang
+%% Memory → Local → Remote
+Stores = [
+    #{
+        <<"store-module">> => hb_store_lru,
+        <<"name">> => <<"memory">>,
+        <<"scope">> => in_memory
+    },
+    #{
+        <<"store-module">> => hb_store_lmdb,
+        <<"name">> => <<"local">>,
+        <<"scope">> => local
+    },
+    #{
+        <<"store-module">> => hb_store_gateway,
+        <<"name">> => <<"arweave">>,
+        <<"scope">> => remote
+    }
+].
+```
+
+### Access Control
+
+Limit what operations each store allows:
+
+```erlang
+%% Read-only store (cache, no writes)
+ReadOnlyStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"archive">>,
+    <<"access">> => [<<"read">>]
+},
+
+%% Write-only store (ingestion, no reads)
+WriteOnlyStore = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"inbox">>,
+    <<"access">> => [<<"write">>]
+},
+
+%% Chain respects access policies
+Chain = [ReadOnlyStore, WriteOnlyStore],
+ok = hb_store:write(Chain, Key, Value).
+%% Skips ReadOnlyStore, writes to WriteOnlyStore
+```
+
+### Scope Filtering
+
+Filter chains by storage scope:
+
+```erlang
+%% Get only local stores
+LocalStores = hb_store:scope(Opts, local).
+
+%% Get local and in-memory
+FastStores = hb_store:scope(Opts, [in_memory, local]).
+```
+
+---
+
+## Part 7: Store Configuration
+
+> 📖 Reference: [hb_store_opts](/src/hb_store_opts)
+
+The `hb_store_opts` module applies default configuration to stores based on their type.
+
+### Applying Defaults
+
+```erlang
+%% Store configurations without all options
+StoreOpts = [
+    #{<<"name">> => <<"db1">>, <<"store-module">> => hb_store_lmdb},
+    #{<<"name">> => <<"db2">>, <<"store-module">> => hb_store_fs}
+],
+
+%% Default values by type
+Defaults = #{
+    <<"lmdb">> => #{<<"capacity">> => 16_000_000_000},
+    <<"fs">> => #{<<"buffer-size">> => 4096}
+},
+
+%% Apply defaults
+UpdatedOpts = hb_store_opts:apply(StoreOpts, Defaults).
+%% db1 now has capacity=16GB, db2 has buffer-size=4096
+```
+
+### Precedence Rules
+
+Store options override defaults:
+
+```erlang
+%% User specifies capacity
+StoreOpt = #{
+    <<"name">> => <<"mydb">>,
+    <<"store-module">> => hb_store_lmdb,
+    <<"capacity">> => 1_000_000  % User value
+},
+
+Defaults = #{
+    <<"lmdb">> => #{
+        <<"capacity">> => 16_000_000_000,  % Default value
+        <<"sync">> => true                  % Additional default
+    }
+},
+
+%% Result:
+%% <<"capacity">> => 1_000_000   (kept from user)
+%% <<"sync">> => true            (added from defaults)
+```
+
+### Nested Store Configuration
+
+Defaults apply recursively to nested stores:
+
+```erlang
+%% Gateway with nested LMDB
+StoreOpts = [
+    #{
+        <<"store-module">> => hb_store_gateway,
+        <<"store">> => [
+            #{
+                <<"name">> => <<"cache">>,
+                <<"store-module">> => hb_store_lmdb
+            }
+        ]
+    }
+],
+
+Defaults = #{
+    <<"gateway">> => #{<<"timeout">> => 30000},
+    <<"lmdb">> => #{<<"capacity">> => 5_000_000_000}
+},
+
+UpdatedOpts = hb_store_opts:apply(StoreOpts, Defaults).
+%% Gateway gets timeout, nested LMDB gets capacity
+```
+
+---
+
+## Part 8: Complete Example
+
+Let's put it all together with a test module:
+
+```erlang
+-module(test_hb_store).
+-include_lib("eunit/include/eunit.hrl").
+
+%% Helper: create unique store name
+unique_store(Backend) ->
+    Id = integer_to_binary(erlang:unique_integer([positive])),
+    #{
+        <<"store-module">> => Backend,
+        <<"name">> => <<"cache-TEST/", Id/binary>>
+    }.
+
+%% Test basic read/write
+basic_rw_test() ->
+    Store = unique_store(hb_store_fs),
+    hb_store:start(Store),
+    
+    Key = <<"test-key">>,
+    Value = <<"test-value">>,
+    
+    ?assertEqual(ok, hb_store:write(Store, Key, Value)),
+    ?assertEqual({ok, Value}, hb_store:read(Store, Key)),
+    ?assertEqual(not_found, hb_store:read(Store, <<"missing">>)),
+    
+    hb_store:reset(Store).
+
+%% Test hierarchical keys
+hierarchical_test() ->
+    Store = unique_store(hb_store_fs),
+    hb_store:start(Store),
+    
+    %% Create group
+    ok = hb_store:make_group(Store, <<"users">>),
+    ?assertEqual(composite, hb_store:type(Store, <<"users">>)),
+    
+    %% Write nested items
+    ok = hb_store:write(Store, [<<"users">>, <<"alice">>], <<"data1">>),
+    ok = hb_store:write(Store, [<<"users">>, <<"bob">>], <<"data2">>),
+    
+    %% List contents
+    {ok, Items} = hb_store:list(Store, <<"users">>),
+    ?assertEqual(2, length(Items)),
+    ?assert(lists:member(<<"alice">>, Items)),
+    
+    hb_store:reset(Store).
+
+%% Test symbolic links
+symlink_test() ->
+    Store = unique_store(hb_store_fs),
+    hb_store:start(Store),
+    
+    %% Create target and link
+    ok = hb_store:write(Store, <<"original">>, <<"content">>),
+    ok = hb_store:make_link(Store, <<"original">>, <<"alias">>),
+    
+    %% Read through link
+    {ok, <<"content">>} = hb_store:read(Store, <<"alias">>),
+    
+    %% Resolve shows target
+    <<"original">> = hb_store:resolve(Store, <<"alias">>),
+    
+    hb_store:reset(Store).
+
+%% Test store chain fallback
+chain_fallback_test() ->
+    Store1 = unique_store(hb_store_fs),
+    Store2 = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/chain-backup">>
+    },
+    
+    hb_store:start(Store1),
+    hb_store:start(Store2),
+    
+    %% Write only to Store2
+    hb_store:write(Store2, <<"key">>, <<"in-backup">>),
+    
+    %% Chain finds it (Store1 misses, Store2 hits)
+    Chain = [Store1, Store2],
+    ?assertEqual({ok, <<"in-backup">>}, hb_store:read(Chain, <<"key">>)),
+    
+    hb_store:reset(Store1),
+    hb_store:reset(Store2).
+
+%% Test LRU with eviction
+lru_eviction_test() ->
+    PersistentStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/lru-persist">>
+    },
+    LRUStore = #{
+        <<"store-module">> => hb_store_lru,
+        <<"name">> => <<"test-evict">>,
+        <<"capacity">> => 500,  % Very small
+        <<"persistent-store">> => PersistentStore
+    },
+    
+    {ok, _} = hb_store_lru:start(LRUStore),
+    
+    %% Write data that exceeds capacity
+    Data = crypto:strong_rand_bytes(200),
+    hb_store_lru:write(LRUStore, <<"key1">>, Data),
+    hb_store_lru:write(LRUStore, <<"key2">>, Data),
+    hb_store_lru:read(LRUStore, <<"key1">>),  % Make key1 recent
+    hb_store_lru:write(LRUStore, <<"key3">>, Data),  % Evicts key2
+    
+    %% key1 still in cache
+    ?assertEqual({ok, Data}, hb_store_lru:read(LRUStore, <<"key1">>)),
+    
+    %% Stop and cleanup
+    hb_store_lru:stop(LRUStore),
+    hb_store:reset(PersistentStore).
+```
+
+Run the tests:
+
+```bash
+rebar3 eunit --module=test_hb_store
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Initialize → Use → Cleanup
+
+```erlang
+Store = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"data">>},
+hb_store:start(Store),
+
+%% Use the store
+ok = hb_store:write(Store, <<"key">>, <<"value">>),
+{ok, <<"value">>} = hb_store:read(Store, <<"key">>),
+
+%% Cleanup
+hb_store:stop(Store).
+```
+
+### Pattern 2: Check Type Before Operation
+
+```erlang
+case hb_store:type(Store, Key) of
+    simple -> 
+        {ok, Value} = hb_store:read(Store, Key),
+        process_value(Value);
+    composite -> 
+        {ok, Items} = hb_store:list(Store, Key),
+        process_directory(Items);
+    not_found -> 
+        create_new(Key)
+end.
+```
+
+### Pattern 3: Tiered Storage Chain
+
+```erlang
+%% Fast → Medium → Slow fallback
+Stores = [
+    #{<<"store-module">> => hb_store_lru, <<"name">> => <<"hot">>},
+    #{<<"store-module">> => hb_store_lmdb, <<"name">> => <<"warm">>},
+    #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cold">>}
+],
+{ok, Value} = hb_store:read(Stores, Key).
+```
+
+### Pattern 4: Content Deduplication with Links
+
+```erlang
+%% Store content by hash
+Hash = crypto:hash(sha256, Content),
+HashKey = hb_util:encode(Hash),
+ok = hb_store:write(Store, [<<"data">>, HashKey], Content),
+
+%% Multiple references via links
+ok = hb_store:make_link(Store, [<<"data">>, HashKey], <<"msg1/body">>),
+ok = hb_store:make_link(Store, [<<"data">>, HashKey], <<"msg2/body">>),
+ok = hb_store:make_link(Store, [<<"data">>, HashKey], <<"msg3/body">>).
+%% Content stored once, referenced three times
+```
+
+---
+
+## What's Next?
+
+You now understand HyperBEAM's storage layer:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Store Interface | [`hb_store`](/src/hb_store) | `read`, `write`, `list`, `make_group`, `make_link` |
+| Filesystem | [`hb_store_fs`](/src/hb_store_fs) | Direct file operations, symlinks |
+| LMDB | [`hb_store_lmdb`](/src/hb_store_lmdb) | Fast embedded database, default backend |
+| RocksDB | [`hb_store_rocksdb`](/src/hb_store_rocksdb) | Write-optimized LSM-tree |
+| LRU Cache | [`hb_store_lru`](/src/hb_store_lru) | In-memory cache with eviction |
+| Configuration | [`hb_store_opts`](/src/hb_store_opts) | Default configuration management |
+
+### Going Further
+
+1. **Caching Layer** — `hb_cache` builds on storage for content-addressed caching
+2. **Remote Storage** — `hb_store_gateway` fetches from Arweave on cache miss
+3. **Message Storage** — How HyperBEAM stores messages using these primitives
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_store](/src/hb_store) | [hb_store_fs](/src/hb_store_fs) | [hb_store_lmdb](/src/hb_store_lmdb)
+
+```erlang
+%% === STORE CONFIGURATION ===
+FSStore = #{<<"store-module">> => hb_store_fs, <<"name">> => <<"data">>}.
+LMDBStore = #{<<"store-module">> => hb_store_lmdb, <<"name">> => <<"db">>}.
+RocksStore = #{<<"store-module">> => hb_store_rocksdb, <<"name">> => <<"rocks">>}.
+LRUStore = #{
+    <<"store-module">> => hb_store_lru,
+    <<"name">> => <<"cache">>,
+    <<"capacity">> => 4_000_000_000,
+    <<"persistent-store">> => FSStore
+}.
+
+%% === LIFECYCLE ===
+ok = hb_store:start(Store).
+ok = hb_store:stop(Store).
+ok = hb_store:reset(Store).
+
+%% === BASIC OPERATIONS ===
+ok = hb_store:write(Store, Key, Value).
+{ok, Value} = hb_store:read(Store, Key).
+not_found = hb_store:read(Store, <<"missing">>).
+
+%% === TYPE CHECKING ===
+simple = hb_store:type(Store, <<"file">>).
+composite = hb_store:type(Store, <<"directory">>).
+not_found = hb_store:type(Store, <<"missing">>).
+
+%% === HIERARCHICAL ===
+ok = hb_store:make_group(Store, <<"dir">>).
+ok = hb_store:write(Store, [<<"dir">>, <<"file">>], Value).
+{ok, Items} = hb_store:list(Store, <<"dir">>).
+
+%% === LINKS ===
+ok = hb_store:make_link(Store, <<"target">>, <<"alias">>).
+{ok, Value} = hb_store:read(Store, <<"alias">>).
+<<"target">> = hb_store:resolve(Store, <<"alias">>).
+
+%% === STORE CHAINS ===
+Chain = [FastStore, SlowStore, RemoteStore].
+{ok, Value} = hb_store:read(Chain, Key).
+
+%% === SCOPE FILTERING ===
+LocalStores = hb_store:scope(Opts, local).
+FastStores = hb_store:scope(Opts, [in_memory, local]).
+
+%% === ACCESS CONTROL ===
+ReadOnly = #{<<"store-module">> => hb_store_fs, <<"access">> => [<<"read">>]}.
+WriteOnly = #{<<"store-module">> => hb_store_fs, <<"access">> => [<<"write">>]}.
+```
+
+---
+
+*Now go build something persistent!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_store Reference](/src/hb_store) — Storage interface
+- [hb_store_fs Reference](/src/hb_store_fs) — Filesystem backend
+- [hb_store_lmdb Reference](/src/hb_store_lmdb) — LMDB backend
+- [hb_store_rocksdb Reference](/src/hb_store_rocksdb) — RocksDB backend
+- [hb_store_lru Reference](/src/hb_store_lru) — LRU cache layer
+- [hb_store_opts Reference](/src/hb_store_opts) — Configuration defaults
+- [Full Reference](/hyperbeam) — All modules
+
+**Backend Documentation**
+- [LMDB](http://www.lmdb.tech/doc/) — Lightning Memory-Mapped Database
+- [RocksDB](http://rocksdb.org/) — LSM-tree storage engine
+- [Erlang ETS](https://www.erlang.org/doc/man/ets.html) — Used by LRU cache
+
+**Related Tutorials**
+- [Arweave Utils Tutorial](/book/ar) — Store data permanently on Arweave
+- [HyperBEAM Book](/book) — Complete learning path

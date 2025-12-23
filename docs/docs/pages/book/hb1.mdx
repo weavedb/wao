@@ -1,0 +1,685 @@
+# HyperBEAM Utility Functions
+
+A beginner's guide to the pure helper functions used throughout HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Type Coercion** — Converting between Erlang types
+2. **Encoding** — Base64url encoding for IDs and data
+3. **JSON** — Serializing and deserializing data
+4. **Hashing** — Cryptographic hashes and commitments
+5. **Escaping** — HTTP header encoding
+6. How these utilities form the **foundation** of HyperBEAM
+
+No prior HyperBEAM knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM's utility modules are **pure functions** — they have no side effects and always return the same output for the same input. This makes them predictable, testable, and composable.
+
+Here's how they fit together:
+
+```
+External Data → Parse/Decode → Process → Encode/Serialize → Output
+      ↓              ↓            ↓            ↓
+   Strings       Erlang        Compute      Binaries
+   JSON          Terms         Hash         HTTP Headers
+   Binaries      Maps          Transform    JSON
+```
+
+Think of utilities as your **toolbox**:
+- **hb_util** = Swiss Army knife (type conversion, encoding, lists)
+- **hb_json** = Translator (Erlang ↔ JSON)
+- **hb_crypto** = Security (hashes, commitments)
+- **hb_escape** = HTTP compliance (header encoding)
+
+Let's explore each one.
+
+---
+
+## Part 1: Type Coercion with hb_util
+
+> 📖 Reference: [hb_util](/src/hb_util)
+
+Data comes in many forms. `hb_util` converts between them seamlessly.
+
+### Converting to Integer
+
+```erlang
+%% From binary
+42 = hb_util:int(<<"42">>).
+
+%% From string
+42 = hb_util:int("42").
+
+%% Passthrough (already integer)
+42 = hb_util:int(42).
+
+%% Negative numbers work too
+-123 = hb_util:int(<<"-123">>).
+```
+
+### Converting to Binary
+
+```erlang
+%% From atom
+<<"hello">> = hb_util:bin(hello).
+
+%% From integer
+<<"42">> = hb_util:bin(42).
+
+%% From string
+<<"test">> = hb_util:bin("test").
+
+%% Passthrough
+<<"data">> = hb_util:bin(<<"data">>).
+```
+
+### Converting to List (String)
+
+```erlang
+%% From binary
+"hello" = hb_util:list(<<"hello">>).
+
+%% From atom
+"test" = hb_util:list(test).
+```
+
+### Quick Reference: Type Coercion
+
+| Function | Input Types | Output |
+|----------|-------------|--------|
+| `hb_util:int/1` | binary, string, integer | integer |
+| `hb_util:float/1` | binary, string, integer, float | float |
+| `hb_util:bin/1` | atom, integer, float, string, binary | binary |
+| `hb_util:list/1` | binary, atom, list | string (char list) |
+| `hb_util:atom/1` | binary, string, atom | atom (existing only) |
+| `hb_util:map/1` | proplist, map | map |
+
+---
+
+## Part 2: Base64url Encoding
+
+> 📖 Reference: [hb_util](/src/hb_util)
+
+Arweave IDs and binary data use **URL-safe base64** encoding. This avoids characters like `+` and `/` that cause problems in URLs.
+
+### Encoding Binary Data
+
+```erlang
+%% Encode 32 bytes to 43-character base64url string
+Data = crypto:strong_rand_bytes(32),
+Encoded = hb_util:encode(Data).
+%% => <<"7hJ9K2mN...">> (43 chars)
+```
+
+### Decoding Back
+
+```erlang
+%% Decode base64url back to binary
+Original = hb_util:decode(Encoded).
+%% => <<...>> (32 bytes)
+```
+
+### Safe Decode (with Error Handling)
+
+```erlang
+%% Returns {ok, Data} or {error, invalid}
+{ok, Data} = hb_util:safe_decode(<<"valid_base64">>).
+{error, invalid} = hb_util:safe_decode(<<"not!valid@base64">>).
+```
+
+### ID Conversion
+
+HyperBEAM uses two ID formats:
+- **Native ID**: 32-byte binary (internal use)
+- **Human ID**: 43-byte base64url string (display/URLs)
+
+```erlang
+%% Convert to human-readable
+NativeID = <<1,2,3,4,...>>,  % 32 bytes
+HumanID = hb_util:human_id(NativeID).
+%% => <<"AQIDBA...">> (43 chars)
+
+%% Convert to native
+NativeID = hb_util:native_id(HumanID).
+%% => <<1,2,3,4,...>> (32 bytes)
+```
+
+### Hex Encoding
+
+```erlang
+%% Convert binary to lowercase hex
+hb_util:to_hex(<<255, 0, 171>>).
+%% => <<"ff00ab">>
+```
+
+---
+
+## Part 3: JSON with hb_json
+
+> 📖 Reference: [hb_json](/src/hb_json)
+
+JSON is the universal data format. `hb_json` provides simple encode/decode.
+
+### Encoding Erlang Terms
+
+```erlang
+%% Map to JSON
+Term = #{<<"name">> => <<"Alice">>, <<"age">> => 30},
+JSON = hb_json:encode(Term).
+%% => <<"{\"name\":\"Alice\",\"age\":30}">>
+
+%% List to JSON array
+hb_json:encode([1, 2, 3]).
+%% => <<"[1,2,3]">>
+
+%% Nested structures work
+Complex = #{
+    <<"user">> => #{
+        <<"name">> => <<"Bob">>,
+        <<"tags">> => [<<"admin">>, <<"active">>]
+    }
+},
+hb_json:encode(Complex).
+```
+
+### Decoding JSON
+
+```erlang
+%% JSON to map
+JSON = <<"{\"key\":\"value\"}">>,
+Term = hb_json:decode(JSON).
+%% => #{<<"key">> => <<"value">>}
+
+%% Arrays become lists
+hb_json:decode(<<"[1,2,3]">>).
+%% => [1, 2, 3]
+```
+
+### Type Mapping
+
+| Erlang | JSON | Example |
+|--------|------|---------|
+| `binary()` | string | `<<"hello">>` → `"hello"` |
+| `integer()` | number | `42` → `42` |
+| `float()` | number | `3.14` → `3.14` |
+| `true/false` | boolean | `true` → `true` |
+| `null` | null | `null` → `null` |
+| `list()` | array | `[1,2]` → `[1,2]` |
+| `map()` | object | `#{k=>v}` → `{"k":"v"}` |
+
+### Roundtrip
+
+```erlang
+Original = #{<<"key">> => <<"value">>},
+JSON = hb_json:encode(Original),
+Decoded = hb_json:decode(JSON),
+Original = Decoded.  % true
+```
+
+---
+
+## Part 4: Cryptographic Hashing
+
+> 📖 Reference: [hb_crypto](/src/hb_crypto) | [hb_keccak](/src/hb_keccak)
+
+Cryptographic hashes are the backbone of blockchain systems. HyperBEAM provides both SHA-256 and Keccak-256.
+
+### SHA-256 Hashing
+
+```erlang
+%% Hash any data
+Data = <<"hello world">>,
+Hash = hb_crypto:sha256(Data).
+%% => <<...>> (32 bytes)
+
+%% Always deterministic
+Hash1 = hb_crypto:sha256(<<"test">>),
+Hash2 = hb_crypto:sha256(<<"test">>),
+Hash1 = Hash2.  % true
+```
+
+### Hash Chaining
+
+Chain multiple IDs together to create a computation trace:
+
+```erlang
+%% Chain two 32-byte IDs
+ID1 = <<1:256>>,  % First ID
+ID2 = <<2:256>>,  % Second ID
+ChainedID = hb_crypto:sha256_chain(ID1, ID2).
+%% => SHA256(ID1 || ID2)
+
+%% Order matters!
+Chain1 = hb_crypto:sha256_chain(ID1, ID2),
+Chain2 = hb_crypto:sha256_chain(ID2, ID1),
+Chain1 =/= Chain2.  % true (different results)
+```
+
+### Accumulation (Order-Independent)
+
+When you need a commitment that doesn't depend on order:
+
+```erlang
+%% Accumulate two IDs (addition mod 2^256)
+ID1 = <<1:256>>,
+ID2 = <<2:256>>,
+Commitment = hb_crypto:accumulate(ID1, ID2).
+%% => <<3:256>>
+
+%% Order doesn't matter
+Acc1 = hb_crypto:accumulate(ID1, ID2),
+Acc2 = hb_crypto:accumulate(ID2, ID1),
+Acc1 = Acc2.  % true (same result)
+
+%% Accumulate a list
+IDs = [<<1:256>>, <<2:256>>, <<3:256>>],
+Total = hb_crypto:accumulate(IDs).
+%% => <<6:256>>
+```
+
+### Keccak-256 (Ethereum Compatible)
+
+```erlang
+%% Keccak-256 hash (used by Ethereum)
+Hash = hb_keccak:keccak_256(<<"testing">>),
+Hex = hb_util:to_hex(Hash).
+%% => <<"5f16f4c7f149ac4f9510d9cf8cf384038ad348b3bcdc01915f95de12df9d1b02">>
+```
+
+> **Note:** Keccak-256 is NOT the same as SHA3-256. Ethereum uses Keccak-256.
+
+### Ethereum Address from Public Key
+
+```erlang
+%% Convert ECDSA secp256k1 public key to checksummed Ethereum address
+PublicKey = <<4, X:32/binary, Y:32/binary>>,  % 65 bytes uncompressed
+EthAddress = hb_keccak:key_to_ethereum_address(PublicKey).
+%% => <<"0xb7B4360F7F6298dE2e7a11009270F35F189Bd77E">>
+```
+
+---
+
+## Part 5: HTTP Header Escaping
+
+> 📖 Reference: [hb_escape](/src/hb_escape)
+
+HTTP/2 and HTTP/3 require lowercase header keys. `hb_escape` handles percent-encoding for compliance.
+
+### Percent Encoding
+
+```erlang
+%% Encode uppercase and special characters
+hb_escape:encode(<<"Hello World!">>).
+%% => <<"%48ello%20%57orld%21">>
+
+%% Lowercase and digits are preserved
+hb_escape:encode(<<"hello123">>).
+%% => <<"hello123">>
+```
+
+### Decoding
+
+```erlang
+%% Decode percent-encoded strings
+hb_escape:decode(<<"%48ello%20%57orld">>).
+%% => <<"Hello World">>
+```
+
+### Encoding Map Keys
+
+Encode all keys in a map for HTTP/2 transmission:
+
+```erlang
+Headers = #{
+    <<"Content-Type">> => <<"application/json">>,
+    <<"X-Custom">> => <<"value">>
+},
+Encoded = hb_escape:encode_keys(Headers, #{}).
+%% Keys are now percent-encoded
+
+%% Decode on the receiving end
+Original = hb_escape:decode_keys(Encoded, #{}).
+```
+
+### Quote Escaping
+
+```erlang
+%% Escape quotes for JSON-like strings
+hb_escape:encode_quotes(<<"He said \"hello\"">>).
+%% => <<"He said \\\"hello\\\"">>
+
+%% Unescape
+hb_escape:decode_quotes(<<"He said \\\"hello\\\"">>).
+%% => <<"He said \"hello\"">>
+```
+
+---
+
+## Part 6: Putting It All Together
+
+> 📖 Reference: [hb_util](/src/hb_util) | [hb_json](/src/hb_json) | [hb_crypto](/src/hb_crypto)
+
+### Create the Test File
+
+Create a new file at `src/test/test_hb_utils.erl`:
+
+```bash
+mkdir -p src/test
+touch src/test/test_hb_utils.erl
+```
+
+Add the following content to `src/test/test_hb_utils.erl`:
+
+```erlang
+-module(test_hb_utils).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_hb_utils
+
+type_coercion_test() ->
+    %% Integer conversion
+    ?assertEqual(42, hb_util:int(<<"42">>)),
+    ?assertEqual(42, hb_util:int("42")),
+    ?assertEqual(-123, hb_util:int(<<"-123">>)),
+    ?debugFmt("Integer conversion: OK", []),
+    
+    %% Binary conversion
+    ?assertEqual(<<"hello">>, hb_util:bin(hello)),
+    ?assertEqual(<<"42">>, hb_util:bin(42)),
+    ?debugFmt("Binary conversion: OK", []),
+    
+    %% List conversion
+    ?assertEqual("hello", hb_util:list(<<"hello">>)),
+    ?debugFmt("List conversion: OK", []).
+
+encoding_test() ->
+    %% Generate random data
+    Data = crypto:strong_rand_bytes(32),
+    
+    %% Encode and decode
+    Encoded = hb_util:encode(Data),
+    ?debugFmt("Encoded 32 bytes to ~p chars", [byte_size(Encoded)]),
+    
+    Decoded = hb_util:decode(Encoded),
+    ?assertEqual(Data, Decoded),
+    ?debugFmt("Roundtrip encoding: OK", []),
+    
+    %% URL-safe (no + or /)
+    ?assertEqual(nomatch, binary:match(Encoded, <<"+">>)),
+    ?assertEqual(nomatch, binary:match(Encoded, <<"/">>)),
+    ?debugFmt("URL-safe encoding verified", []).
+
+json_test() ->
+    %% Encode map
+    Term = #{<<"name">> => <<"Alice">>, <<"age">> => 30},
+    JSON = hb_json:encode(Term),
+    ?debugFmt("Encoded JSON: ~s", [JSON]),
+    
+    %% Decode back
+    Decoded = hb_json:decode(JSON),
+    ?assertEqual(Term, Decoded),
+    ?debugFmt("JSON roundtrip: OK", []),
+    
+    %% Nested structures
+    Complex = #{
+        <<"user">> => #{
+            <<"name">> => <<"Bob">>,
+            <<"tags">> => [<<"admin">>, <<"active">>]
+        }
+    },
+    ComplexJSON = hb_json:encode(Complex),
+    ?assertEqual(Complex, hb_json:decode(ComplexJSON)),
+    ?debugFmt("Nested JSON: OK", []).
+
+hashing_test() ->
+    %% SHA-256 produces 32 bytes
+    Hash = hb_crypto:sha256(<<"hello world">>),
+    ?assertEqual(32, byte_size(Hash)),
+    ?debugFmt("SHA-256 hash size: 32 bytes", []),
+    
+    %% Deterministic
+    Hash1 = hb_crypto:sha256(<<"test">>),
+    Hash2 = hb_crypto:sha256(<<"test">>),
+    ?assertEqual(Hash1, Hash2),
+    ?debugFmt("SHA-256 deterministic: OK", []),
+    
+    %% Hash chaining
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    Chain = hb_crypto:sha256_chain(ID1, ID2),
+    ?assertEqual(32, byte_size(Chain)),
+    ?debugFmt("Hash chain: OK", []),
+    
+    %% Order matters in chaining
+    Chain1 = hb_crypto:sha256_chain(ID1, ID2),
+    Chain2 = hb_crypto:sha256_chain(ID2, ID1),
+    ?assertNotEqual(Chain1, Chain2),
+    ?debugFmt("Chain order dependency verified", []).
+
+accumulation_test() ->
+    %% Accumulate two IDs
+    ID1 = <<1:256>>,
+    ID2 = <<2:256>>,
+    Result = hb_crypto:accumulate(ID1, ID2),
+    
+    <<ResultInt:256>> = Result,
+    ?assertEqual(3, ResultInt),
+    ?debugFmt("Accumulate 1 + 2 = 3: OK", []),
+    
+    %% Order independent
+    Acc1 = hb_crypto:accumulate(ID1, ID2),
+    Acc2 = hb_crypto:accumulate(ID2, ID1),
+    ?assertEqual(Acc1, Acc2),
+    ?debugFmt("Accumulation order-independent: OK", []),
+    
+    %% Accumulate list
+    IDs = [<<1:256>>, <<2:256>>, <<3:256>>],
+    ListResult = hb_crypto:accumulate(IDs),
+    <<ListInt:256>> = ListResult,
+    ?assertEqual(6, ListInt),
+    ?debugFmt("Accumulate list [1,2,3] = 6: OK", []).
+
+escape_test() ->
+    %% Percent encoding
+    Encoded = hb_escape:encode(<<"Hello World!">>),
+    ?debugFmt("Encoded: ~s", [Encoded]),
+    
+    Decoded = hb_escape:decode(Encoded),
+    ?assertEqual(<<"Hello World!">>, Decoded),
+    ?debugFmt("Escape roundtrip: OK", []),
+    
+    %% Lowercase preserved
+    ?assertEqual(<<"hello">>, hb_escape:encode(<<"hello">>)),
+    ?debugFmt("Lowercase preserved: OK", []).
+
+complete_workflow_test() ->
+    ?debugFmt("=== Complete Workflow Test ===", []),
+    
+    %% 1. Create some data
+    Data = #{
+        <<"type">> => <<"message">>,
+        <<"content">> => <<"Hello, HyperBEAM!">>,
+        <<"timestamp">> => 1234567890
+    },
+    ?debugFmt("1. Created data structure", []),
+    
+    %% 2. Serialize to JSON
+    JSON = hb_json:encode(Data),
+    ?debugFmt("2. Serialized to JSON: ~s", [JSON]),
+    
+    %% 3. Hash the content
+    Hash = hb_crypto:sha256(JSON),
+    HashHex = hb_util:to_hex(Hash),
+    ?debugFmt("3. SHA-256 hash: ~s", [HashHex]),
+    
+    %% 4. Encode hash for URLs
+    HashEncoded = hb_util:encode(Hash),
+    ?debugFmt("4. Base64url encoded: ~s", [HashEncoded]),
+    
+    %% 5. Verify roundtrip
+    HashDecoded = hb_util:decode(HashEncoded),
+    ?assertEqual(Hash, HashDecoded),
+    ?debugFmt("5. Verified roundtrip encoding", []),
+    
+    %% 6. Parse JSON back
+    Recovered = hb_json:decode(JSON),
+    ?assertEqual(Data, Recovered),
+    ?debugFmt("6. Verified JSON roundtrip", []),
+    
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_hb_utils
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Parse → Process → Serialize
+
+```erlang
+%% Receive JSON, process, return JSON
+handle_request(JSONBinary) ->
+    %% Parse
+    Data = hb_json:decode(JSONBinary),
+    
+    %% Process
+    Result = process(Data),
+    
+    %% Serialize
+    hb_json:encode(Result).
+```
+
+### Pattern 2: Hash and Encode
+
+```erlang
+%% Create a content-addressed ID
+content_id(Data) ->
+    Hash = hb_crypto:sha256(Data),
+    hb_util:encode(Hash).
+```
+
+### Pattern 3: Type-Safe Input Handling
+
+```erlang
+%% Handle HTTP parameters (always strings/binaries)
+handle_param(BinaryValue) ->
+    case hb_util:safe_decode(BinaryValue) of
+        {ok, Decoded} ->
+            process_binary(Decoded);
+        {error, invalid} ->
+            %% Try as integer
+            try hb_util:int(BinaryValue) of
+                Int -> process_int(Int)
+            catch
+                _:_ -> {error, invalid_param}
+            end
+    end.
+```
+
+### Pattern 4: HTTP Header Preparation
+
+```erlang
+%% Prepare headers for HTTP/2
+prepare_headers(Headers) ->
+    %% Encode keys for HTTP/2 compliance
+    Encoded = hb_escape:encode_keys(Headers, #{}),
+    
+    %% Convert to list format
+    maps:to_list(Encoded).
+```
+
+---
+
+## What's Next?
+
+You now understand the core utilities:
+
+| Module | Purpose | Key Functions |
+|--------|---------|---------------|
+| [`hb_util`](/src/hb_util) | Type coercion, encoding | `int`, `bin`, `encode`, `decode` |
+| [`hb_json`](/src/hb_json) | JSON serialization | `encode`, `decode` |
+| [`hb_crypto`](/src/hb_crypto) | Hashing, commitments | `sha256`, `sha256_chain`, `accumulate` |
+| [`hb_escape`](/src/hb_escape) | HTTP encoding | `encode`, `decode`, `encode_keys` |
+| [`hb_keccak`](/src/hb_keccak) | Ethereum compatibility | `keccak_256`, `key_to_ethereum_address` |
+
+### Going Further
+
+1. **Deep Data Operations** — `hb_util:deep_get/3`, `hb_util:deep_set/4` for nested structures
+2. **Statistics** — `hb_util:mean/1`, `hb_util:stddev/1` for performance analysis
+3. **Structured Fields** — `hb_structured_fields` for RFC-9651 HTTP headers
+4. **Build with HyperBEAM** — These utilities power all HyperBEAM modules ([Book](/book))
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_util](/src/hb_util) | [hb_json](/src/hb_json) | [hb_crypto](/src/hb_crypto) | [hb_escape](/src/hb_escape)
+
+```erlang
+%% === TYPE COERCION ===
+Int = hb_util:int(<<"42">>).
+Bin = hb_util:bin(atom_name).
+List = hb_util:list(<<"binary">>).
+Float = hb_util:float(<<"3.14">>).
+
+%% === ENCODING ===
+Encoded = hb_util:encode(Binary32).   % 32 bytes → 43 chars
+Decoded = hb_util:decode(Encoded).    % 43 chars → 32 bytes
+HumanID = hb_util:human_id(NativeID).
+NativeID = hb_util:native_id(HumanID).
+Hex = hb_util:to_hex(Binary).
+
+%% === JSON ===
+JSON = hb_json:encode(#{key => value}).
+Term = hb_json:decode(JSON).
+
+%% === HASHING ===
+Hash = hb_crypto:sha256(Data).
+Chain = hb_crypto:sha256_chain(ID1, ID2).
+Commit = hb_crypto:accumulate(ID1, ID2).
+Commit = hb_crypto:accumulate([ID1, ID2, ID3]).
+
+%% === KECCAK ===
+Hash = hb_keccak:keccak_256(Data).
+Addr = hb_keccak:key_to_ethereum_address(PubKey).
+
+%% === ESCAPE ===
+Escaped = hb_escape:encode(<<"Upper">>).
+Original = hb_escape:decode(Escaped).
+Headers = hb_escape:encode_keys(Map, #{}).
+```
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [hb_util Reference](/src/hb_util)
+- [hb_json Reference](/src/hb_json)
+- [hb_crypto Reference](/src/hb_crypto)
+- [hb_escape Reference](/src/hb_escape)
+- [hb_keccak Reference](/src/hb_keccak)
+- [hb_structured_fields Reference](/src/hb_structured_fields)
+- [Full Reference](/hyperbeam)
+
+### Standards
+
+- [RFC 4648](https://tools.ietf.org/html/rfc4648) — Base64url Encoding
+- [FIPS 180-4](https://csrc.nist.gov/publications/detail/fips/180/4/final) — SHA-256
+- [EIP-55](https://eips.ethereum.org/EIPS/eip-55) — Ethereum Address Checksum
+- [RFC 9651](https://www.rfc-editor.org/rfc/rfc9651.html) — HTTP Structured Fields
