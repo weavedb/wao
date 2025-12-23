@@ -160,7 +160,7 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>WAO | AO Development Environment</title>
+        <title>WizardAO | AO Development Environment</title>
         <meta
           name="description"
           content="Lightning Fast AO / HyperBEAM Development"
@@ -410,7 +410,7 @@ export default function Home() {
                 textShadow: "0 0 10px #c252ff",
               }}
             >
-              WAO
+              WizardAO
             </h1>
             <div
               className="mobile-menu-icon"
@@ -689,7 +689,7 @@ export default function Home() {
                 </svg>
               </a>
               <a
-                href="https://github.com/weavedb/wao"
+                href="https://github.com/ArweaveOasis/wao"
                 target="_blank"
                 style={{
                   color: "#d8b4fe",
@@ -721,7 +721,7 @@ export default function Home() {
                 </svg>
               </a>
               <a
-                href="https://discord.gg/vCkuVhkugY"
+                href="https://discord.gg/jGqWtUUntQ"
                 target="_blank"
                 style={{
                   color: "#d8b4fe",
