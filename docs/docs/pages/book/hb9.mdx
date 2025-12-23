@@ -1,0 +1,687 @@
+# Running an HTTP Server with HyperBEAM
+
+A beginner's guide to serving HTTP requests with AO-Core
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Server Lifecycle** — Starting and configuring HTTP servers
+2. **Request Flow** — How HTTP requests become HyperBEAM messages
+3. **Configuration** — Dynamic options and runtime updates
+4. **Test Nodes** — Spinning up servers for development
+5. How these pieces connect to form a **working node**
+
+No prior Cowboy or HTTP server knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM's HTTP server transforms HTTP requests into **messages**, routes them through the **AO-Core resolver**, and converts results back to HTTP responses. It uses [Cowboy](https://github.com/ninenines/cowboy)—Erlang's high-performance HTTP server.
+
+Here's the mental model:
+
+```
+HTTP Request → Marshal → Message → AO-Core → Message → HTTP Response
+     ↓            ↓          ↓         ↓          ↓
+   Cowboy     Convert    Route    Resolve    Format
+```
+
+Think of it like a translation service:
+- **Cowboy** = The receptionist taking calls
+- **Marshaling** = Translating the caller's language
+- **AO-Core** = The expert handling the request
+- **Response** = Translating the answer back
+
+Let's build each piece.
+
+---
+
+## Part 1: Starting the Server
+
+> 📖 Reference: [hb_http_server](/src/hb_http_server)
+
+The server has two main entry points: `start/1` for production and `start_node/1` for testing.
+
+### Basic Startup
+
+```erlang
+%% Start with default configuration
+{ok, Pid} = hb_http_server:start().
+```
+
+That's it. The server loads configuration from `config.flat`, displays a greeting banner, and starts listening.
+
+### Custom Configuration
+
+```erlang
+%% Start with specific options
+{ok, Pid} = hb_http_server:start(#{
+    port => 9000,
+    store => [#{type => rocksdb, path => <<"data">>}],
+    priv_key_location => <<"keys/node.json">>
+}).
+```
+
+### What Happens on Startup
+
+```erlang
+Load Config File (config.flat)
+    ↓
+Merge with Environment Defaults
+    ↓
+Initialize Store
+    ↓
+Load Private Wallet
+    ↓
+Display Greeting Banner
+    ↓
+Execute Startup Hooks
+    ↓
+Start Cowboy Listener
+    ↓
+Return {ok, ListenerPID}
+```
+
+### The Greeting Banner
+
+When the server starts, you'll see:
+
+```
+===========================================================
+==    ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗           ==
+==    ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗          ==
+==    ███████║ ╚████╔╝ ██████╔╝█████╗  ██████╔╝          ==
+==    ██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══╝  ██╔══██╗          ==
+==    ██║  ██║   ██║   ██║     ███████╗██║  ██║          ==
+==    ╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚══════╝╚═╝  ╚═╝          ==
+==                                                       ==
+==        ██████╗ ███████╗ █████╗ ███╗   ███╗            ==
+==        ██╔══██╗██╔════╝██╔══██╗████╗ ████║            ==
+==        ██████╔╝█████╗  ███████║██╔████╔██║            ==
+==        ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║            ==
+==        ██████╔╝███████╗██║  ██║██║ ╚═╝ ██║            ==
+==        ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝            ==
+===========================================================
+== Node activated at: http://localhost:8734             ==
+== Operator: xABCD...1234                               ==
+===========================================================
+```
+
+### Quick Reference: Startup Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_http_server:start()` | Start with default config |
+| `hb_http_server:start(Opts)` | Start with custom options |
+| `hb_http_server:start_node()` | Start test node (random port) |
+| `hb_http_server:start_node(Opts)` | Start test node with options |
+
+---
+
+## Part 2: Test Nodes
+
+> 📖 Reference: [hb_http_server](/src/hb_http_server)
+
+For development and testing, use `start_node/1`. It picks a random port and returns a ready-to-use URL.
+
+### Starting a Test Node
+
+```erlang
+Node = hb_http_server:start_node().
+%% => <<"http://localhost:47832/">>
+```
+
+The returned URL includes a trailing slash and is ready for HTTP requests.
+
+### With Custom Options
+
+```erlang
+Node = hb_http_server:start_node(#{
+    <<"app-name">> => <<"My Test App">>,
+    <<"version">> => <<"1.0">>
+}).
+```
+
+### Querying Your Node
+
+Once started, you can query the node's metadata:
+
+```erlang
+Node = hb_http_server:start_node(),
+
+%% Get node info
+{ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+%% Info is a map with node configuration
+```
+
+### Complete Test Example
+
+```erlang
+test_node_basic() ->
+    %% Start a node
+    Node = hb_http_server:start_node(#{
+        <<"test-key">> => <<"test-value">>
+    }),
+    
+    %% Verify it's accessible
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    
+    %% Check our custom key
+    <<"test-value">> = hb_ao:get(<<"test-key">>, Info, #{}).
+```
+
+### Quick Reference: Test Node Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_http_server:start_node()` | Start with random port |
+| `hb_http_server:start_node(Opts)` | Start with options |
+| `hb_http:get(Node, Path, Opts)` | GET request to node |
+| `hb_http:post(Node, Path, Body, Opts)` | POST request to node |
+
+---
+
+## Part 3: Configuration Management
+
+> 📖 Reference: [hb_http_server](/src/hb_http_server) | [hb_opts](/src/hb_opts)
+
+Configuration can be read and updated dynamically at runtime.
+
+### Getting Current Configuration
+
+```erlang
+%% Get all options
+Opts = hb_http_server:get_opts().
+
+%% Get a specific option
+Port = hb_opts:get(port, 8734, Opts).
+```
+
+### Setting Options
+
+```erlang
+%% Update configuration
+hb_http_server:set_opts(#{
+    <<"new-key">> => <<"new-value">>
+}).
+```
+
+### Merging Request with Options
+
+The two-arity version merges a request with existing options and tracks history:
+
+```erlang
+Opts = hb_http_server:get_opts(),
+{ok, UpdatedOpts} = hb_http_server:set_opts(
+    #{<<"key">> => <<"value">>}, 
+    Opts
+).
+```
+
+### Configuration Precedence
+
+Options are resolved in this order (first wins):
+
+1. **Command Line/Explicit** — Options passed to `start/1`
+2. **Configuration File** — Loaded from `config.flat`
+3. **Environment Defaults** — From `hb_opts:default_message_with_env()`
+4. **Hardcoded Defaults** — In `set_default_opts/1`
+
+### Tracking Configuration History
+
+Every configuration update is tracked:
+
+```erlang
+%% Initial state
+Opts1 = hb_http_server:get_opts(),
+History1 = hb_opts:get(node_history, [], Opts1),
+%% History1 = []
+
+%% First update
+{ok, Opts2} = hb_http_server:set_opts(#{<<"key1">> => <<"val1">>}, Opts1),
+History2 = hb_opts:get(node_history, [], Opts2),
+%% History2 = [#{<<"key1">> => <<"val1">>}]
+
+%% Second update
+{ok, Opts3} = hb_http_server:set_opts(#{<<"key2">> => <<"val2">>}, Opts2),
+History3 = hb_opts:get(node_history, [], Opts3),
+%% History3 = [#{<<"key1">> => <<"val1">>}, #{<<"key2">> => <<"val2">>}]
+```
+
+### Quick Reference: Configuration Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_http_server:get_opts()` | Get current config |
+| `hb_http_server:get_opts(NodeMsg)` | Get config for specific node |
+| `hb_http_server:set_opts(Opts)` | Update Cowboy environment |
+| `hb_http_server:set_opts(Req, Opts)` | Merge request with options |
+
+---
+
+## Part 4: Request Flow
+
+> 📖 Reference: [hb_http_server](/src/hb_http_server) | [hb_ao](/src/hb_ao)
+
+Every HTTP request follows the same path through the system.
+
+### The Journey of a Request
+
+```erlang
+1. HTTP Request arrives at Cowboy
+       ↓
+2. init/2 callback receives request
+       ↓
+3. Marshal HTTP → HyperBEAM Message
+       ↓
+4. Route through AO-Core resolver
+       ↓
+5. Execute device stack
+       ↓
+6. Convert result → HTTP Response
+       ↓
+7. Send response to client
+```
+
+### Allowed HTTP Methods
+
+```erlang
+allowed_methods(Req, State) ->
+    {[<<"GET">>, <<"POST">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>], Req, State}.
+```
+
+### Error Handling
+
+Errors are formatted with helpful details:
+
+```erlang
+format_error_response(Req, ErrorMsg, NodeMsg) ->
+    %% Returns:
+    %% Error: {reason}
+    %% Path: /requested/path
+    %% Method: GET
+```
+
+Error types handled:
+- `{error, Reason}` — Standard errors
+- `{throw, Exception}` — Thrown exceptions
+- `{exit, Reason}` — Process exits
+- `{Type, Error, Stack}` — Errors with stack trace
+
+---
+
+## Part 5: Startup Hooks
+
+> 📖 Reference: [hb_http_server](/src/hb_http_server) | [dev_hook](/src/dev_hook)
+
+Hooks let you modify configuration before the server fully starts.
+
+### Defining a Startup Hook
+
+```erlang
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"start">> => #{
+            <<"device">> => #{
+                <<"start">> => fun(_, #{<<"body">> := NodeMsg}, _) ->
+                    %% Modify configuration here
+                    ModifiedMsg = NodeMsg#{<<"custom-key">> => <<"custom-value">>},
+                    {ok, #{<<"body">> => ModifiedMsg}}
+                end
+            }
+        }
+    }
+}).
+```
+
+### How Hooks Execute
+
+```erlang
+HookMsg = #{<<"body">> => NodeMsg},
+Result = dev_hook:on(<<"start">>, HookMsg, NodeMsg),
+{ok, #{<<"body">> := ModifiedNodeMsg}} = Result.
+```
+
+### Use Cases for Hooks
+
+- Modify server configuration dynamically
+- Initialize custom devices
+- Set up monitoring and metrics
+- Configure routing rules
+- Add authentication middleware
+
+### Complete Hook Example
+
+```erlang
+-module(my_hook_test).
+-include_lib("eunit/include/eunit.hrl").
+
+startup_hook_test() ->
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"start">> => #{
+                <<"device">> => #{
+                    <<"start">> => fun(_, #{<<"body">> := Msg}, _) ->
+                        io:format("Server starting!~n"),
+                        {ok, #{<<"body">> => Msg#{<<"initialized">> => true}}}
+                    end
+                }
+            }
+        }
+    }),
+    
+    %% Verify hook ran
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    true = hb_ao:get(<<"initialized">>, Info, false, #{}).
+```
+
+---
+
+## Part 6: Protocol Support
+
+> 📖 Reference: [hb_http_server](/src/hb_http_server)
+
+HyperBEAM supports multiple HTTP protocols.
+
+### HTTP/2 (Default)
+
+```erlang
+%% HTTP/2 is the default
+{ok, _} = hb_http_server:start(#{
+    port => 8734
+}).
+```
+
+### HTTP/3 (QUIC)
+
+```erlang
+%% Enable HTTP/3
+{ok, _} = hb_http_server:start(#{
+    protocol => http3,
+    port => 8734
+}).
+```
+
+### Protocol Configuration
+
+```erlang
+%% HTTP/2 options
+ProtoOpts = #{
+    protocols => [http2],
+    transport => tcp
+}.
+
+%% HTTP/3 options
+ProtoOpts = #{
+    protocols => [http3],
+    transport => quicer
+}.
+```
+
+---
+
+## Part 7: Tests
+
+Save this as `src/test/test_http_server.erl`:
+
+```erlang
+-module(test_http_server).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Test basic server startup
+start_test() ->
+    Config = #{
+        port => 10000 + rand:uniform(10000),
+        priv_wallet => ar_wallet:new()
+    },
+    {ok, Pid} = hb_http_server:start(Config),
+    ?assert(is_pid(Pid)).
+
+%% Test node URL format
+node_url_test() ->
+    Node = hb_http_server:start_node(),
+    ?assert(is_binary(Node)),
+    ?assert(binary:match(Node, <<"http://localhost:">>) =/= nomatch),
+    %% URL should end with /
+    ?assertEqual(<<"/">>, binary:part(Node, byte_size(Node) - 1, 1)).
+
+%% Test node accessibility
+node_accessible_test() ->
+    Node = hb_http_server:start_node(#{}),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assert(is_map(Info)).
+
+%% Test custom options
+custom_opts_test() ->
+    Node = hb_http_server:start_node(#{
+        <<"my-key">> => <<"my-value">>
+    }),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assertEqual(<<"my-value">>, hb_ao:get(<<"my-key">>, Info, #{})).
+
+%% Test configuration updates
+config_update_test() ->
+    Wallet = ar_wallet:new(),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    
+    Opts = hb_http_server:get_opts(#{
+        http_server => hb_util:human_id(ar_wallet:to_address(Wallet))
+    }),
+    
+    Request = #{<<"new-key">> => <<"new-value">>},
+    {ok, UpdatedOpts} = hb_http_server:set_opts(Request, Opts),
+    
+    ?assertEqual(
+        <<"new-value">>, 
+        hb_opts:get(<<"new-key">>, not_found, UpdatedOpts)
+    ).
+
+%% Test configuration history
+history_test() ->
+    Wallet = ar_wallet:new(),
+    _Node = hb_http_server:start_node(#{priv_wallet => Wallet}),
+    
+    Opts = hb_http_server:get_opts(#{
+        http_server => hb_util:human_id(ar_wallet:to_address(Wallet))
+    }),
+    
+    %% First update
+    {ok, Opts1} = hb_http_server:set_opts(#{<<"k1">> => <<"v1">>}, Opts),
+    History1 = hb_opts:get(node_history, [], Opts1),
+    ?assertEqual(1, length(History1)),
+    
+    %% Second update
+    {ok, Opts2} = hb_http_server:set_opts(#{<<"k2">> => <<"v2">>}, Opts1),
+    History2 = hb_opts:get(node_history, [], Opts2),
+    ?assertEqual(2, length(History2)).
+
+%% Test startup hook
+hook_test() ->
+    Node = hb_http_server:start_node(#{
+        on => #{
+            <<"start">> => #{
+                <<"device">> => #{
+                    <<"start">> => fun(_, #{<<"body">> := Msg}, _) ->
+                        {ok, #{<<"body">> => Msg#{<<"hook-ran">> => true}}}
+                    end
+                }
+            }
+        }
+    }),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assert(hb_ao:get(<<"hook-ran">>, Info, false, #{})).
+
+%% Test server restart with same wallet
+restart_test() ->
+    Wallet = ar_wallet:new(),
+    BaseOpts = #{
+        <<"test-key">> => <<"server-1">>,
+        priv_wallet => Wallet,
+        protocol => http2
+    },
+    _Node1 = hb_http_server:start_node(BaseOpts),
+    Node2 = hb_http_server:start_node(BaseOpts#{<<"test-key">> => <<"server-2">>}),
+    ?assertEqual(
+        {ok, <<"server-2">>},
+        hb_http:get(Node2, <<"/~meta@1.0/info/test-key">>, #{protocol => http2})
+    ).
+```
+
+Run the tests:
+
+```bash
+rebar3 eunit --module=test_http_server
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Start Production Server
+
+```erlang
+{ok, _} = hb_http_server:start(#{
+    port => 8734,
+    store => [#{type => rocksdb, path => <<"data">>}],
+    priv_key_location => <<"keys/node.json">>
+}).
+```
+
+### Pattern 2: Start Test Node
+
+```erlang
+Node = hb_http_server:start_node(#{
+    <<"app-name">> => <<"Test">>
+}),
+{ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}).
+```
+
+### Pattern 3: Dynamic Configuration
+
+```erlang
+Opts = hb_http_server:get_opts(),
+{ok, NewOpts} = hb_http_server:set_opts(
+    #{<<"feature-flag">> => true}, 
+    Opts
+).
+```
+
+### Pattern 4: Startup Hook
+
+```erlang
+hb_http_server:start_node(#{
+    on => #{
+        <<"start">> => #{
+            <<"device">> => #{
+                <<"start">> => fun(_, #{<<"body">> := Msg}, _) ->
+                    %% Initialize custom behavior
+                    {ok, #{<<"body">> => Msg#{<<"ready">> => true}}}
+                end
+            }
+        }
+    }
+}).
+```
+
+### Pattern 5: Server Restart
+
+```erlang
+%% Same wallet = update existing server
+Wallet = ar_wallet:new(),
+_Node1 = hb_http_server:start_node(#{priv_wallet => Wallet, <<"v">> => <<"1">>}),
+Node2 = hb_http_server:start_node(#{priv_wallet => Wallet, <<"v">> => <<"2">>}),
+%% Node2 now serves version 2
+```
+
+---
+
+## What's Next?
+
+You now understand the core concepts:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Startup | [`hb_http_server`](/src/hb_http_server) | `start`, `start_node` |
+| Configuration | [`hb_http_server`](/src/hb_http_server) | `get_opts`, `set_opts` |
+| Options | [`hb_opts`](/src/hb_opts) | `get`, precedence rules |
+| Hooks | [`dev_hook`](/src/dev_hook) | `on` |
+| HTTP Client | [`hb_http`](/src/hb_http) | `get`, `post` |
+
+### Going Further
+
+1. **Devices** — Build custom request handlers ([dev_* modules](/book))
+2. **Storage** — Configure persistent backends ([hb_store](/src/hb_store))
+3. **AO-Core** — Understand message resolution ([hb_ao](/src/hb_ao))
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_http_server](/src/hb_http_server) | [hb_http](/src/hb_http) | [hb_opts](/src/hb_opts)
+
+```erlang
+%% === SERVER LIFECYCLE ===
+{ok, Pid} = hb_http_server:start().
+{ok, Pid} = hb_http_server:start(Opts).
+Node = hb_http_server:start_node().
+Node = hb_http_server:start_node(Opts).
+
+%% === CONFIGURATION ===
+Opts = hb_http_server:get_opts().
+Opts = hb_http_server:get_opts(NodeMsg).
+ok = hb_http_server:set_opts(Opts).
+{ok, NewOpts} = hb_http_server:set_opts(Request, Opts).
+
+%% === OPTIONS ACCESS ===
+Value = hb_opts:get(key, default, Opts).
+History = hb_opts:get(node_history, [], Opts).
+
+%% === HTTP CLIENT ===
+{ok, Response} = hb_http:get(Node, Path, Opts).
+{ok, Response} = hb_http:post(Node, Path, Body, Opts).
+
+%% === STARTUP HOOKS ===
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"start">> => #{
+            <<"device">> => #{
+                <<"start">> => fun(_, #{<<"body">> := Msg}, _) ->
+                    {ok, #{<<"body">> => Msg}}
+                end
+            }
+        }
+    }
+}).
+
+%% === COMMON ENDPOINTS ===
+{ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}).
+{ok, Key} = hb_http:get(Node, <<"/~meta@1.0/info/key">>, #{}).
+```
+
+---
+
+*Now go serve some requests!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_http_server Reference](/src/hb_http_server) — HTTP server functions
+- [hb_http Reference](/src/hb_http) — HTTP client helpers
+- [hb_opts Reference](/src/hb_opts) — Configuration system
+- [dev_hook Reference](/src/dev_hook) — Hook system
+- [Full Reference](/hyperbeam) — All modules
+
+**Cowboy Documentation**
+- [Cowboy User Guide](https://ninenines.eu/docs/en/cowboy/2.12/guide/) — HTTP server framework
+- [Cowboy Reference](https://ninenines.eu/docs/en/cowboy/2.12/manual/) — API reference
+
+**Related Tutorials**
+- [Arweave Tutorial](/book/ar) — Permanent storage primitives
+- [The HyperBEAM Book](/book) — Complete learning path

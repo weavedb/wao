@@ -1,0 +1,657 @@
+# Caching Files in HyperBEAM
+
+A beginner's guide to persistent caching with lazy loading
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **The Cache** — Content-addressed storage for messages and results
+2. **Lazy Loading** — Loading data on-demand to save memory
+3. **Read & Write** — Storing and retrieving cached data
+4. **Cache Control** — HTTP-style directives for caching behavior
+5. How these pieces work together to create **efficient storage**
+
+No prior HyperBEAM caching knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM's cache provides **content-addressed storage** for messages and computation results. Data is stored in three layers, with automatic deduplication through content hashing.
+
+When you cache data, it's stored once regardless of how many times it's referenced. Links point to cached data, loading it only when needed.
+
+Here's the mental model:
+
+```
+Message → Write → Content Hash → Store
+    ↓         ↓           ↓
+  Data      Link     Deduplication
+```
+
+Think of it like a library:
+- **Cache** = The library building
+- **Content Hash** = The book's ISBN (unique identifier)
+- **Link** = A catalog reference card
+- **Lazy Loading** = Only fetching books when someone actually wants to read them
+
+Let's build each piece.
+
+---
+
+## Part 1: Writing to Cache
+
+> 📖 Reference: [hb_cache](/src/hb_cache)
+
+The cache stores messages (maps) and binary data. Every piece of content gets a unique ID based on its content hash.
+
+### Writing a Message
+
+```erlang
+%% Get a store (we'll use the default)
+Store = hb_store:default(),
+Opts = #{store => Store},
+
+%% Create a message
+Msg = #{<<"key">> => <<"value">>},
+
+%% Write it to cache
+{ok, ID} = hb_cache:write(Msg, Opts).
+%% ID is the content-addressed identifier
+```
+
+The `write/2` function:
+1. Computes content hash of your data
+2. Stores data at that hash (deduplication!)
+3. Returns the ID for future retrieval
+
+### Writing Binary Data
+
+For raw binary data, use `write_binary/3`:
+
+```erlang
+Binary = <<"Hello, HyperBEAM!">>,
+Hashpath = <<"my-custom-path">>,
+
+{ok, DataPath} = hb_cache:write_binary(Hashpath, Binary, Opts).
+%% Creates a link at Hashpath pointing to the binary
+```
+
+### Quick Reference: Write Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_cache:write(Msg, Opts)` | Store a message, return ID |
+| `hb_cache:write_binary(Path, Binary, Opts)` | Store binary at path |
+| `hb_cache:write_hashpath(Msgs, Opts)` | Write hashpath for message chain |
+
+---
+
+## Part 2: Reading from Cache
+
+> 📖 Reference: [hb_cache](/src/hb_cache)
+
+Reading returns the first layer of data. Nested messages remain as **links** until you explicitly load them.
+
+### Basic Read
+
+```erlang
+%% Write first
+Msg = #{<<"name">> => <<"Alice">>},
+{ok, ID} = hb_cache:write(Msg, Opts),
+
+%% Read it back
+{ok, ReadMsg} = hb_cache:read(ID, Opts).
+%% ReadMsg contains the message (first layer only)
+```
+
+### Handling Not Found
+
+```erlang
+case hb_cache:read(SomeID, Opts) of
+    {ok, Msg} -> 
+        %% Found it
+        process(Msg);
+    not_found -> 
+        %% ID doesn't exist in cache
+        handle_missing()
+end.
+```
+
+### Reading Signed Messages
+
+Signed messages can be read by both their unsigned and signed IDs:
+
+```erlang
+Wallet = ar_wallet:new(),
+
+%% Create and sign a message
+Msg = hb_message:commit(
+    #{<<"data">> => <<"test">>},
+    Wallet
+),
+
+%% Get the signed ID
+SignedID = hb_message:id(Msg, signed, Opts),
+
+%% Write it
+{ok, _} = hb_cache:write(Msg, Opts),
+
+%% Read by signed ID
+{ok, Read} = hb_cache:read(hb_util:human_id(SignedID), Opts).
+```
+
+### Quick Reference: Read Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_cache:read(ID, Opts)` | Read message by ID |
+| `hb_cache:read_resolved(Msg1, Msg2, Opts)` | Read cached computation result |
+
+---
+
+## Part 3: Lazy Loading
+
+> 📖 Reference: [hb_cache](/src/hb_cache)
+
+**Lazy loading** is the cache's superpower. Instead of loading entire nested structures into memory, HyperBEAM uses **links**—lightweight references that only load when accessed.
+
+### The Link Structure
+
+```erlang
+%% A link looks like this:
+{link, ID, LinkOpts}
+
+%% LinkOpts contain loading hints
+LinkOpts = #{
+    <<"type">> => <<"link">>,
+    <<"lazy">> => true,
+    store => Store
+}
+```
+
+### Loading One Layer: ensure_loaded/2
+
+Load just the first layer, keeping nested items as links:
+
+```erlang
+%% Write nested data
+Inner = #{<<"inner">> => <<"data">>},
+Outer = #{<<"outer">> => Inner},
+{ok, OuterID} = hb_cache:write(Outer, Opts),
+
+%% Read returns first layer with links
+{ok, ReadOuter} = hb_cache:read(OuterID, Opts),
+
+%% ensure_loaded resolves the top-level link
+Loaded = hb_cache:ensure_loaded(ReadOuter, Opts).
+%% Loaded has first layer; nested "outer" is still a link
+```
+
+### Loading Everything: ensure_all_loaded/2
+
+When you need the complete data structure:
+
+```erlang
+%% Fully resolve all nested links
+FullyLoaded = hb_cache:ensure_all_loaded(ReadOuter, Opts).
+
+%% Now you can navigate with direct map access
+OuterVal = maps:get(<<"outer">>, FullyLoaded),
+InnerVal = maps:get(<<"inner">>, OuterVal).
+%% InnerVal = <<"data">>
+```
+
+> ⚠️ **Performance Warning:** `ensure_all_loaded/2` recursively loads everything. For deeply nested messages, this can be expensive. Only use when you truly need all the data.
+
+### When to Use Each
+
+| Function | Use When |
+|----------|----------|
+| `ensure_loaded/2` | You only need top-level fields |
+| `ensure_all_loaded/2` | You need to traverse the entire structure |
+
+### Complete Example
+
+```erlang
+-module(lazy_loading_example).
+
+demo() ->
+    Store = hb_store:default(),
+    Opts = #{store => Store},
+    
+    %% Create deeply nested structure
+    Deep = #{<<"deep">> => <<"treasure">>},
+    Middle = #{<<"middle">> => Deep},
+    Top = #{<<"top">> => Middle},
+    
+    %% Write to cache
+    {ok, TopID} = hb_cache:write(Top, Opts),
+    
+    %% Read (returns with links)
+    {ok, ReadTop} = hb_cache:read(TopID, Opts),
+    
+    %% Load everything
+    Loaded = hb_cache:ensure_all_loaded(ReadTop, Opts),
+    
+    %% Navigate to the treasure
+    TopVal = maps:get(<<"top">>, Loaded),
+    MiddleVal = maps:get(<<"middle">>, TopVal),
+    DeepVal = maps:get(<<"deep">>, MiddleVal),
+    
+    io:format("Found: ~p~n", [DeepVal]).
+    %% Prints: Found: <<"treasure">>
+```
+
+### Quick Reference: Loading Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_cache:ensure_loaded(Value, Opts)` | Load first layer only |
+| `hb_cache:ensure_all_loaded(Value, Opts)` | Recursively load everything |
+
+---
+
+## Part 4: Cache Control
+
+> 📖 Reference: [hb_cache_control](/src/hb_cache_control)
+
+Cache control determines **when** to cache and **when** to use cached results. HyperBEAM uses HTTP-style directives with clear precedence rules.
+
+### Cache Control Directives
+
+| Directive | Effect |
+|-----------|--------|
+| `<<"always">>` | Always store and lookup |
+| `<<"store">>` | Enable storing |
+| `<<"no-store">>` | Disable storing |
+| `<<"cache">>` | Enable lookup |
+| `<<"no-cache">>` | Disable lookup (force recompute) |
+| `<<"only-if-cached">>` | Return error if not cached |
+
+### Using Cache Control
+
+```erlang
+%% Always cache
+Opts1 = #{cache_control => [<<"always">>]},
+{ok, Result} = hb_ao:resolve(Msg1, Msg2, Opts1).
+%% Result is automatically cached
+
+%% Force fresh computation
+Opts2 = #{cache_control => [<<"no-cache">>]},
+{ok, Fresh} = hb_ao:resolve(Msg1, Msg2, Opts2).
+%% Ignores any cached result
+
+%% Only use cache, fail if missing
+Opts3 = #{cache_control => [<<"only-if-cached">>]},
+case hb_ao:resolve(Msg1, Msg2, Opts3) of
+    {ok, Cached} -> Cached;
+    {error, _} -> not_in_cache
+end.
+```
+
+### Conditional Store
+
+Use `maybe_store/4` to conditionally cache results:
+
+```erlang
+Msg1 = #{<<"key">> => <<"value">>},
+Msg2 = #{<<"path">> => <<"key">>},
+Msg3 = <<"result">>,
+Opts = #{store => Store, cache_control => [<<"always">>]},
+
+case hb_cache_control:maybe_store(Msg1, Msg2, Msg3, Opts) of
+    {ok, Path} -> 
+        io:format("Cached at: ~p~n", [Path]);
+    not_caching -> 
+        io:format("Caching disabled~n")
+end.
+```
+
+### Conditional Lookup
+
+Use `maybe_lookup/3` to check cache before computing:
+
+```erlang
+case hb_cache_control:maybe_lookup(Msg1, Msg2, Opts) of
+    {ok, Cached} -> 
+        %% Cache hit!
+        {cached, Cached};
+    {continue, M1, M2} -> 
+        %% Cache miss, continue to compute
+        compute(M1, M2);
+    {error, #{<<"status">> := 504}} -> 
+        %% only-if-cached was set but not found
+        {error, not_cached}
+end.
+```
+
+### Precedence Rules
+
+Cache control settings come from multiple sources with clear precedence:
+
+1. **Opts** (highest) — Node operator has final say
+2. **Msg3** — Result message from device
+3. **Msg2** (lowest) — User request message
+
+```erlang
+%% Msg2 says "cache", but Opts says "no-cache"
+%% Result: no-cache wins (Opts has highest precedence)
+Msg2 = #{<<"cache-control">> => [<<"cache">>]},
+Opts = #{cache_control => [<<"no-cache">>]}.
+```
+
+### Async Caching
+
+For performance, cache in the background:
+
+```erlang
+Opts = #{async_cache => true},
+hb_cache_control:maybe_store(Msg1, Msg2, Result, Opts).
+%% Returns immediately, caches in background worker
+```
+
+---
+
+## Part 5: Listing and Matching
+
+> 📖 Reference: [hb_cache](/src/hb_cache)
+
+The cache provides utilities for listing contents and finding messages by template.
+
+### Listing Keys
+
+```erlang
+%% Write a message with multiple keys
+Msg = #{<<"a">> => <<"1">>, <<"b">> => <<"2">>, <<"c">> => <<"3">>},
+{ok, ID} = hb_cache:write(Msg, Opts),
+
+%% List the keys
+Keys = hb_cache:list(ID, Opts).
+%% Keys = [<<"a">>, <<"b">>, <<"c">>]
+```
+
+### Listing Numbered Keys
+
+For sequential data (like scheduler slots):
+
+```erlang
+Msg = #{
+    <<"1">> => <<"first">>,
+    <<"2">> => <<"second">>,
+    <<"5">> => <<"fifth">>,
+    <<"10">> => <<"tenth">>
+},
+{ok, ID} = hb_cache:write(Msg, Opts),
+
+Numbers = hb_cache:list_numbered(ID, Opts).
+%% Numbers = [1, 2, 5, 10] (sorted integers)
+```
+
+### Matching Messages
+
+Find messages matching a template (requires LMDB backend):
+
+```erlang
+%% Write some messages
+{ok, ID1} = hb_cache:write(#{<<"type">> => <<"user">>, <<"name">> => <<"Alice">>}, Opts),
+{ok, ID2} = hb_cache:write(#{<<"type">> => <<"user">>, <<"name">> => <<"Bob">>}, Opts),
+{ok, _} = hb_cache:write(#{<<"type">> => <<"post">>, <<"title">> => <<"Hello">>}, Opts),
+
+%% Find all users
+Template = #{<<"type">> => <<"user">>},
+{ok, UserIDs} = hb_cache:match(Template, Opts).
+%% UserIDs = [ID1, ID2]
+```
+
+### Quick Reference: Utility Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_cache:list(Path, Opts)` | List keys under a path |
+| `hb_cache:list_numbered(Path, Opts)` | List numeric keys as sorted integers |
+| `hb_cache:match(Template, Opts)` | Find messages matching template |
+
+---
+
+## Part 6: Test It
+
+Create a test file `src/test/test_cache.erl`:
+
+```erlang
+-module(test_cache).
+-include_lib("eunit/include/eunit.hrl").
+
+basic_write_read_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    %% Write
+    Msg = #{<<"greeting">> => <<"Hello, World!">>},
+    {ok, ID} = hb_cache:write(Msg, Opts),
+    ?debugFmt("Written with ID: ~p", [ID]),
+    
+    %% Read
+    {ok, Read} = hb_cache:read(ID, Opts),
+    Loaded = hb_cache:ensure_all_loaded(Read, Opts),
+    
+    ?assertEqual(<<"Hello, World!">>, maps:get(<<"greeting">>, Loaded)).
+
+nested_lazy_loading_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    %% Create nested structure
+    Level3 = #{<<"value">> => <<"deep">>},
+    Level2 = #{<<"nested">> => Level3},
+    Level1 = #{<<"data">> => Level2},
+    
+    {ok, ID} = hb_cache:write(Level1, Opts),
+    {ok, Read} = hb_cache:read(ID, Opts),
+    
+    %% Full load and verify
+    Loaded = hb_cache:ensure_all_loaded(Read, Opts),
+    
+    Data = maps:get(<<"data">>, Loaded),
+    Nested = maps:get(<<"nested">>, Data),
+    Value = maps:get(<<"value">>, Nested),
+    
+    ?assertEqual(<<"deep">>, Value).
+
+deduplication_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    %% Same content should get same ID
+    Msg = #{<<"x">> => <<"same">>},
+    
+    {ok, ID1} = hb_cache:write(Msg, Opts),
+    {ok, ID2} = hb_cache:write(Msg, Opts),
+    
+    ?debugFmt("ID1: ~p, ID2: ~p", [ID1, ID2]),
+    ?assertEqual(ID1, ID2).  %% Content-addressed!
+
+cache_control_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = <<"key">>,
+    
+    %% First resolve with "always" to cache
+    Opts1 = #{store => Store, cache_control => [<<"always">>]},
+    {ok, Res1} = hb_ao:resolve(Msg1, Msg2, Opts1),
+    ?assertEqual(<<"value">>, Res1),
+    
+    %% Now use only-if-cached - should hit
+    Opts2 = #{store => Store, cache_control => [<<"only-if-cached">>]},
+    {ok, Res2} = hb_ao:resolve(Msg1, Msg2, Opts2),
+    ?assertEqual(<<"value">>, Res2).
+
+list_keys_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    Msg = #{<<"alpha">> => <<"1">>, <<"beta">> => <<"2">>, <<"gamma">> => <<"3">>},
+    {ok, ID} = hb_cache:write(Msg, Opts),
+    
+    Keys = hb_cache:list(ID, Opts),
+    SortedKeys = lists:sort(Keys),
+    
+    ?assertEqual([<<"alpha">>, <<"beta">>, <<"gamma">>], SortedKeys).
+```
+
+Run the tests:
+
+```bash
+rebar3 eunit --module=test_cache
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Write → Read → Load
+
+```erlang
+Msg = #{<<"key">> => <<"value">>},
+{ok, ID} = hb_cache:write(Msg, Opts),
+{ok, Read} = hb_cache:read(ID, Opts),
+Loaded = hb_cache:ensure_all_loaded(Read, Opts).
+```
+
+### Pattern 2: Cache Computation Results
+
+```erlang
+%% Check cache first
+case hb_cache:read_resolved(Msg1, Msg2, Opts) of
+    {hit, {ok, Cached}} -> 
+        {cached, Cached};
+    miss -> 
+        %% Compute and cache
+        Result = compute(Msg1, Msg2),
+        Hashpath = hb_path:hashpath(Msg1, Msg2, Opts),
+        hb_cache:write_binary(Hashpath, Result, Opts),
+        {computed, Result}
+end.
+```
+
+### Pattern 3: Conditional Caching with Control
+
+```erlang
+%% Let cache control decide
+case hb_cache_control:maybe_lookup(Msg1, Msg2, Opts) of
+    {ok, Cached} -> 
+        Cached;
+    {continue, _, _} -> 
+        Result = compute(),
+        hb_cache_control:maybe_store(Msg1, Msg2, Result, Opts),
+        Result
+end.
+```
+
+### Pattern 4: Force Fresh Computation
+
+```erlang
+Opts = #{cache_control => [<<"no-cache">>]},
+{ok, Fresh} = hb_ao:resolve(Msg1, Msg2, Opts).
+```
+
+### Pattern 5: Background Caching
+
+```erlang
+Opts = #{async_cache => true, cache_control => [<<"store">>]},
+hb_cache_control:maybe_store(Msg1, Msg2, Result, Opts).
+%% Returns immediately
+```
+
+---
+
+## What's Next?
+
+You now understand the caching fundamentals:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Write | [`hb_cache`](/src/hb_cache) | `write`, `write_binary`, `write_hashpath` |
+| Read | [`hb_cache`](/src/hb_cache) | `read`, `read_resolved` |
+| Lazy Load | [`hb_cache`](/src/hb_cache) | `ensure_loaded`, `ensure_all_loaded` |
+| Control | [`hb_cache_control`](/src/hb_cache_control) | `maybe_store`, `maybe_lookup` |
+| Utilities | [`hb_cache`](/src/hb_cache) | `list`, `list_numbered`, `match` |
+
+### Going Further
+
+1. **Storage Backends** — Learn about `hb_store_lmdb`, `hb_store_fs`, and `hb_store_rocksdb`
+2. **Message System** — Deep dive into `hb_message` for signing and verification
+3. **The Resolver** — See how `hb_ao:resolve/3` uses caching internally
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_cache](/src/hb_cache) | [hb_cache_control](/src/hb_cache_control)
+
+```erlang
+%% === SETUP ===
+Store = hb_store:default().
+Opts = #{store => Store}.
+
+%% === WRITE ===
+{ok, ID} = hb_cache:write(Msg, Opts).
+{ok, Path} = hb_cache:write_binary(Hashpath, Binary, Opts).
+
+%% === READ ===
+{ok, Msg} = hb_cache:read(ID, Opts).
+{hit, Result} = hb_cache:read_resolved(Msg1, Msg2, Opts).
+not_found = hb_cache:read(BadID, Opts).
+
+%% === LAZY LOADING ===
+Loaded = hb_cache:ensure_loaded(Link, Opts).
+FullyLoaded = hb_cache:ensure_all_loaded(Msg, Opts).
+
+%% === CACHE CONTROL ===
+Opts1 = #{cache_control => [<<"always">>]}.
+Opts2 = #{cache_control => [<<"no-cache">>]}.
+Opts3 = #{cache_control => [<<"only-if-cached">>]}.
+Opts4 = #{async_cache => true}.
+
+{ok, Path} = hb_cache_control:maybe_store(Msg1, Msg2, Result, Opts).
+{ok, Cached} = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts).
+{continue, M1, M2} = hb_cache_control:maybe_lookup(Msg1, Msg2, Opts).
+
+%% === UTILITIES ===
+Keys = hb_cache:list(ID, Opts).
+Nums = hb_cache:list_numbered(ID, Opts).
+{ok, IDs} = hb_cache:match(Template, Opts).
+```
+
+---
+
+*Now go cache something efficiently!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_cache Reference](/src/hb_cache) — Cache functions
+- [hb_cache_control Reference](/src/hb_cache_control) — Cache control logic
+- [hb_store Reference](/src/hb_store) — Storage abstraction
+- [Full Reference](/hyperbeam) — All modules
+
+**Related Modules**
+- [hb_store](/src/hb_store) — Storage interface
+- [hb_store_lmdb](/src/hb_store_lmdb) — LMDB storage backend
+- [hb_message](/src/hb_message) — Message creation and signing
+- [hb_link](/src/hb_link) — Link structure and resolution
+
+**Concepts**
+- [HTTP Cache-Control](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) — HTTP caching semantics (for reference)
+- [Content-Addressable Storage](https://en.wikipedia.org/wiki/Content-addressable_storage) — The deduplication principle

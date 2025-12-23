@@ -1,0 +1,790 @@
+# Making HTTP Requests with HyperBEAM
+
+A beginner's guide to HTTP communication in HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **HTTP Core** — Making GET and POST requests to remote nodes
+2. **Connection Pooling** — Efficiently managing persistent connections
+3. **Multi-Requests** — Querying multiple nodes in parallel
+4. **Remote Resolution** — Executing messages on remote HyperBEAM nodes
+5. **Gateway Client** — Fetching data from Arweave via GraphQL
+6. **Service Discovery** — Finding nodes in the AO network
+
+No prior HTTP internals knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM nodes communicate over HTTP. Whether you're fetching data from Arweave, sending messages to other nodes, or uploading bundles, HTTP is the transport layer. The HTTP client stack handles connection pooling, codec negotiation, parallel requests, and response parsing.
+
+Here's the mental model:
+
+```
+Your Code → hb_http → hb_http_client → Gun/HTTPC → Remote Node
+     ↓           ↓            ↓              ↓
+  Request    Codec       Pool/Retry      Network
+```
+
+Think of it like a mail delivery service:
+- **hb_http** = The post office (accepts your package, handles paperwork)
+- **hb_http_client** = The delivery trucks (maintains routes, handles logistics)
+- **hb_http_multi** = Express delivery (multiple trucks in parallel)
+- **hb_client** = Your local mailman (knows common destinations)
+- **hb_gateway_client** = International shipping (Arweave network access)
+- **hb_router** = Address lookup (finds where services live)
+
+Let's build each piece.
+
+---
+
+## Part 1: Simple HTTP Requests
+
+> 📖 Reference: [hb_http](/src/hb_http)
+
+`hb_http` is your primary interface for HTTP communication. It converts HyperBEAM messages to HTTP requests and parses responses back into messages.
+
+### Making a GET Request
+
+```erlang
+%% Simple GET to a node
+Node = <<"http://localhost:8421">>,
+{ok, Response} = hb_http:get(Node, #{}).
+
+%% GET with a path
+{ok, Response} = hb_http:get(Node, <<"/status">>, #{}).
+
+%% GET with a message containing path
+Message = #{<<"path">> => <<"/data/123">>},
+{ok, Response} = hb_http:get(Node, Message, #{}).
+```
+
+The response is a map containing:
+- `<<"status">>` — HTTP status code (200, 404, etc.)
+- `<<"body">>` or `<<"data">>` — Response content
+- Headers as key-value pairs
+
+### Making a POST Request
+
+```erlang
+%% POST to a path
+Node = <<"http://localhost:8421">>,
+{ok, Response} = hb_http:post(Node, <<"/submit">>, #{}).
+
+%% POST with a message body
+Message = #{
+    <<"key">> => <<"value">>,
+    <<"data">> => <<"payload">>
+},
+{ok, Response} = hb_http:post(Node, <<"/api/create">>, Message, #{}).
+```
+
+### Generic Request
+
+For full control, use `hb_http:request/5`:
+
+```erlang
+%% Generic request with method, peer, path, message, options
+{ok, Response} = hb_http:request(
+    <<"GET">>,                          % Method
+    <<"http://localhost:8421">>,        % Peer
+    <<"/api/data">>,                    % Path
+    #{},                                % Message body
+    #{}                                 % Options
+).
+
+%% Response status is categorized
+case hb_http:request(<<"GET">>, Node, Path, #{}, #{}) of
+    {ok, Res}      -> handle_success(Res);      % 2xx-3xx
+    {created, Res} -> handle_created(Res);      % 201
+    {error, Res}   -> handle_client_error(Res); % 4xx
+    {failure, Res} -> handle_server_error(Res)  % 5xx
+end.
+```
+
+### Quick Reference: hb_http Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_http:get(Node, Opts)` | GET request to node root |
+| `hb_http:get(Node, Path, Opts)` | GET request to specific path |
+| `hb_http:post(Node, Path, Opts)` | POST request to path |
+| `hb_http:post(Node, Path, Msg, Opts)` | POST request with body |
+| `hb_http:request(Method, Peer, Path, Msg, Opts)` | Generic request |
+
+---
+
+## Part 2: Connection Pooling
+
+> 📖 Reference: [hb_http_client](/src/hb_http_client)
+
+Making HTTP connections is expensive. `hb_http_client` maintains a pool of persistent connections to remote peers, reusing them across requests.
+
+### How It Works
+
+The client is a `gen_server` that:
+1. Maintains a map of `Peer → Connection PID`
+2. Creates new connections on demand
+3. Reuses existing connections when available
+4. Automatically reconnects on failure
+
+```erlang
+%% Under the hood, hb_http uses hb_http_client:req/2
+Args = #{
+    peer => <<"http://example.com">>,
+    path => <<"/api/data">>,
+    method => <<"GET">>,
+    headers => #{},
+    body => <<>>
+},
+{ok, Status, Headers, Body} = hb_http_client:req(Args, #{}).
+```
+
+### Client Selection
+
+HyperBEAM supports two HTTP clients:
+
+```erlang
+%% Use Gun (default) - connection pooling, HTTP/2 support
+{ok, _, _, _} = hb_http_client:req(Args, #{http_client => gun}).
+
+%% Use HTTPC (fallback) - simpler, built-in OTP client
+{ok, _, _, _} = hb_http_client:req(Args, #{http_client => httpc}).
+```
+
+**Gun** (default):
+- Connection pooling
+- HTTP/2 support
+- Streaming responses
+- Automatic reconnection
+
+**HTTPC** (fallback):
+- Stateless
+- Simpler error handling
+- Built into Erlang/OTP
+- Good for debugging
+
+### Request Arguments
+
+```erlang
+Args = #{
+    peer => <<"http://example.com:8080">>,  % Full URL with scheme
+    path => <<"/api/v1/data">>,             % Request path
+    method => <<"POST">>,                   % HTTP method
+    headers => #{
+        <<"content-type">> => <<"application/json">>,
+        <<"authorization">> => <<"Bearer token">>
+    },
+    body => <<"{\"key\":\"value\"}">>,
+    limit => 1048576,                       % Max response size (1MB)
+    is_peer_request => true                 % Mark as peer communication
+}.
+```
+
+### Quick Reference: hb_http_client Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_http_client:start_link(Opts)` | Start the client gen_server |
+| `hb_http_client:req(Args, Opts)` | Execute HTTP request |
+
+---
+
+## Part 3: Supervision
+
+> 📖 Reference: [hb_http_client_sup](/src/hb_http_client_sup)
+
+The HTTP client runs under an OTP supervisor for reliability.
+
+### Supervision Tree
+
+```
+hb_http_client_sup (one_for_one)
+    └── hb_http_client (gen_server, permanent)
+```
+
+### Starting the Supervisor
+
+```erlang
+%% Start HTTP client supervisor with options
+Opts = [#{
+    http_client => gun,
+    port => 8734,
+    prometheus => true
+}],
+{ok, Pid} = hb_http_client_sup:start_link(Opts).
+
+%% Check if client is running
+Children = supervisor:which_children(hb_http_client_sup).
+%% [{hb_http_client, <0.123.0>, worker, [hb_http_client]}]
+```
+
+### Restart Policy
+
+The supervisor uses:
+- **Strategy:** `one_for_one` — restart only failed child
+- **Max Restarts:** 5 in 10 seconds
+- **Shutdown Timeout:** 10s (debug) or 30s (production)
+
+If the client crashes repeatedly, the supervisor terminates to prevent restart loops.
+
+---
+
+## Part 4: Parallel Multi-Requests
+
+> 📖 Reference: [hb_http_multi](/src/hb_http_multi)
+
+When you need to query multiple nodes simultaneously, `hb_http_multi` sends parallel requests and aggregates results.
+
+### Route-Based Requests
+
+When a peer contains `<<"nodes">>`, `hb_http` automatically delegates to multi-request:
+
+```erlang
+%% Configuration with multiple nodes
+Config = #{
+    <<"nodes">> => [
+        <<"http://node1.ao.computer">>,
+        <<"http://node2.ao.computer">>,
+        <<"http://node3.ao.computer">>
+    ]
+},
+
+%% This automatically fans out to all nodes
+{ok, Response} = hb_http:request(
+    <<"GET">>,
+    Config,
+    <<"/api/status">>,
+    #{},
+    #{}
+).
+```
+
+### Multi-Request Options
+
+```erlang
+Opts = #{
+    %% Number of successful responses required
+    <<"multirequest-responses">> => 1,
+    
+    %% Acceptable status codes
+    <<"multirequest-admissible-status">> => 200,
+    
+    %% Custom admissibility check
+    <<"multirequest-admissible">> => #{
+        <<"device">> => <<"query@1.0">>,
+        <<"path">> => <<"has-results">>
+    }
+}.
+```
+
+### Use Cases
+
+- **Redundancy:** Query multiple gateways, use first response
+- **Load balancing:** Spread requests across nodes
+- **Data verification:** Compare responses from multiple sources
+- **Availability:** Continue if some nodes are down
+
+---
+
+## Part 5: Remote Node Communication
+
+> 📖 Reference: [hb_client](/src/hb_client)
+
+`hb_client` provides higher-level functions for common operations: remote resolution, route management, and Arweave uploads.
+
+### Resolving Messages on Remote Nodes
+
+```erlang
+%% Resolve a message pair on a remote HyperBEAM node
+Node = <<"http://localhost:8421">>,
+
+Msg1 = #{
+    <<"device">> => <<"Router@1.0">>,
+    <<"key">> => <<"value">>
+},
+
+Msg2 = #{
+    <<"path">> => <<"/routes">>,
+    <<"method">> => <<"GET">>
+},
+
+{ok, Result} = hb_client:resolve(Node, Msg1, Msg2, #{}).
+```
+
+The `resolve/4` function transforms the message pair by prefixing keys with `1.` and `2.`, sending it as a singleton request.
+
+### Managing Routes
+
+```erlang
+%% Get routes from a remote node
+{ok, Routes} = hb_client:routes(<<"http://localhost:8421">>, #{}).
+
+%% Add a new route
+Route = #{
+    <<"template">> => <<"/my-endpoint">>,
+    <<"node">> => <<"http://handler.ao.computer">>
+},
+{ok, _} = hb_client:add_route(<<"http://localhost:8421">>, Route, #{}).
+```
+
+### Uploading to Arweave
+
+```erlang
+%% Get wallet for signing
+Wallet = hb:wallet(),
+
+%% Create and commit a message
+Msg = #{
+    <<"data">> => <<"Hello, Arweave!">>,
+    <<"Content-Type">> => <<"text/plain">>
+},
+Committed = hb_message:commit(Msg, Wallet, <<"ans104@1.0">>),
+
+%% Upload to ANS-104 bundler
+{ok, Result} = hb_client:upload(Committed, #{}, <<"ans104@1.0">>).
+
+%% Or upload raw serialized data
+Item = ar_bundles:sign_item(#tx{data = <<"data">>}, Wallet),
+Serialized = ar_bundles:serialize(Item),
+{ok, Result} = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>).
+```
+
+### Getting Arweave Block Info
+
+```erlang
+%% Fetch current block information
+{Timestamp, Height, Hash} = hb_client:arweave_timestamp().
+%% Timestamp = Unix timestamp
+%% Height = Block height
+%% Hash = 43-byte block hash
+```
+
+### Quick Reference: hb_client Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_client:resolve(Node, Msg1, Msg2, Opts)` | Execute message pair on remote node |
+| `hb_client:routes(Node, Opts)` | Get routes from node |
+| `hb_client:add_route(Node, Route, Opts)` | Add route to node |
+| `hb_client:arweave_timestamp()` | Get current Arweave block info |
+| `hb_client:upload(Msg, Opts)` | Upload to all commitment devices |
+| `hb_client:upload(Msg, Opts, Device)` | Upload to specific device |
+
+---
+
+## Part 6: Arweave Gateway Client
+
+> 📖 Reference: [hb_gateway_client](/src/hb_gateway_client)
+
+`hb_gateway_client` provides access to Arweave data via the GraphQL API. It fetches transaction metadata and raw data, converting them to HyperBEAM messages.
+
+### Reading Data Items
+
+```erlang
+%% Read a complete data item by ID
+ID = <<"uJBApOt4ma3pTfY6Z4xmknz5vAasup4KcGX7FJ0Of8w">>,
+{ok, Message} = hb_gateway_client:read(ID, #{}).
+
+%% Message contains all metadata and data
+Data = maps:get(<<"data">>, Message),
+Tags = maps:get(<<"tags">>, Message).
+```
+
+### GraphQL Queries
+
+```erlang
+%% Simple query
+Query = <<"query { transactions(first: 10) { edges { node { id } } } }">>,
+{ok, Response} = hb_gateway_client:query(Query, #{}).
+
+%% Query with variables
+Query = <<"query($ids: [ID!]!) { 
+    transactions(ids: $ids) { 
+        edges { node { id tags { name value } } } 
+    } 
+}">>,
+Variables = #{<<"ids">> => [ID1, ID2, ID3]},
+{ok, Response} = hb_gateway_client:query(Query, Variables, #{}).
+```
+
+### Fetching Raw Data
+
+```erlang
+%% Get raw binary data for a transaction
+{ok, Binary} = hb_gateway_client:data(ID, #{}).
+```
+
+### Finding Scheduler Location
+
+```erlang
+%% Find scheduler by owner address
+Address = <<"fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY">>,
+{ok, SchedulerMsg} = hb_gateway_client:scheduler_location(Address, #{}),
+
+%% Extract URL
+URL = hb_ao:get(<<"url">>, SchedulerMsg, #{}).
+```
+
+### Subindex Queries
+
+Filter by tag combinations:
+
+```erlang
+Opts = #{
+    <<"subindex">> => #{
+        <<"1">> => #{
+            <<"name">> => <<"Type">>,
+            <<"value">> => <<"Message">>
+        },
+        <<"2">> => #{
+            <<"name">> => <<"Target">>,
+            <<"value">> => ProcessID
+        }
+    }
+},
+{ok, Message} = hb_gateway_client:read(ID, Opts).
+```
+
+### Quick Reference: hb_gateway_client Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_gateway_client:read(ID, Opts)` | Get complete data item |
+| `hb_gateway_client:data(ID, Opts)` | Get raw binary data |
+| `hb_gateway_client:query(Query, Opts)` | Execute GraphQL query |
+| `hb_gateway_client:query(Query, Vars, Opts)` | Query with variables |
+| `hb_gateway_client:scheduler_location(Addr, Opts)` | Find scheduler |
+| `hb_gateway_client:item_spec()` | Get GraphQL fragment for items |
+
+---
+
+## Part 7: Service Discovery
+
+> 📖 Reference: [hb_router](/src/hb_router)
+
+`hb_router` locates services in the AO network using URL-based routing.
+
+### Finding Services
+
+```erlang
+%% Find a scheduler node
+{ok, URL} = hb_router:find(<<"scheduler">>, ProcessID).
+%% Returns: {ok, <<"https://scheduler.ao.computer">>}
+
+%% Find specific compute unit by address
+{ok, CU} = hb_router:find(<<"compute-unit">>, TaskID, <<"primary">>).
+
+%% Find any service with wildcard
+{ok, MU} = hb_router:find(<<"messenger">>, MsgID, '_').
+```
+
+### Configuration
+
+Services are configured in the `nodes` map:
+
+```erlang
+%% Configuration structure
+#{
+    nodes => #{
+        <<"scheduler">> => #{
+            '_' => <<"https://scheduler.ao.computer">>
+        },
+        <<"compute-unit">> => #{
+            <<"primary">> => <<"https://cu1.ao.computer">>,
+            <<"backup">> => <<"https://cu2.ao.computer">>,
+            '_' => <<"https://cu-default.ao.computer">>
+        },
+        <<"messenger">> => #{
+            '_' => <<"https://mu.ao.computer">>
+        },
+        <<"gateway">> => #{
+            '_' => <<"https://arweave.net">>
+        }
+    }
+}
+```
+
+### Service Types
+
+| Service Type | Description | Typical Address |
+|-------------|-------------|-----------------|
+| `<<"scheduler">>` | Scheduler Units (SU) | `https://scheduler.ao.computer` |
+| `<<"compute-unit">>` | Compute Units (CU) | `https://cu.ao.computer` |
+| `<<"messenger">>` | Messenger Units (MU) | `https://mu.ao.computer` |
+| `<<"gateway">>` | Arweave Gateway | `https://arweave.net` |
+| `<<"bundler">>` | ANS-104 Bundler | `https://up.arweave.net` |
+
+### Quick Reference: hb_router Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_router:find(Type, ID)` | Find service by type |
+| `hb_router:find(Type, ID, Address)` | Find specific service |
+
+---
+
+## Part 8: Complete Example
+
+Let's put it all together with a practical example:
+
+```erlang
+-module(http_example).
+-export([run/0]).
+
+run() ->
+    %% 1. Start HTTP infrastructure
+    hb_http:start(),
+    
+    %% 2. Find a scheduler node
+    ProcessID = <<"my-process-id">>,
+    {ok, SchedulerURL} = hb_router:find(<<"scheduler">>, ProcessID),
+    io:format("Using scheduler: ~s~n", [SchedulerURL]),
+    
+    %% 3. Make a simple GET request
+    {ok, StatusResp} = hb_http:get(SchedulerURL, <<"/status">>, #{}),
+    io:format("Scheduler status: ~p~n", [StatusResp]),
+    
+    %% 4. Fetch data from Arweave
+    DataID = <<"uJBApOt4ma3pTfY6Z4xmknz5vAasup4KcGX7FJ0Of8w">>,
+    case hb_gateway_client:read(DataID, #{}) of
+        {ok, DataMsg} ->
+            io:format("Fetched data: ~p bytes~n", 
+                [byte_size(maps:get(<<"data">>, DataMsg, <<>>))]);
+        {error, Reason} ->
+            io:format("Failed to fetch: ~p~n", [Reason])
+    end,
+    
+    %% 5. Upload to Arweave
+    Wallet = hb:wallet(),
+    Msg = #{
+        <<"data">> => <<"Hello from HyperBEAM!">>,
+        <<"Content-Type">> => <<"text/plain">>
+    },
+    Committed = hb_message:commit(Msg, Wallet, <<"ans104@1.0">>),
+    case hb_client:upload(Committed, #{}, <<"ans104@1.0">>) of
+        {ok, UploadResult} ->
+            io:format("Uploaded! Result: ~p~n", [UploadResult]);
+        {error, UploadError} ->
+            io:format("Upload failed: ~p~n", [UploadError])
+    end,
+    
+    ok.
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Simple GET → Process Response
+
+```erlang
+Node = <<"http://localhost:8421">>,
+case hb_http:get(Node, <<"/api/data">>, #{}) of
+    {ok, #{<<"status">> := 200} = Resp} ->
+        process_data(maps:get(<<"body">>, Resp));
+    {ok, #{<<"status">> := Status}} ->
+        io:format("Unexpected status: ~p~n", [Status]);
+    {error, Reason} ->
+        io:format("Request failed: ~p~n", [Reason])
+end.
+```
+
+### Pattern 2: POST with Signed Message
+
+```erlang
+Wallet = hb:wallet(),
+Message = #{
+    <<"action">> => <<"create">>,
+    <<"data">> => Payload
+},
+SignedMsg = hb_message:commit(Message, #{priv_wallet => Wallet}),
+{ok, Response} = hb_http:post(Node, <<"/api/submit">>, SignedMsg, #{}).
+```
+
+### Pattern 3: Multi-Gateway Query
+
+```erlang
+Gateways = #{
+    <<"nodes">> => [
+        <<"https://arweave.net">>,
+        <<"https://g8way.io">>,
+        <<"https://arweave.dev">>
+    ]
+},
+Opts = #{<<"multirequest-responses">> => 1},
+{ok, Response} = hb_http:request(<<"GET">>, Gateways, <<"/tx/", ID/binary>>, #{}, Opts).
+```
+
+### Pattern 4: Fallback Service Discovery
+
+```erlang
+find_service(Type, ID) ->
+    case hb_router:find(Type, ID) of
+        {ok, URL} -> {ok, URL};
+        {error, _} ->
+            %% Try default
+            hb_router:find(Type, ID, '_')
+    end.
+```
+
+---
+
+## Configuration Options
+
+### hb_http Options
+
+```erlang
+Opts = #{
+    http_client => gun | httpc,           % Client selection
+    http_only_result => true | false,     % Extract single result key
+    <<"codec-device">> => <<"httpsig@1.0">> | <<"ans104@1.0">>,
+    priv_wallet => Wallet,                % Wallet for signing
+    http_request_send_timeout => 30000,   % Request timeout (ms)
+    limit => infinity | Bytes,            % Response size limit
+    cache_control => [<<"no-cache">>]     % Cache control headers
+}.
+```
+
+### hb_http_client Options
+
+```erlang
+Opts = #{
+    http_client => gun | httpc,
+    connect_timeout => 5000,
+    http_request_send_timeout => 30000,
+    limit => infinity,
+    port => 8734,
+    prometheus => true,
+    http_monitor => MonitorMsg,
+    http_reference => Reference
+}.
+```
+
+### hb_gateway_client Options
+
+```erlang
+Opts = #{
+    ans104_trust_gql => false,            % Trust GraphQL without verification
+    <<"multirequest-responses">> => 1,
+    <<"multirequest-admissible-status">> => 200,
+    cache_control => [<<"no-cache">>],
+    hashpath => ignore
+}.
+```
+
+---
+
+## Error Handling
+
+```erlang
+%% HTTP response status mapping
+{ok, _}      → 2xx-3xx (success)
+{created, _} → 201 (created)
+{error, _}   → 4xx (client error)
+{failure, _} → 5xx (server error)
+
+%% Network errors
+{error, connection_closed}
+{error, connect_timeout}
+{error, timeout}
+{error, econnrefused}
+
+%% Size limit
+{error, too_much_data}
+
+%% Service discovery
+{error, service_type_not_found}
+
+%% Gateway
+{error, not_found}
+{error, no_viable_gateway}
+```
+
+---
+
+## What's Next?
+
+You now understand the HTTP client stack:
+
+| Layer | Module | Key Functions |
+|-------|--------|---------------|
+| High-Level | [`hb_client`](/src/hb_client) | `resolve`, `routes`, `upload` |
+| Gateway | [`hb_gateway_client`](/src/hb_gateway_client) | `read`, `query`, `data` |
+| Core HTTP | [`hb_http`](/src/hb_http) | `get`, `post`, `request` |
+| Connection Pool | [`hb_http_client`](/src/hb_http_client) | `req` |
+| Multi-Request | [`hb_http_multi`](/src/hb_http_multi) | Parallel queries |
+| Supervision | [`hb_http_client_sup`](/src/hb_http_client_sup) | OTP supervisor |
+| Discovery | [`hb_router`](/src/hb_router) | `find` |
+
+### Going Further
+
+1. **Codec Devices** — Learn how messages are serialized (`dev_codec_*` modules)
+2. **Message System** — Understand HyperBEAM messages ([hb_message](/src/hb_message))
+3. **Build Devices** — Create custom HTTP-based devices ([Book](/book))
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_http](/src/hb_http) | [hb_http_client](/src/hb_http_client) | [hb_client](/src/hb_client) | [hb_gateway_client](/src/hb_gateway_client) | [hb_router](/src/hb_router)
+
+```erlang
+%% === SIMPLE REQUESTS ===
+{ok, Resp} = hb_http:get(Node, Path, Opts).
+{ok, Resp} = hb_http:post(Node, Path, Message, Opts).
+{Status, Resp} = hb_http:request(Method, Peer, Path, Msg, Opts).
+
+%% === LOW-LEVEL CLIENT ===
+Args = #{peer => URL, path => Path, method => Method, headers => #{}, body => <<>>}.
+{ok, Status, Headers, Body} = hb_http_client:req(Args, Opts).
+
+%% === REMOTE RESOLUTION ===
+{ok, Result} = hb_client:resolve(Node, Msg1, Msg2, Opts).
+{ok, Routes} = hb_client:routes(Node, Opts).
+{ok, _} = hb_client:add_route(Node, Route, Opts).
+
+%% === ARWEAVE UPLOAD ===
+Committed = hb_message:commit(Msg, Wallet, <<"ans104@1.0">>).
+{ok, Result} = hb_client:upload(Committed, Opts, <<"ans104@1.0">>).
+{Timestamp, Height, Hash} = hb_client:arweave_timestamp().
+
+%% === GATEWAY CLIENT ===
+{ok, Message} = hb_gateway_client:read(ID, Opts).
+{ok, Binary} = hb_gateway_client:data(ID, Opts).
+{ok, Response} = hb_gateway_client:query(Query, Variables, Opts).
+{ok, Scheduler} = hb_gateway_client:scheduler_location(Address, Opts).
+
+%% === SERVICE DISCOVERY ===
+{ok, URL} = hb_router:find(ServiceType, ID).
+{ok, URL} = hb_router:find(ServiceType, ID, Address).
+```
+
+---
+
+*Now go build something distributed!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_http Reference](/src/hb_http) — Core HTTP functions
+- [hb_http_client Reference](/src/hb_http_client) — Connection pooling
+- [hb_client Reference](/src/hb_client) — Remote operations
+- [hb_gateway_client Reference](/src/hb_gateway_client) — Arweave GraphQL
+- [hb_router Reference](/src/hb_router) — Service discovery
+- [Full Reference](/hyperbeam) — All modules
+
+**Protocol Documentation**
+- [Arweave GraphQL](https://gql-guide.arweave.dev/) — Gateway query API
+- [ANS-104](https://github.com/ArweaveTeam/arweave-standards/blob/master/ans/ANS-104.md) — Bundled Data v2.0
+
+**Libraries**
+- [Gun HTTP Client](https://ninenines.eu/docs/en/gun/2.0/guide/) — Erlang HTTP/2 client
+- [HTTPC](https://www.erlang.org/doc/man/httpc.html) — Built-in OTP HTTP client
