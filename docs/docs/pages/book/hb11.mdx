@@ -1,0 +1,732 @@
+# HyperBEAM Application Architecture
+
+A beginner's guide to OTP applications with HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Application Module** — The OTP entry point for HyperBEAM
+2. **Supervision Trees** — How processes are managed and restarted
+3. **Core Initialization** — System setup and configuration
+4. **Name Registration** — Finding processes by name (any term)
+5. **Persistent Workers** — Long-lived processes for expensive operations
+6. How these pieces connect to form a **running HyperBEAM node**
+
+No prior OTP knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM uses Erlang/OTP's battle-tested application framework. When you start a node, a carefully orchestrated sequence brings up all the services:
+
+```
+application:start(hyperbeam)
+     ↓
+  hb_app (entry point)
+     ↓
+  hb_sup (supervisor)
+     ├─> hb_http_client
+     ├─> hb_store_rocksdb (optional)
+     └─> [other workers]
+     ↓
+  hb_name (registry)
+     ↓
+  HTTP server + services
+```
+
+Think of it like starting a car:
+- **hb_app** = The ignition key
+- **hb_sup** = The engine management system
+- **hb** = The control panel
+- **hb_name** = The GPS (finding things)
+- **hb_persistent** = Cruise control (long-running tasks)
+
+Let's explore each piece.
+
+---
+
+## Part 1: The Application Module
+
+> 📖 Reference: [hb_app](/src/hb_app)
+
+Every OTP application needs an entry point. `hb_app` is HyperBEAM's—it implements the `application` behavior with two callbacks: `start/2` and `stop/1`.
+
+### Starting the Application
+
+```erlang
+%% The recommended way to start HyperBEAM
+application:ensure_all_started(hyperbeam).
+```
+
+Behind the scenes, this calls `hb_app:start/2`:
+
+```erlang
+%% What happens inside hb_app:start/2
+hb:init(),                          % 1. Initialize system
+{ok, SupPid} = hb_sup:start_link(), % 2. Start supervisor
+dev_scheduler_registry:start(),      % 3. Device scheduler
+ar_timestamp:start(),                % 4. Time sync
+hb_http_server:start().              % 5. HTTP server
+```
+
+### Startup Sequence
+
+```
+1. hb:init()
+   ├─> hb_name:start()         % Name registry
+   └─> Set backtrace_depth     % Debug config
+
+2. hb_sup:start_link()
+   └─> Supervisor PID returned
+
+3. dev_scheduler_registry:start()
+   └─> Device execution scheduler
+
+4. ar_timestamp:start()
+   ├─> Cache process
+   └─> Refresher (15s interval)
+
+5. hb_http_server:start()
+   └─> Cowboy HTTP server
+```
+
+### Stopping the Application
+
+```erlang
+%% Clean shutdown
+application:stop(hyperbeam).
+```
+
+The `stop/1` callback is simple—OTP handles terminating the supervision tree automatically.
+
+### Quick Reference: Application Functions
+
+| Function | What it does |
+|----------|--------------|
+| `application:ensure_all_started(hyperbeam)` | Start HyperBEAM and dependencies |
+| `application:stop(hyperbeam)` | Stop HyperBEAM |
+| `application:which_applications()` | List running applications |
+
+---
+
+## Part 2: The Supervisor
+
+> 📖 Reference: [hb_sup](/src/hb_sup)
+
+A **supervisor** is a process that monitors other processes (children) and restarts them if they crash. `hb_sup` is the root supervisor for HyperBEAM.
+
+### Creating the Supervisor
+
+```erlang
+%% Start with default configuration
+{ok, Pid} = hb_sup:start_link().
+
+%% Start with custom store configuration
+Opts = #{
+    store => [
+        #{
+            <<"store-module">> => hb_store_rocksdb,
+            <<"name">> => <<"cache/rocks">>
+        }
+    ]
+},
+{ok, Pid} = hb_sup:start_link(Opts).
+```
+
+### Supervision Strategy
+
+HyperBEAM uses `one_for_all` with zero intensity:
+
+```erlang
+#{
+    strategy => one_for_all,  % If one child dies, restart ALL
+    intensity => 0,           % Zero failures allowed
+    period => 1               % Within 1 second
+}
+```
+
+**What this means:**
+- Any child crash triggers a complete restart
+- Zero tolerance—one failure shuts everything down
+- Ensures consistent state across all components
+
+### Child Processes
+
+The supervisor manages these children:
+
+```
+hb_sup (one_for_all)
+  ├─ hb_http_client (always started)
+  │   └─> HTTP client pool
+  │
+  └─ hb_store_rocksdb (if configured)
+      └─> RocksDB database
+```
+
+### Inspecting the Supervisor
+
+```erlang
+%% List all children
+supervisor:which_children(hb_sup).
+%% => [{hb_http_client, <0.123.0>, worker, [hb_http_client]}, ...]
+
+%% Count children
+supervisor:count_children(hb_sup).
+%% => #{specs => 2, active => 2, supervisors => 0, workers => 2}
+```
+
+### Quick Reference: Supervisor Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_sup:start_link()` | Start supervisor |
+| `hb_sup:start_link(Opts)` | Start with configuration |
+| `supervisor:which_children(hb_sup)` | List child processes |
+| `supervisor:count_children(hb_sup)` | Count children by type |
+
+---
+
+## Part 3: Core Initialization
+
+> 📖 Reference: [hb](/src/hb)
+
+The `hb` module provides core utilities: initialization, wallet management, and node startup helpers.
+
+### Initializing the System
+
+```erlang
+%% Initialize HyperBEAM (called automatically by hb_app)
+hb:init().
+```
+
+This does two things:
+1. Starts the name registry (`hb_name`)
+2. Sets Erlang's backtrace depth for debugging
+
+### Getting the Current Time
+
+```erlang
+%% Milliseconds since epoch
+Timestamp = hb:now().
+%% => 1703347200000
+```
+
+### Wallet Management
+
+```erlang
+%% Load or create wallet from default location
+Wallet = hb:wallet().
+
+%% Load or create from specific path
+Wallet = hb:wallet("/path/to/wallet.json").
+
+%% Get the wallet address (base64url encoded)
+Address = hb:address().
+%% => <<"abc123...">> (43 characters)
+```
+
+### Starting a Node
+
+```erlang
+%% Start on default port (8080)
+URL = hb:start_mainnet().
+%% => <<"http://localhost:8080">>
+
+%% Start on specific port
+URL = hb:start_mainnet(9000).
+%% => <<"http://localhost:9000">>
+
+%% Start with options
+URL = hb:start_mainnet(#{
+    port => 9000,
+    priv_key_location => "/path/to/wallet.json"
+}).
+```
+
+### Debug Utilities
+
+```erlang
+%% Read a cached message
+{ok, Msg} = hb:read(<<"message_id">>).
+{ok, Msg} = hb:read(<<"message_id">>, local).
+
+%% Hot-reload during development
+hb:build().
+
+%% Safety check for non-production code
+Result = hb:no_prod(experimental_value, ?MODULE, ?LINE).
+```
+
+### Quick Reference: Core Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb:init()` | Initialize system |
+| `hb:now()` | Current time in milliseconds |
+| `hb:wallet()` | Load/create default wallet |
+| `hb:wallet(Path)` | Load/create wallet at path |
+| `hb:address()` | Get wallet address |
+| `hb:start_mainnet()` | Start HTTP node |
+| `hb:read(ID)` | Read cached message |
+| `hb:build()` | Hot-reload code |
+
+---
+
+## Part 4: Name Registration
+
+> 📖 Reference: [hb_name](/src/hb_name)
+
+Erlang's built-in `register/2` only accepts atoms. `hb_name` extends this to support **any Erlang term** as a name—binaries, tuples, maps, anything.
+
+### Why This Matters
+
+HyperBEAM needs to register processes with complex names:
+
+```erlang
+%% Process paths
+<<"/process/abc123">>
+
+%% Composite keys
+{scheduler, <<"user-session-xyz">>}
+
+%% Complex identifiers
+#{type => worker, id => 123}
+```
+
+### Registering Names
+
+```erlang
+%% Register current process with a name
+ok = hb_name:register(<<"my-process">>).
+
+%% Register another process
+WorkerPID = spawn(fun worker_loop/0),
+ok = hb_name:register({worker, 1}, WorkerPID).
+
+%% Atoms still work (uses Erlang's register/2)
+ok = hb_name:register(my_atom_name).
+```
+
+### Finding Processes
+
+```erlang
+%% Lookup by name
+case hb_name:lookup(<<"my-process">>) of
+    undefined -> process_not_found();
+    PID -> send_message(PID)
+end.
+
+%% Dead processes are automatically cleaned up
+%% If the registered process died, lookup returns undefined
+```
+
+### Unregistering
+
+```erlang
+%% Unregister a name (always succeeds)
+ok = hb_name:unregister(<<"my-process">>).
+
+%% Safe to call multiple times
+ok = hb_name:unregister(<<"nonexistent">>).
+```
+
+### Listing All Names
+
+```erlang
+%% Get all registered names
+AllNames = hb_name:all().
+%% => [{<<"my-process">>, <0.123.0>}, {my_atom, <0.124.0>}, ...]
+```
+
+### Concurrency Safety
+
+Registration is atomic—only one process wins:
+
+```erlang
+%% If 100 processes try to register the same name
+%% at once, exactly ONE succeeds
+case hb_name:register(shared_name) of
+    ok -> i_am_the_leader();
+    error -> someone_else_won()
+end.
+```
+
+### Quick Reference: Name Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_name:start()` | Initialize registry |
+| `hb_name:register(Name)` | Register current process |
+| `hb_name:register(Name, PID)` | Register specific process |
+| `hb_name:unregister(Name)` | Remove registration |
+| `hb_name:lookup(Name)` | Find PID by name |
+| `hb_name:all()` | List all registrations |
+
+---
+
+## Part 5: Persistent Workers
+
+> 📖 Reference: [hb_persistent](/src/hb_persistent)
+
+For expensive operations or serialized execution, `hb_persistent` creates long-lived worker processes. It prevents duplicate work and shares results.
+
+### The Problem
+
+Without workers, identical requests execute in parallel:
+
+```
+Request A: 1000ms execution
+Request B: 1000ms execution (parallel duplicate!)
+Request C: 1000ms execution (parallel duplicate!)
+Total CPU: 3000ms
+```
+
+With workers, only one executes:
+
+```
+Request A: 1000ms execution (leader)
+Request B: Waits for A
+Request C: Waits for A
+Total CPU: 1000ms (3x improvement!)
+All get identical results
+```
+
+### Find or Register Pattern
+
+```erlang
+Msg1 = #{<<"device">> => <<"Counter@1.0">>},
+Msg2 = #{<<"path">> => <<"increment">>},
+Opts = #{await_inprogress => named},
+
+case hb_persistent:find_or_register(Msg1, Msg2, Opts) of
+    {leader, GroupName} ->
+        %% I'm the leader—execute the work
+        Result = expensive_operation(),
+        hb_persistent:unregister_notify(GroupName, Msg2, Result, Opts),
+        Result;
+    
+    {wait, LeaderPID} ->
+        %% Someone else is already doing this—wait for them
+        hb_persistent:await(LeaderPID, Msg1, Msg2, Opts);
+    
+    {infinite_recursion, _} ->
+        %% Detected that we're waiting for ourselves
+        error(recursion_detected)
+end.
+```
+
+### Starting a Worker
+
+```erlang
+%% Create a persistent worker for a process
+Msg1 = #{
+    <<"device">> => <<"Process@1.0">>,
+    <<"process">> => ProcessID
+},
+
+Worker = hb_persistent:start_worker(Msg1, #{
+    static_worker => true,      % Re-use same group
+    worker_timeout => 60000     % 1 minute timeout
+}).
+
+%% Later, send requests to the worker
+Msg2 = #{<<"action">> => <<"compute">>},
+Result = hb_persistent:await(Worker, Msg1, Msg2, #{}).
+```
+
+### Monitoring Workers
+
+```erlang
+%% Start a monitor (prints stats every second)
+Monitor = hb_persistent:start_monitor().
+
+%% Output:
+%% == Sitrep ==> 5 named processes. 2 changes.
+%% [my_process: <0.123.0>] #M: 3
+%% [other_process: <0.124.0>] #M: 0
+
+%% Stop monitoring
+hb_persistent:stop_monitor(Monitor).
+```
+
+### Worker Lifecycle
+
+**Static Worker** (keeps same group):
+```
+Start → Register(Group) → Wait → Execute → Notify → Re-register(Group) → Wait → ...
+```
+
+**Dynamic Worker** (new group after each execution):
+```
+Start → Register(Group1) → Execute → Notify → Register(Group2) → ...
+```
+
+### Configuration Options
+
+```erlang
+#{
+    await_inprogress => named,   % Wait for named processes
+    static_worker => true,       % Keep same group name
+    worker_timeout => 10000,     % 10 second timeout
+    spawn_worker => true         % Auto-spawn worker
+}
+```
+
+### Quick Reference: Persistent Functions
+
+| Function | What it does |
+|----------|--------------|
+| `find_or_register(Msg1, Msg2, Opts)` | Become leader or wait |
+| `unregister_notify(Group, Msg2, Result, Opts)` | Complete and notify waiters |
+| `await(Worker, Msg1, Msg2, Opts)` | Wait for result |
+| `start_worker(Msg1, Opts)` | Create persistent worker |
+| `start_monitor()` | Monitor worker activity |
+| `stop_monitor(PID)` | Stop monitoring |
+
+---
+
+## Part 6: Test Code
+
+Create `test/test_app.erl`:
+
+```erlang
+-module(test_app).
+-include_lib("eunit/include/eunit.hrl").
+
+%% Test initialization
+init_test() ->
+    ?assertEqual(ok, hb:init()),
+    Depth = erlang:system_flag(backtrace_depth, 20),
+    ?assert(is_integer(Depth)).
+
+%% Test time
+now_test() ->
+    T1 = hb:now(),
+    ?assert(is_integer(T1)),
+    timer:sleep(10),
+    T2 = hb:now(),
+    ?assert(T2 >= T1).
+
+%% Test wallet
+wallet_test() ->
+    Path = "/tmp/test_wallet_" ++ integer_to_list(rand:uniform(100000)) ++ ".json",
+    Wallet = hb:wallet(Path),
+    ?assert(is_tuple(Wallet)),
+    file:delete(Path).
+
+%% Test name registration
+name_registration_test() ->
+    Name = {test, erlang:unique_integer()},
+    ?assertEqual(ok, hb_name:register(Name)),
+    ?assertEqual(self(), hb_name:lookup(Name)),
+    ?assertEqual(error, hb_name:register(Name)),  % Already registered
+    ?assertEqual(ok, hb_name:unregister(Name)),
+    ?assertEqual(undefined, hb_name:lookup(Name)).
+
+%% Test binary names
+binary_name_test() ->
+    Name = <<"process-", (integer_to_binary(rand:uniform(100000)))/binary>>,
+    ?assertEqual(ok, hb_name:register(Name)),
+    ?assertEqual(self(), hb_name:lookup(Name)),
+    hb_name:unregister(Name).
+
+%% Test supervisor init
+supervisor_init_test() ->
+    {ok, {SupFlags, Children}} = hb_sup:init(#{}),
+    ?assertEqual(one_for_all, maps:get(strategy, SupFlags)),
+    ?assertEqual(0, maps:get(intensity, SupFlags)),
+    ?assert(length(Children) >= 1).
+
+%% Test application start/stop
+application_lifecycle_test() ->
+    case application:ensure_all_started(hyperbeam) of
+        {ok, _Started} ->
+            ?assertNotEqual(undefined, whereis(hb_sup)),
+            application:stop(hyperbeam);
+        {error, {already_started, _}} ->
+            % Already running, that's fine
+            ok
+    end.
+
+%% Test dead process cleanup
+dead_process_cleanup_test() ->
+    Name = {dead_test, erlang:unique_integer()},
+    {PID, Ref} = spawn_monitor(fun() -> 
+        hb_name:register(Name),
+        timer:sleep(100)
+    end),
+    timer:sleep(50),  % Let it register
+    exit(PID, kill),
+    receive {'DOWN', Ref, process, PID, _} -> ok end,
+    ?assertEqual(undefined, hb_name:lookup(Name)).
+```
+
+Run the tests:
+
+```bash
+rebar3 eunit --module=test_app
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Start Node with Custom Config
+
+```erlang
+%% Load configuration
+Opts = #{
+    port => 9000,
+    priv_key_location => "/path/to/wallet.json",
+    store => [
+        #{
+            <<"store-module">> => hb_store_rocksdb,
+            <<"name">> => <<"cache/mainnet">>
+        }
+    ]
+},
+
+%% Start node
+URL = hb:start_mainnet(Opts).
+```
+
+### Pattern 2: Register → Work → Unregister
+
+```erlang
+%% Ensure only one process handles this work
+Name = {job, JobID},
+case hb_name:register(Name) of
+    ok ->
+        try
+            do_expensive_work(JobID)
+        after
+            hb_name:unregister(Name)
+        end;
+    error ->
+        {error, already_running}
+end.
+```
+
+### Pattern 3: Singleton Process
+
+```erlang
+%% Ensure exactly one instance runs
+start_singleton(Name, Fun) ->
+    case hb_name:register(Name) of
+        ok -> 
+            spawn(fun() ->
+                hb_name:register(Name),
+                Fun()
+            end),
+            {ok, started};
+        error -> 
+            {error, already_running}
+    end.
+```
+
+### Pattern 4: Deduplicated Execution
+
+```erlang
+%% Share expensive results across requests
+execute_once(Msg1, Msg2, Opts) ->
+    case hb_persistent:find_or_register(Msg1, Msg2, Opts) of
+        {leader, Group} ->
+            Result = compute(Msg1, Msg2),
+            hb_persistent:unregister_notify(Group, Msg2, Result, Opts),
+            Result;
+        {wait, Leader} ->
+            hb_persistent:await(Leader, Msg1, Msg2, Opts)
+    end.
+```
+
+---
+
+## What's Next?
+
+You now understand the core application architecture:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Application | [`hb_app`](/src/hb_app) | `start`, `stop` |
+| Supervisor | [`hb_sup`](/src/hb_sup) | `start_link`, `init` |
+| Core | [`hb`](/src/hb) | `init`, `wallet`, `start_mainnet` |
+| Names | [`hb_name`](/src/hb_name) | `register`, `lookup`, `unregister` |
+| Workers | [`hb_persistent`](/src/hb_persistent) | `find_or_register`, `await` |
+
+### Going Further
+
+1. **Message Resolution** — How AO-Core processes messages
+2. **Device System** — Pluggable computation handlers
+3. **Storage Layer** — Persistent data with caching
+4. **HTTP API** — REST endpoints for external access
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_app](/src/hb_app) | [hb_sup](/src/hb_sup) | [hb](/src/hb) | [hb_name](/src/hb_name) | [hb_persistent](/src/hb_persistent)
+
+```erlang
+%% === APPLICATION ===
+application:ensure_all_started(hyperbeam).
+application:stop(hyperbeam).
+application:which_applications().
+
+%% === CORE ===
+hb:init().
+Timestamp = hb:now().
+Wallet = hb:wallet().
+Wallet = hb:wallet("/path/to/wallet.json").
+Address = hb:address().
+URL = hb:start_mainnet().
+URL = hb:start_mainnet(#{port => 9000}).
+
+%% === SUPERVISOR ===
+{ok, Pid} = hb_sup:start_link().
+{ok, Pid} = hb_sup:start_link(Opts).
+Children = supervisor:which_children(hb_sup).
+Counts = supervisor:count_children(hb_sup).
+
+%% === NAMES ===
+hb_name:start().
+ok = hb_name:register(Name).
+ok = hb_name:register(Name, PID).
+ok = hb_name:unregister(Name).
+PID = hb_name:lookup(Name).  % or undefined
+All = hb_name:all().
+
+%% === PERSISTENT WORKERS ===
+{leader, Group} = hb_persistent:find_or_register(Msg1, Msg2, Opts).
+{wait, Leader} = hb_persistent:find_or_register(Msg1, Msg2, Opts).
+ok = hb_persistent:unregister_notify(Group, Msg2, Result, Opts).
+Result = hb_persistent:await(Leader, Msg1, Msg2, Opts).
+Worker = hb_persistent:start_worker(Msg1, Opts).
+Monitor = hb_persistent:start_monitor().
+hb_persistent:stop_monitor(Monitor).
+```
+
+---
+
+*Now you understand how HyperBEAM organizes its processes!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_app Reference](/src/hb_app) — Application callbacks
+- [hb_sup Reference](/src/hb_sup) — Supervisor implementation
+- [hb Reference](/src/hb) — Core utilities
+- [hb_name Reference](/src/hb_name) — Name registration
+- [hb_persistent Reference](/src/hb_persistent) — Worker management
+- [Full Reference](/hyperbeam) — All modules
+
+**Erlang/OTP Documentation**
+- [Application Behavior](https://www.erlang.org/doc/design_principles/applications.html) — OTP applications
+- [Supervisor Behavior](https://www.erlang.org/doc/design_principles/sup_princ.html) — Supervision principles
+- [ETS](https://www.erlang.org/doc/man/ets.html) — Erlang Term Storage
+- [Process Groups](https://www.erlang.org/doc/man/pg.html) — Distributed process groups

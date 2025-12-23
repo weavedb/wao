@@ -1,0 +1,722 @@
+# Fetching Data from Remote Sources
+
+A beginner's guide to remote storage in HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Remote Storage Concept** — Fetching data over the network
+2. **Gateway Store** — Reading from Arweave gateways
+3. **Remote Node Store** — Reading from other HyperBEAM nodes
+4. **Local Caching** — Speed up repeated reads
+5. How to combine remote and local stores for **resilient data access**
+
+No prior HyperBEAM knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM stores operate in different **scopes**:
+- **Local** — Data lives on your machine (filesystem, LMDB, RocksDB)
+- **Remote** — Data fetched over the network
+
+Remote stores enable a powerful pattern: your node can transparently access data from anywhere—Arweave gateways, other HyperBEAM nodes, or both. When combined with local caching, you get the best of both worlds: network access with local performance.
+
+Here's the mental model:
+
+```
+Your Node                          Remote Sources
+    │                                    │
+    ├─► Local Cache (fast) ◄─────────────┤
+    │          ↓ miss                    │
+    ├─► Gateway Store ──────────────────►│ Arweave Gateway
+    │          or                        │
+    └─► Remote Node Store ──────────────►│ Other HyperBEAM Node
+```
+
+Think of it like a library system:
+- **Gateway Store** = The main archive (Arweave's permanent storage)
+- **Remote Node Store** = A branch library (another HyperBEAM node)
+- **Local Cache** = Your personal bookshelf (fast access to frequently used data)
+
+Let's explore each component.
+
+---
+
+## Part 1: Understanding Remote Scope
+
+> 📖 Reference: [hb_store](/src/hb_store)
+
+Every store in HyperBEAM has a **scope** that indicates where data lives:
+
+```erlang
+%% Local stores return 'local'
+hb_store_fs:scope(Opts).     %% => local
+hb_store_lmdb:scope(Opts).   %% => local
+
+%% Remote stores return 'remote'
+hb_store_gateway:scope(Opts).      %% => remote
+hb_store_remote_node:scope(Opts).  %% => remote
+```
+
+Why does scope matter?
+- **Performance** — Remote reads have network latency (~500ms vs under 1ms)
+- **Availability** — Remote sources may be temporarily unreachable
+- **Caching** — Remote data should be cached locally when possible
+
+---
+
+## Part 2: Gateway Store
+
+> 📖 Reference: [hb_store_gateway](/src/hb_store_gateway)
+
+The **gateway store** reads data from Arweave gateways. It's **read-only**—you can fetch permanent data from Arweave, but writes go through different mechanisms (bundlers).
+
+### Basic Configuration
+
+```erlang
+%% Minimal configuration - uses default gateway
+Store = #{<<"store-module">> => hb_store_gateway}.
+```
+
+### Reading Data
+
+Gateway store only works with valid Arweave transaction IDs (43-character base64url strings):
+
+```erlang
+Store = #{<<"store-module">> => hb_store_gateway},
+
+%% Read a message by ID
+ID = <<"BOogk_XAI3bvNWnxNxwxmvOfglZt17o4MOVAdPNZ_ew">>,
+{ok, Message} = hb_store_gateway:read(Store, ID).
+
+%% Message is now a map you can work with
+AppName = maps:get(<<"app-name">>, Message).
+```
+
+### Subpath Access
+
+You can read nested values directly without fetching the entire message:
+
+```erlang
+%% Message structure:
+%% #{
+%%   <<"user">> => #{
+%%     <<"name">> => <<"Alice">>,
+%%     <<"email">> => <<"alice@example.com">>
+%%   }
+%% }
+
+%% Read nested value with path
+{ok, <<"Alice">>} = hb_store_gateway:read(Store, [ID, <<"user">>, <<"name">>]).
+
+%% Path not found returns not_found
+not_found = hb_store_gateway:read(Store, [ID, <<"nonexistent">>]).
+```
+
+### Checking Message Structure
+
+```erlang
+%% Check if message has nested data
+case hb_store_gateway:type(Store, ID) of
+    simple ->
+        %% Flat key-value pairs only
+        io:format("Simple message~n");
+    composite ->
+        %% Contains nested structures
+        {ok, Keys} = hb_store_gateway:list(Store, ID),
+        io:format("Composite with keys: ~p~n", [Keys]);
+    not_found ->
+        io:format("Message not found~n")
+end.
+```
+
+### ID Recognition
+
+Gateway store only processes valid Arweave IDs:
+
+```erlang
+%% Valid: 43-character base64url
+<<"IYkkrqlZNW_J-4T-5eFApZOMRl5P4VjvrcOXWvIqB1Q">> %% => fetched
+
+%% Invalid: wrong format or length
+<<"shortkey">> %% => not_found
+<<"not-a-valid-transaction-id">> %% => not_found
+```
+
+### Quick Reference: Gateway Store Functions
+
+| Function | What it does |
+|----------|--------------|
+| `scope(Opts)` | Returns `remote` |
+| `read(Opts, Key)` | Fetch message by ID |
+| `type(Opts, Key)` | Check if simple or composite |
+| `list(Opts, Key)` | List keys in composite message |
+| `resolve(Opts, Key)` | Returns key unchanged (no-op) |
+
+---
+
+## Part 3: Remote Node Store
+
+> 📖 Reference: [hb_store_remote_node](/src/hb_store_remote_node)
+
+The **remote node store** reads data from other HyperBEAM nodes via HTTP. Unlike gateway store, it can also perform writes (with proper authorization).
+
+### Basic Configuration
+
+```erlang
+%% Connect to a remote HyperBEAM node
+RemoteStore = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://ao-node.example.com:8421">>
+}.
+```
+
+### Reading Data
+
+```erlang
+RemoteStore = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://localhost:8421">>
+},
+
+%% Read from remote node
+{ok, Message} = hb_store_remote_node:read(RemoteStore, ID),
+
+%% Messages may have unloaded parts - ensure everything is loaded
+LoadedMsg = hb_cache:ensure_all_loaded(Message).
+```
+
+### Writing Data (Authorized)
+
+Write operations require authentication:
+
+```erlang
+Wallet = hb:wallet(),
+RemoteStore = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://ao-node.example.com:8421">>,
+    <<"wallet">> => Wallet
+},
+
+%% Write to remote node (requires server-side authorization)
+ok = hb_store_remote_node:write(RemoteStore, Key, Value).
+```
+
+### Creating Links
+
+Links create aliases to existing data:
+
+```erlang
+%% Create link: "my-alias" points to SourceID
+ok = hb_store_remote_node:make_link(
+    RemoteStore,
+    SourceID,          % Existing key
+    <<"my-alias">>     % New alias
+).
+
+%% Now readable via alias
+{ok, Message} = hb_store_remote_node:read(RemoteStore, <<"my-alias">>).
+```
+
+### HTTP Endpoints
+
+Remote node store uses the cache device API:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/~cache@1.0/read?target=Key` | GET | Read data |
+| `/~cache@1.0/write` | POST | Write data |
+| `/~cache@1.0/link` | POST | Create link |
+
+### Quick Reference: Remote Node Store Functions
+
+| Function | What it does |
+|----------|--------------|
+| `scope(Opts)` | Returns `remote` |
+| `read(Opts, Key)` | Fetch from remote node |
+| `write(Opts, Key, Value)` | Write to remote node |
+| `make_link(Opts, Src, Dst)` | Create alias on remote |
+| `type(Opts, Key)` | Check existence (simple only) |
+| `resolve(Opts, Key)` | Returns key unchanged |
+
+---
+
+## Part 4: Local Caching
+
+Both remote stores support local caching to improve performance.
+
+### Cache Configuration
+
+```erlang
+%% Define local cache store
+LocalCache = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"gateway-cache">>
+},
+
+%% Gateway store with caching
+GatewayStore = #{
+    <<"store-module">> => hb_store_gateway,
+    <<"local-store">> => [LocalCache]
+},
+
+%% Remote node store with caching
+RemoteStore = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://ao.computer:8421">>,
+    <<"local-store">> => LocalCache
+}.
+```
+
+### Cache Behavior
+
+```
+First Read:
+1. Check local cache -- miss
+2. Fetch from remote source -- success
+3. Write to local cache
+4. Return data
+
+Subsequent Reads:
+1. Check local cache -- hit
+2. Return data (fast!)
+```
+
+### Manual Caching
+
+For remote node store, you can manually cache with links:
+
+```erlang
+StoreOpts = #{<<"local-store">> => LocalCache},
+Data = #{<<"content">> => <<"valuable data">>},
+Links = [<<"alias1">>, <<"alias2">>],
+
+%% Cache data with multiple access points
+ok = hb_store_remote_node:maybe_cache(StoreOpts, Data, Links).
+```
+
+---
+
+## Part 5: Node Types (Gateway Store)
+
+Gateway store supports different backend node types.
+
+### Arweave Gateway
+
+```erlang
+#{
+    <<"store-module">> => hb_store_gateway,
+    <<"node">> => <<"https://arweave.net">>,
+    <<"node-type">> => <<"arweave">>
+}
+
+%% Uses endpoints:
+%% - GraphQL: https://arweave.net/graphql
+%% - Raw: https://arweave.net/raw/{id}
+```
+
+### AO Node
+
+```erlang
+#{
+    <<"store-module">> => hb_store_gateway,
+    <<"node">> => <<"https://ao.computer">>,
+    <<"node-type">> => <<"ao">>
+}
+
+%% Uses endpoints:
+%% - GraphQL: https://ao.computer/~query@1.0/graphql
+%% - Raw: https://ao.computer/{id}
+```
+
+### Custom Routes
+
+```erlang
+#{
+    <<"store-module">> => hb_store_gateway,
+    <<"routes">> => [
+        #{
+            <<"template">> => <<"/graphql">>,
+            <<"nodes">> => [
+                #{<<"prefix">> => <<"https://custom-gateway.com">>}
+            ]
+        }
+    ]
+}
+```
+
+---
+
+## Part 6: Multi-Tier Storage
+
+Combine local and remote stores for optimal performance and resilience.
+
+### Store Chain Pattern
+
+```erlang
+%% Try stores in order: memory -> filesystem -> gateway
+Stores = [
+    #{<<"store-module">> => hb_store_memory},
+    #{<<"store-module">> => hb_store_fs, <<"name">> => <<"cache">>},
+    #{<<"store-module">> => hb_store_gateway}
+],
+
+%% hb_cache tries each store until data is found
+{ok, Message} = hb_cache:read(ID, #{store => Stores}).
+```
+
+### Fallback Pattern
+
+```erlang
+%% Primary: Remote node, Fallback: Gateway
+case hb_store_remote_node:read(RemoteStore, ID) of
+    {ok, Msg} -> 
+        {ok, Msg};
+    not_found -> 
+        hb_store_gateway:read(GatewayStore, ID)
+end.
+```
+
+### Redundant Gateways
+
+```erlang
+%% Try multiple gateways for resilience
+Stores = [
+    #{
+        <<"store-module">> => hb_store_gateway, 
+        <<"node">> => <<"https://primary.arweave.net">>
+    },
+    #{
+        <<"store-module">> => hb_store_gateway, 
+        <<"node">> => <<"https://backup.arweave.net">>
+    }
+],
+{ok, Message} = hb_store:read(Stores, ID).
+```
+
+---
+
+## Part 7: Practical Examples
+
+### Example 1: Simple Gateway Read
+
+```erlang
+-module(test_gateway).
+-include_lib("eunit/include/eunit.hrl").
+
+simple_read_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    ID = <<"BOogk_XAI3bvNWnxNxwxmvOfglZt17o4MOVAdPNZ_ew">>,
+    
+    case hb_store_gateway:read(Store, ID) of
+        {ok, Message} ->
+            ?assert(is_map(Message)),
+            io:format("Fetched message with ~p keys~n", 
+                [maps:size(Message)]);
+        not_found ->
+            io:format("Message not found~n")
+    end.
+```
+
+### Example 2: Cached Gateway Access
+
+```erlang
+-module(test_cached_gateway).
+-include_lib("eunit/include/eunit.hrl").
+
+cached_read_test() ->
+    %% Setup local cache
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"my-cache">>
+    },
+    
+    %% Gateway with caching
+    GatewayStore = #{
+        <<"store-module">> => hb_store_gateway,
+        <<"local-store">> => [LocalStore]
+    },
+    
+    ID = <<"test-transaction-id-here">>,
+    
+    %% First read: fetches from gateway, caches locally
+    {ok, Msg1} = hb_cache:read(ID, #{store => [GatewayStore]}),
+    
+    %% Second read: returns from cache (fast!)
+    {ok, Msg2} = hb_cache:read(ID, #{store => [LocalStore]}),
+    
+    ?assert(hb_message:match(Msg1, Msg2)).
+```
+
+### Example 3: Remote Node with Fallback
+
+```erlang
+-module(test_remote_fallback).
+-include_lib("eunit/include/eunit.hrl").
+
+remote_with_fallback_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-store">>
+    },
+    
+    %% Start local HTTP server
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    
+    %% Configure remote store
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node
+    },
+    
+    %% Write data locally
+    M = #{<<"key">> => <<"value">>},
+    ID = hb_message:id(M),
+    {ok, ID} = hb_cache:write(M, #{store => LocalStore}),
+    
+    %% Read via remote store
+    {ok, Retrieved} = hb_store_remote_node:read(RemoteStore, ID),
+    Loaded = hb_cache:ensure_all_loaded(Retrieved),
+    
+    ?assertMatch(#{<<"key">> := <<"value">>}, Loaded).
+```
+
+### Example 4: Multi-Tier Architecture
+
+```erlang
+-module(test_multi_tier).
+-include_lib("eunit/include/eunit.hrl").
+
+multi_tier_test() ->
+    %% Three-tier storage architecture
+    Opts = #{
+        store => [
+            %% Tier 1: Fast in-memory cache
+            #{<<"store-module">> => hb_store_memory},
+            
+            %% Tier 2: Local filesystem
+            #{
+                <<"store-module">> => hb_store_fs, 
+                <<"name">> => <<"local-cache">>
+            },
+            
+            %% Tier 3: Remote gateway (slowest, most available)
+            #{<<"store-module">> => hb_store_gateway}
+        ]
+    },
+    
+    ID = <<"some-arweave-transaction-id">>,
+    
+    %% Automatically tries each tier
+    case hb_cache:read(ID, Opts) of
+        {ok, Message} ->
+            %% Found in one of the tiers
+            process_message(Message);
+        not_found ->
+            %% Not found in any tier
+            handle_missing()
+    end.
+
+process_message(Msg) -> 
+    io:format("Processing: ~p~n", [Msg]).
+handle_missing() -> 
+    io:format("Data not available~n").
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Read with Cache-Through
+
+```erlang
+LocalCache = #{
+    <<"store-module">> => hb_store_lmdb,
+    <<"name">> => <<"cache">>
+},
+GatewayStore = #{
+    <<"store-module">> => hb_store_gateway,
+    <<"local-store">> => [LocalCache]
+},
+
+%% First read: slow (network)
+%% Subsequent reads: fast (local)
+{ok, Msg} = hb_cache:read(ID, #{store => [GatewayStore]}).
+```
+
+### Pattern 2: Check Before Fetch
+
+```erlang
+Store = #{<<"store-module">> => hb_store_gateway},
+
+case hb_store_gateway:type(Store, ID) of
+    simple -> 
+        {ok, Data} = hb_store_gateway:read(Store, ID),
+        process_simple(Data);
+    composite ->
+        {ok, Keys} = hb_store_gateway:list(Store, ID),
+        process_composite(Keys);
+    not_found ->
+        handle_missing()
+end.
+```
+
+### Pattern 3: Authenticated Remote Writes
+
+```erlang
+Wallet = hb:wallet(),
+RemoteStore = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://trusted-node:8421">>,
+    <<"wallet">> => Wallet
+},
+
+%% Write with authentication
+ok = hb_store_remote_node:write(RemoteStore, <<"key">>, <<"value">>),
+
+%% Create alias
+ok = hb_store_remote_node:make_link(RemoteStore, <<"key">>, <<"alias">>).
+```
+
+### Pattern 4: Error Handling
+
+```erlang
+case hb_store_remote_node:read(Opts, Key) of
+    {ok, Msg} -> 
+        process(hb_cache:ensure_all_loaded(Msg));
+    not_found -> 
+        %% Key doesn't exist or network error
+        handle_not_found();
+    {error, Reason} ->
+        %% HTTP or connection error
+        log_error(Reason),
+        try_fallback()
+end.
+```
+
+---
+
+## Performance Characteristics
+
+### Operation Latency
+
+| Store Type | Read | Write | Notes |
+|------------|------|-------|-------|
+| Memory | &lt;1ms | &lt;1ms | Fastest, volatile |
+| Filesystem | ~1ms | ~5ms | Persistent, single node |
+| LMDB | &lt;1ms | ~1ms | Fast, concurrent reads |
+| Gateway | ~500ms | N/A | Network dependent |
+| Remote Node | ~100-500ms | ~100-500ms | Network dependent |
+
+### Optimization Tips
+
+1. **Always cache remote data locally**
+   ```erlang
+   #{<<"local-store">> => [LocalCache]}
+   ```
+
+2. **Order stores by speed**
+   ```erlang
+   [Memory, LMDB, Filesystem, Gateway]
+   ```
+
+3. **Use appropriate local store**
+   - `hb_store_memory` — Session data, hot cache
+   - `hb_store_lmdb` — Persistent cache, high read volume
+   - `hb_store_fs` — Large files, simple setup
+
+---
+
+## What's Next?
+
+You now understand remote storage in HyperBEAM:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Gateway Store | [`hb_store_gateway`](/src/hb_store_gateway) | `read`, `type`, `list` |
+| Remote Node | [`hb_store_remote_node`](/src/hb_store_remote_node) | `read`, `write`, `make_link` |
+| Local Caching | `local-store` option | Automatic on read |
+| Store Chains | [`hb_store`](/src/hb_store) | Multi-tier fallback |
+
+### Going Further
+
+1. **Local Storage** — Learn about `hb_store_fs`, `hb_store_lmdb`, `hb_store_rocksdb`
+2. **Cache System** — Explore `hb_cache` for content-addressed storage
+3. **HTTP Client** — Understand `hb_http` and `hb_gateway_client`
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_store_gateway](/src/hb_store_gateway) | [hb_store_remote_node](/src/hb_store_remote_node)
+
+```erlang
+%% === GATEWAY STORE ===
+GatewayStore = #{<<"store-module">> => hb_store_gateway}.
+{ok, Msg} = hb_store_gateway:read(GatewayStore, ID).
+{ok, Keys} = hb_store_gateway:list(GatewayStore, ID).
+Type = hb_store_gateway:type(GatewayStore, ID).
+
+%% === REMOTE NODE STORE ===
+RemoteStore = #{
+    <<"store-module">> => hb_store_remote_node,
+    <<"node">> => <<"http://node:8421">>
+}.
+{ok, Msg} = hb_store_remote_node:read(RemoteStore, ID).
+ok = hb_store_remote_node:write(RemoteStore, Key, Val).
+ok = hb_store_remote_node:make_link(RemoteStore, Src, Dst).
+
+%% === WITH LOCAL CACHING ===
+LocalCache = #{
+    <<"store-module">> => hb_store_fs,
+    <<"name">> => <<"cache">>
+}.
+CachedGateway = #{
+    <<"store-module">> => hb_store_gateway,
+    <<"local-store">> => [LocalCache]
+}.
+
+%% === MULTI-TIER ===
+Stores = [
+    #{<<"store-module">> => hb_store_memory},
+    #{<<"store-module">> => hb_store_lmdb, <<"name">> => <<"cache">>},
+    #{<<"store-module">> => hb_store_gateway}
+].
+{ok, Msg} = hb_cache:read(ID, #{store => Stores}).
+
+%% === NODE TYPES ===
+%% Arweave gateway
+#{<<"node">> => <<"https://arweave.net">>, <<"node-type">> => <<"arweave">>}.
+%% AO node
+#{<<"node">> => <<"https://ao.computer">>, <<"node-type">> => <<"ao">>}.
+```
+
+---
+
+*Now go build distributed applications!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_store_gateway Reference](/src/hb_store_gateway) — Gateway store functions
+- [hb_store_remote_node Reference](/src/hb_store_remote_node) — Remote node functions
+- [hb_store Reference](/src/hb_store) — Store interface
+- [hb_cache Reference](/src/hb_cache) — Caching layer
+- [Full Reference](/hyperbeam) — All modules
+
+**Related Modules**
+- [hb_gateway_client](/src/hb_gateway_client) — Arweave gateway API client
+- [hb_http](/src/hb_http) — HTTP convenience functions
+- [hb_store_fs](/src/hb_store_fs) — Filesystem storage backend
+- [hb_store_lmdb](/src/hb_store_lmdb) — LMDB storage backend
+
+**Arweave Resources**
+- [Arweave Gateway](https://arweave.net) — Main Arweave gateway
+- [GraphQL Explorer](https://arweave.net/graphql) — Query Arweave data

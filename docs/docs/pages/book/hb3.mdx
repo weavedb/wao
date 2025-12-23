@@ -1,0 +1,875 @@
+# Working with HyperBEAM Data Structures
+
+A beginner's guide to messages, maps, links, and TABM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Messages** — The universal data format in HyperBEAM
+2. **TABM** — Type Annotated Binary Messages (internal format)
+3. **Links** — Lazy-loadable references to cached data
+4. **Maps** — Link-resolving map operations
+5. **Singleton** — URL-like syntax for message sequences
+
+No prior HyperBEAM knowledge required. Basic Erlang helps, but we'll explain as we go.
+
+---
+
+## The Big Picture
+
+HyperBEAM processes **messages**. Every request, response, and piece of data flows as a message. These four modules define how messages are created, transformed, linked, and parsed:
+
+```
+HTTP Request → Singleton → Message List → hb_ao:resolve
+                  ↓              ↓
+               TABM Format   Link Resolution
+                  ↓              ↓
+              Cache Storage  hb_maps Access
+```
+
+Think of it like a document system:
+- **Message** = A document with signatures and metadata
+- **TABM** = The internal binary format (like PDF)
+- **Link** = A reference to another document (like a hyperlink)
+- **Maps** = Reading documents that contain links
+- **Singleton** = URL addresses for documents
+
+Let's build each piece.
+
+---
+
+## Part 1: Messages
+
+> 📖 Reference: [hb_message](/src/hb_message)
+
+A **message** is the fundamental data unit. It's an Erlang map that can be:
+- **Converted** between formats (structured, ANS-104, HTTP signatures)
+- **Signed** with cryptographic commitments
+- **Verified** for authenticity
+- **Identified** by a unique content-based ID
+
+### The TABM Format
+
+All message operations go through **TABM** (Type Annotated Binary Messages):
+
+```erlang
+%% TABM: Deep maps containing only binaries
+#{
+    <<"key">> => <<"value">>,
+    <<"nested">> => #{
+        <<"deep">> => <<"data">>
+    }
+}
+```
+
+**Benefits:**
+- Simple computational model (O(1) map access)
+- Binary literals only (no types to worry about)
+- Easy format conversion
+- Efficient operations
+
+### Creating and Signing Messages
+
+```erlang
+%% Create a simple message
+Msg = #{<<"data">> => <<"Hello, HyperBEAM!">>},
+
+%% Sign it with a wallet
+Wallet = ar_wallet:new(),
+Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}).
+```
+
+After signing, the message has:
+- A **signature** (cryptographic proof you created it)
+- An **ID** (unique hash of the content)
+- **Commitments** (stored in a special key)
+
+### Verifying Messages
+
+Anyone can verify that a signed message is authentic:
+
+```erlang
+%% Check all commitments
+true = hb_message:verify(Signed, all, #{}).
+
+%% Get list of signers
+Signers = hb_message:signers(Signed, #{}).
+%% Returns list of signer addresses
+```
+
+### Getting Message IDs
+
+Every message has a unique ID. The ID changes based on what's signed:
+
+```erlang
+%% ID of unsigned content only
+UnsignedID = hb_message:id(Msg, unsigned, #{}),
+
+%% ID including all signatures
+SignedID = hb_message:id(Signed, signed, #{}).
+```
+
+### Format Conversion
+
+Messages can be converted between different formats:
+
+```erlang
+%% Convert to TABM (internal format)
+TABM = hb_message:convert(Msg, tabm, #{}),
+
+%% Convert to ANS-104 (Arweave data items)
+ANS104 = hb_message:convert(Msg, <<"ans104@1.0">>, #{}),
+
+%% Convert between formats explicitly
+Structured = hb_message:convert(ANS104, <<"structured@1.0">>, <<"ans104@1.0">>, #{}).
+```
+
+**Common Formats:**
+- `<<"structured@1.0">>` — AO-Core structured messages
+- `<<"ans104@1.0">>` — ANS-104 data items
+- `<<"httpsig@1.0">>` — HTTP signed messages
+- `<<"flat@1.0">>` — Flat key-value maps
+- `tabm` — TABM format (internal)
+
+### Extracting Unsigned Content
+
+To get the original data without signatures:
+
+```erlang
+Original = hb_message:uncommitted(Signed).
+%% Returns message without commitments
+```
+
+### Quick Reference: Message Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_message:commit(Msg, Wallet)` | Sign a message |
+| `hb_message:verify(Msg, all, Opts)` | Verify all signatures |
+| `hb_message:id(Msg, signed, Opts)` | Get message ID |
+| `hb_message:signers(Msg, Opts)` | Get list of signers |
+| `hb_message:convert(Msg, Format, Opts)` | Convert to format |
+| `hb_message:uncommitted(Msg)` | Remove signatures |
+| `hb_message:match(Msg1, Msg2)` | Compare two messages |
+
+---
+
+## Part 2: Links
+
+> 📖 Reference: [hb_link](/src/hb_link)
+
+A **link** is a reference to data stored in cache. Instead of embedding large nested structures, you store them separately and link to them.
+
+### The Link Concept
+
+```
+Full Message:                      Linked Message:
+#{                                 #{
+    <<"data">> => <<"value">>,         <<"data">> => <<"value">>,
+    <<"nested">> => #{                 <<"nested+link">> => <<"ID-123">>
+        <<"large">> => <<"...">>   }
+    }                              
+}                                  Cache: ID-123 → #{<<"large">> => ...}
+```
+
+**Benefits:**
+- **Space efficiency** — Avoid duplicating nested structures
+- **Lazy loading** — Load data only when needed
+- **Network optimization** — Transfer only required parts
+
+### Link Key Encoding
+
+Links use a `+link` suffix convention:
+
+```erlang
+%% Original key: <<"data">>
+%% Link key: <<"data+link">>
+
+%% Check if a key is a link
+true = hb_link:is_link_key(<<"data+link">>),
+false = hb_link:is_link_key(<<"data">>).
+
+%% Remove the link suffix
+<<"data">> = hb_link:remove_link_specifier(<<"data+link">>).
+```
+
+### Normalizing Messages (Creating Links)
+
+The `normalize/3` function converts nested maps to links:
+
+```erlang
+Msg = #{
+    <<"data">> => <<"value">>,
+    <<"nested">> => #{
+        <<"deep">> => <<"structure">>
+    }
+},
+
+%% Offload nested maps to cache
+Normalized = hb_link:normalize(Msg, offload, #{}),
+%% Result: #{<<"data">> => <<"value">>, <<"nested+link">> => <<"ID-...">>}
+```
+
+**Modes:**
+- `offload` — Write submessages to cache, return links
+- `discard` — Generate IDs but don't cache (dry runs)
+- `false` — No normalization (passthrough)
+
+### Decoding Links
+
+Convert `Key+link` entries back to link tuples:
+
+```erlang
+TABM = #{<<"data+link">> => <<"id-123">>},
+Decoded = hb_link:decode_all_links(TABM),
+%% Result: #{<<"data">> => {link, <<"id-123">>, #{...}}}
+```
+
+### Link Tuple Format
+
+```erlang
+{link, ID, #{
+    <<"type">> => <<"link">>,
+    <<"lazy">> => true | false
+}}
+```
+
+- **Greedy Link** (`lazy => false`) — ID directly references the message
+- **Lazy Link** (`lazy => true`) — ID references another ID that must be resolved
+
+### Loading Linked Data
+
+Use `hb_cache:ensure_all_loaded/2` to resolve all links:
+
+```erlang
+%% Message with link tuples
+WithLinks = #{<<"data">> => {link, <<"id-123">>, #{}}},
+
+%% Load all linked data from cache
+FullyLoaded = hb_cache:ensure_all_loaded(WithLinks, #{}),
+%% Result: #{<<"data">> => #{...actual nested data...}}
+```
+
+### Complete Link Flow
+
+```erlang
+%% 1. Create message with nested structure
+Original = #{
+    <<"header">> => <<"value">>,
+    <<"body">> => #{
+        <<"content">> => <<"large data...">>
+    }
+},
+
+%% 2. Normalize (offload to cache)
+Normalized = hb_link:normalize(Original, offload, #{}),
+%% #{<<"header">> => <<"value">>, <<"body+link">> => <<"ID-...">>}
+
+%% 3. Later, decode links
+Decoded = hb_link:decode_all_links(Normalized),
+%% #{<<"header">> => <<"value">>, <<"body">> => {link, <<"ID-...">>, #{...}}}
+
+%% 4. Load from cache
+Loaded = hb_cache:ensure_all_loaded(Decoded, #{}),
+%% Back to original structure
+```
+
+### Quick Reference: Link Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_link:normalize(Msg, Mode, Opts)` | Convert nested maps to links |
+| `hb_link:is_link_key(Key)` | Check if key has `+link` suffix |
+| `hb_link:remove_link_specifier(Key)` | Remove `+link` suffix |
+| `hb_link:decode_all_links(Msg)` | Convert `+link` entries to tuples |
+| `hb_link:format(Link, Opts)` | Format link for display |
+
+---
+
+## Part 3: Link-Resolving Maps
+
+> 📖 Reference: [hb_maps](/src/hb_maps)
+
+⚠️ **Warning:** This is a low-level module. Use `hb_ao:get/3` for most cases.
+
+The `hb_maps` module provides a drop-in replacement for Erlang's `maps` module with **automatic link resolution**. When you access a value that's a link, it automatically loads from cache.
+
+### The Key Difference
+
+**Standard `maps` module:**
+```erlang
+Map = #{key => {link, ID, #{}}},
+Value = maps:get(key, Map).
+%% Result: {link, ID, #{}}  (just the link tuple)
+```
+
+**`hb_maps` module:**
+```erlang
+Map = #{key => {link, ID, #{}}},
+Value = hb_maps:get(key, Map).
+%% Result: <actual value loaded from cache>
+```
+
+### Basic Operations
+
+```erlang
+%% Store some data in cache
+Data = <<"Hello from cache!">>,
+{ok, ID} = hb_cache:write(Data, #{}),
+
+%% Create a map with a link
+Map = #{<<"key">> => {link, ID, #{}}},
+
+%% Get resolves the link automatically
+Value = hb_maps:get(<<"key">>, Map),
+%% Result: <<"Hello from cache!">>
+```
+
+### All Map Functions Resolve Links
+
+```erlang
+%% find also resolves
+{ok, Value} = hb_maps:find(<<"key">>, Map),
+
+%% map transforms resolved values
+Transformed = hb_maps:map(
+    fun(_K, V) -> process(V) end,
+    Map
+),
+
+%% filter works on resolved values
+Filtered = hb_maps:filter(
+    fun(_K, V) -> byte_size(V) > 10 end,
+    Map
+),
+
+%% fold accumulates resolved values
+Sum = hb_maps:fold(
+    fun(_K, V, Acc) -> V + Acc end,
+    0,
+    NumberMap
+).
+```
+
+### Typed Links
+
+Links can specify type information for automatic conversion:
+
+```erlang
+%% Store binary "123"
+{ok, ID} = hb_cache:write(<<"123">>, #{}),
+
+%% Create link with integer type
+Link = {link, ID, #{<<"type">> => integer}},
+Map = #{<<"count">> => Link},
+
+%% Get returns integer, not binary
+Value = hb_maps:get(<<"count">>, Map),
+%% Result: 123 (integer)
+```
+
+### When to Use hb_maps vs hb_ao
+
+**Use `hb_maps` when:**
+- Working with TABM format directly
+- Performance is critical (skip device processing)
+- You understand link resolution implications
+
+**Use `hb_ao` when (most of the time):**
+- Working with structured messages
+- Need device-specific behavior
+- Require key normalization and type conversions
+
+```erlang
+%% Low-level (hb_maps)
+Value = hb_maps:get(<<"key">>, TABMMsg),
+
+%% High-level (hb_ao) - preferred
+{ok, Value} = hb_ao:get(<<"key">>, StructuredMsg, Opts).
+```
+
+### Quick Reference: Maps Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_maps:get(Key, Map)` | Get value, resolve links |
+| `hb_maps:find(Key, Map)` | Find value with `{ok, V}` / `error` |
+| `hb_maps:put(Key, Val, Map)` | Add/update key-value |
+| `hb_maps:map(Fun, Map)` | Transform all values |
+| `hb_maps:filter(Fun, Map)` | Keep matching pairs |
+| `hb_maps:fold(Fun, Acc, Map)` | Reduce to single value |
+| `hb_maps:merge(Map1, Map2)` | Merge maps |
+| `hb_maps:with(Keys, Map)` | Keep only specified keys |
+| `hb_maps:without(Keys, Map)` | Remove specified keys |
+
+---
+
+## Part 4: Singleton (TABM Syntax)
+
+> 📖 Reference: [hb_singleton](/src/hb_singleton)
+
+The `hb_singleton` module translates URL-like paths into ordered lists of AO-Core messages. This is how HTTP requests become executable message sequences.
+
+### Path to Messages
+
+```erlang
+%% Simple path
+Path = <<"/a/b/c">>,
+Msgs = hb_singleton:from(#{<<"path">> => Path}, #{}),
+%% Result: [#{}, #{path => <<"a">>}, #{path => <<"b">>}, #{path => <<"c">>}]
+```
+
+The first element is always a base message (empty map or ID).
+
+### Path Syntax
+
+```erlang
+%% Basic path parts
+"/a/b/c" → [Base, Msg(a), Msg(b), Msg(c)]
+
+%% ID-based path (43-char base64url = Arweave ID)
+"/IYkkrqlZNW_J-4T-.../data" → [ID, Msg(data)]
+
+%% Root path
+"/" → [#{}]
+```
+
+### Inline Parameters
+
+Add key-value pairs directly in the path:
+
+```erlang
+%% Single key-value with &
+"/path&key=value"
+→ [#{}, #{path => <<"path">>, key => <<"value">>}]
+
+%% Multiple keys
+"/path&k1=v1&k2=v2"
+→ [#{}, #{path => <<"path">>, k1 => <<"v1">>, k2 => <<"v2">>}]
+
+%% Boolean flag (no value)
+"/path&enabled"
+→ [#{}, #{path => <<"path">>, enabled => true}]
+
+%% Assumed key name (path=value)
+"/increment=5"
+→ [#{}, #{path => <<"increment">>, increment => <<"5">>}]
+```
+
+### Typed Values
+
+Specify types for automatic conversion:
+
+```erlang
+%% Integer type
+"&count+integer=42"
+→ #{count => 42}  (integer, not binary)
+
+%% Resolve type (nested path)
+"&data+resolve=(/other/path)"
+→ #{data => {resolve, [...]}}
+```
+
+### Device Routing
+
+Route messages to specific devices:
+
+```erlang
+%% Device with ~ prefix
+"/~process@1.0/state"
+→ [#{}, {as, <<"process@1.0">>, #{path => ...}}, #{path => <<"state">>}]
+
+%% Device with parameters
+"/~process@1.0/execute&action=run"
+→ Routes through process@1.0 device
+```
+
+### Scoped Keys
+
+Apply keys to specific messages only:
+
+```erlang
+%% Global key (no prefix) - applies to all
+#{
+    <<"path">> => <<"/a/b">>,
+    <<"global">> => <<"value">>
+}
+%% All messages get global => <<"value">>
+
+%% Scoped key (N. prefix) - applies to Nth message
+#{
+    <<"path">> => <<"/a/b/c">>,
+    <<"2.scoped">> => <<"value">>
+}
+%% Only Msg2 gets scoped => <<"value">>
+```
+
+### Nested Resolution
+
+Use parentheses for inline sub-paths:
+
+```erlang
+%% Nested in path
+"/a/(x/y)/b"
+→ [Base, Msg(a), {resolve, [Base, Msg(x), Msg(y)]}, Msg(b)]
+
+%% Nested in key value
+"/path&key=(/sub/path)"
+→ [Base, #{path => <<"path">>, key => {resolve, [...]}}]
+```
+
+### Query Parameters
+
+Standard URL query parameters become global keys:
+
+```erlang
+"/path?key1=val1&key2=val2"
+→ All messages get key1 and key2
+```
+
+### Round-Trip Conversion
+
+Convert both directions:
+
+```erlang
+%% Path → Messages
+Messages = hb_singleton:from(#{<<"path">> => <<"/a/b">>}, #{}),
+
+%% Messages → Path
+TABM = hb_singleton:to(Messages),
+%% #{<<"path">> => <<"/a/b">>, ...}
+```
+
+### Complete Example
+
+```erlang
+%% Complex request
+Req = #{
+    <<"path">> => <<"/~process@1.0/execute&action=run">>,
+    <<"method">> => <<"POST">>,
+    <<"2.count+integer">> => <<"5">>
+},
+
+Msgs = hb_singleton:from(Req, #{}),
+%% [
+%%   #{method => <<"POST">>},
+%%   {as, <<"process@1.0">>, #{path => ..., method => ...}},
+%%   #{path => <<"execute">>, action => <<"run">>, count => 5, method => ...}
+%% ]
+```
+
+### Quick Reference: Singleton Syntax
+
+| Syntax | Meaning |
+|--------|---------|
+| `/a/b/c` | Path segments |
+| `/ID/...` | ID-based base (43 chars) |
+| `&key=value` | Inline key-value |
+| `&flag` | Boolean flag |
+| `path=value` | Assumed key name |
+| `key+integer=42` | Typed value |
+| `~device@1.0` | Device routing |
+| `2.key=value` | Scoped to message 2 |
+| `(/sub/path)` | Nested resolution |
+| `?key=value` | Query parameter (global) |
+
+---
+
+## Part 5: Testing
+
+Here's a complete test module to verify your understanding:
+
+```erlang
+-module(test_data_structures).
+-include_lib("eunit/include/eunit.hrl").
+
+%% === MESSAGE TESTS ===
+
+message_sign_verify_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"test">>},
+    
+    %% Sign
+    Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    
+    %% Verify
+    ?assert(hb_message:verify(Signed, all, #{})),
+    
+    %% Tamper and fail
+    Tampered = Signed#{<<"data">> => <<"modified">>},
+    ?assertNot(hb_message:verify(Tampered, all, #{})).
+
+message_id_test() ->
+    Msg = #{<<"key">> => <<"value">>},
+    
+    %% Deterministic IDs
+    ID1 = hb_message:id(Msg),
+    ID2 = hb_message:id(Msg),
+    ?assertEqual(ID1, ID2),
+    
+    %% Signed vs unsigned IDs differ
+    Wallet = ar_wallet:new(),
+    Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}),
+    SignedID = hb_message:id(Signed, signed, #{}),
+    UnsignedID = hb_message:id(Signed, unsigned, #{}),
+    ?assertNotEqual(SignedID, UnsignedID).
+
+%% === LINK TESTS ===
+
+link_normalize_test() ->
+    Msg = #{
+        <<"data">> => <<"value">>,
+        <<"nested">> => #{<<"deep">> => <<"structure">>}
+    },
+    
+    %% Normalize creates links
+    Normalized = hb_link:normalize(Msg, offload, #{}),
+    ?assert(maps:is_key(<<"nested+link">>, Normalized)),
+    ?assertNot(maps:is_key(<<"nested">>, Normalized)).
+
+link_key_detection_test() ->
+    ?assert(hb_link:is_link_key(<<"data+link">>)),
+    ?assertNot(hb_link:is_link_key(<<"data">>)),
+    ?assertEqual(<<"data">>, hb_link:remove_link_specifier(<<"data+link">>)).
+
+link_roundtrip_test() ->
+    Original = #{
+        <<"header">> => <<"value">>,
+        <<"body">> => #{<<"content">> => <<"data">>}
+    },
+    
+    %% Normalize → Decode → Load = Original
+    Normalized = hb_link:normalize(Original, offload, #{}),
+    Decoded = hb_link:decode_all_links(Normalized),
+    Loaded = hb_cache:ensure_all_loaded(Decoded, #{}),
+    ?assertEqual(Original, Loaded).
+
+%% === MAPS TESTS ===
+
+maps_link_resolution_test() ->
+    Data = <<"cached data">>,
+    {ok, ID} = hb_cache:write(Data, #{}),
+    
+    Map = #{<<"key">> => {link, ID, #{}}},
+    
+    %% hb_maps resolves automatically
+    Value = hb_maps:get(<<"key">>, Map),
+    ?assertEqual(Data, Value).
+
+maps_typed_link_test() ->
+    {ok, ID} = hb_cache:write(<<"42">>, #{}),
+    
+    Map = #{<<"count">> => {link, ID, #{<<"type">> => integer}}},
+    
+    Value = hb_maps:get(<<"count">>, Map),
+    ?assertEqual(42, Value).
+
+%% === SINGLETON TESTS ===
+
+singleton_simple_path_test() ->
+    Msgs = hb_singleton:from(#{<<"path">> => <<"/a/b/c">>}, #{}),
+    ?assertEqual(4, length(Msgs)),
+    
+    [_Base, Msg1, Msg2, Msg3] = Msgs,
+    ?assertEqual(<<"a">>, maps:get(<<"path">>, Msg1)),
+    ?assertEqual(<<"b">>, maps:get(<<"path">>, Msg2)),
+    ?assertEqual(<<"c">>, maps:get(<<"path">>, Msg3)).
+
+singleton_inline_params_test() ->
+    Msgs = hb_singleton:from(#{<<"path">> => <<"/action&key=value&flag">>}, #{}),
+    
+    [_Base, Msg] = Msgs,
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, Msg)),
+    ?assertEqual(true, maps:get(<<"flag">>, Msg)).
+
+singleton_scoped_keys_test() ->
+    Req = #{
+        <<"path">> => <<"/a/b">>,
+        <<"global">> => <<"g">>,
+        <<"1.first">> => <<"f">>
+    },
+    
+    [_Base, Msg1, Msg2] = hb_singleton:from(Req, #{}),
+    
+    %% Global in all
+    ?assertEqual(<<"g">>, maps:get(<<"global">>, Msg1)),
+    ?assertEqual(<<"g">>, maps:get(<<"global">>, Msg2)),
+    
+    %% Scoped only in Msg1
+    ?assertEqual(<<"f">>, maps:get(<<"first">>, Msg1)),
+    ?assertEqual(error, maps:find(<<"first">>, Msg2)).
+
+singleton_roundtrip_test() ->
+    Original = [
+        #{},
+        #{<<"path">> => <<"a">>},
+        #{<<"path">> => <<"b">>, <<"key">> => <<"value">>}
+    ],
+    
+    TABM = hb_singleton:to(Original),
+    Recovered = hb_singleton:from(TABM, #{}),
+    
+    %% Should round-trip
+    ?assertEqual(length(Original), length(Recovered)).
+```
+
+Run the tests:
+
+```bash
+rebar3 eunit --module=test_data_structures
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Sign → Store → Retrieve
+
+```erlang
+%% Create and sign
+Wallet = ar_wallet:new(),
+Msg = #{<<"data">> => <<"important">>},
+Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}),
+
+%% Store in cache
+{ok, ID} = hb_cache:write(Signed, #{}),
+
+%% Retrieve and verify
+{ok, Retrieved} = hb_cache:read(ID, #{}),
+true = hb_message:verify(Retrieved, all, #{}).
+```
+
+### Pattern 2: Nested Data with Links
+
+```erlang
+%% Large nested structure
+LargeMsg = #{
+    <<"metadata">> => #{...},
+    <<"body">> => #{<<"content">> => LargeContent}
+},
+
+%% Offload to cache
+Normalized = hb_link:normalize(LargeMsg, offload, #{}),
+%% Compact message with links, large data in cache
+
+%% Load when needed
+Decoded = hb_link:decode_all_links(Normalized),
+FullData = hb_cache:ensure_all_loaded(Decoded, #{}).
+```
+
+### Pattern 3: HTTP Request Processing
+
+```erlang
+%% Incoming HTTP request
+Request = #{
+    <<"path">> => <<"/process/execute">>,
+    <<"method">> => <<"POST">>,
+    <<"data">> => Body
+},
+
+%% Convert to message sequence
+Messages = hb_singleton:from(Request, #{}),
+
+%% Execute through AO-Core
+Result = hb_ao:resolve(Messages, BaseState, Opts).
+```
+
+### Pattern 4: Format Conversion
+
+```erlang
+%% Structured message
+Structured = #{<<"key">> => #{<<"nested">> => 123}},
+
+%% Convert for Arweave storage
+ANS104 = hb_message:convert(Structured, <<"ans104@1.0">>, #{}),
+
+%% Sign for upload
+Wallet = ar_wallet:new(),
+Signed = hb_message:commit(ANS104, #{priv_wallet => Wallet}).
+```
+
+---
+
+## What's Next?
+
+You now understand the core data structures:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Messages | [`hb_message`](/src/hb_message) | `commit`, `verify`, `id`, `convert` |
+| Links | [`hb_link`](/src/hb_link) | `normalize`, `decode_all_links`, `is_link_key` |
+| Maps | [`hb_maps`](/src/hb_maps) | `get`, `find`, `map`, `filter` |
+| Singleton | [`hb_singleton`](/src/hb_singleton) | `from`, `to`, `from_path` |
+
+### Going Further
+
+1. **AO-Core Protocol** — See how messages flow through `hb_ao:resolve/3`
+2. **Caching** — Learn about `hb_cache` for persistent storage
+3. **Devices** — Build custom message handlers
+4. **The Full Book** — Continue with [HyperBEAM Book](/book)
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_message](/src/hb_message) | [hb_link](/src/hb_link) | [hb_maps](/src/hb_maps) | [hb_singleton](/src/hb_singleton)
+
+```erlang
+%% === MESSAGE ===
+Wallet = ar_wallet:new().
+Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}).
+true = hb_message:verify(Signed, all, #{}).
+ID = hb_message:id(Signed, signed, #{}).
+Signers = hb_message:signers(Signed, #{}).
+Original = hb_message:uncommitted(Signed).
+Converted = hb_message:convert(Msg, <<"ans104@1.0">>, #{}).
+
+%% === LINK ===
+Normalized = hb_link:normalize(Msg, offload, #{}).
+true = hb_link:is_link_key(<<"data+link">>).
+<<"data">> = hb_link:remove_link_specifier(<<"data+link">>).
+Decoded = hb_link:decode_all_links(Normalized).
+Loaded = hb_cache:ensure_all_loaded(Decoded, #{}).
+
+%% === MAPS (with link resolution) ===
+Value = hb_maps:get(Key, Map).
+{ok, Value} = hb_maps:find(Key, Map).
+Transformed = hb_maps:map(Fun, Map).
+Filtered = hb_maps:filter(Fun, Map).
+Sum = hb_maps:fold(Fun, Acc, Map).
+
+%% === SINGLETON ===
+Msgs = hb_singleton:from(#{<<"path">> => <<"/a/b">>}, #{}).
+TABM = hb_singleton:to(Msgs).
+{ok, Parts, Query} = hb_singleton:from_path(<<"/path?k=v">>).
+```
+
+---
+
+*Now go build something with messages!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_message Reference](/src/hb_message) — Message operations
+- [hb_link Reference](/src/hb_link) — Link management
+- [hb_maps Reference](/src/hb_maps) — Link-resolving maps
+- [hb_singleton Reference](/src/hb_singleton) — TABM parser
+- [Full Reference](/hyperbeam) — All modules
+
+**Related Modules**
+- [hb_ao](/src/hb_ao) — Core protocol (prefer this for most operations)
+- [hb_cache](/src/hb_cache) — Cache storage and retrieval
+- [ar_wallet](/src/ar_wallet) — Wallet operations
+- [ar_bundles](/src/ar_bundles) — ANS-104 data items
+
+**Tutorials**
+- [Arweave Tutorial](/book/ar) — Wallets, data items, and bundles
+- [Setup Guide](/book/setup) — Get HyperBEAM running
+- [Erlang Crash Course](/book/erlang) — Learn the language
