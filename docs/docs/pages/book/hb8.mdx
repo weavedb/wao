@@ -1,0 +1,592 @@
+# The AO-Core Protocol
+
+Understanding message resolution and devices in HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **Messages** — The universal data structure
+2. **Resolution** — How computation flows through `resolve/3`
+3. **Devices** — Pluggable computation modules
+4. **Keys & Paths** — Navigating message structures
+5. How these pieces form the **AO-Core protocol**
+
+No prior HyperBEAM knowledge required. Basic Erlang helps—see [Erlang Crash Course](/book/erlang) if needed.
+
+---
+
+## The Big Picture
+
+HyperBEAM implements the **AO-Core protocol**—a system where everything is a message, and computation means resolving messages against each other using devices.
+
+```
+Request Message → resolve/3 → Device Function → Result Message
+     ↓                ↓              ↓
+  "What to do"    "The engine"   "How to do it"
+```
+
+Think of it like a universal function call:
+
+- **Message** = Both data and instructions (like a self-describing packet)
+- **Device** = A module that knows how to handle certain operations
+- **Resolution** = Running the device function and getting a result
+
+The key insight: **Every operation in HyperBEAM flows through `hb_ao:resolve/3`**. Reading data? Resolution. Executing code? Resolution. Sending messages? Resolution. This uniformity makes the system incredibly composable.
+
+Let's build each piece.
+
+---
+
+## Part 1: Messages
+
+> 📖 Reference: [hb_message](/src/hb_message) | [dev_message](/src/dev_message)
+
+A **message** is just a map. It can contain anything:
+
+```erlang
+%% A simple message
+Message = #{
+    <<"name">> => <<"Alice">>,
+    <<"balance">> => 100
+}.
+```
+
+Messages are the universal data structure. Everything in HyperBEAM—configuration, requests, responses, state—is a message.
+
+### The Device Key
+
+Messages can specify which **device** should handle them:
+
+```erlang
+%% Message with explicit device
+Message = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"action">> => <<"transfer">>,
+    <<"amount">> => 50
+}.
+```
+
+If no device is specified, the default `dev_message` handles it (simple key-value operations).
+
+### The Path Key
+
+The **path** tells the resolver what to compute:
+
+```erlang
+%% Request to get a value
+Request = #{
+    <<"path">> => <<"/balance">>
+}.
+```
+
+Think of `path` as "what question are you asking?" The device uses this to determine which function to run.
+
+### Quick Reference: Message Concepts
+
+| Concept | Description |
+|---------|-------------|
+| Message | A map containing data and optional metadata |
+| `device` key | Which module handles this message |
+| `path` key | What operation to perform |
+| Default device | `dev_message` (basic map operations) |
+
+---
+
+## Part 2: Resolution
+
+> 📖 Reference: [hb_ao](/src/hb_ao)
+
+**Resolution** is the core operation: given a base message and a request, compute a result.
+
+```erlang
+%% The fundamental operation
+{ok, Result} = hb_ao:resolve(BaseMessage, RequestMessage, Opts).
+```
+
+### Simple Example: Reading a Value
+
+```erlang
+%% Base message with data
+Base = #{
+    <<"name">> => <<"Alice">>,
+    <<"balance">> => 100
+}.
+
+%% Request to read balance
+Request = #{<<"path">> => <<"/balance">>}.
+
+%% Resolve!
+{ok, 100} = hb_ao:resolve(Base, Request, #{}).
+```
+
+The resolver:
+1. Looks at the request path (`/balance`)
+2. Finds the device (default: `dev_message`)
+3. Calls the device function
+4. Returns the result
+
+### Nested Paths
+
+Paths can navigate nested structures:
+
+```erlang
+Base = #{
+    <<"user">> => #{
+        <<"profile">> => #{
+            <<"name">> => <<"Alice">>
+        }
+    }
+}.
+
+Request = #{<<"path">> => <<"/user/profile/name">>}.
+
+{ok, <<"Alice">>} = hb_ao:resolve(Base, Request, #{}).
+```
+
+### Sequential Resolution
+
+You can chain multiple operations:
+
+```erlang
+Base = #{<<"count">> => 0},
+Step1 = #{<<"path">> => <<"set">>, <<"count">> => 1},
+Step2 = #{<<"path">> => <<"set">>, <<"count">> => 2},
+
+{ok, Final} = hb_ao:resolve_many([Base, Step1, Step2], #{}),
+%% Final has count = 2
+```
+
+Each step's output becomes the next step's input—like a pipeline.
+
+### The 13 Resolution Phases
+
+Under the hood, resolution goes through 13 discrete phases:
+
+```
+1.  Normalization      →  Prepare messages
+2.  Cache lookup       →  Check if already computed
+3.  Validation         →  Verify message validity
+4.  Persistent check   →  Check persistent store
+5.  Device lookup      →  Find the device module
+6.  Execution          →  Run device function
+7.  Step hook          →  Execute callbacks
+8.  Subresolution      →  Handle nested messages
+9.  Crypto linking     →  Update hash path
+10. Result caching     →  Store for reuse
+11. Notify waiters     →  Alert pending processes
+12. Fork worker        →  Spawn concurrent work
+13. Recurse/terminate  →  Continue or return
+```
+
+You don't need to understand all phases yet—just know that resolution is deterministic and cacheable.
+
+### Quick Reference: Resolution Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_ao:resolve(Msg, Opts)` | Resolve message using its path |
+| `hb_ao:resolve(Base, Request, Opts)` | Resolve request against base |
+| `hb_ao:resolve_many([Msgs], Opts)` | Chain multiple resolutions |
+| `hb_ao:get(Key, Msg, Opts)` | Get value (convenience wrapper) |
+| `hb_ao:set(Msg, Key, Value, Opts)` | Set value (convenience wrapper) |
+
+---
+
+## Part 3: Devices
+
+> 📖 Reference: [hb_ao_device](/src/hb_ao_device)
+
+A **device** is an Erlang module that handles specific operations. When you resolve a message, the resolver finds the appropriate device and calls its functions.
+
+### How Device Lookup Works
+
+```
+1. Check message for device key
+2. If found, load that device
+3. If not found, use dev_message (default)
+4. Find function matching the path/key
+5. Call function with (Msg1, Msg2, Opts)
+```
+
+### The Default Device: dev_message
+
+Without a device specified, `dev_message` handles basic operations:
+
+```erlang
+%% No device = dev_message
+Msg = #{<<"data">> => <<"value">>},
+
+%% These all use dev_message
+hb_ao:get(<<"data">>, Msg, #{}),           %% => <<"value">>
+hb_ao:set(Msg, <<"new">>, <<"thing">>, #{}), %% => updated map
+hb_ao:keys(Msg, #{}).                       %% => [<<"data">>]
+```
+
+### Device Function Signature
+
+All device functions follow the same pattern:
+
+```erlang
+my_function(Msg1, Msg2, Opts) -> {ok, Result} | {error, Reason}.
+```
+
+- `Msg1` — The base message being operated on
+- `Msg2` — The request message (contains path, parameters)
+- `Opts` — Runtime options
+
+### Loading Devices
+
+```erlang
+%% Load a device by name
+{ok, Module} = hb_ao_device:load(<<"scheduler@1.0">>, Opts).
+
+%% Load the default device
+DefaultDev = hb_ao_device:default().
+%% => dev_message
+```
+
+### Device Info
+
+Devices can declare their capabilities:
+
+```erlang
+%% Get device info
+Info = hb_ao_device:info(dev_message, #{}, #{}),
+
+%% Info contains:
+%% - exports: which keys this device handles
+%% - excludes: keys to not export
+%% - handler: override function for all calls
+%% - default: fallback for unknown keys
+```
+
+### Quick Reference: Device Functions
+
+| Function | What it does |
+|----------|--------------|
+| `hb_ao_device:load(DevID, Opts)` | Load device module |
+| `hb_ao_device:default()` | Get default device (`dev_message`) |
+| `hb_ao_device:info(Msg, Opts)` | Get device capabilities |
+| `hb_ao_device:message_to_device(Msg, Opts)` | Extract device from message |
+| `hb_ao_device:is_exported(Msg, Dev, Key, Opts)` | Check if key is handled |
+
+---
+
+## Part 4: Keys and Paths
+
+> 📖 Reference: [hb_ao](/src/hb_ao) | [hb_path](/src/hb_path)
+
+Keys identify values in messages. Paths navigate through nested structures.
+
+### Key Normalization
+
+Keys can be various types—they all get normalized to binaries:
+
+```erlang
+%% All these become <<"test">>
+hb_ao:normalize_key(<<"test">>).   %% binary
+hb_ao:normalize_key(test).          %% atom  
+hb_ao:normalize_key("test").        %% string
+hb_ao:normalize_key(42).            %% integer → <<"42">>
+
+%% Lists become paths
+hb_ao:normalize_key([<<"a">>, <<"b">>]).  %% => <<"a/b">>
+```
+
+### Getting Values
+
+```erlang
+Msg = #{
+    <<"name">> => <<"Alice">>,
+    <<"settings">> => #{
+        <<"theme">> => <<"dark">>
+    }
+}.
+
+%% Simple get
+hb_ao:get(<<"name">>, Msg).
+%% => <<"Alice">>
+
+%% Nested path
+hb_ao:get(<<"/settings/theme">>, Msg, #{}).
+%% => <<"dark">>
+
+%% With default
+hb_ao:get(<<"missing">>, Msg, <<"default">>, #{}).
+%% => <<"default">>
+```
+
+### Setting Values
+
+```erlang
+Msg = #{<<"count">> => 0}.
+
+%% Set single key
+Updated = hb_ao:set(Msg, <<"count">>, 1, #{}),
+%% => #{<<"count">> => 1}
+
+%% Set nested path
+Updated2 = hb_ao:set(Msg, <<"/data/value">>, <<"test">>, #{}),
+%% => #{<<"count">> => 0, <<"data">> => #{<<"value">> => <<"test">>}}
+
+%% Set multiple keys at once
+Updates = #{<<"a">> => 1, <<"b">> => 2},
+Updated3 = hb_ao:set(Msg, Updates, #{}).
+```
+
+### Removing Keys
+
+```erlang
+Msg = #{<<"keep">> => 1, <<"remove">> => 2}.
+
+Updated = hb_ao:remove(Msg, <<"remove">>, #{}),
+%% => #{<<"keep">> => 1}
+```
+
+### Listing Keys
+
+```erlang
+Msg = #{<<"a">> => 1, <<"b">> => 2, <<"c">> => 3}.
+
+Keys = hb_ao:keys(Msg),
+%% => [<<"a">>, <<"b">>, <<"c">>]
+```
+
+### Quick Reference: Key Operations
+
+| Function | What it does |
+|----------|--------------|
+| `hb_ao:get(Key, Msg)` | Get value |
+| `hb_ao:get(Key, Msg, Default, Opts)` | Get with default |
+| `hb_ao:set(Msg, Key, Value, Opts)` | Set single key |
+| `hb_ao:set(Msg, Updates, Opts)` | Set multiple keys |
+| `hb_ao:remove(Msg, Key, Opts)` | Remove key |
+| `hb_ao:keys(Msg)` | List all keys |
+| `hb_ao:normalize_key(Key)` | Convert to binary |
+
+---
+
+## Part 5: Putting It Together
+
+Let's build a complete example that demonstrates the protocol in action.
+
+### Example: A Simple Counter
+
+```erlang
+-module(test_protocol).
+-include_lib("eunit/include/eunit.hrl").
+
+counter_test() ->
+    %% Initial state
+    State = #{
+        <<"count">> => 0,
+        <<"name">> => <<"My Counter">>
+    },
+    
+    %% Read the count
+    {ok, 0} = hb_ao:resolve(
+        State, 
+        #{<<"path">> => <<"/count">>}, 
+        #{}
+    ),
+    
+    %% Increment (using set)
+    {ok, State2} = hb_ao:resolve(
+        State,
+        #{<<"path">> => <<"set">>, <<"count">> => 1},
+        #{}
+    ),
+    
+    %% Verify increment worked
+    {ok, 1} = hb_ao:resolve(
+        State2,
+        #{<<"path">> => <<"/count">>},
+        #{}
+    ),
+    
+    %% Chain multiple operations
+    {ok, Final} = hb_ao:resolve_many([
+        State,
+        #{<<"path">> => <<"set">>, <<"count">> => 10},
+        #{<<"path">> => <<"set">>, <<"count">> => 20}
+    ], #{}),
+    
+    %% Final count is 20
+    20 = hb_ao:get(<<"count">>, Final).
+```
+
+### Example: Working with Devices
+
+```erlang
+device_test() ->
+    %% Check default device
+    ?assertEqual(dev_message, hb_ao_device:default()),
+    
+    %% Load a device
+    {ok, Mod} = hb_ao_device:load(dev_message, #{}),
+    ?assertEqual(dev_message, Mod),
+    
+    %% Get device info
+    Info = hb_ao_device:info(dev_message, #{}, #{}),
+    ?assert(is_map(Info)),
+    
+    %% Check if key is exported
+    Msg = #{<<"data">> => <<"test">>},
+    ?assertEqual(true, hb_ao_device:is_exported(
+        Msg, dev_message, <<"get">>, #{}
+    )).
+```
+
+### Example: Direct vs Computed Access
+
+```erlang
+access_test() ->
+    Base = #{
+        <<"device">> => <<"message@1.0">>,
+        <<"data">> => <<"value">>
+    },
+    
+    %% Direct access - just reads the literal key
+    ?assertEqual(true, hb_ao_device:is_direct_key_access(
+        Base, 
+        #{<<"path">> => <<"data">>}, 
+        #{}
+    )),
+    
+    %% Computed access - runs device function
+    ?assertEqual(false, hb_ao_device:is_direct_key_access(
+        Base,
+        #{<<"path">> => <<"get">>},  %% 'get' is a function
+        #{}
+    )).
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Read → Modify → Write
+
+```erlang
+%% Get current value
+Value = hb_ao:get(<<"balance">>, Msg, 0, #{}),
+
+%% Modify
+NewValue = Value + 100,
+
+%% Write back
+UpdatedMsg = hb_ao:set(Msg, <<"balance">>, NewValue, #{}).
+```
+
+### Pattern 2: Pipeline Processing
+
+```erlang
+%% Chain operations
+{ok, Result} = hb_ao:resolve_many([
+    InitialState,
+    #{<<"path">> => <<"validate">>},
+    #{<<"path">> => <<"transform">>},
+    #{<<"path">> => <<"save">>}
+], #{}).
+```
+
+### Pattern 3: Conditional Device Loading
+
+```erlang
+%% Get device from message, with fallback
+Device = case hb_ao_device:message_to_device(Msg, Opts) of
+    undefined -> hb_ao_device:default();
+    Dev -> Dev
+end.
+```
+
+### Pattern 4: Check Before Execute
+
+```erlang
+%% Check if device handles this operation
+case hb_ao_device:is_exported(Msg, Device, <<"my_op">>, Opts) of
+    true ->
+        hb_ao:resolve(Msg, #{<<"path">> => <<"my_op">>}, Opts);
+    false ->
+        {error, not_supported}
+end.
+```
+
+---
+
+## What's Next?
+
+You now understand the core protocol:
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Resolution | [`hb_ao`](/src/hb_ao) | `resolve`, `resolve_many`, `get`, `set` |
+| Devices | [`hb_ao_device`](/src/hb_ao_device) | `load`, `info`, `is_exported` |
+| Messages | [`dev_message`](/src/dev_message) | Default device operations |
+| Paths | [`hb_path`](/src/hb_path) | Path parsing and matching |
+
+### Going Further
+
+1. **Explore Devices** — See how `dev_process`, `dev_scheduler`, `dev_wasm` extend the protocol
+2. **Build Custom Devices** — Create your own computation modules ([Tutorial](/tutorials/creating-devices))
+3. **Understand Caching** — Learn how results are cached and reused ([hb_cache](/src/hb_cache))
+4. **HTTP Integration** — See how HTTP requests become resolutions ([dev_codec_httpsig](/src/dev_codec_httpsig))
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [hb_ao](/src/hb_ao) | [hb_ao_device](/src/hb_ao_device)
+
+```erlang
+%% === RESOLUTION ===
+{ok, Result} = hb_ao:resolve(Base, Request, Opts).
+{ok, Result} = hb_ao:resolve(Msg, Opts).
+{ok, Final} = hb_ao:resolve_many([Msg1, Msg2, Msg3], Opts).
+
+%% === GET/SET/REMOVE ===
+Value = hb_ao:get(Key, Msg).
+Value = hb_ao:get(Key, Msg, Default, Opts).
+Updated = hb_ao:set(Msg, Key, Value, Opts).
+Updated = hb_ao:set(Msg, #{Key1 => V1, Key2 => V2}, Opts).
+Updated = hb_ao:remove(Msg, Key, Opts).
+Keys = hb_ao:keys(Msg).
+
+%% === NORMALIZATION ===
+BinKey = hb_ao:normalize_key(Key).
+NormMsg = hb_ao:normalize_keys(Msg).
+
+%% === DEVICES ===
+{ok, Mod} = hb_ao_device:load(DeviceID, Opts).
+DefaultDev = hb_ao_device:default().
+Device = hb_ao_device:message_to_device(Msg, Opts).
+Info = hb_ao_device:info(Device, Msg, Opts).
+Bool = hb_ao_device:is_exported(Msg, Dev, Key, Opts).
+Bool = hb_ao_device:is_direct_key_access(Base, Req, Opts).
+{Status, Dev, Fun} = hb_ao_device:message_to_fun(Msg, Key, Opts).
+```
+
+---
+
+*Now go build something computational!*
+
+---
+
+## Resources
+
+**HyperBEAM Documentation**
+- [hb_ao Reference](/src/hb_ao) — Core resolution engine
+- [hb_ao_device Reference](/src/hb_ao_device) — Device management
+- [dev_message Reference](/src/dev_message) — Default device
+- [Full Reference](/hyperbeam) — All modules
+
+**Protocol Documentation**
+- [AO-Core Protocol](https://ao.arweave.dev/) — Protocol specification
+- [HyperBEAM Book](/book) — Complete learning guide
+
+**Building Devices**
+- [Creating Devices](/tutorials/creating-devices) — Build your own devices
+- [Device Examples](https://github.com/permaweb/HyperBEAM/tree/main/src) — Study existing devices
