@@ -2,7 +2,7 @@ import { Html, Main, NextScript } from "next/document"
 import { Head } from "arnext"
 
 export default function Document() {
-  const title = "WAO | DevNet Launch"
+  const title = "WizardAO"
   const desc = "Web-Based Implementation of AO"
   const image = "https://wao.eco/cover.png"
   return (

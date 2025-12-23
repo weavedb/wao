@@ -148,7 +148,7 @@ const dev = [
 
 export default defineConfig({
   iconUrl: "/favicon.ico",
-  title: "WAO",
+  title: "WizardAO",
   ogImageUrl:
     "https://vocs.dev/api/og?logo=%logo&title=%title&description=%description",
   topNav: [
