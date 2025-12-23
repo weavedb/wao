@@ -1,4 +1,4 @@
-# WAO - Wizard AO SDK & Testing
+# WizardAO (WAO) - AO SDK & Testing
 
 ![](./app/public/assets/cover.png)
 
