@@ -583,7 +583,7 @@ Msgs = hb_singleton:from(Req, #{}),
 Here's a complete test module to verify your understanding:
 
 ```erlang
--module(test_data_structures).
+-module(test_hb3).
 -include_lib("eunit/include/eunit.hrl").
 
 %% === MESSAGE TESTS ===
@@ -720,7 +720,7 @@ singleton_roundtrip_test() ->
 Run the tests:
 
 ```bash
-rebar3 eunit --module=test_data_structures
+rebar3 eunit --module=test_hb3
 ```
 
 ---

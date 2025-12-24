@@ -20,7 +20,9 @@ Written for [HyperBEAM v0.9-milestone-3-beta-3](https://github.com/permaweb/Hype
 
 Get HyperBEAM running on your machine.
 
-→ [Setup](/book/setup)
+:::tip
+[Setup Tutorial](/book/setup)
+:::
 
 ---
 
@@ -28,7 +30,9 @@ Get HyperBEAM running on your machine.
 
 HyperBEAM is written in Erlang. You cannot read the code without learning the language first.
 
-→ [Erlang Crash Course](/book/erlang)
+:::tip
+[Erlang Crash Course Tutorial](/book/erlang)
+:::
 
 ---
 
@@ -36,7 +40,9 @@ HyperBEAM is written in Erlang. You cannot read the code without learning the la
 
 Before reading modules, understand how the codebase is organized.
 
-→ [Project Structure](/book/structure)
+:::tip
+[Project Structure Tutorial](/book/structure)
+:::
 
 ---
 
@@ -44,7 +50,9 @@ Before reading modules, understand how the codebase is organized.
 
 Arweave blockchain primitives. HyperBEAM stores everything on Arweave—these modules are the foundation.
 
-→ [Arweave Utils Tutorial](/book/ar)
+:::tip
+[Arweave Utils Tutorial](/book/ar)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -60,15 +68,19 @@ Arweave blockchain primitives. HyperBEAM stores everything on Arweave—these mo
 
 ## Chapter 5: HyperBEAM Core
 
-Core HyperBEAM infrastructure.
+The runtime environment that devices execute in. Understanding these modules helps you write better devices and debug issues.
+
+You'll start with pure utilities, then learn how data flows through the system — from configuration to storage to network to the protocol that ties everything together.
 
 ---
 
-### Utilities
+### 1. Utilities
 
 Pure helper functions used throughout the codebase.
 
-→ [Utilities Tutorial](/book/hb1)
+:::tip
+[Utilities Tutorial](/book/hb1)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -81,11 +93,13 @@ Pure helper functions used throughout the codebase.
 
 ---
 
-### Configuration
+### 2. Configuration
 
 How HyperBEAM settings flow from defaults through node config to per-message overrides.
 
-→ [Configuration Tutorial](/book/hb2)
+:::tip
+[Configuration Tutorial](/book/hb2)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -96,11 +110,13 @@ How HyperBEAM settings flow from defaults through node config to per-message ove
 
 ---
 
-### Data Structures
+### 3. Data Structures
 
 Messages are maps. These modules define how they're created, signed, linked, and transformed.
 
-→ [Data Structures Tutorial](/book/hb3)
+:::tip
+[Data Structures Tutorial](/book/hb3)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -111,11 +127,13 @@ Messages are maps. These modules define how they're created, signed, linked, and
 
 ---
 
-### Storage
+### 4. Storage
 
 Persistent data storage with pluggable backends.
 
-→ [Storage Tutorial](/book/hb4)
+:::tip
+[Storage Tutorial](/book/hb4)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -128,11 +146,13 @@ Persistent data storage with pluggable backends.
 
 ---
 
-### Caching
+### 5. Caching
 
 Content-addressed caching layer on top of storage.
 
-→ [Caching Tutorial](/book/hb5)
+:::tip
+[Caching Tutorial](/book/hb5)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -141,11 +161,13 @@ Content-addressed caching layer on top of storage.
 
 ---
 
-### HTTP Client
+### 6. HTTP Client
 
 Outbound HTTP requests to gateways and other nodes.
 
-→ [HTTP Client Tutorial](/book/hb6)
+:::tip
+[HTTP Client Tutorial](/book/hb6)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -159,11 +181,13 @@ Outbound HTTP requests to gateways and other nodes.
 
 ---
 
-### Remote Storage
+### 7. Remote Storage
 
 Storage backends that fetch data over the network.
 
-→ [Remote Storage Tutorial](/book/hb7)
+:::tip
+[Remote Storage Tutorial](/book/hb7)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -172,11 +196,13 @@ Storage backends that fetch data over the network.
 
 ---
 
-### Protocol
+### 8. Protocol
 
 The heart of HyperBEAM. Every request flows through `hb_ao:resolve/3`.
 
-→ [Protocol Tutorial](/book/hb8)
+:::tip
+[Protocol Tutorial](/book/hb8)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -185,11 +211,13 @@ The heart of HyperBEAM. Every request flows through `hb_ao:resolve/3`.
 
 ---
 
-### HTTP Server
+### 9. HTTP Server
 
 Inbound HTTP handling.
 
-→ [HTTP Server Tutorial](/book/hb9)
+:::tip
+[HTTP Server Tutorial](/book/hb9)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -197,11 +225,13 @@ Inbound HTTP handling.
 
 ---
 
-### WASM
+### 10. WASM
 
 WebAssembly execution environment.
 
-→ [WASM Tutorial](/book/hb10)
+:::tip
+[WASM Tutorial](/book/hb10)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -210,11 +240,13 @@ WebAssembly execution environment.
 
 ---
 
-### Application
+### 11. Application
 
 OTP application structure and node lifecycle.
 
-→ [Application Tutorial](/book/hb11)
+:::tip
+[Application Tutorial](/book/hb11)
+:::
 
 | Module | Description |
 |--------|-------------|
@@ -226,7 +258,13 @@ OTP application structure and node lifecycle.
 
 ---
 
-### Volume
+### Supplemental
+
+:::note
+These modules are not directly related to building devices. They cover node operations, debugging, and testing infrastructure.
+:::
+
+#### Volume
 
 Storage partitions and data routing.
 
@@ -234,9 +272,7 @@ Storage partitions and data routing.
 |--------|-------------|
 | [hb_volume](/src/hb_volume) | Manages storage partitions, handles mounting/unmounting and data routing |
 
----
-
-### Monitoring
+#### Monitoring
 
 Logging, tracing, debugging, and metrics.
 
@@ -251,9 +287,7 @@ Logging, tracing, debugging, and metrics.
 | [hb_metrics_collector](/src/hb_metrics_collector) | Collects and exposes Prometheus metrics for request counts and latencies |
 | [hb_process_monitor](/src/hb_process_monitor) | Monitors Erlang process health, detects failures, reports status |
 
----
-
-### Testing
+#### Testing
 
 Test utilities and conformance tests.
 

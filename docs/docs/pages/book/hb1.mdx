@@ -369,21 +369,21 @@ hb_escape:decode_quotes(<<"He said \\\"hello\\\"">>).
 
 ### Create the Test File
 
-Create a new file at `src/test/test_hb_utils.erl`:
+Create a new file at `src/test/test_hb1.erl`:
 
 ```bash
 mkdir -p src/test
-touch src/test/test_hb_utils.erl
+touch src/test/test_hb1.erl
 ```
 
-Add the following content to `src/test/test_hb_utils.erl`:
+Add the following content to `src/test/test_hb1.erl`:
 
 ```erlang
--module(test_hb_utils).
+-module(test_hb1).
 -include_lib("eunit/include/eunit.hrl").
 -include("include/hb.hrl").
 
-%% Run with: rebar3 eunit --module=test_hb_utils
+%% Run with: rebar3 eunit --module=test_hb1
 
 type_coercion_test() ->
     %% Integer conversion
@@ -541,7 +541,7 @@ complete_workflow_test() ->
 ### Run the Tests
 
 ```bash
-rebar3 eunit --module=test_hb_utils
+rebar3 eunit --module=test_hb1
 ```
 
 ---

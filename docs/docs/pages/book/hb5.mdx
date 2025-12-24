@@ -419,99 +419,199 @@ Template = #{<<"type">> => <<"user">>},
 
 ## Part 6: Test It
 
-Create a test file `src/test/test_cache.erl`:
+Create a test file `src/test/test_hb5.erl`:
 
 ```erlang
--module(test_cache).
+-module(test_hb5).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_hb5
 
 basic_write_read_test() ->
     Store = hb_test_utils:test_store(),
     hb_store:reset(Store),
     Opts = #{store => Store},
     
-    %% Write
+    %% Write a message
     Msg = #{<<"greeting">> => <<"Hello, World!">>},
     {ok, ID} = hb_cache:write(Msg, Opts),
     ?debugFmt("Written with ID: ~p", [ID]),
     
-    %% Read
+    %% Read it back
     {ok, Read} = hb_cache:read(ID, Opts),
     Loaded = hb_cache:ensure_all_loaded(Read, Opts),
     
-    ?assertEqual(<<"Hello, World!">>, maps:get(<<"greeting">>, Loaded)).
+    ?assertEqual(<<"Hello, World!">>, maps:get(<<"greeting">>, Loaded)),
+    ?debugFmt("Basic write/read: OK", []).
 
 nested_lazy_loading_test() ->
     Store = hb_test_utils:test_store(),
     hb_store:reset(Store),
     Opts = #{store => Store},
     
-    %% Create nested structure
-    Level3 = #{<<"value">> => <<"deep">>},
+    %% Create deeply nested structure
+    Level3 = #{<<"value">> => <<"treasure">>},
     Level2 = #{<<"nested">> => Level3},
     Level1 = #{<<"data">> => Level2},
     
     {ok, ID} = hb_cache:write(Level1, Opts),
+    ?debugFmt("Wrote nested structure with ID: ~p", [ID]),
+    
+    %% Read returns links
     {ok, Read} = hb_cache:read(ID, Opts),
     
-    %% Full load and verify
+    %% Full load resolves all links
     Loaded = hb_cache:ensure_all_loaded(Read, Opts),
     
+    %% Navigate to the treasure
     Data = maps:get(<<"data">>, Loaded),
     Nested = maps:get(<<"nested">>, Data),
     Value = maps:get(<<"value">>, Nested),
     
-    ?assertEqual(<<"deep">>, Value).
+    ?assertEqual(<<"treasure">>, Value),
+    ?debugFmt("Nested lazy loading: OK", []).
 
 deduplication_test() ->
     Store = hb_test_utils:test_store(),
     hb_store:reset(Store),
     Opts = #{store => Store},
     
-    %% Same content should get same ID
-    Msg = #{<<"x">> => <<"same">>},
+    %% Same content should get same ID (content-addressed!)
+    Msg = #{<<"x">> => <<"same content">>},
     
     {ok, ID1} = hb_cache:write(Msg, Opts),
     {ok, ID2} = hb_cache:write(Msg, Opts),
     
-    ?debugFmt("ID1: ~p, ID2: ~p", [ID1, ID2]),
-    ?assertEqual(ID1, ID2).  %% Content-addressed!
+    ?assertEqual(ID1, ID2),
+    ?debugFmt("Deduplication verified: same ID for same content", []).
 
-cache_control_test() ->
+not_found_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    %% Try to read non-existent ID
+    FakeID = hb_util:human_id(<<1:256>>),
+    Result = hb_cache:read(FakeID, Opts),
+    
+    ?assertEqual(not_found, Result),
+    ?debugFmt("Not found handling: OK", []).
+
+cache_control_always_test() ->
     Store = hb_test_utils:test_store(),
     hb_store:reset(Store),
     
-    Msg1 = #{<<"key">> => <<"value">>},
+    Msg1 = #{<<"key">> => <<"cached-value">>},
     Msg2 = <<"key">>,
     
-    %% First resolve with "always" to cache
+    %% First resolve with "always" to cache the result
     Opts1 = #{store => Store, cache_control => [<<"always">>]},
     {ok, Res1} = hb_ao:resolve(Msg1, Msg2, Opts1),
-    ?assertEqual(<<"value">>, Res1),
+    ?assertEqual(<<"cached-value">>, Res1),
+    ?debugFmt("Resolved and cached with 'always'", []),
     
-    %% Now use only-if-cached - should hit
+    %% Now use only-if-cached - should hit cache
     Opts2 = #{store => Store, cache_control => [<<"only-if-cached">>]},
     {ok, Res2} = hb_ao:resolve(Msg1, Msg2, Opts2),
-    ?assertEqual(<<"value">>, Res2).
+    ?assertEqual(<<"cached-value">>, Res2),
+    ?debugFmt("Cache hit with 'only-if-cached': OK", []).
+
+cache_control_no_store_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    Msg1 = #{<<"key">> => <<"value">>},
+    Msg2 = #{<<"cache-control">> => [<<"no-store">>]},
+    Msg3 = <<"result">>,
+    
+    %% Should not cache with no-store directive
+    Result = hb_cache_control:maybe_store(Msg1, Msg2, Msg3, Opts),
+    ?assertEqual(not_caching, Result),
+    ?debugFmt("no-store directive respected: OK", []).
 
 list_keys_test() ->
     Store = hb_test_utils:test_store(),
     hb_store:reset(Store),
     Opts = #{store => Store},
     
+    %% Write message with multiple keys
     Msg = #{<<"alpha">> => <<"1">>, <<"beta">> => <<"2">>, <<"gamma">> => <<"3">>},
     {ok, ID} = hb_cache:write(Msg, Opts),
     
+    %% List returns all keys
     Keys = hb_cache:list(ID, Opts),
     SortedKeys = lists:sort(Keys),
     
-    ?assertEqual([<<"alpha">>, <<"beta">>, <<"gamma">>], SortedKeys).
+    ?assertEqual([<<"alpha">>, <<"beta">>, <<"gamma">>], SortedKeys),
+    ?debugFmt("List keys: OK", []).
+
+list_numbered_test() ->
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    %% Write message with numbered keys
+    Msg = #{
+        <<"1">> => <<"first">>,
+        <<"2">> => <<"second">>,
+        <<"5">> => <<"fifth">>,
+        <<"10">> => <<"tenth">>
+    },
+    {ok, ID} = hb_cache:write(Msg, Opts),
+    
+    %% Returns sorted integers
+    Numbers = hb_cache:list_numbered(ID, Opts),
+    
+    ?assertEqual([1, 2, 5, 10], lists:sort(Numbers)),
+    ?debugFmt("List numbered: OK", []).
+
+complete_workflow_test() ->
+    ?debugFmt("=== Complete Caching Workflow Test ===", []),
+    
+    Store = hb_test_utils:test_store(),
+    hb_store:reset(Store),
+    Opts = #{store => Store},
+    
+    %% 1. Create nested data
+    Inner = #{<<"secret">> => <<"hidden treasure">>},
+    Outer = #{<<"container">> => Inner, <<"label">> => <<"box">>},
+    ?debugFmt("1. Created nested data structure", []),
+    
+    %% 2. Write to cache
+    {ok, ID} = hb_cache:write(Outer, Opts),
+    ?debugFmt("2. Cached with ID: ~p", [ID]),
+    
+    %% 3. Read back (lazy)
+    {ok, Read} = hb_cache:read(ID, Opts),
+    ?debugFmt("3. Read from cache (with links)", []),
+    
+    %% 4. Fully load
+    Loaded = hb_cache:ensure_all_loaded(Read, Opts),
+    ?debugFmt("4. Fully loaded all nested data", []),
+    
+    %% 5. Verify structure
+    Label = maps:get(<<"label">>, Loaded),
+    ?assertEqual(<<"box">>, Label),
+    
+    Container = maps:get(<<"container">>, Loaded),
+    Secret = maps:get(<<"secret">>, Container),
+    ?assertEqual(<<"hidden treasure">>, Secret),
+    ?debugFmt("5. Verified nested structure", []),
+    
+    %% 6. Verify deduplication
+    {ok, ID2} = hb_cache:write(Outer, Opts),
+    ?assertEqual(ID, ID2),
+    ?debugFmt("6. Verified content-addressed deduplication", []),
+    
+    ?debugFmt("=== All caching tests passed! ===", []).
 ```
 
-Run the tests:
+### Run the Tests
 
 ```bash
-rebar3 eunit --module=test_cache
+rebar3 eunit --module=test_hb5
 ```
 
 ---
