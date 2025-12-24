@@ -587,7 +587,7 @@ UpdatedOpts = hb_store_opts:apply(StoreOpts, Defaults).
 Let's put it all together with a test module:
 
 ```erlang
--module(test_hb_store).
+-module(test_hb4).
 -include_lib("eunit/include/eunit.hrl").
 
 %% Helper: create unique store name
@@ -703,7 +703,7 @@ lru_eviction_test() ->
 Run the tests:
 
 ```bash
-rebar3 eunit --module=test_hb_store
+rebar3 eunit --module=test_hb4
 ```
 
 ---
