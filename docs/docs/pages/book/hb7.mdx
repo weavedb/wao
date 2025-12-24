@@ -30,12 +30,12 @@ Here's the mental model:
 
 ```
 Your Node                          Remote Sources
-    │                                    │
-    ├─► Local Cache (fast) ◄─────────────┤
-    │          ↓ miss                    │
-    ├─► Gateway Store ──────────────────►│ Arweave Gateway
-    │          or                        │
-    └─► Remote Node Store ──────────────►│ Other HyperBEAM Node
+    |                                    |
+    +-- Local Cache (fast) --------------+
+    |          | miss                    |
+    +-- Gateway Store -------------------> Arweave Gateway
+    |          or                        |
+    +-- Remote Node Store ---------------> Other HyperBEAM Node
 ```
 
 Think of it like a library system:
@@ -64,7 +64,7 @@ hb_store_remote_node:scope(Opts).  %% => remote
 ```
 
 Why does scope matter?
-- **Performance** — Remote reads have network latency (~500ms vs under 1ms)
+- **Performance** — Remote reads have network latency (around 500ms vs under 1ms)
 - **Availability** — Remote sources may be temporarily unreachable
 - **Caching** — Remote data should be cached locally when possible
 
@@ -317,7 +317,7 @@ Gateway store supports different backend node types.
 
 %% Uses endpoints:
 %% - GraphQL: https://arweave.net/graphql
-%% - Raw: https://arweave.net/raw/{id}
+%% - Raw: https://arweave.net/raw/id
 ```
 
 ### AO Node
@@ -331,23 +331,7 @@ Gateway store supports different backend node types.
 
 %% Uses endpoints:
 %% - GraphQL: https://ao.computer/~query@1.0/graphql
-%% - Raw: https://ao.computer/{id}
-```
-
-### Custom Routes
-
-```erlang
-#{
-    <<"store-module">> => hb_store_gateway,
-    <<"routes">> => [
-        #{
-            <<"template">> => <<"/graphql">>,
-            <<"nodes">> => [
-                #{<<"prefix">> => <<"https://custom-gateway.com">>}
-            ]
-        }
-    ]
-}
+%% - Raw: https://ao.computer/id
 ```
 
 ---
@@ -401,72 +385,79 @@ Stores = [
 
 ---
 
-## Part 7: Practical Examples
+## Part 7: Complete Test
 
-### Example 1: Simple Gateway Read
+Create `src/test/test_hb7.erl`:
 
 ```erlang
--module(test_gateway).
+-module(test_hb7).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-simple_read_test() ->
+%% Run with: rebar3 eunit --module=test_hb7
+
+scope_test() ->
+    %% Gateway store is always remote scope
+    GatewayStore = #{<<"store-module">> => hb_store_gateway},
+    ?assertEqual(remote, hb_store_gateway:scope(GatewayStore)),
+    ?debugFmt("Gateway store scope: remote", []),
+    
+    %% Remote node store is always remote scope
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => <<"http://localhost:8421">>
+    },
+    ?assertEqual(remote, hb_store_remote_node:scope(RemoteStore)),
+    ?debugFmt("Remote node store scope: remote", []).
+
+gateway_read_test() ->
     Store = #{<<"store-module">> => hb_store_gateway},
+    
+    %% Known Arweave transaction ID (aos module)
     ID = <<"BOogk_XAI3bvNWnxNxwxmvOfglZt17o4MOVAdPNZ_ew">>,
     
-    case hb_store_gateway:read(Store, ID) of
+    try hb_store_gateway:read(Store, ID) of
         {ok, Message} ->
             ?assert(is_map(Message)),
-            io:format("Fetched message with ~p keys~n", 
-                [maps:size(Message)]);
+            ?debugFmt("Gateway read success: ~p keys", [maps:size(Message)]);
         not_found ->
-            io:format("Message not found~n")
+            ?debugFmt("Gateway read: not_found (ID may not exist)", [])
+    catch
+        _:_ ->
+            ?debugFmt("Gateway read: network unavailable (skipped)", [])
     end.
-```
 
-### Example 2: Cached Gateway Access
+gateway_invalid_id_test() ->
+    Store = #{<<"store-module">> => hb_store_gateway},
+    
+    %% Short key - not a valid ID (should return not_found without network call)
+    ?assertEqual(not_found, hb_store_gateway:read(Store, <<"shortkey">>)),
+    ?debugFmt("Invalid ID rejected: OK", []).
+    
+    %% Note: Testing non-existent valid-format IDs requires network access
+    %% and is covered by gateway_read_test when network is available.
 
-```erlang
--module(test_cached_gateway).
--include_lib("eunit/include/eunit.hrl").
-
-cached_read_test() ->
-    %% Setup local cache
+remote_node_basic_test() ->
+    %% Setup local store for testing
     LocalStore = #{
         <<"store-module">> => hb_store_fs,
-        <<"name">> => <<"my-cache">>
+        <<"name">> => <<"test-remote-basic">>
     },
+    hb_store:reset(LocalStore),
+    ?debugFmt("Local store reset: OK", []),
     
-    %% Gateway with caching
-    GatewayStore = #{
-        <<"store-module">> => hb_store_gateway,
-        <<"local-store">> => [LocalStore]
-    },
+    %% Create test message
+    TestData = #{<<"test-key">> => <<"test-value-", (integer_to_binary(rand:uniform(10000)))/binary>>},
+    ID = hb_message:id(TestData),
+    ?debugFmt("Test message ID: ~s", [hb_util:encode(ID)]),
     
-    ID = <<"test-transaction-id-here">>,
+    %% Write to local store
+    {ok, ID} = hb_cache:write(TestData, #{store => LocalStore}),
+    ?debugFmt("Wrote message to local store", []),
     
-    %% First read: fetches from gateway, caches locally
-    {ok, Msg1} = hb_cache:read(ID, #{store => [GatewayStore]}),
-    
-    %% Second read: returns from cache (fast!)
-    {ok, Msg2} = hb_cache:read(ID, #{store => [LocalStore]}),
-    
-    ?assert(hb_message:match(Msg1, Msg2)).
-```
-
-### Example 3: Remote Node with Fallback
-
-```erlang
--module(test_remote_fallback).
--include_lib("eunit/include/eunit.hrl").
-
-remote_with_fallback_test() ->
-    LocalStore = #{
-        <<"store-module">> => hb_store_fs,
-        <<"name">> => <<"test-store">>
-    },
-    
-    %% Start local HTTP server
+    %% Start HTTP server
     Node = hb_http_server:start_node(#{store => LocalStore}),
+    ?debugFmt("Started HTTP server at: ~s", [Node]),
     
     %% Configure remote store
     RemoteStore = #{
@@ -474,58 +465,207 @@ remote_with_fallback_test() ->
         <<"node">> => Node
     },
     
-    %% Write data locally
-    M = #{<<"key">> => <<"value">>},
-    ID = hb_message:id(M),
-    {ok, ID} = hb_cache:write(M, #{store => LocalStore}),
-    
     %% Read via remote store
     {ok, Retrieved} = hb_store_remote_node:read(RemoteStore, ID),
     Loaded = hb_cache:ensure_all_loaded(Retrieved),
+    ?assert(is_map(Loaded)),
+    ?debugFmt("Remote read success", []),
     
-    ?assertMatch(#{<<"key">> := <<"value">>}, Loaded).
-```
+    %% Verify content matches
+    ?assertEqual(maps:get(<<"test-key">>, TestData), maps:get(<<"test-key">>, Loaded)),
+    ?debugFmt("Content verified: OK", []).
 
-### Example 4: Multi-Tier Architecture
-
-```erlang
--module(test_multi_tier).
--include_lib("eunit/include/eunit.hrl").
-
-multi_tier_test() ->
-    %% Three-tier storage architecture
-    Opts = #{
-        store => [
-            %% Tier 1: Fast in-memory cache
-            #{<<"store-module">> => hb_store_memory},
-            
-            %% Tier 2: Local filesystem
-            #{
-                <<"store-module">> => hb_store_fs, 
-                <<"name">> => <<"local-cache">>
-            },
-            
-            %% Tier 3: Remote gateway (slowest, most available)
-            #{<<"store-module">> => hb_store_gateway}
-        ]
+remote_node_not_found_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-remote-notfound">>
+    },
+    hb_store:reset(LocalStore),
+    
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node
     },
     
-    ID = <<"some-arweave-transaction-id">>,
-    
-    %% Automatically tries each tier
-    case hb_cache:read(ID, Opts) of
-        {ok, Message} ->
-            %% Found in one of the tiers
-            process_message(Message);
-        not_found ->
-            %% Not found in any tier
-            handle_missing()
-    end.
+    %% Non-existent key
+    ?assertEqual(not_found, hb_store_remote_node:read(RemoteStore, <<"nonexistent">>)),
+    ?debugFmt("Remote not_found: OK", []).
 
-process_message(Msg) -> 
-    io:format("Processing: ~p~n", [Msg]).
-handle_missing() -> 
-    io:format("Data not available~n").
+local_caching_test() ->
+    %% Setup stores
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-caching-remote">>
+    },
+    CacheStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-caching-local">>
+    },
+    hb_store:reset(LocalStore),
+    hb_store:reset(CacheStore),
+    ?debugFmt("Stores reset: OK", []),
+    
+    %% Create and store test data
+    TestData = #{<<"cached-key">> => <<"cached-value">>},
+    ID = hb_message:id(TestData),
+    {ok, ID} = hb_cache:write(TestData, #{store => LocalStore}),
+    ?debugFmt("Test data written", []),
+    
+    %% Start server and configure remote store with caching
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    RemoteStoreWithCache = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node,
+        <<"local-store">> => CacheStore
+    },
+    
+    %% First read - fetches from remote, caches locally
+    {ok, Msg1} = hb_store_remote_node:read(RemoteStoreWithCache, ID),
+    ?debugFmt("First read (from remote): OK", []),
+    
+    %% Verify data was cached locally
+    {ok, CachedMsg} = hb_cache:read(ID, #{store => CacheStore}),
+    LoadedCached = hb_cache:ensure_all_loaded(CachedMsg),
+    ?assertEqual(<<"cached-value">>, maps:get(<<"cached-key">>, LoadedCached)),
+    ?debugFmt("Data cached locally: OK", []).
+
+maybe_cache_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-maybe-cache">>
+    },
+    hb_store:reset(LocalStore),
+    
+    StoreOpts = #{<<"local-store">> => LocalStore},
+    Data = #{<<"manual-cache-key">> => <<"manual-cache-value">>},
+    ID = hb_message:id(Data),
+    
+    %% Manually cache data
+    Result = hb_store_remote_node:maybe_cache(StoreOpts, Data),
+    ?assertEqual(ok, Result),
+    ?debugFmt("maybe_cache succeeded", []),
+    
+    %% Verify data was cached
+    {ok, Cached} = hb_cache:read(ID, #{store => LocalStore}),
+    LoadedCached = hb_cache:ensure_all_loaded(Cached),
+    ?assertEqual(<<"manual-cache-value">>, maps:get(<<"manual-cache-key">>, LoadedCached)),
+    ?debugFmt("Manual cache verified: OK", []).
+
+maybe_cache_with_links_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-cache-links">>
+    },
+    hb_store:reset(LocalStore),
+    
+    StoreOpts = #{<<"local-store">> => LocalStore},
+    Data = #{<<"linked-data">> => <<"linked-value">>},
+    ID = hb_message:id(Data),
+    Links = [<<"link1">>, <<"link2">>, ID],
+    
+    %% Cache with links
+    Result = hb_store_remote_node:maybe_cache(StoreOpts, Data, Links),
+    ?assertEqual(ok, Result),
+    ?debugFmt("maybe_cache with links succeeded", []),
+    
+    %% Verify data is readable by ID
+    {ok, Cached} = hb_cache:read(ID, #{store => LocalStore}),
+    ?assert(is_map(Cached)),
+    ?debugFmt("Cache with links verified: OK", []).
+
+multi_tier_storage_test() ->
+    ?debugFmt("=== Multi-Tier Storage Test ===", []),
+    
+    %% Setup three tiers
+    MemoryStore = #{<<"store-module">> => hb_store_memory},
+    FsStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-multi-tier">>
+    },
+    hb_store:reset(FsStore),
+    
+    %% Write to filesystem tier
+    TestData = #{<<"tier-key">> => <<"tier-value">>},
+    ID = hb_message:id(TestData),
+    {ok, ID} = hb_cache:write(TestData, #{store => FsStore}),
+    ?debugFmt("1. Wrote to filesystem tier", []),
+    
+    %% Read through multi-tier
+    Stores = [MemoryStore, FsStore],
+    {ok, Retrieved} = hb_cache:read(ID, #{store => Stores}),
+    Loaded = hb_cache:ensure_all_loaded(Retrieved),
+    ?assertEqual(<<"tier-value">>, maps:get(<<"tier-key">>, Loaded)),
+    ?debugFmt("2. Multi-tier read: OK", []),
+    
+    %% Not found case
+    NotFoundResult = hb_cache:read(<<"nonexistent-id">>, #{store => Stores}),
+    ?assertEqual(not_found, NotFoundResult),
+    ?debugFmt("3. Multi-tier not_found: OK", []),
+    
+    ?debugFmt("=== Multi-Tier Storage Test Complete ===", []).
+
+complete_workflow_test() ->
+    ?debugFmt("=== Complete Remote Storage Workflow ===", []),
+    
+    %% 1. Setup infrastructure
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-workflow-source">>
+    },
+    CacheStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"test-workflow-cache">>
+    },
+    hb_store:reset(LocalStore),
+    hb_store:reset(CacheStore),
+    ?debugFmt("1. Infrastructure setup complete", []),
+    
+    %% 2. Create original data
+    OriginalData = #{
+        <<"type">> => <<"test-message">>,
+        <<"content">> => <<"Hello from remote storage!">>,
+        <<"timestamp">> => erlang:system_time(millisecond)
+    },
+    ID = hb_message:id(OriginalData),
+    {ok, ID} = hb_cache:write(OriginalData, #{store => LocalStore}),
+    ?debugFmt("2. Original data stored, ID: ~s", [hb_util:encode(ID)]),
+    
+    %% 3. Start remote node
+    Node = hb_http_server:start_node(#{store => LocalStore}),
+    ?debugFmt("3. Remote node started at: ~s", [Node]),
+    
+    %% 4. Configure remote store with caching
+    RemoteStore = #{
+        <<"store-module">> => hb_store_remote_node,
+        <<"node">> => Node,
+        <<"local-store">> => CacheStore
+    },
+    ?debugFmt("4. Remote store configured with local cache", []),
+    
+    %% 5. Read via remote (triggers caching)
+    {ok, RemoteMsg} = hb_store_remote_node:read(RemoteStore, ID),
+    LoadedRemote = hb_cache:ensure_all_loaded(RemoteMsg),
+    ?assertEqual(<<"Hello from remote storage!">>, maps:get(<<"content">>, LoadedRemote)),
+    ?debugFmt("5. Remote read successful", []),
+    
+    %% 6. Verify local cache
+    {ok, CachedMsg} = hb_cache:read(ID, #{store => CacheStore}),
+    LoadedCached = hb_cache:ensure_all_loaded(CachedMsg),
+    ?assertEqual(<<"Hello from remote storage!">>, maps:get(<<"content">>, LoadedCached)),
+    ?debugFmt("6. Local cache verified", []),
+    
+    %% 7. Verify scope
+    ?assertEqual(remote, hb_store_remote_node:scope(RemoteStore)),
+    ?debugFmt("7. Scope is remote: OK", []),
+    
+    ?debugFmt("=== Complete Workflow Test Passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_hb7
 ```
 
 ---
@@ -601,37 +741,6 @@ end.
 
 ---
 
-## Performance Characteristics
-
-### Operation Latency
-
-| Store Type | Read | Write | Notes |
-|------------|------|-------|-------|
-| Memory | &lt;1ms | &lt;1ms | Fastest, volatile |
-| Filesystem | ~1ms | ~5ms | Persistent, single node |
-| LMDB | &lt;1ms | ~1ms | Fast, concurrent reads |
-| Gateway | ~500ms | N/A | Network dependent |
-| Remote Node | ~100-500ms | ~100-500ms | Network dependent |
-
-### Optimization Tips
-
-1. **Always cache remote data locally**
-   ```erlang
-   #{<<"local-store">> => [LocalCache]}
-   ```
-
-2. **Order stores by speed**
-   ```erlang
-   [Memory, LMDB, Filesystem, Gateway]
-   ```
-
-3. **Use appropriate local store**
-   - `hb_store_memory` — Session data, hot cache
-   - `hb_store_lmdb` — Persistent cache, high read volume
-   - `hb_store_fs` — Large files, simple setup
-
----
-
 ## What's Next?
 
 You now understand remote storage in HyperBEAM:
@@ -698,25 +807,19 @@ Stores = [
 
 ---
 
-*Now go build distributed applications!*
-
----
-
 ## Resources
 
-**HyperBEAM Documentation**
-- [hb_store_gateway Reference](/src/hb_store_gateway) — Gateway store functions
-- [hb_store_remote_node Reference](/src/hb_store_remote_node) — Remote node functions
-- [hb_store Reference](/src/hb_store) — Store interface
-- [hb_cache Reference](/src/hb_cache) — Caching layer
-- [Full Reference](/hyperbeam) — All modules
+### HyperBEAM Documentation
 
-**Related Modules**
+- [hb_store_gateway Reference](/src/hb_store_gateway)
+- [hb_store_remote_node Reference](/src/hb_store_remote_node)
+- [hb_store Reference](/src/hb_store)
+- [hb_cache Reference](/src/hb_cache)
+- [Full Reference](/hyperbeam)
+
+### Related Modules
+
 - [hb_gateway_client](/src/hb_gateway_client) — Arweave gateway API client
 - [hb_http](/src/hb_http) — HTTP convenience functions
 - [hb_store_fs](/src/hb_store_fs) — Filesystem storage backend
 - [hb_store_lmdb](/src/hb_store_lmdb) — LMDB storage backend
-
-**Arweave Resources**
-- [Arweave Gateway](https://arweave.net) — Main Arweave gateway
-- [GraphQL Explorer](https://arweave.net/graphql) — Query Arweave data

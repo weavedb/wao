@@ -426,10 +426,10 @@ ProtoOpts = #{
 
 ## Part 7: Tests
 
-Save this as `src/test/test_http_server.erl`:
+Save this as `src/test/test_hb9.erl`:
 
 ```erlang
--module(test_http_server).
+-module(test_hb9).
 -include_lib("eunit/include/eunit.hrl").
 -include("include/hb.hrl").
 
@@ -535,7 +535,7 @@ restart_test() ->
 Run the tests:
 
 ```bash
-rebar3 eunit --module=test_http_server
+rebar3 eunit --module=test_hb9
 ```
 
 ---
