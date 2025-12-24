@@ -527,10 +527,10 @@ ok = hb_beamr:deserialize(WASM, Checkpoint).
 
 ## Part 6: Test Code
 
-Save this as `src/test/test_wasm.erl`:
+Save this as `src/test/test_hb10.erl`:
 
 ```erlang
--module(test_wasm).
+-module(test_hb10).
 -include_lib("eunit/include/eunit.hrl").
 -include("include/hb.hrl").
 
@@ -757,7 +757,7 @@ full_workflow_test() ->
 Run the tests:
 
 ```bash
-rebar3 eunit --module=test_wasm
+rebar3 eunit --module=test_hb10
 ```
 
 ---

@@ -451,15 +451,15 @@ Tail = hb_path:tl(#{<<"path">> => [<<"a">>, <<"b">>, <<"c">>]}, #{}).
 **Push** adds to the front (next to execute):
 
 ```erlang
-Msg1 = hb_path:push_request(#{}, <<"a">>),  %% path: [<<"a">>]
-Msg2 = hb_path:push_request(Msg1, <<"b">>). %% path: [<<"b">>, <<"a">>]
+Msg1 = #{<<"path">> => [<<"a">>]},
+Msg2 = hb_path:push_request(Msg1, <<"b">>).  %% path: [<<"b">>, <<"a">>]
 ```
 
 **Queue** adds to the back:
 
 ```erlang
-Msg1 = hb_path:queue_request(#{}, <<"a">>),  %% path: [<<"a">>]
-Msg2 = hb_path:queue_request(Msg1, <<"b">>). %% path: [<<"a">>, <<"b">>]
+Msg1 = #{<<"path">> => [<<"a">>]},
+Msg2 = hb_path:queue_request(Msg1, <<"b">>).  %% path: [<<"a">>, <<"b">>]
 ```
 
 ### Path Conversion
@@ -547,119 +547,208 @@ true = hb_path:verify_hashpath([Msg1, Msg2, Msg3, Msg4], #{}).
 
 ## Part 5: Putting It Together
 
-### Complete Configuration Example
+### Test File
+
+Add this to your `src/test/test_hb2.erl`:
 
 ```erlang
--module(test_config).
+-module(test_hb2).
 -include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-full_config_test() ->
-    %% 1. Check available features
+%% Run with: rebar3 eunit --module=test_hb2
+
+features_test() ->
+    %% Get all features
     Features = hb_features:all(),
+    ?assert(is_map(Features)),
     ?debugFmt("Features: ~p", [Features]),
     
-    %% 2. Load configuration
-    {ok, FileConfig} = hb_opts:load("config.json"),
+    %% Check known features exist
+    ?assert(maps:is_key(http3, Features)),
+    ?assert(maps:is_key(rocksdb, Features)),
+    ?assert(maps:is_key(test, Features)),
+    ?debugFmt("Feature flags: OK", []),
     
-    %% 3. Merge with defaults
-    Defaults = hb_opts:default_message_with_env(),
-    NodeConfig = hb_maps:merge(Defaults, FileConfig),
+    %% enabled/1 returns boolean
+    ?assert(is_boolean(hb_features:enabled(http3))),
+    ?assert(is_boolean(hb_features:enabled(rocksdb))),
+    ?debugFmt("Feature checks: OK", []),
     
-    %% 4. Create message with options
-    Msg = #{
-        <<"device">> => <<"Process@1.0">>,
-        <<"path">> => <<"execute">>
-    },
-    
-    %% 5. Add private state
-    MsgWithPriv = hb_private:set(Msg, <<"cache/state">>, #{counter => 0}, #{}),
-    
-    %% 6. Use local override
-    LocalOpts = NodeConfig#{gateway => <<"https://custom.gateway">>},
+    %% Unknown features return false
+    ?assertEqual(false, hb_features:enabled(nonexistent_feature)),
+    ?debugFmt("Unknown feature handling: OK", []).
+
+options_test() ->
+    %% Local options override
+    LocalOpts = #{gateway => <<"https://custom.gateway">>},
     Gateway = hb_opts:get(gateway, <<"default">>, LocalOpts),
     ?assertEqual(<<"https://custom.gateway">>, Gateway),
+    ?debugFmt("Local override: OK", []),
     
-    %% 7. Verify private data not serialized
-    Serialized = hb_message:serialize(hb_private:reset(MsgWithPriv)),
-    Recovered = hb_message:deserialize(Serialized),
-    ?assertEqual(#{}, hb_private:from_message(Recovered)).
-```
-
-### Multi-Identity Operations
-
-```erlang
-identity_test() ->
-    %% Create wallets
-    MainWallet = ar_wallet:new(),
-    AliceWallet = ar_wallet:new(),
-    BobWallet = ar_wallet:new(),
+    %% Default fallback
+    Missing = hb_opts:get(nonexistent_key, <<"fallback">>, #{}),
+    ?assertEqual(<<"fallback">>, Missing),
+    ?debugFmt("Default fallback: OK", []),
     
-    %% Configure identities
-    Opts = #{
-        priv_wallet => MainWallet,
-        identities => #{
-            <<"alice">> => #{priv_wallet => AliceWallet},
-            <<"bob">> => #{priv_wallet => BobWallet}
-        }
+    %% Prefer global
+    GlobalOpts = #{mode => local_value, prefer => global},
+    ?assertNotEqual(local_value, hb_opts:get(mode, undefined, GlobalOpts)),
+    ?debugFmt("Prefer global: OK", []).
+
+private_state_test() ->
+    %% Create message with private state
+    Msg = #{<<"data">> => <<"public">>},
+    MsgWithPriv = hb_private:set(Msg, <<"cache/result">>, 42, #{}),
+    ?assert(maps:is_key(<<"priv">>, MsgWithPriv)),
+    ?debugFmt("Set private: OK", []),
+    
+    %% Get private value
+    Value = hb_private:get(<<"cache/result">>, MsgWithPriv, #{}),
+    ?assertEqual(42, Value),
+    ?debugFmt("Get private: OK", []),
+    
+    %% Get with default
+    Default = hb_private:get(<<"missing">>, MsgWithPriv, <<"default">>, #{}),
+    ?assertEqual(<<"default">>, Default),
+    ?debugFmt("Get with default: OK", []),
+    
+    %% Extract private map
+    Priv = hb_private:from_message(MsgWithPriv),
+    ?assert(is_map(Priv)),
+    ?debugFmt("Extract private: OK", []),
+    
+    %% Reset removes private
+    Cleaned = hb_private:reset(MsgWithPriv),
+    ?assertEqual(#{}, hb_private:from_message(Cleaned)),
+    ?debugFmt("Reset private: OK", []).
+
+private_key_check_test() ->
+    %% Check private key detection
+    ?assert(hb_private:is_private(<<"priv">>)),
+    ?assert(hb_private:is_private(<<"private">>)),
+    ?assert(hb_private:is_private(priv)),
+    ?assertNot(hb_private:is_private(<<"data">>)),
+    ?assertNot(hb_private:is_private(<<"public">>)),
+    ?debugFmt("Private key detection: OK", []).
+
+path_manipulation_test() ->
+    %% Head and tail
+    Msg = #{<<"path">> => [<<"a">>, <<"b">>, <<"c">>]},
+    ?assertEqual(<<"a">>, hb_path:hd(Msg, #{})),
+    ?debugFmt("Path head: OK", []),
+    
+    Tail = hb_path:tl(Msg, #{}),
+    ?assertEqual([<<"b">>, <<"c">>], maps:get(<<"path">>, Tail)),
+    ?debugFmt("Path tail: OK", []),
+    
+    %% Pop request
+    {Head, Rest} = hb_path:pop_request(Msg, #{}),
+    ?assertEqual(<<"a">>, Head),
+    ?assertEqual([<<"b">>, <<"c">>], maps:get(<<"path">>, Rest)),
+    ?debugFmt("Pop request: OK", []).
+
+path_building_test() ->
+    %% Push adds to front (need to start with existing path)
+    Msg1 = #{<<"path">> => [<<"a">>]},
+    Msg2 = hb_path:push_request(Msg1, <<"b">>),
+    Path = maps:get(<<"path">>, Msg2),
+    ?assertEqual(<<"b">>, hd(Path)),
+    ?debugFmt("Push request: OK", []),
+    
+    %% Queue adds to back
+    Msg3 = #{<<"path">> => [<<"a">>]},
+    Msg4 = hb_path:queue_request(Msg3, <<"b">>),
+    QPath = maps:get(<<"path">>, Msg4),
+    ?assertEqual(<<"a">>, hd(QPath)),
+    ?assertEqual([<<"a">>, <<"b">>], QPath),
+    ?debugFmt("Queue request: OK", []).
+
+path_conversion_test() ->
+    %% Binary to parts
+    Parts = hb_path:term_to_path_parts(<<"a/b/c">>),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Parts),
+    ?debugFmt("Path to parts: OK", []),
+    
+    %% Parts to binary
+    Binary = hb_path:to_binary([<<"a">>, <<"b">>, <<"c">>]),
+    ?assertEqual(<<"a/b/c">>, Binary),
+    ?debugFmt("Parts to binary: OK", []),
+    
+    %% Normalize
+    Normalized = hb_path:normalize(<<"test">>),
+    ?assertEqual(<<"/test">>, Normalized),
+    ?debugFmt("Path normalize: OK", []).
+
+path_matching_test() ->
+    %% Case-insensitive matching
+    ?assert(hb_path:matches(<<"Test">>, <<"test">>)),
+    ?assert(hb_path:matches(<<"ABC">>, <<"abc">>)),
+    ?assertNot(hb_path:matches(<<"test">>, <<"other">>)),
+    ?debugFmt("Case-insensitive match: OK", []),
+    
+    %% Regex matching
+    ?assert(hb_path:regex_matches(<<"a/b/c">>, <<"a/.*/c">>)),
+    ?assert(hb_path:regex_matches(<<"a/anything/c">>, <<"a/.*/c">>)),
+    ?assertNot(hb_path:regex_matches(<<"a/b/c">>, <<"a/.*/d">>)),
+    ?debugFmt("Regex match: OK", []).
+
+hashpath_test() ->
+    %% Single message hashpath
+    Msg1 = #{<<"data">> => <<"initial">>},
+    HP1 = hb_path:hashpath(Msg1, #{}),
+    ?assert(is_binary(HP1)),
+    ?assertEqual(43, byte_size(HP1)),
+    ?debugFmt("Single hashpath: ~s", [HP1]),
+    
+    %% Two message hashpath
+    Msg2 = #{<<"action">> => <<"update">>},
+    HP2 = hb_path:hashpath(Msg1, Msg2, #{}),
+    ?assert(is_binary(HP2)),
+    ?assertEqual(87, byte_size(HP2)),
+    ?debugFmt("Chained hashpath: OK", []).
+
+complete_workflow_test() ->
+    ?debugFmt("=== Complete Configuration Workflow ===", []),
+    
+    %% 1. Check features
+    Features = hb_features:all(),
+    ?debugFmt("1. Available features: ~p", [maps:keys(Features)]),
+    
+    %% 2. Create message with path
+    Msg = #{
+        <<"device">> => <<"Process@1.0">>,
+        <<"path">> => [<<"init">>, <<"execute">>]
     },
+    ?debugFmt("2. Created message with path", []),
     
-    %% Switch identity
-    {ok, AliceOpts} = hb_opts:as(<<"alice">>, Opts),
-    {ok, BobOpts} = hb_opts:as(<<"bob">>, Opts),
+    %% 3. Add private state
+    MsgWithPriv = hb_private:set(Msg, <<"state/counter">>, 0, #{}),
+    ?debugFmt("3. Added private state", []),
     
-    %% Each identity has its own wallet
-    AliceAddr = ar_wallet:to_address(maps:get(priv_wallet, AliceOpts)),
-    BobAddr = ar_wallet:to_address(maps:get(priv_wallet, BobOpts)),
-    ?assertNotEqual(AliceAddr, BobAddr).
+    %% 4. Process path
+    {Head, Rest} = hb_path:pop_request(MsgWithPriv, #{}),
+    ?assertEqual(<<"init">>, Head),
+    ?debugFmt("4. Processing path element: ~s", [Head]),
+    
+    %% 5. Update private state
+    UpdatedMsg = hb_private:set(Rest, <<"state/counter">>, 1, #{}),
+    Counter = hb_private:get(<<"state/counter">>, UpdatedMsg, #{}),
+    ?assertEqual(1, Counter),
+    ?debugFmt("5. Updated counter to: ~p", [Counter]),
+    
+    %% 6. Clean for serialization
+    Cleaned = hb_private:reset(UpdatedMsg),
+    ?assertEqual(#{}, hb_private:from_message(Cleaned)),
+    ?debugFmt("6. Cleaned private state for serialization", []),
+    
+    ?debugFmt("=== All tests passed! ===", []).
 ```
 
-### Feature-Conditional Initialization
+### Run the Tests
 
-```erlang
-init_node(Opts) ->
-    %% Check required features
-    Required = [rocksdb],
-    Missing = [F || F <- Required, not hb_features:enabled(F)],
-    case Missing of
-        [] -> 
-            ok;
-        _ -> 
-            error({missing_features, Missing})
-    end,
-    
-    %% Select store based on features
-    Store = case hb_features:enabled(rocksdb) of
-        true -> hb_store_rocksdb;
-        false -> hb_store_lmdb
-    end,
-    
-    %% Configure node
-    NodeOpts = Opts#{
-        store => Store,
-        store_path => hb_opts:get(data_dir, <<"/data">>, Opts)
-    },
-    
-    {ok, NodeOpts}.
-```
-
-### Request Path Processing
-
-```erlang
-process_path(Msg, Opts) ->
-    case hb_path:pop_request(Msg, Opts) of
-        undefined -> 
-            %% No more path elements
-            {ok, Msg};
-        {Head, Rest} ->
-            %% Process current element
-            io:format("Processing: ~s~n", [Head]),
-            
-            %% Store progress in private state
-            UpdatedRest = hb_private:set(Rest, <<"processed">>, Head, Opts),
-            
-            %% Continue with remaining path
-            process_path(UpdatedRest, Opts)
-    end.
+```bash
+rebar3 eunit --module=test_hb2
 ```
 
 ---
@@ -773,8 +862,8 @@ true = hb_private:is_private(<<"priv">>).
 Head = hb_path:hd(Msg, Opts).
 Tail = hb_path:tl(Msg, Opts).
 {H, T} = hb_path:pop_request(Msg, Opts).
-Msg2 = hb_path:push_request(Msg, Path).
-Msg2 = hb_path:queue_request(Msg, Path).
+Msg2 = hb_path:push_request(#{<<"path">> => [<<"a">>]}, <<"b">>).
+Msg2 = hb_path:queue_request(#{<<"path">> => [<<"a">>]}, <<"b">>).
 Parts = hb_path:term_to_path_parts(<<"a/b/c">>).
 Bin = hb_path:to_binary([<<"a">>, <<"b">>]).
 true = hb_path:matches(<<"A">>, <<"a">>).

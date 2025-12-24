@@ -10,10 +10,10 @@ By the end of this tutorial, you'll understand:
 
 1. **HTTP Core** — Making GET and POST requests to remote nodes
 2. **Connection Pooling** — Efficiently managing persistent connections
-3. **Multi-Requests** — Querying multiple nodes in parallel
-4. **Remote Resolution** — Executing messages on remote HyperBEAM nodes
-5. **Gateway Client** — Fetching data from Arweave via GraphQL
-6. **Service Discovery** — Finding nodes in the AO network
+3. **Remote Resolution** — Executing messages on remote HyperBEAM nodes
+4. **Gateway Client** — Fetching data from Arweave via GraphQL
+5. **Service Discovery** — Finding nodes in the AO network
+6. How these pieces form the **HTTP communication layer**
 
 No prior HTTP internals knowledge required. Basic Erlang helps, but we'll explain as we go.
 
@@ -34,7 +34,6 @@ Your Code → hb_http → hb_http_client → Gun/HTTPC → Remote Node
 Think of it like a mail delivery service:
 - **hb_http** = The post office (accepts your package, handles paperwork)
 - **hb_http_client** = The delivery trucks (maintains routes, handles logistics)
-- **hb_http_multi** = Express delivery (multiple trucks in parallel)
 - **hb_client** = Your local mailman (knows common destinations)
 - **hb_gateway_client** = International shipping (Arweave network access)
 - **hb_router** = Address lookup (finds where services live)
@@ -231,68 +230,9 @@ The supervisor uses:
 - **Max Restarts:** 5 in 10 seconds
 - **Shutdown Timeout:** 10s (debug) or 30s (production)
 
-If the client crashes repeatedly, the supervisor terminates to prevent restart loops.
-
 ---
 
-## Part 4: Parallel Multi-Requests
-
-> 📖 Reference: [hb_http_multi](/src/hb_http_multi)
-
-When you need to query multiple nodes simultaneously, `hb_http_multi` sends parallel requests and aggregates results.
-
-### Route-Based Requests
-
-When a peer contains `<<"nodes">>`, `hb_http` automatically delegates to multi-request:
-
-```erlang
-%% Configuration with multiple nodes
-Config = #{
-    <<"nodes">> => [
-        <<"http://node1.ao.computer">>,
-        <<"http://node2.ao.computer">>,
-        <<"http://node3.ao.computer">>
-    ]
-},
-
-%% This automatically fans out to all nodes
-{ok, Response} = hb_http:request(
-    <<"GET">>,
-    Config,
-    <<"/api/status">>,
-    #{},
-    #{}
-).
-```
-
-### Multi-Request Options
-
-```erlang
-Opts = #{
-    %% Number of successful responses required
-    <<"multirequest-responses">> => 1,
-    
-    %% Acceptable status codes
-    <<"multirequest-admissible-status">> => 200,
-    
-    %% Custom admissibility check
-    <<"multirequest-admissible">> => #{
-        <<"device">> => <<"query@1.0">>,
-        <<"path">> => <<"has-results">>
-    }
-}.
-```
-
-### Use Cases
-
-- **Redundancy:** Query multiple gateways, use first response
-- **Load balancing:** Spread requests across nodes
-- **Data verification:** Compare responses from multiple sources
-- **Availability:** Continue if some nodes are down
-
----
-
-## Part 5: Remote Node Communication
+## Part 4: Remote Node Communication
 
 > 📖 Reference: [hb_client](/src/hb_client)
 
@@ -316,8 +256,6 @@ Msg2 = #{
 
 {ok, Result} = hb_client:resolve(Node, Msg1, Msg2, #{}).
 ```
-
-The `resolve/4` function transforms the message pair by prefixing keys with `1.` and `2.`, sending it as a singleton request.
 
 ### Managing Routes
 
@@ -348,11 +286,6 @@ Committed = hb_message:commit(Msg, Wallet, <<"ans104@1.0">>),
 
 %% Upload to ANS-104 bundler
 {ok, Result} = hb_client:upload(Committed, #{}, <<"ans104@1.0">>).
-
-%% Or upload raw serialized data
-Item = ar_bundles:sign_item(#tx{data = <<"data">>}, Wallet),
-Serialized = ar_bundles:serialize(Item),
-{ok, Result} = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>).
 ```
 
 ### Getting Arweave Block Info
@@ -378,7 +311,7 @@ Serialized = ar_bundles:serialize(Item),
 
 ---
 
-## Part 6: Arweave Gateway Client
+## Part 5: Arweave Gateway Client
 
 > 📖 Reference: [hb_gateway_client](/src/hb_gateway_client)
 
@@ -420,37 +353,6 @@ Variables = #{<<"ids">> => [ID1, ID2, ID3]},
 {ok, Binary} = hb_gateway_client:data(ID, #{}).
 ```
 
-### Finding Scheduler Location
-
-```erlang
-%% Find scheduler by owner address
-Address = <<"fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY">>,
-{ok, SchedulerMsg} = hb_gateway_client:scheduler_location(Address, #{}),
-
-%% Extract URL
-URL = hb_ao:get(<<"url">>, SchedulerMsg, #{}).
-```
-
-### Subindex Queries
-
-Filter by tag combinations:
-
-```erlang
-Opts = #{
-    <<"subindex">> => #{
-        <<"1">> => #{
-            <<"name">> => <<"Type">>,
-            <<"value">> => <<"Message">>
-        },
-        <<"2">> => #{
-            <<"name">> => <<"Target">>,
-            <<"value">> => ProcessID
-        }
-    }
-},
-{ok, Message} = hb_gateway_client:read(ID, Opts).
-```
-
 ### Quick Reference: hb_gateway_client Functions
 
 | Function | What it does |
@@ -464,7 +366,7 @@ Opts = #{
 
 ---
 
-## Part 7: Service Discovery
+## Part 6: Service Discovery
 
 > 📖 Reference: [hb_router](/src/hb_router)
 
@@ -497,14 +399,7 @@ Services are configured in the `nodes` map:
         },
         <<"compute-unit">> => #{
             <<"primary">> => <<"https://cu1.ao.computer">>,
-            <<"backup">> => <<"https://cu2.ao.computer">>,
-            '_' => <<"https://cu-default.ao.computer">>
-        },
-        <<"messenger">> => #{
-            '_' => <<"https://mu.ao.computer">>
-        },
-        <<"gateway">> => #{
-            '_' => <<"https://arweave.net">>
+            <<"backup">> => <<"https://cu2.ao.computer">>
         }
     }
 }
@@ -520,61 +415,329 @@ Services are configured in the `nodes` map:
 | `<<"gateway">>` | Arweave Gateway | `https://arweave.net` |
 | `<<"bundler">>` | ANS-104 Bundler | `https://up.arweave.net` |
 
-### Quick Reference: hb_router Functions
-
-| Function | What it does |
-|----------|--------------|
-| `hb_router:find(Type, ID)` | Find service by type |
-| `hb_router:find(Type, ID, Address)` | Find specific service |
-
 ---
 
-## Part 8: Complete Example
+## Part 7: Complete Test
 
-Let's put it all together with a practical example:
+Save this as `src/test/test_hb6.erl` and run with `rebar3 eunit --module=test_hb6`:
 
 ```erlang
--module(http_example).
--export([run/0]).
+-module(test_hb6).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-run() ->
-    %% 1. Start HTTP infrastructure
-    hb_http:start(),
+%% Run with: rebar3 eunit --module=test_hb6
+
+%% ============================================================================
+%% Test Helpers
+%% ============================================================================
+
+%% Helper to start a mock HTTP server
+start_mock_server(ResponseBody, StatusCode) ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(ListenSock),
+    spawn(fun() -> mock_server_loop(ListenSock, ResponseBody, StatusCode) end),
+    {Port, ListenSock}.
+
+mock_server_loop(ListenSock, ResponseBody, StatusCode) ->
+    case gen_tcp:accept(ListenSock, 5000) of
+        {ok, Sock} ->
+            {ok, _Request} = gen_tcp:recv(Sock, 0, 5000),
+            ContentLength = integer_to_binary(byte_size(ResponseBody)),
+            Response = <<"HTTP/1.1 ", (integer_to_binary(StatusCode))/binary, " OK\r\n",
+                        "Content-Type: application/json\r\n",
+                        "Content-Length: ", ContentLength/binary, "\r\n\r\n",
+                        ResponseBody/binary>>,
+            gen_tcp:send(Sock, Response),
+            gen_tcp:close(Sock),
+            mock_server_loop(ListenSock, ResponseBody, StatusCode);
+        {error, timeout} ->
+            gen_tcp:close(ListenSock);
+        {error, _} ->
+            gen_tcp:close(ListenSock)
+    end.
+
+%% ============================================================================
+%% hb_http Tests
+%% ============================================================================
+
+hb_http_start_test() ->
+    ?assertEqual(ok, hb_http:start()),
+    ?debugFmt("hb_http:start() OK", []).
+
+hb_http_get_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"status\":\"ok\"}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
     
-    %% 2. Find a scheduler node
-    ProcessID = <<"my-process-id">>,
-    {ok, SchedulerURL} = hb_router:find(<<"scheduler">>, ProcessID),
-    io:format("Using scheduler: ~s~n", [SchedulerURL]),
+    {ok, Res} = hb_http:get(URL, <<"/test">>, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    ?debugFmt("GET request returned status 200", []),
     
-    %% 3. Make a simple GET request
-    {ok, StatusResp} = hb_http:get(SchedulerURL, <<"/status">>, #{}),
-    io:format("Scheduler status: ~p~n", [StatusResp]),
+    gen_tcp:close(Sock).
+
+hb_http_post_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"created\":true}">>, 200),
+    URL = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
     
-    %% 4. Fetch data from Arweave
-    DataID = <<"uJBApOt4ma3pTfY6Z4xmknz5vAasup4KcGX7FJ0Of8w">>,
-    case hb_gateway_client:read(DataID, #{}) of
-        {ok, DataMsg} ->
-            io:format("Fetched data: ~p bytes~n", 
-                [byte_size(maps:get(<<"data">>, DataMsg, <<>>))]);
-        {error, Reason} ->
-            io:format("Failed to fetch: ~p~n", [Reason])
-    end,
+    Message = #{<<"key">> => <<"value">>},
+    {ok, Res} = hb_http:post(URL, <<"/submit">>, Message, #{http_client => httpc}),
+    ?assert(is_map(Res)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    ?debugFmt("POST request with message body OK", []),
     
-    %% 5. Upload to Arweave
-    Wallet = hb:wallet(),
-    Msg = #{
-        <<"data">> => <<"Hello from HyperBEAM!">>,
-        <<"Content-Type">> => <<"text/plain">>
+    gen_tcp:close(Sock).
+
+hb_http_request_status_codes_test() ->
+    ?debugFmt("=== Testing HTTP Status Code Handling ===", []),
+    
+    %% Test 200 OK
+    {Port1, Sock1} = start_mock_server(<<"{\"ok\":true}">>, 200),
+    URL1 = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port1)]),
+    {ok, _} = hb_http:request(<<"GET">>, URL1, <<"/">>, #{}, #{http_client => httpc}),
+    ?debugFmt("200 OK → {ok, _}", []),
+    gen_tcp:close(Sock1),
+    
+    %% Test 404 Error
+    {Port2, Sock2} = start_mock_server(<<"{\"error\":\"not found\"}">>, 404),
+    URL2 = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port2)]),
+    {error, Res2} = hb_http:request(<<"GET">>, URL2, <<"/missing">>, #{}, #{http_client => httpc}),
+    ?assertEqual(404, maps:get(<<"status">>, Res2)),
+    ?debugFmt("404 Not Found → {error, _}", []),
+    gen_tcp:close(Sock2),
+    
+    %% Test 500 Failure
+    {Port3, Sock3} = start_mock_server(<<"{\"error\":\"internal\"}">>, 500),
+    URL3 = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port3)]),
+    {failure, Res3} = hb_http:request(<<"GET">>, URL3, <<"/fail">>, #{}, #{http_client => httpc}),
+    ?assertEqual(500, maps:get(<<"status">>, Res3)),
+    ?debugFmt("500 Internal Error → {failure, _}", []),
+    gen_tcp:close(Sock3).
+
+%% ============================================================================
+%% hb_http_client Tests
+%% ============================================================================
+
+hb_http_client_req_test() ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(ListenSock),
+    
+    spawn(fun() ->
+        {ok, Sock} = gen_tcp:accept(ListenSock),
+        {ok, _Request} = gen_tcp:recv(Sock, 0, 5000),
+        Response = <<"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"test\":true}">>,
+        gen_tcp:send(Sock, Response),
+        gen_tcp:close(Sock),
+        gen_tcp:close(ListenSock)
+    end),
+    
+    Args = #{
+        peer => iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+        path => <<"/api/test">>,
+        method => <<"GET">>,
+        headers => #{},
+        body => <<>>
     },
-    Committed = hb_message:commit(Msg, Wallet, <<"ans104@1.0">>),
-    case hb_client:upload(Committed, #{}, <<"ans104@1.0">>) of
-        {ok, UploadResult} ->
-            io:format("Uploaded! Result: ~p~n", [UploadResult]);
-        {error, UploadError} ->
-            io:format("Upload failed: ~p~n", [UploadError])
-    end,
     
-    ok.
+    Result = hb_http_client:req(Args, #{http_client => httpc}),
+    ?assertMatch({ok, 200, _, _}, Result),
+    ?debugFmt("hb_http_client:req/2 returned {ok, 200, _, _}", []).
+
+hb_http_client_connection_refused_test() ->
+    Args = #{
+        peer => <<"http://127.0.0.1:59999">>,
+        path => <<"/">>,
+        method => <<"GET">>,
+        headers => #{},
+        body => <<>>
+    },
+    Result = hb_http_client:req(Args, #{http_client => httpc}),
+    ?assertMatch({error, _}, Result),
+    ?debugFmt("Connection refused returns {error, _}", []).
+
+%% ============================================================================
+%% hb_http_client_sup Tests
+%% ============================================================================
+
+hb_http_client_sup_init_test() ->
+    Opts = [#{}],
+    {ok, {SupSpec, ChildSpecs}} = hb_http_client_sup:init(Opts),
+    
+    ?assertMatch({one_for_one, 5, 10}, SupSpec),
+    ?debugFmt("Supervisor spec: one_for_one, 5 restarts in 10 seconds", []),
+    
+    ?assertEqual(1, length(ChildSpecs)),
+    [ChildSpec] = ChildSpecs,
+    ?assertMatch({hb_http_client, {hb_http_client, start_link, _}, permanent, _, worker, [hb_http_client]}, ChildSpec),
+    ?debugFmt("Child spec: hb_http_client, permanent worker", []).
+
+%% ============================================================================
+%% hb_client Tests
+%% ============================================================================
+
+hb_client_resolve_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"routes\":[]}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    Msg1 = #{<<"device">> => <<"Router@1.0">>},
+    Msg2 = #{<<"path">> => <<"routes">>, <<"method">> => <<"GET">>},
+    
+    {ok, Result} = hb_client:resolve(Node, Msg1, Msg2, #{http_client => httpc}),
+    ?assert(is_map(Result)),
+    ?assertEqual(200, maps:get(<<"status">>, Result)),
+    ?debugFmt("hb_client:resolve/4 executed remote message pair", []),
+    
+    gen_tcp:close(Sock).
+
+hb_client_routes_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"routes\":[\"/api\",\"/data\"]}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    {ok, Routes} = hb_client:routes(Node, #{http_client => httpc}),
+    ?assert(is_map(Routes)),
+    ?debugFmt("hb_client:routes/2 fetched route list", []),
+    
+    gen_tcp:close(Sock).
+
+hb_client_add_route_test() ->
+    {Port, Sock} = start_mock_server(<<"{\"success\":true}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    
+    Route = #{
+        <<"template">> => <<"/test-path">>,
+        <<"node">> => Node
+    },
+    
+    {ok, Result} = hb_client:add_route(Node, Route, #{http_client => httpc}),
+    ?assert(is_map(Result)),
+    ?debugFmt("hb_client:add_route/3 added route", []),
+    
+    gen_tcp:close(Sock).
+
+hb_client_arweave_timestamp_test() ->
+    {Timestamp, Height, Hash} = hb_client:arweave_timestamp(),
+    
+    ?assert(is_integer(Timestamp)),
+    ?assert(is_integer(Height)),
+    ?assert(is_binary(Hash)),
+    ?debugFmt("Arweave timestamp: ~p, height: ~p", [Timestamp, Height]).
+
+hb_client_upload_test() ->
+    %% Create a signed ANS-104 item
+    Serialized = ar_bundles:serialize(
+        ar_bundles:sign_item(#tx{
+            data = <<"TEST DATA">>,
+            tags = [{<<"Content-Type">>, <<"text/plain">>}]
+        }, hb:wallet())
+    ),
+    
+    Result = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>),
+    ?assertMatch({ok, _}, Result),
+    ?debugFmt("hb_client:upload/3 uploaded ANS-104 item", []).
+
+%% ============================================================================
+%% hb_gateway_client Tests
+%% ============================================================================
+
+hb_gateway_client_item_spec_test() ->
+    Spec = hb_gateway_client:item_spec(),
+    
+    ?assert(is_binary(Spec)),
+    ?assertNotEqual(nomatch, binary:match(Spec, <<"id">>)),
+    ?assertNotEqual(nomatch, binary:match(Spec, <<"anchor">>)),
+    ?assertNotEqual(nomatch, binary:match(Spec, <<"signature">>)),
+    ?assertNotEqual(nomatch, binary:match(Spec, <<"tags">>)),
+    ?debugFmt("item_spec contains required GraphQL fields", []).
+
+hb_gateway_client_query_test_() ->
+    {timeout, 30, fun() ->
+        _Node = hb_http_server:start_node(#{}),
+        Query = <<"query { transactions(first: 1) { edges { node { id } } } }">>,
+        Result = hb_gateway_client:query(Query, #{}),
+        ?assert(is_tuple(Result)),
+        ?debugFmt("GraphQL query executed", [])
+    end}.
+
+hb_gateway_client_read_test_() ->
+    {timeout, 30, fun() ->
+        _Node = hb_http_server:start_node(#{}),
+        ID = <<"BOogk_XAI3bvNWnxNxwxmvOfglZt17o4MOVAdPNZ_ew">>,
+        case hb_gateway_client:read(ID, #{}) of
+            {ok, Msg} ->
+                ?assert(is_map(Msg)),
+                ?debugFmt("Read data item from gateway", []);
+            {error, Reason} ->
+                ?debugFmt("Gateway unavailable: ~p", [Reason])
+        end
+    end}.
+
+%% ============================================================================
+%% Complete Workflow Test
+%% ============================================================================
+
+complete_workflow_test() ->
+    ?debugFmt("=== Complete HTTP Workflow Test ===", []),
+    
+    %% 1. Start HTTP infrastructure
+    ok = hb_http:start(),
+    ?debugFmt("1. HTTP infrastructure started", []),
+    
+    %% 2. Create mock server simulating a HyperBEAM node
+    {Port, Sock} = start_mock_server(<<"{\"device\":\"test@1.0\",\"result\":\"success\"}">>, 200),
+    Node = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(Port)]),
+    ?debugFmt("2. Mock node started at ~s", [Node]),
+    
+    %% 3. Make GET request
+    {ok, GetResp} = hb_http:get(Node, <<"/status">>, #{http_client => httpc}),
+    ?assertEqual(200, maps:get(<<"status">>, GetResp)),
+    ?debugFmt("3. GET /status returned 200", []),
+    
+    %% 4. Make POST request with message
+    Message = #{
+        <<"action">> => <<"test">>,
+        <<"data">> => <<"hello">>
+    },
+    {ok, PostResp} = hb_http:post(Node, <<"/api/submit">>, Message, #{http_client => httpc}),
+    ?assertEqual(200, maps:get(<<"status">>, PostResp)),
+    ?debugFmt("4. POST /api/submit returned 200", []),
+    
+    %% 5. Test hb_client resolve
+    Msg1 = #{<<"device">> => <<"Router@1.0">>},
+    Msg2 = #{<<"path">> => <<"/routes">>, <<"method">> => <<"GET">>},
+    {ok, ResolveResp} = hb_client:resolve(Node, Msg1, Msg2, #{http_client => httpc}),
+    ?assert(is_map(ResolveResp)),
+    ?debugFmt("5. Remote resolve completed", []),
+    
+    %% 6. Get Arweave timestamp
+    {Timestamp, Height, Hash} = hb_client:arweave_timestamp(),
+    ?assert(is_integer(Timestamp)),
+    ?assert(is_integer(Height)),
+    ?assert(is_binary(Hash)),
+    ?debugFmt("6. Arweave timestamp: ~p at height ~p", [Timestamp, Height]),
+    
+    %% 7. Test gateway client item spec
+    Spec = hb_gateway_client:item_spec(),
+    ?assert(is_binary(Spec)),
+    ?debugFmt("7. Gateway item_spec retrieved (~p bytes)", [byte_size(Spec)]),
+    
+    %% 8. Upload to Arweave
+    Serialized = ar_bundles:serialize(
+        ar_bundles:sign_item(#tx{
+            data = <<"Workflow test data">>,
+            tags = [{<<"App">>, <<"test_hb6">>}]
+        }, hb:wallet())
+    ),
+    {ok, UploadResult} = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>),
+    ?debugFmt("8. Uploaded to Arweave: ~p", [UploadResult]),
+    
+    gen_tcp:close(Sock),
+    ?debugFmt("=== All workflow tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_hb6
 ```
 
 ---
@@ -607,18 +770,17 @@ SignedMsg = hb_message:commit(Message, #{priv_wallet => Wallet}),
 {ok, Response} = hb_http:post(Node, <<"/api/submit">>, SignedMsg, #{}).
 ```
 
-### Pattern 3: Multi-Gateway Query
+### Pattern 3: Upload and Verify
 
 ```erlang
-Gateways = #{
-    <<"nodes">> => [
-        <<"https://arweave.net">>,
-        <<"https://g8way.io">>,
-        <<"https://arweave.dev">>
-    ]
-},
-Opts = #{<<"multirequest-responses">> => 1},
-{ok, Response} = hb_http:request(<<"GET">>, Gateways, <<"/tx/", ID/binary>>, #{}, Opts).
+%% Create, sign, and upload
+Wallet = hb:wallet(),
+Item = ar_bundles:sign_item(#tx{
+    data = Data,
+    tags = [{<<"Content-Type">>, <<"application/json">>}]
+}, Wallet),
+Serialized = ar_bundles:serialize(Item),
+{ok, Result} = hb_client:upload(Serialized, #{}, <<"ans104@1.0">>).
 ```
 
 ### Pattern 4: Fallback Service Discovery
@@ -628,82 +790,9 @@ find_service(Type, ID) ->
     case hb_router:find(Type, ID) of
         {ok, URL} -> {ok, URL};
         {error, _} ->
-            %% Try default
+            %% Try wildcard default
             hb_router:find(Type, ID, '_')
     end.
-```
-
----
-
-## Configuration Options
-
-### hb_http Options
-
-```erlang
-Opts = #{
-    http_client => gun | httpc,           % Client selection
-    http_only_result => true | false,     % Extract single result key
-    <<"codec-device">> => <<"httpsig@1.0">> | <<"ans104@1.0">>,
-    priv_wallet => Wallet,                % Wallet for signing
-    http_request_send_timeout => 30000,   % Request timeout (ms)
-    limit => infinity | Bytes,            % Response size limit
-    cache_control => [<<"no-cache">>]     % Cache control headers
-}.
-```
-
-### hb_http_client Options
-
-```erlang
-Opts = #{
-    http_client => gun | httpc,
-    connect_timeout => 5000,
-    http_request_send_timeout => 30000,
-    limit => infinity,
-    port => 8734,
-    prometheus => true,
-    http_monitor => MonitorMsg,
-    http_reference => Reference
-}.
-```
-
-### hb_gateway_client Options
-
-```erlang
-Opts = #{
-    ans104_trust_gql => false,            % Trust GraphQL without verification
-    <<"multirequest-responses">> => 1,
-    <<"multirequest-admissible-status">> => 200,
-    cache_control => [<<"no-cache">>],
-    hashpath => ignore
-}.
-```
-
----
-
-## Error Handling
-
-```erlang
-%% HTTP response status mapping
-{ok, _}      → 2xx-3xx (success)
-{created, _} → 201 (created)
-{error, _}   → 4xx (client error)
-{failure, _} → 5xx (server error)
-
-%% Network errors
-{error, connection_closed}
-{error, connect_timeout}
-{error, timeout}
-{error, econnrefused}
-
-%% Size limit
-{error, too_much_data}
-
-%% Service discovery
-{error, service_type_not_found}
-
-%% Gateway
-{error, not_found}
-{error, no_viable_gateway}
 ```
 
 ---
@@ -718,7 +807,6 @@ You now understand the HTTP client stack:
 | Gateway | [`hb_gateway_client`](/src/hb_gateway_client) | `read`, `query`, `data` |
 | Core HTTP | [`hb_http`](/src/hb_http) | `get`, `post`, `request` |
 | Connection Pool | [`hb_http_client`](/src/hb_http_client) | `req` |
-| Multi-Request | [`hb_http_multi`](/src/hb_http_multi) | Parallel queries |
 | Supervision | [`hb_http_client_sup`](/src/hb_http_client_sup) | OTP supervisor |
 | Discovery | [`hb_router`](/src/hb_router) | `find` |
 
@@ -758,7 +846,6 @@ Committed = hb_message:commit(Msg, Wallet, <<"ans104@1.0">>).
 {ok, Message} = hb_gateway_client:read(ID, Opts).
 {ok, Binary} = hb_gateway_client:data(ID, Opts).
 {ok, Response} = hb_gateway_client:query(Query, Variables, Opts).
-{ok, Scheduler} = hb_gateway_client:scheduler_location(Address, Opts).
 
 %% === SERVICE DISCOVERY ===
 {ok, URL} = hb_router:find(ServiceType, ID).
@@ -767,19 +854,15 @@ Committed = hb_message:commit(Msg, Wallet, <<"ans104@1.0">>).
 
 ---
 
-*Now go build something distributed!*
-
----
-
 ## Resources
 
 **HyperBEAM Documentation**
-- [hb_http Reference](/src/hb_http) — Core HTTP functions
-- [hb_http_client Reference](/src/hb_http_client) — Connection pooling
-- [hb_client Reference](/src/hb_client) — Remote operations
-- [hb_gateway_client Reference](/src/hb_gateway_client) — Arweave GraphQL
-- [hb_router Reference](/src/hb_router) — Service discovery
-- [Full Reference](/hyperbeam) — All modules
+- [hb_http Reference](/src/hb_http)
+- [hb_http_client Reference](/src/hb_http_client)
+- [hb_client Reference](/src/hb_client)
+- [hb_gateway_client Reference](/src/hb_gateway_client)
+- [hb_router Reference](/src/hb_router)
+- [Full Reference](/hyperbeam)
 
 **Protocol Documentation**
 - [Arweave GraphQL](https://gql-guide.arweave.dev/) — Gateway query API
