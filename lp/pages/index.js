@@ -160,10 +160,10 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>WizardAO | AO Development Environment</title>
+        <title> Your go-to entry point for AO, built on HyperBEAM</title>
         <meta
           name="description"
-          content="Lightning Fast AO / HyperBEAM Development"
+          content="A continuously evolving documentation and tooling hub for learning, experimenting, and referencing"
         />
         <meta
           name="viewport"
