@@ -1,0 +1,801 @@
+# Payment
+
+A beginner's guide to pricing and payment in HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **dev_p4** — Core payment ledger and pricing orchestrator
+2. **dev_simple_pay** — Per-request pricing with balance management
+3. **dev_faff** — Allow-list based access control
+
+These devices form the **payment layer** that enables economic operations.
+
+---
+
+## The Big Picture
+
+HyperBEAM's payment system separates **pricing** (how much?) from **ledger** (who pays?):
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │              Payment System                 │
+                    │                                             │
+   Request ───────→ │   ┌─────────┐      ┌─────────────┐         │
+                    │   │ Pricing │ ──→  │   Balance   │         │
+                    │   │ Device  │      │   Check     │         │
+                    │   └────┬────┘      └──────┬──────┘         │
+                    │        │                  │                 │
+                    │   Estimate Cost      Sufficient?            │
+                    │        │                  │                 │
+                    │        ▼                  ▼                 │
+                    │   ┌─────────┐      ┌─────────────┐         │
+   Response ←────── │   │ Ledger  │ ←──  │   Execute   │         │
+                    │   │ Charge  │      │   Request   │         │
+                    │   └─────────┘      └─────────────┘         │
+                    │                                             │
+                    └─────────────────────────────────────────────┘
+```
+
+Think of it like a **prepaid service**:
+- **dev_p4** = Payment processor (coordinates estimate → check → charge)
+- **dev_simple_pay** = Simple balance sheet (tracks credits/debits)
+- **dev_faff** = VIP list (free access for approved addresses)
+
+Let's explore each component.
+
+---
+
+## Part 1: The P4 Payment Processor
+
+> 📖 Reference: [dev_p4](/src/dev_p4)
+
+`dev_p4` orchestrates **pre-execution checks** and **post-execution charges** by coordinating between pricing and ledger devices.
+
+### How P4 Works
+
+```
+User Request
+      │
+      ▼
+┌─────────────────┐
+│ Is Route        │─────Yes──→ Proceed Without Charge
+│ Non-Chargeable? │
+└────────┬────────┘
+         │ No
+         ▼
+┌─────────────────┐
+│ Pricing Device  │──→ Estimate Cost
+│ /estimate       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Cost = infinity?│─────Yes──→ Reject Request
+└────────┬────────┘
+         │ No
+         ▼
+┌─────────────────┐
+│ Ledger Device   │──→ Check Balance
+│ /balance        │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Balance >= Cost?│─────No──→ Return 402 Error
+└────────┬────────┘
+         │ Yes
+         ▼
+┌─────────────────┐
+│ Execute Request │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Pricing Device  │──→ Calculate Actual Cost
+│ /price          │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Ledger Device   │──→ Charge Account
+│ /charge         │
+└────────┬────────┘
+         │
+         ▼
+   Return Response
+```
+
+### Configuring P4
+
+```erlang
+%% Set up node with P4 payment processing
+Node = hb_http_server:start_node(#{
+    on => #{
+        %% Pre-execution: estimate and check balance
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>
+        },
+        %% Post-execution: charge for service
+        <<"response">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>
+        }
+    },
+    %% Routes that don't require payment
+    p4_non_chargable_routes => [
+        #{<<"template">> => <<"/~p4@1.0/balance">>},
+        #{<<"template">> => <<"/~p4@1.0/topup">>},
+        #{<<"template">> => <<"/~meta@1.0/*">>}
+    ],
+    operator => hb:address()
+}).
+```
+
+### Checking Balance
+
+```erlang
+Wallet = ar_wallet:new(),
+BalanceReq = hb_message:commit(
+    #{<<"path">> => <<"/~p4@1.0/balance">>},
+    #{priv_wallet => Wallet}
+),
+{ok, Balance} = hb_http:get(Node, BalanceReq, #{}).
+%% Balance: 0 | number | <<"infinity">>
+```
+
+### Price Types
+
+| Price | Meaning |
+|-------|---------|
+| `0` | Free (no charge) |
+| `N` | Cost N units |
+| `<<"infinity">>` | Will not service under any circumstances |
+
+### Error Responses
+
+```erlang
+%% 402 Insufficient Funds
+{error, #{
+    <<"status">> => 402,
+    <<"body">> => <<"Insufficient funds">>,
+    <<"price">> => 10,
+    <<"balance">> => 5
+}}
+
+%% Infinity (Will Not Service)
+{error, <<"Node will not service this request under any circumstances.">>}
+```
+
+---
+
+## Part 2: Simple Pay Device
+
+> 📖 Reference: [dev_simple_pay](/src/dev_simple_pay)
+
+`dev_simple_pay` provides **per-request pricing** and **balance management**. It acts as both a pricing device and ledger device for P4.
+
+### Pricing Rules
+
+1. **Operator requests** → Free (cost = 0)
+2. **Route-matched requests** → Use route-specific price
+3. **Generic requests** → message count × `simple_pay_price`
+
+### Setting Up Simple Pay
+
+```erlang
+Wallet = ar_wallet:new(),
+Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+
+NodeOpts = #{
+    %% Ledger: address → balance mapping
+    simple_pay_ledger => #{
+        <<"user-address-1">> => 1000,
+        <<"user-address-2">> => 500
+    },
+    
+    %% Price per message
+    simple_pay_price => 10,
+    
+    %% Operator (free access)
+    operator => Address,
+    
+    %% Configure P4 to use simple-pay
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>
+        },
+        <<"response">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>
+        }
+    }
+},
+
+Node = hb_http_server:start_node(NodeOpts).
+```
+
+### Checking Balance
+
+```erlang
+{ok, Balance} = hb_http:get(
+    Node,
+    hb_message:commit(
+        #{<<"path">> => <<"/~simple-pay@1.0/balance">>},
+        #{priv_wallet => ClientWallet}
+    ),
+    #{}
+).
+```
+
+### Topping Up (Operator Only)
+
+```erlang
+{ok, NewBalance} = hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~simple-pay@1.0/topup">>,
+            <<"amount">> => 1000,
+            <<"recipient">> => ClientAddress
+        },
+        #{priv_wallet => OperatorWallet}  %% Must be operator
+    ),
+    #{}
+).
+```
+
+### Route-Specific Pricing
+
+```erlang
+NodeOpts = #{
+    simple_pay_price => 10,  %% Default
+    router_opts => #{
+        <<"offered">> => [
+            #{
+                <<"template">> => <<"/premium/*">>,
+                <<"price">> => 100  %% Premium routes cost more
+            },
+            #{
+                <<"template">> => <<"/free/*">>,
+                <<"price">> => 0    %% Some routes are free
+            }
+        ]
+    }
+}.
+```
+
+### Simple Pay Functions
+
+| Function | Description |
+|----------|-------------|
+| `estimate/3` | Calculate request cost |
+| `charge/3` | Deduct from balance |
+| `balance/3` | Get current balance |
+| `topup/3` | Add to balance (operator only) |
+
+---
+
+## Part 3: Friends and Family (FAFF)
+
+> 📖 Reference: [dev_faff](/src/dev_faff)
+
+`dev_faff` implements **allow-list access control** — approved addresses get free access, everyone else is blocked.
+
+### How FAFF Works
+
+```
+Request with Signature
+         │
+         ▼
+┌─────────────────┐
+│ Get All Signers │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ All Signers in  │
+│ Allow List?     │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │         │
+   Yes        No
+    │         │
+    ▼         ▼
+{ok, 0}    {ok, <<"infinity">>}
+ Free       Blocked
+```
+
+### Setting Up FAFF
+
+```erlang
+%% Configure allow-list
+NodeMsg = #{
+    faff_allow_list => [
+        <<"trusted-address-1">>,
+        <<"trusted-address-2">>,
+        <<"trusted-address-3">>
+    ]
+}.
+
+%% Use FAFF as pricing policy
+Node = hb_http_server:start_node(#{
+    faff_allow_list => AllowedAddresses,
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => <<"faff@1.0">>,
+            <<"ledger-device">> => <<"faff@1.0">>
+        }
+    }
+}).
+```
+
+### Checking Access
+
+```erlang
+Wallet = ar_wallet:new(),
+Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+
+Req = hb_message:commit(
+    #{<<"action">> => <<"process">>},
+    #{priv_wallet => Wallet}
+),
+Msg = #{<<"request">> => Req},
+NodeMsg = #{faff_allow_list => [Address]},
+
+case dev_faff:estimate(unused, Msg, NodeMsg) of
+    {ok, 0} ->
+        %% Access allowed
+        proceed;
+    {ok, <<"infinity">>} ->
+        %% Access denied
+        reject
+end.
+```
+
+### Multi-Signature Requests
+
+**All signers** must be in the allow-list:
+
+```erlang
+%% Create multi-signed request
+Req1 = hb_message:commit(#{<<"action">> => <<"test">>}, 
+    #{priv_wallet => Wallet1}),
+Req2 = hb_message:commit(Req1, #{priv_wallet => Wallet2}),
+
+%% Both addresses must be allowed
+NodeMsg = #{faff_allow_list => [Addr1, Addr2]},  %% OK
+NodeMsg = #{faff_allow_list => [Addr1]},          %% Blocked (Addr2 not allowed)
+```
+
+### Use Cases
+
+- **Private nodes** — Restrict to known users
+- **Development** — Limit access during testing
+- **Enterprise** — Internal-only services
+
+---
+
+## Try It: Complete Payment Examples
+
+```erlang
+%%% File: test_dev7.erl
+-module(test_dev7).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_dev7
+
+p4_exports_test() ->
+    code:ensure_loaded(dev_p4),
+    ?assert(erlang:function_exported(dev_p4, request, 3)),
+    ?assert(erlang:function_exported(dev_p4, response, 3)),
+    ?assert(erlang:function_exported(dev_p4, balance, 3)),
+    ?debugFmt("P4 exports: OK", []).
+
+simple_pay_operator_free_test() ->
+    Wallet = ar_wallet:new(),
+    Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+    
+    NodeMsg = #{
+        operator => Address,
+        simple_pay_price => 10
+    },
+    
+    %% Operator request
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/test">>},
+        #{priv_wallet => Wallet}
+    ),
+    
+    {ok, Price} = dev_simple_pay:estimate(
+        #{},
+        #{<<"request">> => Req},
+        NodeMsg
+    ),
+    
+    ?assertEqual(0, Price),
+    ?debugFmt("Simple pay operator free: OK", []).
+
+simple_pay_generic_pricing_test() ->
+    ClientWallet = ar_wallet:new(),
+    OperatorWallet = ar_wallet:new(),
+    OperatorAddress = hb_util:human_id(ar_wallet:to_address(OperatorWallet)),
+    
+    NodeMsg = #{
+        operator => OperatorAddress,
+        simple_pay_price => 10
+    },
+    
+    %% Non-operator request
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/test">>},
+        #{priv_wallet => ClientWallet}
+    ),
+    
+    {ok, Price} = dev_simple_pay:estimate(
+        #{},
+        #{<<"request">> => Req},
+        NodeMsg
+    ),
+    
+    ?assert(Price > 0),
+    ?debugFmt("Simple pay generic pricing: ~p", [Price]).
+
+simple_pay_balance_test() ->
+    ClientWallet = ar_wallet:new(),
+    ClientAddress = hb_util:human_id(ar_wallet:to_address(ClientWallet)),
+    
+    NodeMsg = #{
+        simple_pay_ledger => #{ClientAddress => 500}
+    },
+    
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/balance">>},
+        #{priv_wallet => ClientWallet}
+    ),
+    
+    {ok, Balance} = dev_simple_pay:balance(#{}, Req, NodeMsg),
+    ?assertEqual(500, Balance),
+    ?debugFmt("Simple pay balance: ~p", [Balance]).
+
+simple_pay_new_user_test() ->
+    ClientWallet = ar_wallet:new(),
+    
+    NodeMsg = #{
+        simple_pay_ledger => #{}
+    },
+    
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/balance">>},
+        #{priv_wallet => ClientWallet}
+    ),
+    
+    {ok, Balance} = dev_simple_pay:balance(#{}, Req, NodeMsg),
+    ?assertEqual(0, Balance),
+    ?debugFmt("Simple pay new user balance: ~p", [Balance]).
+
+faff_allowed_test() ->
+    Wallet = ar_wallet:new(),
+    Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+    
+    Req = hb_message:commit(
+        #{<<"action">> => <<"test">>},
+        #{priv_wallet => Wallet}
+    ),
+    Msg = #{<<"request">> => Req},
+    NodeMsg = #{faff_allow_list => [Address]},
+    
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(0, Price),
+    ?debugFmt("FAFF allowed: OK", []).
+
+faff_blocked_test() ->
+    Wallet = ar_wallet:new(),
+    
+    Req = hb_message:commit(
+        #{<<"action">> => <<"test">>},
+        #{priv_wallet => Wallet}
+    ),
+    Msg = #{<<"request">> => Req},
+    NodeMsg = #{faff_allow_list => []},  %% Empty allow list
+    
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(<<"infinity">>, Price),
+    ?debugFmt("FAFF blocked: OK", []).
+
+faff_charge_always_succeeds_test() ->
+    Req = #{<<"action">> => <<"test">>},
+    NodeMsg = #{},
+    
+    {ok, Result} = dev_faff:charge(unused, Req, NodeMsg),
+    ?assertEqual(true, Result),
+    ?debugFmt("FAFF charge: OK", []).
+
+complete_payment_workflow_test() ->
+    ?debugFmt("=== Complete Payment Workflow ===", []),
+    
+    %% Setup
+    OperatorWallet = ar_wallet:new(),
+    OperatorAddress = hb_util:human_id(ar_wallet:to_address(OperatorWallet)),
+    ClientWallet = ar_wallet:new(),
+    ClientAddress = hb_util:human_id(ar_wallet:to_address(ClientWallet)),
+    
+    NodeMsg = #{
+        operator => OperatorAddress,
+        simple_pay_price => 10,
+        simple_pay_ledger => #{ClientAddress => 100}
+    },
+    
+    %% 1. Check initial balance
+    BalanceReq = hb_message:commit(#{}, #{priv_wallet => ClientWallet}),
+    {ok, Balance1} = dev_simple_pay:balance(#{}, BalanceReq, NodeMsg),
+    ?assertEqual(100, Balance1),
+    ?debugFmt("1. Initial balance: ~p", [Balance1]),
+    
+    %% 2. Estimate a request cost
+    Req = hb_message:commit(
+        #{<<"path">> => <<"/compute">>},
+        #{priv_wallet => ClientWallet}
+    ),
+    {ok, Price} = dev_simple_pay:estimate(
+        #{},
+        #{<<"request">> => Req},
+        NodeMsg
+    ),
+    ?assert(Price > 0),
+    ?debugFmt("2. Request price: ~p", [Price]),
+    
+    %% 3. Check if balance sufficient
+    Sufficient = Balance1 >= Price,
+    ?assert(Sufficient),
+    ?debugFmt("3. Balance sufficient: ~p", [Sufficient]),
+    
+    %% 4. Operator gets free access
+    OperatorReq = hb_message:commit(
+        #{<<"path">> => <<"/compute">>},
+        #{priv_wallet => OperatorWallet}
+    ),
+    {ok, OperatorPrice} = dev_simple_pay:estimate(
+        #{},
+        #{<<"request">> => OperatorReq},
+        NodeMsg
+    ),
+    ?assertEqual(0, OperatorPrice),
+    ?debugFmt("4. Operator price: ~p (free)", [OperatorPrice]),
+    
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_dev7
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Pay-Per-Use Node
+
+```erlang
+%% Simple metered access
+NodeOpts = #{
+    simple_pay_ledger => #{},
+    simple_pay_price => 1,  %% 1 unit per message
+    operator => OperatorAddress,
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>
+        },
+        <<"response">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => <<"simple-pay@1.0">>,
+            <<"ledger-device">> => <<"simple-pay@1.0">>
+        }
+    },
+    p4_non_chargable_routes => [
+        #{<<"template">> => <<"/~p4@1.0/*">>},
+        #{<<"template">> => <<"/~simple-pay@1.0/*">>}
+    ]
+}.
+```
+
+### Pattern 2: Tiered Pricing
+
+```erlang
+%% Different prices for different routes
+NodeOpts = #{
+    simple_pay_price => 10,  %% Default
+    router_opts => #{
+        <<"offered">> => [
+            #{<<"template">> => <<"/basic/*">>, <<"price">> => 1},
+            #{<<"template">> => <<"/standard/*">>, <<"price">> => 10},
+            #{<<"template">> => <<"/premium/*">>, <<"price">> => 100}
+        ]
+    }
+}.
+```
+
+### Pattern 3: Private Node
+
+```erlang
+%% Only allow specific addresses
+NodeOpts = #{
+    faff_allow_list => [
+        <<"team-member-1-address">>,
+        <<"team-member-2-address">>,
+        <<"partner-address">>
+    ],
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => <<"faff@1.0">>,
+            <<"ledger-device">> => <<"faff@1.0">>
+        }
+    }
+}.
+```
+
+### Pattern 4: Hybrid (FAFF + Simple Pay)
+
+```erlang
+%% VIPs free, others pay
+estimate_hybrid(_, Msg, NodeMsg) ->
+    VIPList = hb_opts:get(vip_list, [], NodeMsg),
+    Req = hb_ao:get(<<"request">>, Msg, NodeMsg),
+    Signers = hb_message:signers(Req, NodeMsg),
+    
+    case lists:all(fun(S) -> lists:member(S, VIPList) end, Signers) of
+        true -> 
+            {ok, 0};  %% VIPs free
+        false -> 
+            dev_simple_pay:estimate(#{}, Msg, NodeMsg)  %% Others pay
+    end.
+```
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [dev_p4](/src/dev_p4) | [dev_simple_pay](/src/dev_simple_pay) | [dev_faff](/src/dev_faff)
+
+```erlang
+%% === P4 DEVICE ===
+%% Configure node
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => PricingDevice,
+            <<"ledger-device">> => LedgerDevice
+        },
+        <<"response">> => #{
+            <<"device">> => <<"p4@1.0">>,
+            <<"pricing-device">> => PricingDevice,
+            <<"ledger-device">> => LedgerDevice
+        }
+    },
+    p4_non_chargable_routes => [#{<<"template">> => <<"/free/*">>}]
+}).
+
+%% Check balance
+{ok, Balance} = hb_http:get(Node,
+    hb_message:commit(#{<<"path">> => <<"/~p4@1.0/balance">>}, Wallet),
+    #{}).
+
+%% === SIMPLE PAY DEVICE ===
+%% Configuration
+NodeOpts = #{
+    simple_pay_ledger => #{Address => Balance},
+    simple_pay_price => PricePerMessage,
+    operator => OperatorAddress
+}.
+
+%% Estimate
+{ok, Price} = dev_simple_pay:estimate(#{}, #{<<"request">> => Req}, NodeMsg).
+
+%% Charge
+{ok, true} = dev_simple_pay:charge(#{}, ChargeReq, NodeMsg).
+
+%% Balance
+{ok, Balance} = dev_simple_pay:balance(#{}, Req, NodeMsg).
+
+%% Topup (operator only)
+{ok, NewBalance} = dev_simple_pay:topup(#{}, TopupReq, NodeMsg).
+
+%% === FAFF DEVICE ===
+%% Configuration
+NodeOpts = #{
+    faff_allow_list => [Address1, Address2, Address3]
+}.
+
+%% Estimate (0 = allowed, infinity = blocked)
+{ok, Price} = dev_faff:estimate(unused, #{<<"request">> => Req}, NodeMsg).
+
+%% Charge (always succeeds)
+{ok, true} = dev_faff:charge(unused, Req, NodeMsg).
+```
+
+---
+
+## Pricing Device Interface
+
+Any device can be a pricing device by implementing:
+
+```erlang
+%% Pre-execution estimate
+estimate(Base, #{<<"request">> => Request}, NodeMsg) -> 
+    {ok, Price}.  %% Price: 0 | N | <<"infinity">>
+
+%% Post-execution price
+price(Base, #{<<"request">> => Request, <<"response">> => Response}, NodeMsg) ->
+    {ok, ActualPrice}.
+```
+
+## Ledger Device Interface
+
+Any device can be a ledger device by implementing:
+
+```erlang
+%% Check balance
+balance(Base, Request, NodeMsg) ->
+    {ok, Balance}.  %% Balance: number | <<"infinity">> | true
+
+%% Charge account
+charge(Base, #{<<"amount">> => Amount, <<"request">> => Request}, NodeMsg) ->
+    {ok, true} | {error, #{<<"status">> => 402}}.
+
+%% Credit account (optional)
+credit(Base, #{<<"amount">> => Amount, <<"request">> => Request}, NodeMsg) ->
+    {ok, NewBalance}.
+```
+
+---
+
+## What's Next?
+
+You now understand the payment layer:
+
+| Device | Purpose | Type |
+|--------|---------|------|
+| [dev_p4](/src/dev_p4) | Payment orchestrator | Controller |
+| [dev_simple_pay](/src/dev_simple_pay) | Per-request pricing | Pricing + Ledger |
+| [dev_faff](/src/dev_faff) | Allow-list access | Pricing + Ledger |
+
+### Going Further
+
+1. **Authentication** — Identity and signatures ([Tutorial](/book/dev8))
+2. **Arweave & Data** — Permanent storage ([Tutorial](/book/dev9))
+3. **Full Device Reference** — All 77 devices ([Reference](/devices))
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [dev_p4 Reference](/src/dev_p4)
+- [dev_simple_pay Reference](/src/dev_simple_pay)
+- [dev_faff Reference](/src/dev_faff)
+- [Full Device List](/devices)
+
+### Related Tutorials
+
+- [Process & Scheduling](/book/dev4)
+- [Runtimes](/book/dev6)
+- [Authentication](/book/dev8)

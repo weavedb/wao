@@ -1,0 +1,927 @@
+# Infrastructure
+
+A beginner's guide to node configuration, routing, and lifecycle management
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **dev_meta** — The entry point: node configuration, initialization, and request handling
+2. **dev_router** — Message routing with load balancing strategies
+3. **dev_relay** — Synchronous and asynchronous message relay between nodes
+4. **dev_node_process** — Singleton process management for node services
+5. **dev_hook** — Lifecycle hooks for request/response processing
+
+These devices form the **infrastructure layer** that powers every HyperBEAM node.
+
+---
+
+## The Big Picture
+
+A HyperBEAM node is a message-processing machine. Infrastructure devices handle the plumbing:
+
+```
+                          ┌─────────────────────────────────────┐
+                          │            HyperBEAM Node           │
+                          │                                     │
+Request ──→ dev_meta ──→ dev_hook ──→ dev_router ──→ Process   │
+     │        │              │            │                     │
+     │     Config         Hooks        Routes                   │
+     │                       │            │                     │
+     │                       ▼            ▼                     │
+     │                  dev_relay ←── dev_node_process          │
+     │                       │            │                     │
+Response ←────────────────────────────────┘                     │
+                          └─────────────────────────────────────┘
+```
+
+Think of it like a company:
+- **dev_meta** = Reception (entry point, configuration)
+- **dev_router** = Dispatcher (who handles what)
+- **dev_relay** = Courier (sends messages to other nodes)
+- **dev_node_process** = Department manager (manages singleton services)
+- **dev_hook** = Policies (run custom logic at checkpoints)
+
+Let's build each piece.
+
+---
+
+## Part 1: The Meta Device
+
+> 📖 Reference: [dev_meta](/src/dev_meta)
+
+`dev_meta` is the **gateway** to every HyperBEAM node. It handles initialization, configuration, request preprocessing, and exposes node information.
+
+### Starting a Node
+
+```erlang
+%% Start a node with configuration
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new(),
+    custom_config => <<"my_value">>,
+    store => #{
+        <<"store-module">> => hb_store_fs,
+        <<"store-prefix">> => <<"/data">>
+    }
+}).
+```
+
+### Getting Node Information
+
+```erlang
+%% HTTP endpoint
+{ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}).
+
+%% Build information
+{ok, Version} = hb_http:get(Node, <<"/~meta@1.0/build/version">>, #{}).
+{ok, GitHash} = hb_http:get(Node, <<"/~meta@1.0/build/source">>, #{}).
+{ok, NodeName} = hb_http:get(Node, <<"/~meta@1.0/build/node">>, #{}).
+%% => <<"HyperBEAM">>
+```
+
+### Updating Configuration
+
+Only the **operator** can update node configuration:
+
+```erlang
+%% Update requires signed request
+{ok, _} = hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~meta@1.0/info">>,
+            <<"new_setting">> => <<"new_value">>
+        },
+        #{priv_wallet => OperatorWallet}
+    ),
+    #{}
+).
+```
+
+### Node Initialization States
+
+| State | Description | Accessible Endpoints |
+|-------|-------------|---------------------|
+| `false` | Not initialized | Only `/~meta@1.0/info` |
+| `true` | Initialized | All endpoints |
+| `permanent` | Locked | All endpoints (no config changes) |
+
+```erlang
+%% Lock configuration permanently
+{ok, _} = hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~meta@1.0/info">>,
+            initialized => <<"permanent">>
+        },
+        #{priv_wallet => Owner}
+    ),
+    #{}
+).
+```
+
+### Claiming an Unclaimed Node
+
+```erlang
+%% Start unclaimed
+Node = hb_http_server:start_node(#{operator => unclaimed}),
+
+%% First claimer becomes operator
+Owner = ar_wallet:new(),
+{ok, _} = hb_http:post(
+    Node,
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~meta@1.0/info">>,
+            <<"operator">> => hb_util:human_id(ar_wallet:to_address(Owner))
+        },
+        #{priv_wallet => Owner}
+    ),
+    #{}
+).
+```
+
+---
+
+## Part 2: Message Routing
+
+> 📖 Reference: [dev_router](/src/dev_router)
+
+`dev_router` routes messages to appropriate handlers based on path templates and load balancing strategies.
+
+### Route Configuration
+
+```erlang
+Node = hb_http_server:start_node(#{
+    routes => [
+        #{
+            <<"template">> => <<"/api/*">>,
+            <<"node">> => <<"https://api.example.com">>
+        },
+        #{
+            <<"template">> => <<"/scheduler/*">>,
+            <<"node">> => <<"https://scheduler.example.com">>
+        },
+        #{
+            <<"template">> => <<"*">>,
+            <<"node">> => <<"fallback">>
+        }
+    ]
+}).
+```
+
+### Finding a Route
+
+```erlang
+%% Programmatic route lookup
+{ok, Route} = dev_router:route(
+    #{<<"path">> => <<"/api/users">>},
+    #{routes => Routes}
+).
+
+%% Via HTTP
+{ok, Routes} = hb_http:get(Node, <<"/~router@1.0/routes">>, #{}).
+```
+
+### Load Balancing Strategies
+
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| `All` | Return all nodes | Manual selection |
+| `Random` | Random selection | Even distribution |
+| `By-Base` | Hash-based routing | Cache locality |
+| `By-Weight` | Weighted distribution | Capacity-based |
+| `Nearest` | Wallet distance | Geographic proximity |
+
+```erlang
+%% Random distribution
+#{
+    <<"template">> => <<"/.*">>,
+    <<"strategy">> => <<"Random">>,
+    <<"nodes">> => [
+        #{<<"prefix">> => <<"http://node1.example.com">>},
+        #{<<"prefix">> => <<"http://node2.example.com">>},
+        #{<<"prefix">> => <<"http://node3.example.com">>}
+    ]
+}
+
+%% Weighted distribution
+#{
+    <<"template">> => <<"/.*">>,
+    <<"strategy">> => <<"By-Weight">>,
+    <<"nodes">> => [
+        #{<<"prefix">> => <<"http://big.example.com">>, <<"weight">> => 3.0},
+        #{<<"prefix">> => <<"http://small.example.com">>, <<"weight">> => 1.0}
+    ]
+}
+
+%% Nearest by wallet address
+#{
+    <<"template">> => <<"/.*">>,
+    <<"strategy">> => <<"Nearest">>,
+    <<"nodes">> => [
+        #{<<"prefix">> => <<"http://node1">>, <<"wallet">> => Address1},
+        #{<<"prefix">> => <<"http://node2">>, <<"wallet">> => Address2}
+    ]
+}
+```
+
+### Path Transformation
+
+```erlang
+%% Rewrite paths during routing
+#{
+    <<"template">> => <<"/api/*">>,
+    <<"prefix">> => <<"https://backend.example.com">>,
+    <<"match">> => <<"^/api">>,
+    <<"with">> => <<"/v2">>
+}
+%% /api/users → https://backend.example.com/v2/users
+```
+
+### Dynamic Route Registration
+
+```erlang
+%% Register route with remote router
+{ok, _} = dev_router:register(
+    #{},
+    #{},
+    #{
+        priv_wallet => Wallet,
+        router_opts => #{
+            <<"offered">> => [
+                #{
+                    <<"registration-peer">> => RemoteRouter,
+                    <<"prefix">> => <<"http://localhost:8080">>,
+                    <<"template">> => <<"/my/service/*">>
+                }
+            ]
+        }
+    }
+).
+```
+
+---
+
+## Part 3: Message Relay
+
+> 📖 Reference: [dev_relay](/src/dev_relay)
+
+`dev_relay` sends messages between nodes via HTTP. It supports synchronous (`call`) and asynchronous (`cast`) modes.
+
+### Synchronous Relay (call)
+
+Wait for response:
+
+```erlang
+%% GET request to external URL
+{ok, Response} = hb_ao:resolve(
+    #{
+        <<"device">> => <<"relay@1.0">>,
+        <<"method">> => <<"GET">>,
+        <<"path">> => <<"https://api.example.com/data">>
+    },
+    <<"call">>,
+    #{}
+).
+
+%% POST to specific peer
+{ok, Response} = hb_ao:resolve(
+    #{
+        <<"device">> => <<"relay@1.0">>,
+        <<"method">> => <<"POST">>,
+        <<"path">> => <<"/~scheduler@1.0/schedule">>,
+        <<"peer">> => TargetNode,
+        <<"body">> => MessageData
+    },
+    <<"call">>,
+    #{}
+).
+```
+
+### Asynchronous Relay (cast)
+
+Fire and forget:
+
+```erlang
+%% Returns immediately with <<"OK">>
+{ok, <<"OK">>} = hb_ao:resolve(
+    #{
+        <<"device">> => <<"relay@1.0">>,
+        <<"method">> => <<"POST">>,
+        <<"path">> => <<"/webhook">>,
+        <<"peer">> => WebhookEndpoint,
+        <<"body">> => NotificationData
+    },
+    <<"cast">>,
+    #{}
+).
+```
+
+### Signed Relay Requests
+
+For nodes requiring authenticated requests:
+
+```erlang
+Node = hb_http_server:start_node(#{
+    priv_wallet => Wallet,
+    relay_allow_commit_request => true,
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"router@1.0">>,
+            <<"path">> => <<"preprocess">>,
+            <<"commit-request">> => true
+        }
+    }
+}).
+```
+
+### Router + Relay Integration
+
+```erlang
+%% Configure node to relay via nearest peer
+Node = hb_http_server:start_node(#{
+    routes => [
+        #{
+            <<"template">> => <<"/.*">>,
+            <<"strategy">> => <<"Nearest">>,
+            <<"nodes">> => ClusterNodes
+        }
+    ],
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"relay@1.0">>
+        }
+    }
+}).
+
+%% Requests are automatically routed to nearest node
+{ok, Result} = hb_http:get(Node, <<"/some/path">>, #{}).
+```
+
+---
+
+## Part 4: Node Singleton Processes
+
+> 📖 Reference: [dev_node_process](/src/dev_node_process)
+
+`dev_node_process` manages **singleton processes** that are unique per node — perfect for services like ledgers, caches, and loggers.
+
+### Defining Node Processes
+
+```erlang
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new(),
+    node_processes => #{
+        <<"ledger">> => #{
+            <<"device">> => <<"process@1.0">>,
+            <<"execution-device">> => <<"lua@5.3a">>,
+            <<"scheduler-device">> => <<"scheduler@1.0">>,
+            <<"module">> => #{
+                <<"content-type">> => <<"text/x-lua">>,
+                <<"body">> => LedgerCode
+            },
+            <<"balance">> => #{Alice => 1000}
+        },
+        <<"logger">> => #{
+            <<"device">> => <<"process@1.0">>,
+            <<"execution-device">> => <<"lua@5.3a">>,
+            <<"module">> => LoggerModule
+        }
+    }
+}).
+```
+
+### Accessing Singleton Processes
+
+Processes are **lazily initialized** on first access:
+
+```erlang
+%% Via AO resolution (spawns if needed)
+{ok, Ledger} = hb_ao:resolve(
+    #{<<"device">> => <<"node-process@1.0">>},
+    <<"ledger">>,
+    NodeOpts
+).
+
+%% Via HTTP
+GET /ledger~node-process@1.0
+GET /ledger~node-process@1.0/now/balance
+POST /ledger~node-process@1.0/schedule
+```
+
+### Singleton Guarantee
+
+```erlang
+%% First access spawns process
+{ok, P1} = hb_ao:resolve(
+    #{<<"device">> => <<"node-process@1.0">>},
+    <<"ledger">>,
+    Opts
+).
+
+%% Second access returns same process
+{ok, P2} = hb_ao:resolve(
+    #{<<"device">> => <<"node-process@1.0">>},
+    <<"ledger">>,
+    Opts
+).
+
+%% Same process ID
+hb_message:id(P1, all) =:= hb_message:id(P2, all).  %% true
+```
+
+### Disable Auto-Spawn
+
+```erlang
+%% Check if process exists without spawning
+Result = hb_ao:resolve(
+    #{<<"device">> => <<"node-process@1.0">>},
+    #{<<"path">> => <<"unknown">>, <<"spawn">> => false},
+    Opts
+).
+%% => {error, not_found}
+```
+
+---
+
+## Part 5: Lifecycle Hooks
+
+> 📖 Reference: [dev_hook](/src/dev_hook)
+
+`dev_hook` enables custom logic at key lifecycle points. Hooks form a **pipeline** — each handler's output feeds the next.
+
+### Built-in Hooks
+
+| Hook | When | Use Case |
+|------|------|----------|
+| `start` | Node startup | Initialize services |
+| `request` | HTTP request received | Validate, authenticate |
+| `step` | After each message evaluation | Logging, metrics |
+| `response` | Before HTTP response sent | Transform, cache |
+
+### Registering Hooks
+
+```erlang
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"request">> => [
+            #{<<"device">> => <<"auth@1.0">>},
+            #{<<"device">> => <<"rate-limit@1.0">>},
+            #{<<"device">> => <<"logger@1.0">>}
+        ],
+        <<"response">> => #{
+            <<"device">> => <<"cache@1.0">>
+        }
+    }
+}).
+```
+
+### Inline Hook Functions
+
+```erlang
+Handler = #{
+    <<"device">> => #{
+        <<"request">> => fun(_, Req, _Opts) ->
+            %% Custom validation
+            case validate(Req) of
+                ok -> {ok, Req};
+                {error, Reason} -> {error, Reason}
+            end
+        end
+    }
+},
+Opts = #{on => #{<<"request">> => Handler}}.
+```
+
+### Hook Pipeline Execution
+
+```erlang
+%% Pipeline: Handler1 → Handler2 → Handler3
+%%
+%% Request
+%%   ↓
+%% Handler1: {ok, R1}
+%%   ↓
+%% Handler2: {ok, R2}
+%%   ↓
+%% Handler3: {ok, R3}
+%%   ↓
+%% Final Result: R3
+
+%% Error halts pipeline
+%% Handler2: {error, E} → Stops, returns {error, E}
+```
+
+### Hook Options
+
+| Option | Value | Effect |
+|--------|-------|--------|
+| `hook/result` | `<<"ignore">>` | Don't modify request |
+| `hook/result` | `<<"return">>` | Use handler result (default) |
+| `hook/commit-request` | `<<"true">>` | Sign request before handler |
+
+```erlang
+%% Logger that doesn't modify the request
+LogHandler = #{
+    <<"device">> => <<"logger@1.0">>,
+    <<"hook/result">> => <<"ignore">>
+}.
+```
+
+### Authentication Hook Example
+
+```erlang
+AuthHandler = #{
+    <<"device">> => #{
+        <<"auth">> => fun(_, Req, Opts) ->
+            case hb_message:signers(Req, Opts) of
+                [] -> 
+                    {error, <<"Unauthorized: No signature">>};
+                [Signer|_] ->
+                    case is_allowed(Signer, Opts) of
+                        true -> {ok, Req};
+                        false -> {error, <<"Forbidden">>}
+                    end
+            end
+        end
+    }
+},
+Node = hb_http_server:start_node(#{
+    on => #{<<"request">> => AuthHandler}
+}).
+```
+
+---
+
+## Try It: Complete Workflow
+
+```erlang
+%%% File: test_dev3.erl
+-module(test_dev3).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_dev3
+
+meta_info_test() ->
+    Node = hb_http_server:start_node(#{
+        test_config => <<"my_value">>
+    }),
+    {ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?assertEqual(<<"my_value">>, hb_ao:get(<<"test_config">>, Info, #{})),
+    ?debugFmt("Meta info: OK", []).
+
+meta_build_test() ->
+    Node = hb_http_server:start_node(#{}),
+    {ok, NodeName} = hb_http:get(Node, <<"/~meta@1.0/build/node">>, #{}),
+    ?assertEqual(<<"HyperBEAM">>, NodeName),
+    ?debugFmt("Build info: OK", []).
+
+router_routes_test() ->
+    Routes = [
+        #{<<"template">> => <<"/api/*">>, <<"node">> => <<"api-server">>},
+        #{<<"template">> => <<"*">>, <<"node">> => <<"fallback">>}
+    ],
+    
+    %% Match API route
+    {ok, _} = dev_router:route(
+        #{<<"path">> => <<"/api/users">>},
+        #{routes => Routes}
+    ),
+    ?debugFmt("Router match: OK", []).
+
+relay_call_test() ->
+    Peer = hb_http_server:start_node(#{priv_wallet => ar_wallet:new()}),
+    
+    {ok, Res} = hb_ao:resolve(
+        #{
+            <<"device">> => <<"relay@1.0">>,
+            <<"method">> => <<"GET">>,
+            <<"path">> => <<"/~meta@1.0/build/node">>,
+            <<"peer">> => Peer
+        },
+        <<"call">>,
+        #{}
+    ),
+    ?debugFmt("Relay call: OK", []).
+
+relay_cast_test() ->
+    Peer = hb_http_server:start_node(#{priv_wallet => ar_wallet:new()}),
+    
+    Start = erlang:monotonic_time(millisecond),
+    {ok, <<"OK">>} = hb_ao:resolve(
+        #{
+            <<"device">> => <<"relay@1.0">>,
+            <<"method">> => <<"GET">>,
+            <<"path">> => <<"/~meta@1.0/info">>,
+            <<"peer">> => Peer
+        },
+        <<"cast">>,
+        #{}
+    ),
+    Duration = erlang:monotonic_time(millisecond) - Start,
+    ?assert(Duration < 100),  %% Cast returns immediately
+    ?debugFmt("Relay cast: ~pms", [Duration]).
+
+hook_pipeline_test() ->
+    Handler1 = #{
+        <<"device">> => #{
+            <<"test">> => fun(_, Req, _) -> 
+                {ok, Req#{<<"h1">> => true}} 
+            end
+        }
+    },
+    Handler2 = #{
+        <<"device">> => #{
+            <<"test">> => fun(_, Req, _) -> 
+                {ok, Req#{<<"h2">> => true}} 
+            end
+        }
+    },
+    
+    Opts = #{on => #{<<"test">> => [Handler1, Handler2]}},
+    {ok, Result} = dev_hook:on(<<"test">>, #{<<"input">> => true}, Opts),
+    
+    ?assertEqual(true, maps:get(<<"h1">>, Result)),
+    ?assertEqual(true, maps:get(<<"h2">>, Result)),
+    ?debugFmt("Hook pipeline: OK", []).
+
+hook_error_halt_test() ->
+    Handler1 = #{
+        <<"device">> => #{
+            <<"test">> => fun(_, Req, _) -> {ok, Req#{<<"h1">> => true}} end
+        }
+    },
+    Handler2 = #{
+        <<"device">> => #{
+            <<"test">> => fun(_, _, _) -> {error, <<"Halted">>} end
+        }
+    },
+    Handler3 = #{
+        <<"device">> => #{
+            <<"test">> => fun(_, Req, _) -> {ok, Req#{<<"h3">> => true}} end
+        }
+    },
+    
+    Opts = #{on => #{<<"test">> => [Handler1, Handler2, Handler3]}},
+    {error, <<"Halted">>} = dev_hook:on(<<"test">>, #{}, Opts),
+    ?debugFmt("Hook error halt: OK", []).
+
+complete_infrastructure_test() ->
+    ?debugFmt("=== Complete Infrastructure Test ===", []),
+    
+    %% 1. Start node with hooks
+    Parent = self(),
+    RequestHook = #{
+        <<"device">> => #{
+            <<"request">> => fun(_, Req, _) ->
+                Parent ! {hook, request},
+                {ok, Req}
+            end
+        }
+    },
+    
+    Node = hb_http_server:start_node(#{
+        priv_wallet => ar_wallet:new(),
+        on => #{<<"request">> => RequestHook}
+    }),
+    ?debugFmt("1. Started node with hooks", []),
+    
+    %% 2. Get node info
+    {ok, _Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}),
+    ?debugFmt("2. Retrieved node info", []),
+    
+    %% 3. Verify hook executed
+    receive
+        {hook, request} -> 
+            ?debugFmt("3. Request hook executed", [])
+    after 100 -> 
+        error(hook_timeout)
+    end,
+    
+    %% 4. Get build info
+    {ok, <<"HyperBEAM">>} = hb_http:get(Node, <<"/~meta@1.0/build/node">>, #{}),
+    ?debugFmt("4. Build info retrieved", []),
+    
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_dev3
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Multi-Node Cluster
+
+```erlang
+%% Configure load-balanced cluster
+Node = hb_http_server:start_node(#{
+    routes => [
+        #{
+            <<"template">> => <<"/compute/*">>,
+            <<"strategy">> => <<"By-Base">>,
+            <<"nodes">> => [
+                #{<<"prefix">> => <<"http://compute1:8080">>},
+                #{<<"prefix">> => <<"http://compute2:8080">>},
+                #{<<"prefix">> => <<"http://compute3:8080">>}
+            ]
+        }
+    ],
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"router@1.0">>,
+            <<"path">> => <<"preprocess">>
+        }
+    }
+}).
+```
+
+### Pattern 2: Authentication Gateway
+
+```erlang
+AuthHook = #{
+    <<"device">> => #{
+        <<"request">> => fun(_, Req, Opts) ->
+            case hb_message:verify(Req, all, Opts) of
+                true -> {ok, Req};
+                false -> {error, <<"Invalid signature">>}
+            end
+        end
+    }
+},
+
+Node = hb_http_server:start_node(#{
+    on => #{<<"request">> => AuthHook}
+}).
+```
+
+### Pattern 3: Logging Middleware
+
+```erlang
+LogHook = #{
+    <<"device">> => #{
+        <<"request">> => fun(_, Req, _) ->
+            io:format("Request: ~p~n", [maps:get(<<"path">>, Req, unknown)]),
+            {ok, Req}
+        end,
+        <<"response">> => fun(_, Res, _) ->
+            io:format("Response: ~p~n", [maps:get(<<"status">>, Res, 200)]),
+            {ok, Res}
+        end
+    },
+    <<"hook/result">> => <<"ignore">>
+},
+
+Node = hb_http_server:start_node(#{
+    on => #{
+        <<"request">> => LogHook,
+        <<"response">> => LogHook
+    }
+}).
+```
+
+### Pattern 4: Node Services
+
+```erlang
+Node = hb_http_server:start_node(#{
+    priv_wallet => Wallet,
+    node_processes => #{
+        <<"ledger">> => LedgerDef,
+        <<"cache">> => CacheDef,
+        <<"metrics">> => MetricsDef
+    }
+}).
+
+%% Access via HTTP
+GET /ledger~node-process@1.0/now/balance/ADDRESS
+POST /cache~node-process@1.0/schedule
+GET /metrics~node-process@1.0/now/stats
+```
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [dev_meta](/src/dev_meta) | [dev_router](/src/dev_router) | [dev_relay](/src/dev_relay) | [dev_node_process](/src/dev_node_process) | [dev_hook](/src/dev_hook)
+
+```erlang
+%% === META DEVICE ===
+%% Get node info
+{ok, Info} = hb_http:get(Node, <<"/~meta@1.0/info">>, #{}).
+
+%% Get build info
+{ok, Version} = hb_http:get(Node, <<"/~meta@1.0/build/version">>, #{}).
+
+%% Update config (requires operator signature)
+{ok, _} = hb_http:post(Node, hb_message:commit(#{
+    <<"path">> => <<"/~meta@1.0/info">>,
+    <<"key">> => <<"value">>
+}, #{priv_wallet => Wallet}), #{}).
+
+%% === ROUTER DEVICE ===
+%% Find route
+{ok, Route} = dev_router:route(#{<<"path">> => Path}, #{routes => Routes}).
+
+%% Match route
+{ok, Match} = dev_router:match(Base, #{<<"path">> => Path}, Opts).
+
+%% Get all routes
+{ok, Routes} = hb_http:get(Node, <<"/~router@1.0/routes">>, #{}).
+
+%% === RELAY DEVICE ===
+%% Synchronous call
+{ok, Response} = hb_ao:resolve(#{
+    <<"device">> => <<"relay@1.0">>,
+    <<"method">> => <<"GET">>,
+    <<"path">> => Path,
+    <<"peer">> => Peer
+}, <<"call">>, #{}).
+
+%% Asynchronous cast
+{ok, <<"OK">>} = hb_ao:resolve(#{
+    <<"device">> => <<"relay@1.0">>,
+    <<"method">> => <<"POST">>,
+    <<"path">> => Path,
+    <<"peer">> => Peer,
+    <<"body">> => Data
+}, <<"cast">>, #{}).
+
+%% === NODE PROCESS DEVICE ===
+%% Access singleton (spawns if needed)
+{ok, Process} = hb_ao:resolve(
+    #{<<"device">> => <<"node-process@1.0">>},
+    <<"process-name">>,
+    Opts
+).
+
+%% Check without spawning
+Result = hb_ao:resolve(
+    #{<<"device">> => <<"node-process@1.0">>},
+    #{<<"path">> => <<"name">>, <<"spawn">> => false},
+    Opts
+).
+
+%% === HOOK DEVICE ===
+%% Execute hook
+{ok, Result} = dev_hook:on(<<"hook-name">>, Req, Opts).
+
+%% Find handlers
+Handlers = dev_hook:find(<<"hook-name">>, Opts).
+
+%% Configure hooks
+Opts = #{
+    on => #{
+        <<"request">> => [Handler1, Handler2],
+        <<"response">> => ResponseHandler
+    }
+}.
+```
+
+---
+
+## What's Next?
+
+You now understand the infrastructure layer:
+
+| Device | Purpose | Key Feature |
+|--------|---------|-------------|
+| [dev_meta](/src/dev_meta) | Node gateway | Config, init, hooks |
+| [dev_router](/src/dev_router) | Message routing | Load balancing |
+| [dev_relay](/src/dev_relay) | Node-to-node | call/cast modes |
+| [dev_node_process](/src/dev_node_process) | Singletons | Lazy init |
+| [dev_hook](/src/dev_hook) | Lifecycle | Pipeline handlers |
+
+### Going Further
+
+1. **Process & Scheduling** — Stateful computation units ([Tutorial](/book/dev4))
+2. **Store** — Data persistence and caching ([Tutorial](/book/dev5))
+3. **Runtimes** — Execute WASM and Lua code ([Tutorial](/book/dev6))
+4. **Full Device Reference** — All 77 devices ([Reference](/devices))
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [dev_meta Reference](/src/dev_meta)
+- [dev_router Reference](/src/dev_router)
+- [dev_relay Reference](/src/dev_relay)
+- [dev_node_process Reference](/src/dev_node_process)
+- [dev_hook Reference](/src/dev_hook)
+- [Full Device List](/devices)
+
+### Related Tutorials
+
+- [HB Core Tutorial 2: Configuration](/book/hb2)
+- [Messages & Composition](/book/dev1)
+- [Process & Scheduling](/book/dev4)

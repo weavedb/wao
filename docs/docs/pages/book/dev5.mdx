@@ -1,0 +1,836 @@
+# Storage & Naming
+
+A beginner's guide to data persistence and name resolution in HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **dev_cache** — Read/write data with access control
+2. **dev_lookup** — Retrieve resources by ID with format negotiation
+3. **dev_local_name** — Register human-readable names for resources
+4. **dev_name** — Resolve names through configurable resolver chains
+
+These devices form the **persistence layer** that stores and retrieves data.
+
+---
+
+## The Big Picture
+
+Every HyperBEAM node needs to store and retrieve data:
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │             Storage & Naming                │
+                    │                                             │
+                    │   ┌─────────┐      ┌─────────────┐         │
+   "my-process" ──→ │   │  Name   │ ──→  │ Local Name  │         │
+                    │   │ Resolve │      │  Registry   │         │
+                    │   └────┬────┘      └──────┬──────┘         │
+                    │        │                  │                 │
+                    │        ▼                  ▼                 │
+                    │   ┌─────────┐      ┌─────────────┐         │
+   message-id ────→ │   │ Lookup  │ ──→  │   Cache     │         │
+                    │   │  Read   │      │   Store     │         │
+                    │   └─────────┘      └─────────────┘         │
+                    │                                             │
+                    └─────────────────────────────────────────────┘
+```
+
+Think of it like a **library system**:
+- **dev_cache** = The warehouse (stores and retrieves items)
+- **dev_lookup** = The retrieval desk (fetch by ID)
+- **dev_local_name** = The card catalog (friendly names)
+- **dev_name** = The librarian (resolves requests)
+
+Let's build each piece.
+
+---
+
+## Part 1: The Cache Device
+
+> 📖 Reference: [dev_cache](/src/dev_cache)
+
+`dev_cache` provides **controlled access** to local storage with read/write operations and authorization.
+
+### Reading from Cache
+
+```erlang
+%% Read by target ID
+Request = #{
+    <<"method">> => <<"GET">>,
+    <<"target">> => <<"message-id-abc123...">>
+},
+{ok, Data} = dev_cache:read(#{}, Request, Opts).
+```
+
+### Writing to Cache
+
+Writes require **trusted writer** authorization:
+
+```erlang
+%% Configure trusted writers
+Wallet = ar_wallet:new(),
+Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+Opts = #{
+    store => LocalStore,
+    cache_writers => [Address]
+}.
+
+%% Write data (must be signed by trusted writer)
+TestData = #{<<"key">> => <<"value">>},
+WriteMsg = hb_message:commit(#{
+    <<"path">> => <<"/~cache@1.0/write">>,
+    <<"method">> => <<"POST">>,
+    <<"body">> => TestData
+}, #{priv_wallet => Wallet}),
+
+{ok, WriteRes} = hb_http:post(Node, WriteMsg, #{}),
+Path = maps:get(<<"path">>, WriteRes).
+```
+
+### Batch Writes
+
+```erlang
+%% Write multiple items at once
+BatchData = #{
+    <<"item1">> => #{<<"data">> => <<"value1">>},
+    <<"item2">> => #{<<"data">> => <<"value2">>},
+    <<"item3">> => #{<<"data">> => <<"value3">>}
+},
+
+WriteMsg = hb_message:commit(#{
+    <<"path">> => <<"/~cache@1.0/write">>,
+    <<"method">> => <<"POST">>,
+    <<"type">> => <<"batch">>,
+    <<"body">> => BatchData
+}, #{priv_wallet => Wallet}).
+```
+
+### Creating Links
+
+```erlang
+%% Create a symbolic link (alias)
+LinkMsg = hb_message:commit(#{
+    <<"path">> => <<"/~cache@1.0/link">>,
+    <<"method">> => <<"POST">>,
+    <<"source">> => SourceID,
+    <<"destination">> => <<"custom/path/alias">>
+}, #{priv_wallet => Wallet}),
+
+{ok, _} = hb_http:post(Node, LinkMsg, #{}).
+```
+
+### Format Conversion
+
+Request AOS-2 JSON format:
+
+```erlang
+ReadMsg = #{
+    <<"path">> => <<"/~cache@1.0/read">>,
+    <<"method">> => <<"GET">>,
+    <<"target">> => Path,
+    <<"accept">> => <<"application/aos-2">>
+},
+{ok, JSONResult} = hb_http:get(Node, ReadMsg, #{}),
+Body = maps:get(<<"body">>, JSONResult).
+%% Body is JSON-encoded message
+```
+
+### Cache API Summary
+
+| Operation | Method | Authorization | Description |
+|-----------|--------|---------------|-------------|
+| `read` | GET | None | Read by ID |
+| `write` | POST | Trusted writer | Store data |
+| `link` | POST | Trusted writer | Create alias |
+
+---
+
+## Part 2: The Lookup Device
+
+> 📖 Reference: [dev_lookup](/src/dev_lookup)
+
+`dev_lookup` provides **simple ID-based retrieval** with content negotiation.
+
+### Basic Lookup
+
+```erlang
+%% Look up by ID
+{ok, Resource} = dev_lookup:read(
+    #{},
+    #{<<"target">> => <<"message-id-abc123...">>},
+    #{}
+).
+```
+
+### With Format Negotiation
+
+```erlang
+%% Request AOS-2 JSON format
+{ok, Response} = dev_lookup:read(
+    #{},
+    #{
+        <<"target">> => ID,
+        <<"accept">> => <<"application/aos-2">>
+    },
+    #{}
+),
+JSONBody = maps:get(<<"body">>, Response),
+{ok, Decoded} = dev_json_iface:json_to_message(JSONBody, #{}).
+```
+
+### HTTP Usage
+
+```bash
+# Raw format
+GET /~lookup@1.0/read?target={ID}
+
+# AOS-2 JSON format
+GET /~lookup@1.0/read?target={ID}&accept=application/aos-2
+```
+
+### Use Cases
+
+```erlang
+%% Message retrieval
+MsgID = hb_message:id(Message, all),
+{ok, _} = hb_cache:write(Message, Opts),
+{ok, Retrieved} = dev_lookup:read(#{}, #{<<"target">> => MsgID}, Opts).
+
+%% Process state lookup
+{ok, ProcessState} = dev_lookup:read(
+    #{},
+    #{<<"target">> => ProcessID},
+    Opts
+).
+
+%% Cross-node message sharing
+Req = #{
+    <<"target">> => ID,
+    <<"accept">> => <<"application/aos-2">>
+},
+{ok, JSONResponse} = hb_http:post(RemoteNode, Req, Opts).
+```
+
+---
+
+## Part 3: Local Name Registry
+
+> 📖 Reference: [dev_local_name](/src/dev_local_name)
+
+`dev_local_name` maps **human-readable names** to message IDs or resources, with admin-only registration.
+
+### Registering a Name (Admin Only)
+
+```erlang
+%% Must be signed by node admin
+Req = hb_message:commit(
+    #{
+        <<"key">> => <<"my-process">>,
+        <<"value">> => ProcessMessage
+    },
+    #{priv_wallet => AdminWallet}
+),
+{ok, <<"Registered.">>} = dev_local_name:register(#{}, Req, Opts).
+```
+
+### Looking Up a Name
+
+```erlang
+%% Lookup by key
+LookupReq = #{<<"key">> => <<"my-process">>},
+{ok, Process} = dev_local_name:lookup(#{}, LookupReq, Opts).
+
+%% Via default handler (path becomes key)
+{ok, Value} = hb_ao:resolve(
+    #{<<"device">> => <<"local-name@1.0">>},
+    #{<<"path">> => <<"my-process">>},
+    Opts
+).
+```
+
+### Direct Registration (Internal Use)
+
+For system devices that need to register names without admin auth:
+
+```erlang
+%% No authorization check
+dev_local_name:direct_register(
+    #{
+        <<"key">> => <<"system-resource">>,
+        <<"value">> => Resource
+    },
+    Opts
+).
+```
+
+### Storage Architecture
+
+```
+Layer 1: In-Memory Cache (fast, cleared on restart)
+├── local_names => #{
+│       <<"name1">> => Value1,
+│       <<"name2">> => Value2
+│   }
+
+Layer 2: Persistent Cache (survives restarts)
+└── cache-dir/
+    └── local-name@1.0/
+        ├── name1 -> message-path
+        └── name2 -> message-path
+```
+
+### HTTP API
+
+```bash
+# Register (admin only)
+POST /~local-name@1.0/register
+Body: {"key": "my-name", "value": "my-value"}
+
+# Lookup
+GET /~local-name@1.0/lookup?key=my-name
+GET /~local-name@1.0/my-name  # via default handler
+```
+
+---
+
+## Part 4: Name Resolution
+
+> 📖 Reference: [dev_name](/src/dev_name)
+
+`dev_name` resolves names through a **chain of resolvers**, trying each until one succeeds.
+
+### How Resolution Works
+
+```
+Request: "alice"
+    │
+    ▼
+┌─────────────────┐
+│ Resolver 1      │ → not_found
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Resolver 2      │ → {ok, "alice-id-123"}
+└────────┬────────┘
+         │
+         ▼
+Result: "alice-id-123"
+```
+
+### Creating a Resolver
+
+```erlang
+%% Simple map-based resolver
+MapResolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Key = hb_ao:get(<<"key">>, Req, Opts),
+            Map = #{
+                <<"alice">> => <<"alice-process-id">>,
+                <<"bob">> => <<"bob-process-id">>
+            },
+            case maps:get(Key, Map, not_found) of
+                not_found -> {error, not_found};
+                Value -> {ok, Value}
+            end
+        end
+    }
+}.
+```
+
+### Configuring Resolvers
+
+```erlang
+%% Configure resolver chain
+Opts = #{
+    name_resolvers => [
+        LocalCacheResolver,    % Try local first
+        DatabaseResolver,      % Then database
+        RemoteResolver         % Finally remote
+    ]
+}.
+```
+
+### Resolving Names
+
+```erlang
+%% Basic resolution
+{ok, Value} = hb_ao:resolve(
+    #{<<"device">> => <<"name@1.0">>},
+    <<"alice">>,
+    Opts
+).
+
+%% Resolve and load from cache (default)
+{ok, LoadedMessage} = hb_ao:resolve(
+    #{<<"device">> => <<"name@1.0">>},
+    <<"config">>,
+    Opts
+).
+
+%% Get raw ID without loading
+{ok, ID} = hb_ao:resolve(
+    #{<<"device">> => <<"name@1.0">>},
+    #{<<"path">> => <<"config">>, <<"load">> => false},
+    Opts
+).
+```
+
+### HTTP Usage
+
+```bash
+# Resolve and load
+GET /~name@1.0/alice
+
+# Get raw ID without loading
+GET /~name@1.0/alice?load=false
+```
+
+### Use Cases
+
+**Service Discovery:**
+```erlang
+ServiceResolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Key = hb_ao:get(<<"key">>, Req, Opts),
+            Services = #{
+                <<"database">> => <<"db-process-id">>,
+                <<"cache">> => <<"cache-process-id">>,
+                <<"api">> => <<"api-process-id">>
+            },
+            case maps:get(Key, Services, not_found) of
+                not_found -> {error, not_found};
+                ID -> {ok, ID}
+            end
+        end
+    }
+}.
+```
+
+**User Directory:**
+```erlang
+%% Use local-name as resolver
+UserResolver = #{
+    <<"device">> => <<"local-name@1.0">>
+},
+Opts = #{name_resolvers => [UserResolver]}.
+```
+
+---
+
+## Try It: Complete Workflow
+
+```erlang
+%%% File: test_dev5.erl
+-module(test_dev5).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_dev5
+
+cache_write_read_test() ->
+    Opts = #{store => hb_test_utils:test_store()},
+    
+    %% Write data
+    TestData = #{<<"key">> => <<"value">>},
+    {ok, Path} = hb_cache:write(TestData, Opts),
+    
+    %% Read data
+    Request = #{<<"target">> => Path},
+    {ok, ReadData} = dev_cache:read(#{}, Request, Opts),
+    
+    ?assert(hb_message:match(TestData, ReadData, only_present, Opts)),
+    ?debugFmt("Cache write/read: OK", []).
+
+cache_binary_test() ->
+    Opts = #{store => hb_test_utils:test_store()},
+    
+    %% Write binary
+    BinaryData = <<"raw binary content">>,
+    {ok, Path} = hb_cache:write(BinaryData, Opts),
+    
+    %% Read binary
+    {ok, ReadData} = hb_cache:read(Path, Opts),
+    ?assertEqual(BinaryData, ReadData),
+    ?debugFmt("Cache binary: OK", []).
+
+lookup_basic_test() ->
+    %% Write message
+    Msg = #{<<"test-key">> => <<"test-value">>},
+    {ok, ID} = hb_cache:write(Msg, #{}),
+    
+    %% Lookup
+    {ok, Retrieved} = dev_lookup:read(
+        #{},
+        #{<<"target">> => ID},
+        #{}
+    ),
+    ?assert(hb_message:match(Msg, Retrieved)),
+    ?debugFmt("Lookup basic: OK", []).
+
+lookup_aos2_format_test() ->
+    %% Write message
+    Msg = #{<<"data">> => <<"test-data">>},
+    {ok, ID} = hb_cache:write(Msg, #{}),
+    
+    %% Lookup with AOS-2 format
+    {ok, Response} = dev_lookup:read(
+        #{},
+        #{
+            <<"target">> => ID,
+            <<"accept">> => <<"application/aos-2">>
+        },
+        #{}
+    ),
+    ?assert(maps:is_key(<<"body">>, Response)),
+    ?assertEqual(<<"application/aos-2">>, maps:get(<<"content-type">>, Response)),
+    ?debugFmt("Lookup AOS-2: OK", []).
+
+lookup_not_found_test() ->
+    {error, not_found} = dev_lookup:read(
+        #{},
+        #{<<"target">> => <<"nonexistent-id">>},
+        #{}
+    ),
+    ?debugFmt("Lookup not found: OK", []).
+
+local_name_register_test() ->
+    Wallet = ar_wallet:new(),
+    Opts = #{priv_wallet => Wallet},
+    
+    %% Register name
+    Req = hb_message:commit(
+        #{
+            <<"key">> => <<"test-name">>,
+            <<"value">> => <<"test-value">>
+        },
+        Opts
+    ),
+    {ok, <<"Registered.">>} = dev_local_name:register(#{}, Req, Opts),
+    ?debugFmt("Local name register: OK", []).
+
+local_name_lookup_test() ->
+    %% Setup with predefined names
+    Opts = #{
+        local_names => #{
+            <<"my-process">> => <<"process-id-123">>
+        }
+    },
+    
+    %% Lookup
+    LookupReq = #{<<"key">> => <<"my-process">>},
+    {ok, Value} = dev_local_name:lookup(#{}, LookupReq, Opts),
+    ?assertEqual(<<"process-id-123">>, Value),
+    ?debugFmt("Local name lookup: OK", []).
+
+local_name_not_found_test() ->
+    {error, not_found} = dev_local_name:lookup(
+        #{},
+        #{<<"key">> => <<"nonexistent">>},
+        #{}
+    ),
+    ?debugFmt("Local name not found: OK", []).
+
+name_resolver_test() ->
+    %% Create mock resolver
+    MockResolver = #{
+        <<"device">> => #{
+            <<"lookup">> => fun(_, Req, Opts) ->
+                Key = hb_ao:get(<<"key">>, Req, Opts),
+                Names = #{
+                    <<"alice">> => <<"alice-id">>,
+                    <<"bob">> => <<"bob-id">>
+                },
+                case maps:get(Key, Names, not_found) of
+                    not_found -> {error, not_found};
+                    Value -> {ok, Value}
+                end
+            end
+        }
+    },
+    
+    %% Verify info structure
+    Info = dev_name:info(#{}),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    ?debugFmt("Name resolver: OK", []).
+
+complete_workflow_test() ->
+    ?debugFmt("=== Complete Storage Workflow ===", []),
+    
+    Opts = #{store => hb_test_utils:test_store()},
+    
+    %% 1. Write data to cache
+    Data = #{
+        <<"type">> => <<"Config">>,
+        <<"database">> => <<"postgres://localhost">>,
+        <<"port">> => 5432
+    },
+    {ok, DataPath} = hb_cache:write(Data, Opts),
+    ?debugFmt("1. Wrote config to cache: ~s", [DataPath]),
+    
+    %% 2. Read back via lookup
+    {ok, Retrieved} = dev_lookup:read(
+        #{},
+        #{<<"target">> => DataPath},
+        Opts
+    ),
+    ?assert(hb_message:match(Data, Retrieved, only_present, Opts)),
+    ?debugFmt("2. Retrieved via lookup", []),
+    
+    %% 3. Register a name
+    Wallet = ar_wallet:new(),
+    RegOpts = Opts#{priv_wallet => Wallet},
+    dev_local_name:direct_register(
+        #{<<"key">> => <<"app-config">>, <<"value">> => DataPath},
+        RegOpts
+    ),
+    ?debugFmt("3. Registered name 'app-config'", []),
+    
+    %% 4. Lookup by name
+    {ok, FoundPath} = dev_local_name:lookup(
+        #{},
+        #{<<"key">> => <<"app-config">>},
+        RegOpts
+    ),
+    ?assertEqual(DataPath, FoundPath),
+    ?debugFmt("4. Looked up by name", []),
+    
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_dev5
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Process Registration
+
+```erlang
+%% Register a process with friendly name
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => LuaModule
+},
+{ok, ProcessPath} = hb_cache:write(Process, Opts),
+
+dev_local_name:direct_register(
+    #{<<"key">> => <<"my-app">>, <<"value">> => ProcessPath},
+    Opts
+).
+
+%% Later, access by name
+{ok, Path} = dev_local_name:lookup(
+    #{},
+    #{<<"key">> => <<"my-app">>},
+    Opts
+),
+{ok, Process} = hb_cache:read(Path, Opts).
+```
+
+### Pattern 2: Configuration Store
+
+```erlang
+%% Store configuration
+Config = #{
+    <<"database">> => <<"postgres://localhost:5432">>,
+    <<"redis">> => <<"redis://localhost:6379">>,
+    <<"api_key">> => <<"secret123">>
+},
+{ok, ConfigPath} = hb_cache:write(Config, Opts),
+
+dev_local_name:direct_register(
+    #{<<"key">> => <<"prod-config">>, <<"value">> => ConfigPath},
+    Opts
+).
+
+%% Retrieve configuration
+{ok, Path} = dev_local_name:lookup(#{}, #{<<"key">> => <<"prod-config">>}, Opts),
+{ok, Config} = hb_cache:read(Path, Opts),
+DbUrl = maps:get(<<"database">>, Config).
+```
+
+### Pattern 3: Service Discovery
+
+```erlang
+%% Create service resolver
+ServiceResolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Service = hb_ao:get(<<"key">>, Req, Opts),
+            %% Could query a registry, database, or config
+            Services = #{
+                <<"auth">> => <<"auth-process-id">>,
+                <<"payments">> => <<"payments-process-id">>,
+                <<"notifications">> => <<"notify-process-id">>
+            },
+            case maps:get(Service, Services, not_found) of
+                not_found -> {error, not_found};
+                ID -> {ok, ID}
+            end
+        end
+    }
+},
+
+Opts = #{name_resolvers => [ServiceResolver]}.
+
+%% Resolve service
+{ok, AuthProcess} = hb_ao:resolve(
+    #{<<"device">> => <<"name@1.0">>},
+    <<"auth">>,
+    Opts
+).
+```
+
+### Pattern 4: Hierarchical Resolution
+
+```erlang
+%% Multiple resolvers in priority order
+Opts = #{
+    name_resolvers => [
+        LocalCacheResolver,    %% 1. Check local cache (fastest)
+        LocalNameResolver,     %% 2. Check local names
+        ClusterResolver,       %% 3. Check cluster registry
+        ArweaveResolver        %% 4. Check Arweave (slowest)
+    ]
+}.
+
+%% Resolution tries each in order
+{ok, Resource} = hb_ao:resolve(
+    #{<<"device">> => <<"name@1.0">>},
+    <<"rare-resource">>,  %% May need Arweave lookup
+    Opts
+).
+```
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [dev_cache](/src/dev_cache) | [dev_lookup](/src/dev_lookup) | [dev_local_name](/src/dev_local_name) | [dev_name](/src/dev_name)
+
+```erlang
+%% === CACHE DEVICE ===
+%% Write (requires trusted writer)
+{ok, Path} = hb_cache:write(Data, Opts).
+
+%% Read
+{ok, Data} = dev_cache:read(#{}, #{<<"target">> => Path}, Opts).
+
+%% Batch write
+WriteMsg = #{
+    <<"type">> => <<"batch">>,
+    <<"body">> => #{<<"k1">> => V1, <<"k2">> => V2}
+}.
+
+%% Create link
+LinkMsg = #{
+    <<"source">> => SourceID,
+    <<"destination">> => <<"custom/path">>
+}.
+
+%% === LOOKUP DEVICE ===
+%% Basic lookup
+{ok, Resource} = dev_lookup:read(#{}, #{<<"target">> => ID}, #{}).
+
+%% With AOS-2 format
+{ok, Response} = dev_lookup:read(#{}, #{
+    <<"target">> => ID,
+    <<"accept">> => <<"application/aos-2">>
+}, #{}).
+
+%% === LOCAL NAME DEVICE ===
+%% Register (admin only)
+Req = hb_message:commit(#{
+    <<"key">> => <<"name">>,
+    <<"value">> => Value
+}, #{priv_wallet => AdminWallet}),
+{ok, _} = dev_local_name:register(#{}, Req, Opts).
+
+%% Direct register (internal)
+dev_local_name:direct_register(#{
+    <<"key">> => <<"name">>,
+    <<"value">> => Value
+}, Opts).
+
+%% Lookup
+{ok, Value} = dev_local_name:lookup(#{}, #{<<"key">> => <<"name">>}, Opts).
+
+%% === NAME DEVICE ===
+%% Configure resolvers
+Opts = #{name_resolvers => [Resolver1, Resolver2]}.
+
+%% Resolve and load
+{ok, Loaded} = hb_ao:resolve(
+    #{<<"device">> => <<"name@1.0">>},
+    <<"name">>,
+    Opts
+).
+
+%% Resolve without loading
+{ok, ID} = hb_ao:resolve(
+    #{<<"device">> => <<"name@1.0">>},
+    #{<<"path">> => <<"name">>, <<"load">> => false},
+    Opts
+).
+
+%% Create resolver
+Resolver = #{
+    <<"device">> => #{
+        <<"lookup">> => fun(_, Req, Opts) ->
+            Key = hb_ao:get(<<"key">>, Req, Opts),
+            %% Return {ok, Value} or {error, not_found}
+        end
+    }
+}.
+```
+
+---
+
+## What's Next?
+
+You now understand the persistence layer:
+
+| Device | Purpose | Key Feature |
+|--------|---------|-------------|
+| [dev_cache](/src/dev_cache) | Storage access | Read/write with auth |
+| [dev_lookup](/src/dev_lookup) | ID retrieval | Format negotiation |
+| [dev_local_name](/src/dev_local_name) | Name registry | Admin-only registration |
+| [dev_name](/src/dev_name) | Name resolution | Resolver chains |
+
+### Going Further
+
+1. **Runtimes** — Execute WASM and Lua code ([Tutorial](/book/dev6))
+2. **Payment** — Metering and economics ([Tutorial](/book/dev7))
+3. **Authentication** — Identity and signatures ([Tutorial](/book/dev8))
+4. **Full Device Reference** — All 77 devices ([Reference](/devices))
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [dev_cache Reference](/src/dev_cache)
+- [dev_lookup Reference](/src/dev_lookup)
+- [dev_local_name Reference](/src/dev_local_name)
+- [dev_name Reference](/src/dev_name)
+- [Full Device List](/devices)
+
+### Related Tutorials
+
+- [Messages & Composition](/book/dev1)
+- [Process & Scheduling](/book/dev4)
+- [Runtimes](/book/dev6)

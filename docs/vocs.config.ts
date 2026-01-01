@@ -320,6 +320,48 @@ export default defineConfig({
             },
           ],
         },
+        {
+          text: "Devices",
+          collapsed: true,
+          items: [
+            {
+              text: "Messages & Composition",
+              link: "/book/dev1",
+            },
+            {
+              text: "Codecs",
+              link: "/book/dev2",
+            },
+            {
+              text: "Infrastructure",
+              link: "/book/dev3",
+            },
+            {
+              text: "Process & Scheduling",
+              link: "/book/dev4",
+            },
+            {
+              text: "Store",
+              link: "/book/dev5",
+            },
+            {
+              text: "Runtimes",
+              link: "/book/dev6",
+            },
+            {
+              text: "Payment",
+              link: "/book/dev7",
+            },
+            {
+              text: "Authentication",
+              link: "/book/dev8",
+            },
+            {
+              text: "Arweave & Data",
+              link: "/book/dev9",
+            },
+          ],
+        },
       ],
     },
     {
