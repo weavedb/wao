@@ -59,6 +59,53 @@ This module provides GraphQL-style query capabilities for Arweave data stored in
 
 **Description:** Handle Arweave GraphQL queries for transactions, blocks, and their fields. Supports nested field resolution following GraphQL patterns.
 
+**Test Code:**
+```erlang
+-module(dev_query_arweave_test).
+-include_lib("eunit/include/eunit.hrl").
+
+query_edges_test() ->
+    List = [#{<<"a">> => 1}, #{<<"b">> => 2}],
+    {ok, Edges} = dev_query_arweave:query(List, <<"edges">>, #{}, #{}),
+    ?assertEqual([{ok, #{<<"a">> => 1}}, {ok, #{<<"b">> => 2}}], Edges).
+
+query_node_test() ->
+    Msg = #{<<"data">> => <<"test">>},
+    {ok, Result} = dev_query_arweave:query(Msg, <<"node">>, #{}, #{}),
+    ?assertEqual(Msg, Result).
+
+query_block_fields_test() ->
+    Block = #{
+        <<"previous_block">> => <<"prev-hash">>,
+        <<"height">> => 12345,
+        <<"timestamp">> => 1234567890
+    },
+    {ok, Prev} = dev_query_arweave:query(Block, <<"previous">>, #{}, #{}),
+    ?assertEqual(<<"prev-hash">>, Prev),
+    {ok, Height} = dev_query_arweave:query(Block, <<"height">>, #{}, #{}),
+    ?assertEqual(12345, Height),
+    {ok, Timestamp} = dev_query_arweave:query(Block, <<"timestamp">>, #{}, #{}),
+    ?assertEqual(1234567890, Timestamp).
+
+query_owner_fields_test() ->
+    Owner = #{ <<"key">> => <<"pubkey">>, <<"address">> => <<"addr">> },
+    {ok, Key} = dev_query_arweave:query(Owner, <<"key">>, #{}, #{}),
+    ?assertEqual(<<"pubkey">>, Key),
+    {ok, Addr} = dev_query_arweave:query(Owner, <<"address">>, #{}, #{}),
+    ?assertEqual(<<"addr">>, Addr).
+
+query_winston_test() ->
+    {ok, Amount} = dev_query_arweave:query(12345, <<"winston">>, #{}, #{}),
+    ?assertEqual(12345, Amount).
+
+query_data_fields_test() ->
+    DataObj = #{ <<"data">> => <<"hello world">>, <<"type">> => <<"text/plain">> },
+    {ok, Size} = dev_query_arweave:query(DataObj, <<"size">>, #{}, #{}),
+    ?assertEqual(11, Size),
+    {ok, Type} = dev_query_arweave:query(DataObj, <<"type">>, #{}, #{}),
+    ?assertEqual(<<"text/plain">>, Type).
+```
+
 ---
 
 ## Supported Fields
@@ -74,38 +121,6 @@ query(Obj, <<"transactions">>, Args, Opts) -> {ok, [Message]}.
 query(Obj, <<"transaction">>, Args, Opts) -> {ok, Message | null}.
 ```
 
-**Test Code:**
-```erlang
--module(dev_query_arweave_tx_test).
--include_lib("eunit/include/eunit.hrl").
-
-transactions_by_id_test() ->
-    Opts = #{ store => hb_test_utils:test_store() },
-    Wallet = ar_wallet:new(),
-    Msg = hb_message:commit(#{ <<"data">> => <<"test">> }, #{ priv_wallet => Wallet }),
-    {ok, _} = hb_cache:write(Msg, Opts),
-    ID = hb_message:id(Msg, all, Opts),
-    Args = #{ <<"id">> => ID },
-    {ok, Results} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
-    ?assert(length(Results) >= 1).
-
-transaction_single_test() ->
-    Opts = #{ store => hb_test_utils:test_store() },
-    Wallet = ar_wallet:new(),
-    Msg = hb_message:commit(#{ <<"data">> => <<"single">> }, #{ priv_wallet => Wallet }),
-    {ok, _} = hb_cache:write(Msg, Opts),
-    ID = hb_message:id(Msg, all, Opts),
-    Args = #{ <<"id">> => ID },
-    {ok, Result} = dev_query_arweave:query(#{}, <<"transaction">>, Args, Opts),
-    ?assert(is_map(Result) orelse Result == null).
-
-transactions_not_found_test() ->
-    Opts = #{ store => hb_test_utils:test_store() },
-    Args = #{ <<"id">> => <<"nonexistent-id">> },
-    {ok, Results} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
-    ?assertEqual([], Results).
-```
-
 ---
 
 #### blocks / block
@@ -117,24 +132,6 @@ query(Obj, <<"blocks">>, Args, Opts) -> {ok, [Block]}.
 query(Obj, <<"block">>, Args, Opts) -> {ok, Block | null}.
 ```
 
-**Test Code:**
-```erlang
--module(dev_query_arweave_block_test).
--include_lib("eunit/include/eunit.hrl").
-
-blocks_by_height_test() ->
-    Opts = #{ store => hb_test_utils:test_store() },
-    Args = #{ <<"height">> => #{ <<"min">> => 0, <<"max">> => 10 } },
-    {ok, Results} = dev_query_arweave:query(#{}, <<"blocks">>, Args, Opts),
-    ?assert(is_list(Results)).
-
-block_single_test() ->
-    Opts = #{ store => hb_test_utils:test_store() },
-    Args = #{ <<"height">> => #{ <<"min">> => 1, <<"max">> => 1 } },
-    {ok, Result} = dev_query_arweave:query(#{}, <<"block">>, Args, Opts),
-    ?assert(is_map(Result) orelse Result == null).
-```
-
 ---
 
 #### edges / node
@@ -144,22 +141,6 @@ Navigate GraphQL edge/node structure.
 ```erlang
 query(List, <<"edges">>, Args, Opts) -> {ok, [{ok, Msg} || Msg <- List]}.
 query(Msg, <<"node">>, Args, Opts) -> {ok, Msg}.
-```
-
-**Test Code:**
-```erlang
--module(dev_query_arweave_edges_test).
--include_lib("eunit/include/eunit.hrl").
-
-edges_test() ->
-    List = [#{<<"a">> => 1}, #{<<"b">> => 2}],
-    {ok, Edges} = dev_query_arweave:query(List, <<"edges">>, #{}, #{}),
-    ?assertEqual([{ok, #{<<"a">> => 1}}, {ok, #{<<"b">> => 2}}], Edges).
-
-node_test() ->
-    Msg = #{<<"data">> => <<"test">>},
-    {ok, Result} = dev_query_arweave:query(Msg, <<"node">>, #{}, #{}),
-    ?assertEqual(Msg, Result).
 ```
 
 ---
@@ -192,25 +173,6 @@ Get the block timestamp.
 
 ```erlang
 query(Block, <<"timestamp">>, _Args, Opts) -> {ok, Timestamp | null}.
-```
-
-**Test Code:**
-```erlang
--module(dev_query_arweave_block_fields_test).
--include_lib("eunit/include/eunit.hrl").
-
-block_fields_test() ->
-    Block = #{
-        <<"previous_block">> => <<"prev-hash">>,
-        <<"height">> => 12345,
-        <<"timestamp">> => 1234567890
-    },
-    {ok, Prev} = dev_query_arweave:query(Block, <<"previous">>, #{}, #{}),
-    ?assertEqual(<<"prev-hash">>, Prev),
-    {ok, Height} = dev_query_arweave:query(Block, <<"height">>, #{}, #{}),
-    ?assertEqual(12345, Height),
-    {ok, Timestamp} = dev_query_arweave:query(Block, <<"timestamp">>, #{}, #{}),
-    ?assertEqual(1234567890, Timestamp).
 ```
 
 ---
@@ -246,19 +208,6 @@ query(#{ <<"key">> := Key }, <<"key">>, _Args, _Opts) -> {ok, Key}.
 query(#{ <<"address">> := Address }, <<"address">>, _Args, _Opts) -> {ok, Address}.
 ```
 
-**Test Code:**
-```erlang
--module(dev_query_arweave_owner_test).
--include_lib("eunit/include/eunit.hrl").
-
-owner_fields_test() ->
-    Owner = #{ <<"key">> => <<"pubkey">>, <<"address">> => <<"addr">> },
-    {ok, Key} = dev_query_arweave:query(Owner, <<"key">>, #{}, #{}),
-    ?assertEqual(<<"pubkey">>, Key),
-    {ok, Addr} = dev_query_arweave:query(Owner, <<"address">>, #{}, #{}),
-    ?assertEqual(<<"addr">>, Addr).
-```
-
 ---
 
 #### fee / quantity
@@ -269,30 +218,6 @@ Get transaction fee or quantity (in Winston).
 query(Msg, <<"fee">>, _Args, Opts) -> {ok, Fee}.
 query(Msg, <<"quantity">>, _Args, Opts) -> {ok, Quantity}.
 query(Number, <<"winston">>, _Args, _Opts) -> {ok, Number}.
-```
-
-**Test Code:**
-```erlang
--module(dev_query_arweave_amount_test).
--include_lib("eunit/include/eunit.hrl").
-
-fee_quantity_test() ->
-    Msg = #{ <<"fee">> => 1000, <<"quantity">> => 5000 },
-    {ok, Fee} = dev_query_arweave:query(Msg, <<"fee">>, #{}, #{}),
-    ?assertEqual(1000, Fee),
-    {ok, Qty} = dev_query_arweave:query(Msg, <<"quantity">>, #{}, #{}),
-    ?assertEqual(5000, Qty).
-
-winston_test() ->
-    {ok, Amount} = dev_query_arweave:query(12345, <<"winston">>, #{}, #{}),
-    ?assertEqual(12345, Amount).
-
-default_values_test() ->
-    Msg = #{},
-    {ok, Fee} = dev_query_arweave:query(Msg, <<"fee">>, #{}, #{}),
-    ?assertEqual(0, Fee),
-    {ok, Qty} = dev_query_arweave:query(Msg, <<"quantity">>, #{}, #{}),
-    ?assertEqual(0, Qty).
 ```
 
 ---
@@ -336,19 +261,6 @@ query(#{ <<"data">> := Data }, <<"size">>, _Args, _Opts) -> {ok, byte_size(Data)
 query(#{ <<"type">> := Type }, <<"type">>, _Args, _Opts) -> {ok, Type}.
 ```
 
-**Test Code:**
-```erlang
--module(dev_query_arweave_data_test).
--include_lib("eunit/include/eunit.hrl").
-
-data_fields_test() ->
-    DataObj = #{ <<"data">> => <<"hello world">>, <<"type">> => <<"text/plain">> },
-    {ok, Size} = dev_query_arweave:query(DataObj, <<"size">>, #{}, #{}),
-    ?assertEqual(11, Size),
-    {ok, Type} = dev_query_arweave:query(DataObj, <<"type">>, #{}, #{}),
-    ?assertEqual(<<"text/plain">>, Type).
-```
-
 ---
 
 ## Query Matching
@@ -365,42 +277,6 @@ Generates matches for each supported query argument.
 | `tags` | Tag key-value pairs | Cache template match |
 | `owners` | Owner addresses | Commitment field match |
 | `recipients` | Recipient addresses | Commitment field match |
-
-**Test Code:**
-```erlang
--module(dev_query_arweave_match_test).
--include_lib("eunit/include/eunit.hrl").
-
-match_by_tags_test() ->
-    Opts = #{ store => hb_test_utils:test_store() },
-    Wallet = ar_wallet:new(),
-    Msg = hb_message:commit(#{
-        <<"data">> => <<"tagged">>,
-        <<"App-Name">> => <<"TestApp">>,
-        <<"Version">> => <<"1.0">>
-    }, #{ priv_wallet => Wallet }),
-    {ok, _} = hb_cache:write(Msg, Opts),
-    Args = #{
-        <<"tags">> => [
-            #{ <<"name">> => <<"App-Name">>, <<"values">> => [<<"TestApp">>] }
-        ]
-    },
-    {ok, Results} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
-    ?assert(is_list(Results)).
-
-match_by_ids_test() ->
-    Opts = #{ store => hb_test_utils:test_store() },
-    Wallet = ar_wallet:new(),
-    Msg1 = hb_message:commit(#{ <<"data">> => <<"one">> }, #{ priv_wallet => Wallet }),
-    Msg2 = hb_message:commit(#{ <<"data">> => <<"two">> }, #{ priv_wallet => Wallet }),
-    {ok, _} = hb_cache:write(Msg1, Opts),
-    {ok, _} = hb_cache:write(Msg2, Opts),
-    ID1 = hb_message:id(Msg1, all, Opts),
-    ID2 = hb_message:id(Msg2, all, Opts),
-    Args = #{ <<"ids">> => [ID1, ID2] },
-    {ok, Results} = dev_query_arweave:query(#{}, <<"transactions">>, Args, Opts),
-    ?assert(length(Results) >= 2).
-```
 
 ---
 

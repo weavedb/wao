@@ -132,7 +132,7 @@ tags_duplicate_test() ->
 tags_with_ao_types_test() ->
     Item = #tx{
         tags = [
-            {<<"ao-types">>, <<"key1:number,key2:string">>},
+            {<<"ao-types">>, <<"key1=number, key2=string">>},
             {<<"key1">>, <<"123">>},
             {<<"key2">>, <<"text">>}
         ]
@@ -307,7 +307,7 @@ base_missing_key_test() ->
     Tags = #{ <<"other">> => <<"val">> },
     Data = #{},
     % Should throw error for missing key
-    ?assertError({missing_key, <<"missing">>},
+    ?assertThrow({missing_key, <<"missing">>},
                 dev_codec_ans104_from:base(CommittedKeys, Fields, Tags, Data, #{})).
 ```
 

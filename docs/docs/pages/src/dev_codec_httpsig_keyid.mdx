@@ -107,6 +107,7 @@ req_to_key_secret_test() ->
     Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
     Req = #{
         <<"secret">> => Secret,
+        <<"scheme">> => <<"secret">>,
         <<"type">> => <<"hmac-sha256">>
     },
     {ok, Scheme, Key, KeyID} = dev_codec_httpsig_keyid:req_to_key_material(Req, #{}),
