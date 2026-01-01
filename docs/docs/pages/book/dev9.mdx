@@ -1,0 +1,887 @@
+# Arweave & Data
+
+A beginner's guide to permanent storage and data retrieval in HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **dev_arweave** — Arweave network interface (transactions, blocks)
+2. **dev_codec_ans104** — ANS-104 bundled transaction codec
+3. **dev_query** — Cache search and discovery
+4. **dev_copycat** — Message indexing from external sources
+5. **dev_manifest** — Path manifest resolution
+
+These devices form the **data layer** for permanent storage and retrieval.
+
+---
+
+## The Big Picture
+
+HyperBEAM integrates deeply with Arweave for permanent, decentralized storage:
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │              Data Layer                     │
+                    │                                             │
+                    │   ┌───────────────────────────────────┐     │
+   Arweave ←──────→ │   │         dev_arweave               │     │
+   Network          │   │   Transactions │ Blocks │ Status  │     │
+                    │   └───────────────────────────────────┘     │
+                    │                    ↕                        │
+                    │   ┌───────────────────────────────────┐     │
+                    │   │         dev_codec_ans104          │     │
+                    │   │    TABM ←→ ANS-104 TX Records     │     │
+                    │   └───────────────────────────────────┘     │
+                    │                    ↕                        │
+                    │   ┌─────────────┐   ┌─────────────────┐     │
+                    │   │  dev_query  │   │   dev_copycat   │     │
+                    │   │   Search    │   │     Index       │     │
+                    │   └─────────────┘   └─────────────────┘     │
+                    │                    ↕                        │
+                    │   ┌───────────────────────────────────┐     │
+                    │   │         dev_manifest              │     │
+                    │   │      Path → Content Resolution    │     │
+                    │   └───────────────────────────────────┘     │
+                    │                                             │
+                    └─────────────────────────────────────────────┘
+```
+
+Think of it like a **permanent file system**:
+- **dev_arweave** = Network interface (read/write to Arweave)
+- **dev_codec_ans104** = Data format (bundled transactions)
+- **dev_query** = Search engine (find cached data)
+- **dev_copycat** = Indexer (sync from Arweave)
+- **dev_manifest** = Directory structure (path → file mapping)
+
+Let's explore each component.
+
+---
+
+## Part 1: Arweave Network Interface
+
+> 📖 Reference: [dev_arweave](/src/dev_arweave)
+
+`dev_arweave` provides access to the Arweave network for transaction uploads, retrievals, and block queries.
+
+### Transaction Operations
+
+```erlang
+%% Upload a transaction
+Wallet = ar_wallet:new(),
+Msg = hb_message:commit(
+    #{
+        <<"variant">> => <<"ao.N.1">>,
+        <<"type">> => <<"Message">>,
+        <<"data">> => <<"Hello Arweave">>
+    },
+    #{priv_wallet => Wallet},
+    #{<<"commitment-device">> => <<"ans104@1.0">>}
+),
+
+{ok, Response} = hb_http:post(
+    Node,
+    Msg#{
+        <<"path">> => <<"/~arweave@2.9-pre/tx">>,
+        <<"codec-device">> => <<"ans104@1.0">>
+    },
+    #{priv_wallet => Wallet}
+).
+
+%% Retrieve a transaction (header only)
+Request = #{
+    <<"tx">> => TXID,
+    <<"data">> => false,
+    <<"method">> => <<"GET">>
+},
+{ok, Header} = dev_arweave:tx(#{}, Request, Opts).
+
+%% Retrieve with data
+Request = #{
+    <<"tx">> => TXID,
+    <<"data">> => true,
+    <<"method">> => <<"GET">>
+},
+{ok, TX} = dev_arweave:tx(#{}, Request, Opts).
+```
+
+### Data Retrieval Options
+
+| Option | Behavior |
+|--------|----------|
+| `false` | Header only, no data |
+| `true` (default) | Include data if available |
+| `always` | Error if data unavailable |
+
+### Block Operations
+
+```erlang
+%% Get current block
+{ok, Block} = dev_arweave:current(#{}, #{}, Opts).
+
+%% Get block by height
+{ok, Block} = dev_arweave:block(#{}, #{<<"block">> => <<"1234567">>}, Opts).
+
+%% Get block by ID (43-char hash)
+{ok, Block} = dev_arweave:block(#{}, #{<<"block">> => BlockID}, Opts).
+```
+
+### Network Status
+
+```erlang
+{ok, Info} = dev_arweave:status(#{}, #{}, Opts).
+%% Returns: #{<<"network">> => ..., <<"version">> => ..., <<"blocks">> => ...}
+```
+
+### Caching Strategy
+
+All retrieved data is automatically cached:
+- Transaction ID → Transaction data
+- Block ID → Block data
+- Block height → Block (via pseudo-path)
+
+---
+
+## Part 2: ANS-104 Codec
+
+> 📖 Reference: [dev_codec_ans104](/src/dev_codec_ans104)
+
+`dev_codec_ans104` transforms between HyperBEAM's TABM format and Arweave's ANS-104 bundled transaction format.
+
+### Format Conversion
+
+```erlang
+%% TABM → ANS-104 TX
+Msg = #{<<"key">> => <<"value">>, <<"data">> => <<"content">>},
+{ok, TX} = dev_codec_ans104:to(Msg, #{}, #{}).
+
+%% ANS-104 TX → TABM
+{ok, TABM} = dev_codec_ans104:from(TX, #{}, #{}).
+```
+
+### Signing Messages
+
+```erlang
+%% RSA-PSS signature
+Wallet = ar_wallet:new(),
+Signed = hb_message:commit(
+    #{<<"key">> => <<"value">>},
+    #{priv_wallet => Wallet},
+    #{<<"commitment-device">> => <<"ans104@1.0">>}
+).
+
+%% Unsigned SHA-256 commitment
+{ok, Committed} = dev_codec_ans104:commit(
+    #{<<"key">> => <<"value">>},
+    #{<<"type">> => <<"unsigned-sha256">>},
+    #{}
+).
+```
+
+### Commitment Types
+
+| Type | Alias | Description |
+|------|-------|-------------|
+| `<<"rsa-pss-sha256">>` | `<<"signed">>` | RSA-PSS signature (requires wallet) |
+| `<<"unsigned-sha256">>` | `<<"unsigned">>` | Hash-only commitment |
+
+### Serialization
+
+```erlang
+%% Serialize to binary
+{ok, Binary} = dev_codec_ans104:serialize(Msg, #{}, #{}).
+
+%% Deserialize from binary
+{ok, TABM} = dev_codec_ans104:deserialize(Binary, #{}, #{}).
+
+%% Round-trip
+{ok, TX} = dev_codec_ans104:to(Original, #{}, #{}),
+{ok, Serialized} = dev_codec_ans104:serialize(TX, #{}, #{}),
+{ok, Restored} = dev_codec_ans104:deserialize(Serialized, #{}, #{}).
+```
+
+### Verification
+
+```erlang
+Signed = hb_message:commit(Msg, #{priv_wallet => Wallet}, 
+    #{<<"commitment-device">> => <<"ans104@1.0">>}),
+
+{ok, true} = dev_codec_ans104:verify(Signed, #{}, #{}).
+
+%% Tampered message fails
+Tampered = Signed#{<<"key">> => <<"modified">>},
+{ok, false} = dev_codec_ans104:verify(Tampered, #{}, #{}).
+```
+
+### Tag Handling
+
+ANS-104 preserves tag names and handles duplicates:
+
+```erlang
+%% Original tags preserved in commitment
+#{<<"commitments">> => #{
+    ID => #{
+        <<"original-tags">> => #{...},  %% Case-preserved tag names
+        <<"committed">> => [...]        %% Committed key list
+    }
+}}
+
+%% Duplicate tags become structured-field lists
+[{<<"key">>, <<"val1">>}, {<<"key">>, <<"val2">>}]
+%% → #{<<"key">> => <<"\"val1\", \"val2\"">>}
+```
+
+---
+
+## Part 3: Cache Search
+
+> 📖 Reference: [dev_query](/src/dev_query)
+
+`dev_query` enables searching and discovering messages in the node's cache.
+
+### Search Modes
+
+| Mode | Description |
+|------|-------------|
+| `all` | Match all keys in request (default) |
+| `base` | Match all keys in base message |
+| `only` | Match specific keys only |
+
+### Basic Search
+
+```erlang
+%% Search by key-value
+{ok, [Path]} = hb_ao:resolve(
+    <<"~query@1.0/all?key=value">>,
+    Opts
+).
+
+%% Get messages directly
+{ok, [Msg]} = hb_ao:resolve(
+    <<"~query@1.0/all?key=value&return=messages">>,
+    Opts
+).
+
+%% Multiple keys (AND)
+{ok, Results} = hb_ao:resolve(
+    <<"~query@1.0/all?type=Message&target=xyz&return=messages">>,
+    Opts
+).
+```
+
+### Return Types
+
+| Return | Result |
+|--------|--------|
+| `paths` (default) | `{ok, [Path1, Path2, ...]}` |
+| `messages` | `{ok, [Msg1, Msg2, ...]}` |
+| `count` | `{ok, 5}` |
+| `boolean` | `{ok, true}` or `{ok, false}` |
+| `first-path` | `{ok, Path}` |
+| `first-message` | `{ok, Message}` |
+
+### Selective Search (only mode)
+
+```erlang
+%% Search specific keys only
+{ok, Results} = hb_ao:resolve(
+    <<"~query@1.0/only=target,action&target=xyz&action=Eval&return=messages">>,
+    Opts
+).
+
+%% As map
+{ok, Results} = dev_query:only(
+    #{},
+    #{
+        <<"only">> => #{<<"key">> => <<"value">>},
+        <<"return">> => <<"messages">>
+    },
+    Opts
+).
+```
+
+### Nested Key Matching
+
+```erlang
+%% Search nested structures
+{ok, [Msg]} = hb_ao:resolve(
+    <<"~query@1.0/all?nested/key=value&return=first-message">>,
+    Opts
+).
+```
+
+### GraphQL Interface
+
+```erlang
+%% Execute GraphQL query (Arweave-style)
+{ok, Result} = dev_query:graphql(
+    #{<<"query">> => GraphQLQuery},
+    #{},
+    Opts
+).
+
+%% Check if results exist
+{ok, HasResults} = dev_query:has_results(
+    #{<<"body">> => JSONResponse},
+    #{},
+    #{}
+).
+```
+
+---
+
+## Part 4: Message Indexing
+
+> 📖 Reference: [dev_copycat](/src/dev_copycat)
+
+`dev_copycat` orchestrates indexing messages from external sources (Arweave, GraphQL gateways) into local cache.
+
+### GraphQL Indexing
+
+```erlang
+%% Index by custom query
+{ok, Count} = dev_copycat:graphql(
+    #{},
+    #{
+        <<"query">> => <<"
+            query($after: String) {
+                transactions(
+                    first: 100,
+                    after: $after,
+                    tags: [{name: \"App-Name\", values: [\"MyApp\"]}]
+                ) {
+                    edges {
+                        node { id owner { address } tags { name value } }
+                        cursor
+                    }
+                    pageInfo { hasNextPage }
+                }
+            }
+        ">>,
+        <<"variables">> => #{}
+    },
+    #{<<"node">> => <<"https://arweave.net">>}
+).
+
+%% Index by tag filter (auto-generates query)
+dev_copycat:graphql(#{}, #{
+    <<"tag">> => <<"App-Name">>,
+    <<"value">> => <<"MyApp">>
+}, #{}).
+
+%% Index by owner
+dev_copycat:graphql(#{}, #{
+    <<"owner">> => WalletAddress
+}, #{}).
+```
+
+### Arweave Block Indexing
+
+```erlang
+%% Fetch blocks in a range (reverse chronological)
+{ok, FinalHeight} = dev_copycat:arweave(#{}, #{
+    <<"from">> => 1500000,
+    <<"to">> => 1499000
+}, #{}).
+
+%% Fetch from current block down
+{ok, FinalHeight} = dev_copycat:arweave(#{}, #{}, #{}).
+
+%% Fetch to specific target height
+{ok, FinalHeight} = dev_copycat:arweave(#{}, #{
+    <<"to">> => 1000000
+}, #{}).
+```
+
+### Use Cases
+
+| Use Case | Engine | Example |
+|----------|--------|---------|
+| Initial sync | `arweave` | Full node population |
+| Process data | `graphql` | Filter by Process tag |
+| Owner history | `graphql` | Filter by wallet address |
+| Gap filling | `arweave` | Specific block range |
+| App indexing | `graphql` | Filter by App-Name tag |
+
+### Engine Comparison
+
+| Feature | GraphQL | Arweave |
+|---------|---------|---------|
+| Filtering | ✓ Flexible | ✗ Sequential |
+| Speed | Fast (filtered) | Slower (complete) |
+| Dependency | Gateway | Direct nodes |
+| Best for | Targeted queries | Complete sync |
+
+---
+
+## Part 5: Path Manifests
+
+> 📖 Reference: [dev_manifest](/src/dev_manifest)
+
+`dev_manifest` resolves Arweave path manifests, enabling structured content organization like a file system.
+
+### Manifest Structure
+
+```json
+{
+  "manifest": "arweave/paths",
+  "version": "0.1.0",
+  "index": {
+    "path": "index.html"
+  },
+  "paths": {
+    "index.html": { "id": "TX_ID_1" },
+    "css/style.css": { "id": "TX_ID_2" },
+    "js/app.js": { "id": "TX_ID_3" }
+  }
+}
+```
+
+### Creating a Manifest
+
+```erlang
+%% Create content
+IndexPage = #{<<"content-type">> => <<"text/html">>, <<"body">> => IndexHTML},
+{ok, IndexID} = hb_cache:write(IndexPage, Opts),
+
+StyleCSS = #{<<"content-type">> => <<"text/css">>, <<"body">> => CSSContent},
+{ok, StyleID} = hb_cache:write(StyleCSS, Opts),
+
+%% Create manifest
+ManifestData = #{
+    <<"paths">> => #{
+        <<"index.html">> => #{<<"id">> => IndexID},
+        <<"css/style.css">> => #{<<"id">> => StyleID}
+    },
+    <<"index">> => #{<<"path">> => <<"index.html">>}
+},
+
+JSON = hb_message:convert(ManifestData, <<"json@1.0">>, <<"structured@1.0">>, #{}),
+ManifestMsg = #{
+    <<"device">> => <<"manifest@1.0">>,
+    <<"body">> => JSON
+},
+{ok, ManifestID} = hb_cache:write(ManifestMsg, Opts).
+```
+
+### Accessing Content
+
+```erlang
+%% Via HTTP
+Node = hb_http_server:start_node(Opts),
+
+%% Get index (default page)
+{ok, Index} = hb_http:get(Node, <<ManifestID/binary, "/index">>, Opts).
+
+%% Get specific file
+{ok, Style} = hb_http:get(Node, <<ManifestID/binary, "/css/style.css">>, Opts).
+
+%% Direct resolution
+{ok, Content} = dev_manifest:index(ManifestMsg, #{}, Opts).
+```
+
+### Nested Paths
+
+```erlang
+%% Manifest with nested structure
+ManifestData = #{
+    <<"paths">> => #{
+        <<"docs">> => #{
+            <<"api">> => #{
+                <<"guide">> => #{<<"id">> => ApiGuideID}
+            }
+        }
+    }
+},
+
+%% Access nested content
+{ok, Guide} = hb_http:get(Node, <<ManifestID/binary, "/docs/api/guide">>, Opts).
+```
+
+### URL Pattern
+
+```
+/{MANIFEST_ID}/{PATH}
+
+Examples:
+/abc123.../index
+/abc123.../about.html
+/abc123.../docs/api/guide
+/abc123.../assets/logo.png
+```
+
+---
+
+## Try It: Complete Data Examples
+
+```erlang
+%%% File: test_dev9.erl
+-module(test_dev9).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_dev9
+
+arweave_exports_test() ->
+    code:ensure_loaded(dev_arweave),
+    ?assert(erlang:function_exported(dev_arweave, tx, 3)),
+    ?assert(erlang:function_exported(dev_arweave, block, 3)),
+    ?assert(erlang:function_exported(dev_arweave, current, 3)),
+    ?assert(erlang:function_exported(dev_arweave, status, 3)),
+    ?debugFmt("Arweave exports: OK", []).
+
+ans104_content_type_test() ->
+    {ok, ContentType} = dev_codec_ans104:content_type(#{}),
+    ?assertEqual(<<"application/ans104">>, ContentType),
+    ?debugFmt("ANS-104 content type: ~s", [ContentType]).
+
+ans104_to_from_test() ->
+    Msg = #{
+        <<"key">> => <<"value">>,
+        <<"data">> => <<"test data">>
+    },
+    {ok, TX} = dev_codec_ans104:to(Msg, #{}, #{}),
+    ?assert(is_tuple(TX)),
+    ?assertEqual(tx, element(1, TX)),
+    
+    {ok, TABM} = dev_codec_ans104:from(TX, #{}, #{}),
+    ?assert(is_map(TABM)),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, TABM)),
+    ?debugFmt("ANS-104 to/from: OK", []).
+
+ans104_serialize_test() ->
+    Msg = #{<<"test">> => <<"data">>},
+    {ok, TX} = dev_codec_ans104:to(Msg, #{}, #{}),
+    {ok, Binary} = dev_codec_ans104:serialize(TX, #{}, #{}),
+    ?assert(is_binary(Binary)),
+    ?assert(byte_size(Binary) > 0),
+    ?debugFmt("ANS-104 serialize: ~p bytes", [byte_size(Binary)]).
+
+ans104_sign_verify_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"key">> => <<"value">>},
+    
+    Signed = hb_message:commit(
+        Msg,
+        #{priv_wallet => Wallet},
+        #{<<"commitment-device">> => <<"ans104@1.0">>}
+    ),
+    
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    {ok, true} = dev_codec_ans104:verify(Signed, #{}, #{}),
+    ?debugFmt("ANS-104 sign/verify: OK", []).
+
+query_exports_test() ->
+    code:ensure_loaded(dev_query),
+    ?assert(erlang:function_exported(dev_query, all, 3)),
+    ?assert(erlang:function_exported(dev_query, base, 3)),
+    ?assert(erlang:function_exported(dev_query, only, 3)),
+    ?assert(erlang:function_exported(dev_query, graphql, 3)),
+    ?debugFmt("Query exports: OK", []).
+
+query_info_test() ->
+    Info = dev_query:info(#{}),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"keys">>, Excludes)),
+    ?debugFmt("Query info: OK", []).
+
+query_has_results_test() ->
+    %% With results
+    JSONWithResults = hb_json:encode(#{
+        <<"data">> => #{
+            <<"transactions">> => #{
+                <<"edges">> => [#{<<"node">> => #{<<"id">> => <<"123">>}}]
+            }
+        }
+    }),
+    {ok, true} = dev_query:has_results(#{<<"body">> => JSONWithResults}, #{}, #{}),
+    
+    %% Without results
+    JSONEmpty = hb_json:encode(#{
+        <<"data">> => #{
+            <<"transactions">> => #{<<"edges">> => []}
+        }
+    }),
+    {ok, false} = dev_query:has_results(#{<<"body">> => JSONEmpty}, #{}, #{}),
+    ?debugFmt("Query has_results: OK", []).
+
+copycat_exports_test() ->
+    code:ensure_loaded(dev_copycat),
+    ?assert(erlang:function_exported(dev_copycat, graphql, 3)),
+    ?assert(erlang:function_exported(dev_copycat, arweave, 3)),
+    ?debugFmt("Copycat exports: OK", []).
+
+manifest_exports_test() ->
+    code:ensure_loaded(dev_manifest),
+    ?assert(erlang:function_exported(dev_manifest, info, 0)),
+    ?assert(erlang:function_exported(dev_manifest, index, 3)),
+    ?debugFmt("Manifest exports: OK", []).
+
+manifest_info_test() ->
+    Info = dev_manifest:info(),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)),
+    ?assert(is_function(maps:get(default, Info))),
+    ?debugFmt("Manifest info: OK", []).
+
+complete_data_workflow_test() ->
+    ?debugFmt("=== Complete Data Workflow ===", []),
+    
+    %% 1. Create a message with ANS-104 format
+    Wallet = ar_wallet:new(),
+    Msg = #{
+        <<"type">> => <<"Document">>,
+        <<"title">> => <<"Test Document">>,
+        <<"data">> => <<"Document content here">>
+    },
+    
+    %% 2. Sign with ANS-104
+    Signed = hb_message:commit(
+        Msg,
+        #{priv_wallet => Wallet},
+        #{<<"commitment-device">> => <<"ans104@1.0">>}
+    ),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    ?debugFmt("1. Message signed with ANS-104", []),
+    
+    %% 3. Convert to TX record
+    {ok, TX} = dev_codec_ans104:to(Signed, #{}, #{}),
+    ?assert(is_tuple(TX)),
+    ?debugFmt("2. Converted to TX record", []),
+    
+    %% 4. Serialize for transmission
+    {ok, Binary} = dev_codec_ans104:serialize(TX, #{}, #{}),
+    ?assert(is_binary(Binary)),
+    ?debugFmt("3. Serialized: ~p bytes", [byte_size(Binary)]),
+    
+    %% 5. Deserialize
+    {ok, Restored} = dev_codec_ans104:deserialize(Binary, #{}, #{}),
+    ?assert(is_map(Restored)),
+    ?debugFmt("4. Deserialized successfully", []),
+    
+    %% 6. Verify signature
+    {ok, true} = dev_codec_ans104:verify(Signed, #{}, #{}),
+    ?debugFmt("5. Signature verified", []),
+    
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_dev9
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Upload and Retrieve
+
+```erlang
+%% Upload to Arweave
+Wallet = ar_wallet:new(),
+Msg = hb_message:commit(
+    #{<<"data">> => Content},
+    #{priv_wallet => Wallet},
+    #{<<"commitment-device">> => <<"ans104@1.0">>}
+),
+{ok, #{<<"status">> := 200}} = hb_http:post(
+    Node,
+    Msg#{
+        <<"path">> => <<"/~arweave@2.9-pre/tx">>,
+        <<"codec-device">> => <<"ans104@1.0">>
+    },
+    #{priv_wallet => Wallet}
+),
+TXID = hb_message:id(Msg, signed, #{}).
+
+%% Later: Retrieve from Arweave
+{ok, Retrieved} = dev_arweave:tx(#{}, #{
+    <<"tx">> => TXID,
+    <<"data">> => true,
+    <<"method">> => <<"GET">>
+}, Opts).
+```
+
+### Pattern 2: Index and Search
+
+```erlang
+%% Index from Arweave
+dev_copycat:graphql(#{}, #{
+    <<"tag">> => <<"Process">>,
+    <<"value">> => ProcessID
+}, #{}).
+
+%% Search local cache
+{ok, Messages} = hb_ao:resolve(
+    <<"~query@1.0/all?Process=", ProcessID/binary, "&return=messages">>,
+    Opts
+).
+```
+
+### Pattern 3: Static Website
+
+```erlang
+%% Create pages
+Pages = [
+    {<<"index.html">>, IndexHTML},
+    {<<"about.html">>, AboutHTML},
+    {<<"css/style.css">>, CSS}
+],
+
+%% Upload each page
+IDs = lists:map(fun({Name, Content}) ->
+    Msg = #{<<"content-type">> => content_type(Name), <<"body">> => Content},
+    {ok, ID} = hb_cache:write(Msg, Opts),
+    {Name, ID}
+end, Pages),
+
+%% Create manifest
+ManifestData = #{
+    <<"paths">> => maps:from_list([
+        {Name, #{<<"id">> => ID}} || {Name, ID} <- IDs
+    ]),
+    <<"index">> => #{<<"path">> => <<"index.html">>}
+},
+JSON = hb_message:convert(ManifestData, <<"json@1.0">>, <<"structured@1.0">>, #{}),
+ManifestMsg = #{<<"device">> => <<"manifest@1.0">>, <<"body">> => JSON},
+{ok, ManifestID} = hb_cache:write(ManifestMsg, Opts).
+
+%% Access: /{ManifestID}/index.html, /{ManifestID}/about.html, etc.
+```
+
+### Pattern 4: Block Explorer
+
+```erlang
+%% Get current network state
+{ok, Status} = dev_arweave:status(#{}, #{}, Opts),
+CurrentHeight = maps:get(<<"blocks">>, Status),
+
+%% Get latest block
+{ok, LatestBlock} = dev_arweave:current(#{}, #{}, Opts),
+
+%% Get specific block
+{ok, Block} = dev_arweave:block(#{}, #{
+    <<"block">> => integer_to_binary(CurrentHeight - 10)
+}, Opts),
+
+%% List transactions in block
+TXs = maps:get(<<"txs">>, Block, []).
+```
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [dev_arweave](/src/dev_arweave) | [dev_codec_ans104](/src/dev_codec_ans104) | [dev_query](/src/dev_query) | [dev_copycat](/src/dev_copycat) | [dev_manifest](/src/dev_manifest)
+
+```erlang
+%% === ARWEAVE DEVICE ===
+%% Upload transaction
+{ok, _} = hb_http:post(Node, SignedMsg#{
+    <<"path">> => <<"/~arweave@2.9-pre/tx">>,
+    <<"codec-device">> => <<"ans104@1.0">>
+}, Opts).
+
+%% Get transaction
+{ok, TX} = dev_arweave:tx(#{}, #{<<"tx">> => TXID, <<"data">> => true}, Opts).
+
+%% Get block
+{ok, Block} = dev_arweave:block(#{}, #{<<"block">> => Height}, Opts).
+{ok, Block} = dev_arweave:current(#{}, #{}, Opts).
+
+%% Network status
+{ok, Info} = dev_arweave:status(#{}, #{}, Opts).
+
+%% === ANS-104 CODEC ===
+%% Convert TABM ↔ TX
+{ok, TX} = dev_codec_ans104:to(TABM, #{}, #{}).
+{ok, TABM} = dev_codec_ans104:from(TX, #{}, #{}).
+
+%% Serialize/Deserialize
+{ok, Binary} = dev_codec_ans104:serialize(Msg, #{}, #{}).
+{ok, TABM} = dev_codec_ans104:deserialize(Binary, #{}, #{}).
+
+%% Sign (via hb_message)
+Signed = hb_message:commit(Msg, #{priv_wallet => Wallet},
+    #{<<"commitment-device">> => <<"ans104@1.0">>}).
+
+%% Verify
+{ok, true} = dev_codec_ans104:verify(Signed, #{}, #{}).
+
+%% === QUERY DEVICE ===
+%% Search
+{ok, Paths} = hb_ao:resolve(<<"~query@1.0/all?key=value">>, Opts).
+{ok, Msgs} = hb_ao:resolve(<<"~query@1.0/all?key=value&return=messages">>, Opts).
+{ok, Count} = hb_ao:resolve(<<"~query@1.0/all?key=value&return=count">>, Opts).
+{ok, Bool} = hb_ao:resolve(<<"~query@1.0/all?key=value&return=boolean">>, Opts).
+
+%% Only specific keys
+{ok, Results} = hb_ao:resolve(<<"~query@1.0/only=k1,k2&k1=v1&k2=v2">>, Opts).
+
+%% === COPYCAT DEVICE ===
+%% GraphQL indexing
+{ok, Count} = dev_copycat:graphql(#{}, #{<<"tag">> => Tag, <<"value">> => Val}, Opts).
+{ok, Count} = dev_copycat:graphql(#{}, #{<<"owner">> => Address}, Opts).
+
+%% Arweave block indexing
+{ok, Height} = dev_copycat:arweave(#{}, #{<<"from">> => From, <<"to">> => To}, Opts).
+
+%% === MANIFEST DEVICE ===
+%% Get index page
+{ok, Index} = dev_manifest:index(ManifestMsg, #{}, Opts).
+
+%% HTTP access pattern
+GET /{ManifestID}/index
+GET /{ManifestID}/path/to/file
+```
+
+---
+
+## What's Next?
+
+You now understand the data layer:
+
+| Device | Purpose | Network |
+|--------|---------|---------|
+| [dev_arweave](/src/dev_arweave) | Network interface | Arweave |
+| [dev_codec_ans104](/src/dev_codec_ans104) | Bundle format | — |
+| [dev_query](/src/dev_query) | Cache search | Local |
+| [dev_copycat](/src/dev_copycat) | Message indexing | External → Local |
+| [dev_manifest](/src/dev_manifest) | Path resolution | — |
+
+### Going Further
+
+1. **Full Device Reference** — All 77 devices ([Reference](/devices))
+2. **Build Your First App** — Practical tutorials
+3. **AO Protocol** — Deep dive into the Actor-Oriented protocol
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [dev_arweave Reference](/src/dev_arweave)
+- [dev_codec_ans104 Reference](/src/dev_codec_ans104)
+- [dev_query Reference](/src/dev_query)
+- [dev_copycat Reference](/src/dev_copycat)
+- [dev_manifest Reference](/src/dev_manifest)
+- [Full Device List](/devices)
+
+### Arweave Documentation
+
+- [ANS-104 Specification](https://github.com/ArweaveTeam/arweave-standards/blob/master/ans/ANS-104.md)
+- [Path Manifest v1](https://specs.ar.io/?tx=lXLd0OPwo-dJLB_Amz5jgIeDhiOkjXuM3-r0H_aiNj0)
+- [Arweave Network](https://arweave.org)
+
+### Related Tutorials
+
+- [Authentication](/book/dev8)
+- [Payment](/book/dev7)
+- [Codecs](/book/dev2)

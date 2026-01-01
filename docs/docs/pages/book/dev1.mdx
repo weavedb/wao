@@ -1,0 +1,822 @@
+# Messages & Composition
+
+A beginner's guide to the foundational device and composition patterns
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **dev_message** — The identity device: get, set, keys, remove, and cryptographic commitments
+2. **dev_stack** — Composing devices into pipelines with Fold and Map modes
+3. **dev_multipass** — Multi-pass execution for iterative workflows
+4. **dev_apply** — Dynamic path execution with base:/request: prefixes
+5. **dev_patch** — Moving data between message paths
+6. **dev_dedup** — Preventing duplicate message processing
+
+These six devices form the **foundation** of all HyperBEAM computation.
+
+---
+
+## The Big Picture
+
+Every computation in HyperBEAM is a **message** being resolved by a **device**. The composition devices let you build complex pipelines from simple pieces:
+
+```
+Message → Device → Result
+   ↓         ↓        ↓
+  Data    Behavior   Data
+
+Simple:   Msg → dev_message → Value
+
+Pipeline: Msg → dev_stack → [Device1 → Device2 → Device3] → Result
+
+Multi-pass: Msg → dev_multipass → Pass1 → Pass2 → Pass3 → Result
+```
+
+Think of it like a factory:
+- **dev_message** = Raw materials handler (read/write data)
+- **dev_stack** = Assembly line (chain operations)
+- **dev_multipass** = Quality control loops (iterate until done)
+- **dev_apply** = Work order executor (dynamic dispatch)
+- **dev_patch** = Material mover (reorganize data)
+- **dev_dedup** = Duplicate checker (process once)
+
+Let's build each piece.
+
+---
+
+## Part 1: The Message Device
+
+> 📖 Reference: [dev_message](/src/dev_message)
+
+`dev_message` is the **identity device** — the foundation everything else builds on. It provides direct access to message fields with case-insensitive lookup, private key filtering, and cryptographic commitments.
+
+### Getting Values
+
+```erlang
+%% Direct key access
+Msg = #{ <<"name">> => <<"Alice">>, <<"age">> => 30 },
+{ok, <<"Alice">>} = hb_ao:resolve(Msg, <<"name">>, #{}).
+
+%% Case-insensitive (HTTP header style)
+Msg = #{ <<"content-type">> => <<"text/html">> },
+{ok, <<"text/html">>} = hb_ao:resolve(Msg, <<"Content-Type">>, #{}).
+```
+
+### Setting Values
+
+```erlang
+%% Set a single value
+Msg = #{ <<"existing">> => <<"old">> },
+{ok, Updated} = hb_ao:resolve(
+    Msg,
+    #{ <<"path">> => <<"set">>, <<"new-key">> => <<"new-value">> },
+    #{}
+).
+%% Updated = #{ <<"existing">> => <<"old">>, <<"new-key">> => <<"new-value">> }
+
+%% Set deep path
+{ok, Deep} = hb_ao:resolve(
+    #{},
+    #{ <<"path">> => <<"set">>, <<"user/name">> => <<"Bob">> },
+    #{}
+).
+%% Deep = #{ <<"user">> => #{ <<"name">> => <<"Bob">> } }
+
+%% Remove a key with `unset`
+Msg = #{ <<"keep">> => 1, <<"remove">> => 2 },
+{ok, Cleaned} = hb_ao:resolve(
+    Msg,
+    #{ <<"path">> => <<"set">>, <<"remove">> => unset },
+    #{ hashpath => ignore }
+).
+%% Cleaned = #{ <<"keep">> => 1 }
+```
+
+### Listing Keys
+
+```erlang
+%% Get all public keys
+Msg = #{ <<"a">> => 1, <<"b">> => 2, <<"priv_secret">> => 3 },
+{ok, Keys} = hb_ao:resolve(Msg, keys, #{}).
+%% Keys = [<<"a">>, <<"b">>]  (private keys filtered)
+```
+
+### Removing Keys
+
+```erlang
+%% Remove single key
+{ok, Result} = hb_ao:resolve(
+    #{ <<"a">> => 1, <<"b">> => 2 },
+    #{ <<"path">> => <<"remove">>, <<"item">> => <<"a">> },
+    #{ hashpath => ignore }
+).
+%% Result = #{ <<"b">> => 2 }
+
+%% Remove multiple keys
+{ok, Result} = hb_ao:resolve(
+    #{ <<"a">> => 1, <<"b">> => 2, <<"c">> => 3 },
+    #{ <<"path">> => <<"remove">>, <<"items">> => [<<"a">>, <<"b">>] },
+    #{ hashpath => ignore }
+).
+%% Result = #{ <<"c">> => 3 }
+```
+
+### Cryptographic Commitments
+
+Messages can be **signed** (committed) for verification:
+
+```erlang
+%% Sign a message
+Wallet = ar_wallet:new(),
+Unsigned = #{ <<"data">> => <<"important">> },
+Signed = hb_message:commit(Unsigned, #{ priv_wallet => Wallet }).
+
+%% Verify signature
+{ok, true} = hb_ao:resolve(
+    #{},
+    #{ <<"path">> => <<"verify">>, <<"body">> => Signed },
+    #{ hashpath => ignore }
+).
+
+%% Get message ID
+{ok, ID} = dev_message:id(Signed, #{}, #{}).
+```
+
+### Private Key Filtering
+
+Keys starting with `priv` or `private` are **never exposed**:
+
+```erlang
+Msg = #{
+    <<"public_data">> => <<"visible">>,
+    <<"priv_wallet">> => <<"HIDDEN">>,
+    <<"private_key">> => <<"HIDDEN">>
+},
+
+%% Keys excludes private
+{ok, [<<"public_data">>]} = dev_message:keys(Msg, #{}).
+
+%% Get returns not_found for private
+{error, not_found} = dev_message:get(<<"priv_wallet">>, Msg, #{}).
+```
+
+---
+
+## Part 2: Device Stacks
+
+> 📖 Reference: [dev_stack](/src/dev_stack)
+
+`dev_stack` composes multiple devices into a pipeline. It supports two execution modes: **Fold** (sequential with state passing) and **Map** (parallel with result aggregation).
+
+### Creating a Stack
+
+```erlang
+%% Define a stack of devices
+Pipeline = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => Device1,
+        <<"2">> => Device2,
+        <<"3">> => Device3
+    },
+    <<"initial-state">> => <<"START">>
+}.
+```
+
+Devices execute in **lexicographic key order**: `<<"1">>` → `<<"2">>` → `<<"3">>`.
+
+### Fold Mode (Default)
+
+In Fold mode, each device receives the output of the previous device:
+
+```
+Input → Device1 → State1 → Device2 → State2 → Device3 → Output
+```
+
+```erlang
+%% Create append devices for testing
+AppendA = dev_stack:generate_append_device(<<"+A">>),
+AppendB = dev_stack:generate_append_device(<<"+B">>),
+
+Stack = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => AppendA,
+        <<"2">> => AppendB
+    },
+    <<"result">> => <<"INIT">>
+},
+
+{ok, Result} = hb_ao:resolve(
+    Stack,
+    #{ <<"path">> => <<"append">>, <<"bin">> => <<"!">> },
+    #{}
+).
+%% result = <<"INIT+A!+B!">>
+```
+
+### Map Mode
+
+In Map mode, each device runs independently on the original input:
+
+```
+         ┌→ Device1 → Result1 ─┐
+Input ───┼→ Device2 → Result2 ─┼→ Combined
+         └→ Device3 → Result3 ─┘
+```
+
+```erlang
+{ok, Result} = hb_ao:resolve(
+    Stack,
+    #{ <<"path">> => <<"append">>, <<"mode">> => <<"Map">>, <<"bin">> => <<"!">> },
+    #{}
+).
+%% Result contains:
+%%   <<"1/result">> => <<"INIT+A!">>
+%%   <<"2/result">> => <<"INIT+B!">>
+```
+
+### Special Responses
+
+Devices can control stack flow with special return values:
+
+```erlang
+%% Skip remaining devices in current pass
+{skip, UpdatedMsg}
+
+%% Re-execute from first device (Fold only)
+{pass, UpdatedMsg}
+```
+
+### Input/Output Prefixes
+
+Isolate device namespaces with prefixes:
+
+```erlang
+Stack = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => Device1,
+        <<"2">> => Device2
+    },
+    <<"input-prefixes">> => #{
+        <<"1">> => <<"in1/">>,
+        <<"2">> => <<"in2/">>
+    },
+    <<"output-prefixes">> => #{
+        <<"1">> => <<"out1/">>,
+        <<"2">> => <<"out2/">>
+    }
+}.
+```
+
+---
+
+## Part 3: Multi-Pass Execution
+
+> 📖 Reference: [dev_multipass](/src/dev_multipass)
+
+`dev_multipass` enables iterative workflows by returning `{pass, Msg}` until a pass count is reached.
+
+### Basic Configuration
+
+```erlang
+Msg = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 3,   % Total passes to execute
+    <<"pass">> => 1      % Current pass (1-indexed)
+}.
+```
+
+### Execution Flow
+
+```erlang
+%% Pass 1: Returns {pass, Msg} — trigger re-execution
+{pass, _} = hb_ao:resolve(
+    #{ <<"device">> => <<"multipass@1.0">>, <<"passes">> => 2, <<"pass">> => 1 },
+    <<"compute">>,
+    #{}
+).
+
+%% Pass 2: Returns {ok, Msg} — complete
+{ok, _} = hb_ao:resolve(
+    #{ <<"device">> => <<"multipass@1.0">>, <<"passes">> => 2, <<"pass">> => 2 },
+    <<"compute">>,
+    #{}
+).
+```
+
+### With Device Stacks
+
+Multipass shines when combined with stacks for iterative algorithms:
+
+```erlang
+IterativeProcess = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => <<"dedup@1.0">>,           % Deduplicate
+        <<"2">> => ComputeDevice,              % Do work
+        <<"3">> => <<"multipass@1.0">>         % Control passes
+    },
+    <<"passes">> => 3
+}.
+```
+
+---
+
+## Part 4: Dynamic Execution with Apply
+
+> 📖 Reference: [dev_apply](/src/dev_apply)
+
+`dev_apply` executes paths dynamically, supporting explicit `base:` and `request:` prefixes.
+
+### Single Path Execution
+
+```erlang
+%% Execute a path stored in the message
+Base = #{
+    <<"device">> => <<"apply@1.0">>,
+    <<"body">> => <<"/~meta@1.0/build/node">>
+},
+{ok, <<"HyperBEAM">>} = hb_ao:resolve(Base, #{ <<"path">> => <<"body">> }, #{}).
+```
+
+### Paired Execution
+
+Apply one message to another:
+
+```erlang
+Base = #{
+    <<"device">> => <<"apply@1.0">>,
+    <<"data-container">> => #{ <<"value">> => <<"DATA">> },
+    <<"base">> => <<"data-container">>
+},
+Request = #{
+    <<"data-path">> => <<"value">>,
+    <<"request">> => <<"data-path">>,
+    <<"path">> => <<"pair">>
+},
+{ok, <<"DATA">>} = hb_ao:resolve(Base, Request, #{}).
+```
+
+### Source Prefixes
+
+Explicitly specify which message to read from:
+
+```erlang
+%% Read from base message
+<<"base:data/key">>
+
+%% Read from request message  
+<<"request:params/id">>
+<<"req:params/id">>        % Short form
+```
+
+---
+
+## Part 5: Moving Data with Patch
+
+> 📖 Reference: [dev_patch](/src/dev_patch)
+
+`dev_patch` reorganizes messages by moving data between paths.
+
+### All Mode
+
+Move everything from source to destination:
+
+```erlang
+Msg = #{
+    <<"device">> => <<"patch@1.0">>,
+    <<"input">> => #{
+        <<"zone1">> => #{ <<"data">> => 1 },
+        <<"zone2">> => #{ <<"data">> => 2 }
+    },
+    <<"state">> => #{}
+},
+{ok, Result} = hb_ao:resolve(
+    Msg,
+    #{
+        <<"path">> => <<"all">>,
+        <<"patch-from">> => <<"/input">>,
+        <<"patch-to">> => <<"/state">>
+    },
+    #{}
+).
+%% state now contains zone1 and zone2
+```
+
+### Patches Mode
+
+Move only messages with `method => <<"PATCH">>`:
+
+```erlang
+Msg = #{
+    <<"device">> => <<"patch@1.0">>,
+    <<"results">> => #{
+        <<"outbox">> => #{
+            <<"1">> => #{ <<"method">> => <<"PATCH">>, <<"data">> => <<"move-me">> },
+            <<"2">> => #{ <<"method">> => <<"GET">>, <<"data">> => <<"keep-here">> }
+        }
+    },
+    <<"patch-from">> => <<"/results/outbox">>
+},
+{ok, Result} = hb_ao:resolve(Msg, <<"compute">>, #{}).
+%% Only item 1 moved; item 2 stays in results/outbox
+```
+
+### Source Prefixes
+
+```erlang
+%% Read from request message
+<<"req:/results/outbox">>
+
+%% Read from base message (default)
+<<"/results/outbox">>
+```
+
+---
+
+## Part 6: Deduplication
+
+> 📖 Reference: [dev_dedup](/src/dev_dedup)
+
+`dev_dedup` prevents duplicate message processing by tracking seen message IDs.
+
+### Basic Usage
+
+```erlang
+Stack = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"dedup-subject">> => <<"request">>,  % Dedupe by request ID
+    <<"device-stack">> => #{
+        <<"1">> => <<"dedup@1.0">>,
+        <<"2">> => ProcessDevice,
+        <<"3">> => StoreDevice
+    }
+}.
+
+%% First call: processes normally
+{ok, Msg2} = hb_ao:resolve(Stack, Request1, #{}).
+
+%% Second call with same request: skips processing
+{ok, Msg3} = hb_ao:resolve(Msg2, Request1, #{}).
+%% ProcessDevice and StoreDevice not called again
+```
+
+### Subject Configuration
+
+Control what's used for deduplication:
+
+```erlang
+%% Dedupe by entire request (default: body)
+#{ <<"dedup-subject">> => <<"request">> }
+
+%% Dedupe by specific key
+#{ <<"dedup-subject">> => <<"message-id">> }
+```
+
+### With Multipass
+
+Dedup only runs on the first pass, allowing multipass to work:
+
+```erlang
+Stack = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => <<"dedup@1.0">>,
+        <<"2">> => ComputeDevice,
+        <<"3">> => <<"multipass@1.0">>
+    },
+    <<"passes">> => 2
+}.
+%% Dedup checks on pass 1, skips check on pass 2
+```
+
+---
+
+## Try It: Complete Workflow
+
+```erlang
+%%% File: test_dev1.erl
+-module(test_dev1).
+-include_lib("eunit/include/eunit.hrl").
+
+%% Run with: rebar3 eunit --module=test_dev1
+
+message_basics_test() ->
+    Msg = #{ <<"name">> => <<"Alice">>, <<"age">> => 30 },
+    
+    %% Get value
+    {ok, <<"Alice">>} = hb_ao:resolve(Msg, <<"name">>, #{}),
+    ?debugFmt("Get value: OK", []),
+    
+    %% List keys
+    {ok, Keys} = hb_ao:resolve(Msg, keys, #{}),
+    ?assertEqual(2, length(Keys)),
+    ?debugFmt("List keys: OK", []),
+    
+    %% Set value
+    {ok, Updated} = hb_ao:resolve(
+        Msg,
+        #{ <<"path">> => <<"set">>, <<"city">> => <<"Tokyo">> },
+        #{}
+    ),
+    ?assertEqual(<<"Tokyo">>, maps:get(<<"city">>, Updated)),
+    ?debugFmt("Set value: OK", []).
+
+stack_fold_test() ->
+    AppendA = dev_stack:generate_append_device(<<"+A">>),
+    AppendB = dev_stack:generate_append_device(<<"+B">>),
+    
+    Stack = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => AppendA,
+            <<"2">> => AppendB
+        },
+        <<"result">> => <<"START">>
+    },
+    
+    {ok, Result} = hb_ao:resolve(
+        Stack,
+        #{ <<"path">> => <<"append">>, <<"bin">> => <<"!">> },
+        #{}
+    ),
+    
+    ?assertEqual(<<"START+A!+B!">>, maps:get(<<"result">>, Result)),
+    ?debugFmt("Stack fold: ~s", [maps:get(<<"result">>, Result)]).
+
+stack_map_test() ->
+    AppendA = dev_stack:generate_append_device(<<"+A">>),
+    AppendB = dev_stack:generate_append_device(<<"+B">>),
+    
+    Stack = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => AppendA,
+            <<"2">> => AppendB
+        },
+        <<"result">> => <<"START">>
+    },
+    
+    {ok, Result} = hb_ao:resolve(
+        Stack,
+        #{ <<"path">> => <<"append">>, <<"mode">> => <<"Map">>, <<"bin">> => <<"!">> },
+        #{}
+    ),
+    
+    ?assertEqual(<<"START+A!">>, hb_ao:get(<<"1/result">>, Result, #{})),
+    ?assertEqual(<<"START+B!">>, hb_ao:get(<<"2/result">>, Result, #{})),
+    ?debugFmt("Stack map: OK", []).
+
+multipass_test() ->
+    Msg1 = #{
+        <<"device">> => <<"multipass@1.0">>,
+        <<"passes">> => 2,
+        <<"pass">> => 1
+    },
+    
+    %% Pass 1: should return {pass, _}
+    {pass, _} = hb_ao:resolve(Msg1, <<"compute">>, #{}),
+    ?debugFmt("Pass 1: triggered repass", []),
+    
+    %% Pass 2: should return {ok, _}
+    Msg2 = Msg1#{ <<"pass">> => 2 },
+    {ok, _} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+    ?debugFmt("Pass 2: complete", []).
+
+dedup_test() ->
+    Stack = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"dedup-subject">> => <<"request">>,
+        <<"device-stack">> => #{
+            <<"1">> => <<"dedup@1.0">>,
+            <<"2">> => dev_stack:generate_append_device(<<"+PROCESSED">>)
+        },
+        <<"result">> => <<"INIT">>
+    },
+    
+    Request = #{ <<"path">> => <<"append">>, <<"bin">> => <<"!">> },
+    
+    %% First call: processes
+    {ok, Msg2} = hb_ao:resolve(Stack, Request, #{}),
+    ?assertEqual(<<"INIT+PROCESSED!">>, maps:get(<<"result">>, Msg2)),
+    ?debugFmt("First call: processed", []),
+    
+    %% Second call: deduplicated (no additional append)
+    {ok, Msg3} = hb_ao:resolve(Msg2, Request, #{}),
+    ?assertEqual(<<"INIT+PROCESSED!">>, maps:get(<<"result">>, Msg3)),
+    ?debugFmt("Second call: deduplicated", []).
+
+complete_pipeline_test() ->
+    ?debugFmt("=== Complete Pipeline Test ===", []),
+    
+    %% Build a pipeline: validate → transform → store
+    Pipeline = #{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => #{
+            <<"1">> => <<"dedup@1.0">>,
+            <<"2">> => dev_stack:generate_append_device(<<"-validated">>),
+            <<"3">> => dev_stack:generate_append_device(<<"-transformed">>)
+        },
+        <<"dedup-subject">> => <<"request">>,
+        <<"result">> => <<"input">>
+    },
+    
+    {ok, Result} = hb_ao:resolve(
+        Pipeline,
+        #{ <<"path">> => <<"append">>, <<"bin">> => <<"">> },
+        #{}
+    ),
+    
+    Expected = <<"input-validated-transformed">>,
+    ?assertEqual(Expected, maps:get(<<"result">>, Result)),
+    ?debugFmt("Pipeline result: ~s", [maps:get(<<"result">>, Result)]),
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_dev1
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Validation Pipeline
+
+```erlang
+ValidationPipeline = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => SchemaValidator,
+        <<"2">> => PermissionChecker,
+        <<"3">> => RateLimiter
+    }
+}.
+%% Any device can return {error, _} to halt the pipeline
+```
+
+### Pattern 2: Parallel Processing
+
+```erlang
+ParallelAnalysis = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"sentiment">> => SentimentAnalyzer,
+        <<"entities">> => EntityExtractor,
+        <<"keywords">> => KeywordExtractor
+    }
+},
+{ok, Results} = hb_ao:resolve(
+    ParallelAnalysis,
+    #{ <<"path">> => <<"analyze">>, <<"mode">> => <<"Map">> },
+    #{}
+).
+%% Results contains: sentiment/*, entities/*, keywords/*
+```
+
+### Pattern 3: Iterative Refinement
+
+```erlang
+ConvergenceLoop = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => OptimizationStep,
+        <<"2">> => ConvergenceChecker,  % Returns {pass, _} or {ok, _}
+        <<"3">> => <<"multipass@1.0">>
+    },
+    <<"passes">> => 100,  % Max iterations
+    <<"tolerance">> => 0.001
+}.
+```
+
+### Pattern 4: Idempotent Processing
+
+```erlang
+IdempotentProcessor = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{
+        <<"1">> => <<"dedup@1.0">>,
+        <<"2">> => ExpensiveComputation,
+        <<"3">> => ResultPersister
+    },
+    <<"dedup-subject">> => <<"request">>
+}.
+%% Safe to call multiple times with same input
+```
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [dev_message](/src/dev_message) | [dev_stack](/src/dev_stack) | [dev_multipass](/src/dev_multipass) | [dev_apply](/src/dev_apply) | [dev_patch](/src/dev_patch) | [dev_dedup](/src/dev_dedup)
+
+```erlang
+%% === MESSAGE DEVICE ===
+{ok, Value} = hb_ao:resolve(Msg, <<"key">>, #{}).
+{ok, Keys} = hb_ao:resolve(Msg, keys, #{}).
+{ok, Updated} = hb_ao:resolve(Msg, #{ <<"path">> => <<"set">>, <<"k">> => <<"v">> }, #{}).
+{ok, Updated} = hb_ao:resolve(Msg, #{ <<"path">> => <<"set">>, <<"k">> => unset }, #{}).
+{ok, Updated} = hb_ao:resolve(Msg, #{ <<"path">> => <<"remove">>, <<"item">> => <<"k">> }, #{}).
+{ok, ID} = dev_message:id(Msg, #{}, #{}).
+{ok, true} = hb_ao:resolve(#{}, #{ <<"path">> => <<"verify">>, <<"body">> => Signed }, #{}).
+
+%% === STACK DEVICE ===
+Stack = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => #{ <<"1">> => D1, <<"2">> => D2 }
+}.
+{ok, Result} = hb_ao:resolve(Stack, #{ <<"path">> => <<"key">> }, #{}).  % Fold
+{ok, Result} = hb_ao:resolve(Stack, #{ <<"path">> => <<"key">>, <<"mode">> => <<"Map">> }, #{}).
+
+%% Stack responses
+{ok, Msg}    % Continue normally
+{skip, Msg}  % Skip remaining devices
+{pass, Msg}  % Re-execute from start (Fold only)
+
+%% === MULTIPASS DEVICE ===
+Msg = #{
+    <<"device">> => <<"multipass@1.0">>,
+    <<"passes">> => 3,
+    <<"pass">> => 1
+}.
+%% Returns {pass, Msg} until pass == passes, then {ok, Msg}
+
+%% === APPLY DEVICE ===
+Base = #{
+    <<"device">> => <<"apply@1.0">>,
+    <<"path-to-execute">> => <<"some/path">>
+}.
+{ok, Result} = hb_ao:resolve(Base, #{ <<"path">> => <<"path-to-execute">> }, #{}).
+
+%% Prefixes
+<<"base:data/key">>       % Read from base
+<<"request:params/id">>   % Read from request
+
+%% === PATCH DEVICE ===
+Msg = #{
+    <<"device">> => <<"patch@1.0">>,
+    <<"patch-from">> => <<"/source/path">>,
+    <<"patch-to">> => <<"/dest/path">>
+}.
+{ok, Result} = hb_ao:resolve(Msg, <<"all">>, #{}).     % Move all
+{ok, Result} = hb_ao:resolve(Msg, <<"compute">>, #{}). % Move PATCH items only
+
+%% === DEDUP DEVICE ===
+Stack = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"dedup-subject">> => <<"request">>,  % or specific key
+    <<"device-stack">> => #{
+        <<"1">> => <<"dedup@1.0">>,
+        <<"2">> => ProcessDevice
+    }
+}.
+```
+
+---
+
+## What's Next?
+
+You now understand the composition foundation:
+
+| Device | Purpose | Key Concept |
+|--------|---------|-------------|
+| [dev_message](/src/dev_message) | Data access | get/set/keys/verify |
+| [dev_stack](/src/dev_stack) | Pipelines | Fold/Map modes |
+| [dev_multipass](/src/dev_multipass) | Iteration | pass/passes control |
+| [dev_apply](/src/dev_apply) | Dynamic dispatch | base:/request: prefixes |
+| [dev_patch](/src/dev_patch) | Data movement | all/patches modes |
+| [dev_dedup](/src/dev_dedup) | Idempotency | Request deduplication |
+
+### Going Further
+
+1. **Codecs** — Encode/decode messages for wire formats ([Tutorial](/book/dev2))
+2. **Process & Scheduling** — Stateful computation units ([Tutorial](/book/dev4))
+3. **Runtimes** — Execute WASM and Lua code ([Tutorial](/book/dev6))
+4. **Full Device Reference** — All 77 devices ([Reference](/devices))
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [dev_message Reference](/src/dev_message)
+- [dev_stack Reference](/src/dev_stack)
+- [dev_multipass Reference](/src/dev_multipass)
+- [dev_apply Reference](/src/dev_apply)
+- [dev_patch Reference](/src/dev_patch)
+- [dev_dedup Reference](/src/dev_dedup)
+- [Full Device List](/devices)
+
+### Related Tutorials
+
+- [HB Core Tutorial 1: Utility Functions](/book/hb1)
+- [HB Core Tutorial 2: Configuration](/book/hb2)
+- [HB Core Tutorial 3: AO-Core Resolution](/book/hb3)
