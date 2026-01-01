@@ -1,0 +1,683 @@
+# Codecs
+
+A beginner's guide to message encoding, decoding, and cryptographic signing
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **dev_codec_httpsig** — HTTP Message Signatures (RFC 9421) for cryptographic commitments
+2. **dev_codec_structured** — Rich type preservation with `ao-types` annotations
+3. **dev_codec_json** — JSON serialization for HTTP APIs
+4. **dev_codec_flat** — Path-based flat map encoding for configuration
+5. **Sub-devices** — Specialized helpers for key extraction, format conversion, and proxying
+
+These codecs handle **wire format conversion** and **cryptographic signing** for all HyperBEAM messages.
+
+---
+
+## The Big Picture
+
+Messages need to travel over networks and be verified by recipients. Codecs handle both:
+
+```
+                    Encoding
+Internal (TABM) ─────────────────→ Wire Format (JSON/HTTP)
+       ↑                                    ↓
+       │         Signing                    │
+       │    ┌─────────────┐                 │
+       └────│  HTTPSig    │─────────────────┘
+            └─────────────┘
+                    Decoding
+```
+
+Think of codecs as **translators and notaries**:
+- **dev_codec_structured** = Type preserving translator (integers stay integers)
+- **dev_codec_json** = Web translator (everything becomes JSON)
+- **dev_codec_flat** = Config file translator (nested → flat paths)
+- **dev_codec_httpsig** = Notary (signs and verifies authenticity)
+
+Let's build each piece.
+
+---
+
+## Part 1: HTTP Message Signatures
+
+> 📖 Reference: [dev_codec_httpsig](/src/dev_codec_httpsig)
+
+`dev_codec_httpsig` implements RFC 9421 for cryptographic message signing. It's the **foundation of trust** in HyperBEAM — every signed message uses this codec.
+
+### Signature Algorithms
+
+| Algorithm | Type | Use Case |
+|-----------|------|----------|
+| `rsa-pss-sha512` | Asymmetric | Public verification (default for `signed`) |
+| `hmac-sha256` | Symmetric | Shared secret verification (default for `unsigned`) |
+
+### Signing with RSA-PSS (Asymmetric)
+
+```erlang
+%% Create a wallet (RSA-4096 key pair)
+Wallet = ar_wallet:new(),
+
+%% Sign a message
+Msg = #{<<"data">> => <<"important content">>},
+{ok, Signed} = dev_codec_httpsig:commit(
+    Msg,
+    #{<<"type">> => <<"rsa-pss-sha512">>},
+    #{priv_wallet => Wallet}
+).
+
+%% The signed message now has a commitments field
+Commitments = maps:get(<<"commitments">>, Signed).
+%% Contains signature, keyid, committed keys list
+```
+
+### Signing with HMAC (Symmetric)
+
+```erlang
+%% Generate a shared secret
+Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+
+%% Sign with HMAC
+{ok, Signed} = dev_codec_httpsig:commit(
+    Msg,
+    #{
+        <<"type">> => <<"hmac-sha256">>,
+        <<"secret">> => Secret
+    },
+    #{}
+).
+```
+
+### Verifying Signatures
+
+```erlang
+%% Verify all commitments on a message
+IsValid = hb_message:verify(Signed, all, #{}).
+%% => true | false
+
+%% Or verify via the device directly
+[CommitID] = maps:keys(maps:get(<<"commitments">>, Signed)),
+Commitment = maps:get(CommitID, maps:get(<<"commitments">>, Signed)),
+{ok, true} = dev_codec_httpsig:verify(Msg, Commitment, #{}).
+```
+
+### Signing Specific Keys Only
+
+```erlang
+%% Only commit to certain fields
+{ok, Signed} = dev_codec_httpsig:commit(
+    #{<<"a">> => <<"1">>, <<"b">> => <<"2">>, <<"c">> => <<"3">>},
+    #{
+        <<"type">> => <<"signed">>,
+        <<"committed">> => [<<"a">>, <<"c">>]  % b is not signed
+    },
+    #{priv_wallet => Wallet}
+).
+```
+
+### Commitment Structure
+
+```erlang
+%% RSA-PSS commitment
+#{
+    <<"commitment-device">> => <<"httpsig@1.0">>,
+    <<"type">> => <<"rsa-pss-sha512">>,
+    <<"keyid">> => <<"publickey:{Base64PublicKey}">>,
+    <<"committer">> => <<"{ArweaveAddress}">>,
+    <<"signature">> => <<"{Base64Signature}">>,
+    <<"committed">> => [<<"data">>, <<"timestamp">>]
+}
+
+%% HMAC commitment
+#{
+    <<"commitment-device">> => <<"httpsig@1.0">>,
+    <<"type">> => <<"hmac-sha256">>,
+    <<"keyid">> => <<"secret:{KeyID}">>,
+    <<"signature">> => <<"{HMAC}">>,
+    <<"committed">> => [<<"data">>]
+}
+```
+
+### Sub-devices
+
+HTTPSig has four specialized sub-devices:
+
+| Sub-device | Purpose |
+|------------|---------|
+| [dev_codec_httpsig_conv](/src/dev_codec_httpsig_conv) | TABM ↔ HTTP format conversion with multipart support |
+| [dev_codec_httpsig_keyid](/src/dev_codec_httpsig_keyid) | Key material extraction (publickey/secret/constant schemes) |
+| [dev_codec_httpsig_siginfo](/src/dev_codec_httpsig_siginfo) | Signature ↔ commitment conversion per RFC 9421 |
+| [dev_codec_httpsig_proxy](/src/dev_codec_httpsig_proxy) | HMAC commitment proxy for cookie/http-auth |
+
+---
+
+## Part 2: Structured Fields (Rich Types)
+
+> 📖 Reference: [dev_codec_structured](/src/dev_codec_structured)
+
+`dev_codec_structured` preserves **rich Erlang types** when encoding messages. Without it, everything becomes a binary string.
+
+### Supported Types
+
+| Erlang Type | ao-types Annotation | Example |
+|-------------|---------------------|---------|
+| `integer()` | `"integer"` | `42` |
+| `float()` | `"float"` | `3.14` |
+| `atom()` | `"atom"` | `my_module` |
+| `list()` | `"list"` | `[1, 2, 3]` |
+
+### Encoding Rich Types
+
+```erlang
+%% Message with rich types
+Msg = #{
+    <<"count">> => 42,              % integer
+    <<"price">> => 3.14,            % float
+    <<"module">> => my_handler,     % atom
+    <<"items">> => [1, 2, 3]        % list
+},
+
+%% Convert to TABM (Type-Annotated Binary Message)
+{ok, TABM} = dev_codec_structured:from(Msg, #{}, #{}).
+
+%% TABM structure:
+%% #{
+%%     <<"count">> => <<"42">>,
+%%     <<"price">> => <<"3.14">>,
+%%     <<"module">> => <<"my_handler">>,
+%%     <<"items">> => #{<<"1">> => <<"1">>, <<"2">> => <<"2">>, ...},
+%%     <<"ao-types">> => <<"count=\"integer\", price=\"float\", module=\"atom\"">>
+%% }
+```
+
+### Decoding Back to Rich Types
+
+```erlang
+%% Convert TABM back to structured
+{ok, Structured} = dev_codec_structured:to(TABM, #{}, #{}).
+
+%% Types are restored
+42 = maps:get(<<"count">>, Structured).
+my_handler = maps:get(<<"module">>, Structured).
+```
+
+### Type Annotations (`ao-types`)
+
+The `ao-types` field uses RFC 8941 Structured Fields syntax:
+
+```erlang
+%% Single type
+<<"ao-types">> => <<"count=\"integer\"">>
+
+%% Multiple types
+<<"ao-types">> => <<"count=\"integer\", module=\"atom\", items=\"list\"">>
+
+%% Decode programmatically
+Types = dev_codec_structured:decode_ao_types(TABM, #{}).
+%% => #{<<"count">> => <<"integer">>, <<"module">> => <<"atom">>}
+```
+
+### Selective Type Encoding
+
+```erlang
+%% Only encode specific types
+{ok, TABM} = dev_codec_structured:from(
+    Msg,
+    #{<<"encode-types">> => [<<"integer">>, <<"atom">>]},  % Skip floats, lists
+    #{}
+).
+```
+
+---
+
+## Part 3: JSON Codec
+
+> 📖 Reference: [dev_codec_json](/src/dev_codec_json)
+
+`dev_codec_json` serializes messages for HTTP APIs. It preserves JSON-native types (numbers, arrays) but encodes atoms with type annotations.
+
+### Encoding to JSON
+
+```erlang
+Msg = #{
+    <<"name">> => <<"Alice">>,
+    <<"age">> => 30,
+    <<"tags">> => [<<"admin">>, <<"active">>]
+},
+
+{ok, JSON} = dev_codec_json:to(Msg, #{}, #{}).
+%% => <<"{\"name\":\"Alice\",\"age\":30,\"tags\":[\"admin\",\"active\"]}">>
+```
+
+### Decoding from JSON
+
+```erlang
+JSON = <<"{\"key\":\"value\",\"count\":123}">>,
+{ok, TABM} = dev_codec_json:from(JSON, #{}, #{}).
+%% => #{<<"key">> => <<"value">>, <<"count">> => 123}
+```
+
+### Signing JSON Messages
+
+```erlang
+%% Sign with JSON codec (delegates to HTTPSig)
+{ok, Signed} = dev_codec_json:commit(
+    Msg,
+    #{<<"type">> => <<"rsa-pss-sha512">>},
+    #{priv_wallet => Wallet}
+).
+
+%% Serialize for HTTP response
+{ok, Response} = dev_codec_json:serialize(Signed, #{}, #{}).
+%% => #{
+%%     <<"content-type">> => <<"application/json">>,
+%%     <<"body">> => <<"{...}">>
+%% }
+```
+
+### Bundle Mode
+
+Load all linked items before encoding:
+
+```erlang
+{ok, JSON} = dev_codec_json:to(
+    MsgWithLinks,
+    #{<<"bundle">> => true},
+    #{}
+).
+%% All linked messages are embedded in the JSON
+```
+
+### Deserialize from Custom Path
+
+```erlang
+Base = #{
+    <<"payload">> => <<"{\"result\":\"success\"}">>
+},
+{ok, TABM} = dev_codec_json:deserialize(
+    Base,
+    #{<<"target">> => <<"payload">>},
+    #{}
+).
+%% => #{<<"result">> => <<"success">>}
+```
+
+---
+
+## Part 4: Flat Map Codec
+
+> 📖 Reference: [dev_codec_flat](/src/dev_codec_flat)
+
+`dev_codec_flat` converts nested structures to flat path-based keys. Useful for configuration files and debugging.
+
+### Flattening Nested Structures
+
+```erlang
+%% Nested message
+Nested = #{
+    <<"database">> => #{
+        <<"host">> => <<"localhost">>,
+        <<"port">> => <<"5432">>
+    },
+    <<"cache">> => #{
+        <<"enabled">> => <<"true">>
+    }
+},
+
+%% Convert to flat
+{ok, Flat} = dev_codec_flat:to(Nested, #{}, #{}).
+%% => #{
+%%     <<"database/host">> => <<"localhost">>,
+%%     <<"database/port">> => <<"5432">>,
+%%     <<"cache/enabled">> => <<"true">>
+%% }
+```
+
+### Unflattening to Nested
+
+```erlang
+%% Flat config
+Flat = #{
+    <<"server/host">> => <<"0.0.0.0">>,
+    <<"server/port">> => <<"8080">>,
+    <<"log/level">> => <<"debug">>
+},
+
+%% Convert to nested
+{ok, Nested} = dev_codec_flat:from(Flat, #{}, #{}).
+%% => #{
+%%     <<"server">> => #{
+%%         <<"host">> => <<"0.0.0.0">>,
+%%         <<"port">> => <<"8080">>
+%%     },
+%%     <<"log">> => #{
+%%         <<"level">> => <<"debug">>
+%%     }
+%% }
+```
+
+### Serialization for Config Files
+
+```erlang
+%% Serialize to text format
+{ok, Text} = dev_codec_flat:serialize(Flat, #{}).
+%% => <<"database/host: localhost\ndatabase/port: 5432\n...">>
+
+%% Deserialize from text
+{ok, Map} = dev_codec_flat:deserialize(Text).
+```
+
+---
+
+## Try It: Complete Workflow
+
+```erlang
+%%% File: test_dev2.erl
+-module(test_dev2).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_dev2
+
+httpsig_rsa_test() ->
+    Wallet = ar_wallet:new(),
+    Msg = #{<<"data">> => <<"test">>},
+    
+    %% Sign
+    {ok, Signed} = dev_codec_httpsig:commit(
+        Msg,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    ?debugFmt("RSA-PSS signed: OK", []),
+    
+    %% Verify
+    ?assert(hb_message:verify(Signed, all, #{})),
+    ?debugFmt("Verification: OK", []).
+
+httpsig_hmac_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Msg = #{<<"data">> => <<"test">>},
+    
+    {ok, Signed} = dev_codec_httpsig:commit(
+        Msg,
+        #{<<"type">> => <<"hmac-sha256">>, <<"secret">> => Secret},
+        #{}
+    ),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    ?debugFmt("HMAC signed: OK", []).
+
+structured_types_test() ->
+    Msg = #{
+        <<"count">> => 42,
+        <<"name">> => <<"test">>,
+        <<"module">> => my_handler
+    },
+    
+    %% Encode to TABM
+    {ok, TABM} = dev_codec_structured:from(Msg, #{}, #{}),
+    ?assert(is_binary(maps:get(<<"count">>, TABM))),
+    ?assert(maps:is_key(<<"ao-types">>, TABM)),
+    ?debugFmt("Structured encode: OK", []),
+    
+    %% Decode back
+    {ok, Decoded} = dev_codec_structured:to(TABM, #{}, #{}),
+    ?assertEqual(42, maps:get(<<"count">>, Decoded)),
+    ?assertEqual(my_handler, maps:get(<<"module">>, Decoded)),
+    ?debugFmt("Structured decode: OK", []).
+
+json_roundtrip_test() ->
+    Msg = #{
+        <<"name">> => <<"Alice">>,
+        <<"age">> => 30,
+        <<"items">> => [1, 2, 3]
+    },
+    
+    %% Encode to JSON
+    {ok, JSON} = dev_codec_json:to(Msg, #{}, #{}),
+    ?assert(is_binary(JSON)),
+    ?debugFmt("JSON: ~s", [JSON]),
+    
+    %% Decode back
+    {ok, Decoded} = dev_codec_json:from(JSON, #{}, #{}),
+    ?assertEqual(<<"Alice">>, maps:get(<<"name">>, Decoded)),
+    ?debugFmt("JSON roundtrip: OK", []).
+
+flat_conversion_test() ->
+    Nested = #{
+        <<"db">> => #{
+            <<"host">> => <<"localhost">>,
+            <<"port">> => <<"5432">>
+        }
+    },
+    
+    %% Flatten
+    {ok, Flat} = dev_codec_flat:to(Nested, #{}, #{}),
+    ?assertEqual(<<"localhost">>, maps:get(<<"db/host">>, Flat)),
+    ?debugFmt("Flattened: OK", []),
+    
+    %% Unflatten
+    {ok, Unflat} = dev_codec_flat:from(Flat, #{}, #{}),
+    ?assertEqual(<<"localhost">>, hb_ao:get(<<"db/host">>, Unflat, #{})),
+    ?debugFmt("Unflattened: OK", []).
+
+complete_workflow_test() ->
+    ?debugFmt("=== Complete Codec Workflow ===", []),
+    
+    %% 1. Create message with rich types
+    Msg = #{
+        <<"type">> => <<"transfer">>,
+        <<"amount">> => 1000,
+        <<"recipient">> => <<"alice@example.com">>
+    },
+    ?debugFmt("1. Created message with integer amount", []),
+    
+    %% 2. Convert to structured (preserve types)
+    {ok, Structured} = dev_codec_structured:from(Msg, #{}, #{}),
+    ?assert(maps:is_key(<<"ao-types">>, Structured)),
+    ?debugFmt("2. Converted to structured format", []),
+    
+    %% 3. Sign the message
+    Wallet = ar_wallet:new(),
+    {ok, Signed} = dev_codec_httpsig:commit(
+        Structured,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    ?debugFmt("3. Signed with RSA-PSS", []),
+    
+    %% 4. Serialize to JSON for HTTP
+    {ok, Response} = dev_codec_json:serialize(Signed, #{}, #{}),
+    ?assertEqual(<<"application/json">>, maps:get(<<"content-type">>, Response)),
+    ?debugFmt("4. Serialized for HTTP", []),
+    
+    %% 5. Verify on receiving end
+    ?assert(hb_message:verify(Signed, all, #{})),
+    ?debugFmt("5. Verified signature", []),
+    
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_dev2
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Sign and Serialize for HTTP
+
+```erlang
+%% Sign → Serialize → Send
+sign_and_send(Msg, Wallet) ->
+    {ok, Signed} = dev_codec_httpsig:commit(
+        Msg,
+        #{<<"type">> => <<"rsa-pss-sha512">>},
+        #{priv_wallet => Wallet}
+    ),
+    {ok, Response} = dev_codec_json:serialize(Signed, #{}, #{}),
+    send_http_response(Response).
+```
+
+### Pattern 2: Receive and Verify
+
+```erlang
+%% Receive → Deserialize → Verify
+receive_and_verify(Request) ->
+    {ok, Msg} = dev_codec_json:deserialize(Request, #{}, #{}),
+    case hb_message:verify(Msg, all, #{}) of
+        true -> {ok, Msg};
+        false -> {error, invalid_signature}
+    end.
+```
+
+### Pattern 3: Config File Processing
+
+```erlang
+%% Load flat config → Unflatten → Use
+load_config(Path) ->
+    {ok, Text} = file:read_file(Path),
+    {ok, Flat} = dev_codec_flat:deserialize(Text),
+    {ok, Config} = dev_codec_flat:from(Flat, #{}, #{}),
+    Config.
+```
+
+### Pattern 4: Type-Safe Message Passing
+
+```erlang
+%% Preserve types across serialization
+send_typed_message(Msg) ->
+    %% Encode with type annotations
+    {ok, TABM} = dev_codec_structured:from(Msg, #{}, #{}),
+    {ok, JSON} = dev_codec_json:to(TABM, #{}, #{}),
+    transmit(JSON).
+
+receive_typed_message(JSON) ->
+    {ok, TABM} = dev_codec_json:from(JSON, #{}, #{}),
+    {ok, Msg} = dev_codec_structured:to(TABM, #{}, #{}),
+    %% Types are restored: integers, atoms, lists
+    Msg.
+```
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [dev_codec_httpsig](/src/dev_codec_httpsig) | [dev_codec_structured](/src/dev_codec_structured) | [dev_codec_json](/src/dev_codec_json) | [dev_codec_flat](/src/dev_codec_flat)
+
+```erlang
+%% === HTTP MESSAGE SIGNATURES ===
+%% RSA-PSS signing
+{ok, Signed} = dev_codec_httpsig:commit(Msg, #{<<"type">> => <<"rsa-pss-sha512">>}, #{priv_wallet => Wallet}).
+
+%% HMAC signing
+{ok, Signed} = dev_codec_httpsig:commit(Msg, #{<<"type">> => <<"hmac-sha256">>, <<"secret">> => Secret}, #{}).
+
+%% Verify
+IsValid = hb_message:verify(Signed, all, #{}).
+
+%% Sign specific keys
+{ok, Signed} = dev_codec_httpsig:commit(Msg, #{<<"committed">> => [<<"a">>, <<"b">>]}, Opts).
+
+%% === STRUCTURED FIELDS ===
+%% Encode rich types to TABM
+{ok, TABM} = dev_codec_structured:from(#{<<"count">> => 42, <<"mod">> => my_mod}, #{}, #{}).
+
+%% Decode TABM to rich types
+{ok, Structured} = dev_codec_structured:to(TABM, #{}, #{}).
+
+%% Read type annotations
+Types = dev_codec_structured:decode_ao_types(TABM, #{}).
+
+%% === JSON CODEC ===
+%% Encode to JSON
+{ok, JSON} = dev_codec_json:to(Msg, #{}, #{}).
+
+%% Decode from JSON
+{ok, TABM} = dev_codec_json:from(JSON, #{}, #{}).
+
+%% Serialize for HTTP response
+{ok, #{<<"content-type">> := CT, <<"body">> := Body}} = dev_codec_json:serialize(Msg, #{}, #{}).
+
+%% Deserialize from request
+{ok, TABM} = dev_codec_json:deserialize(#{<<"body">> => JSON}, #{}, #{}).
+
+%% Bundle mode (embed linked items)
+{ok, JSON} = dev_codec_json:to(Msg, #{<<"bundle">> => true}, #{}).
+
+%% === FLAT CODEC ===
+%% Flatten nested → paths
+{ok, Flat} = dev_codec_flat:to(#{<<"a">> => #{<<"b">> => <<"v">>}}, #{}, #{}).
+%% => #{<<"a/b">> => <<"v">>}
+
+%% Unflatten paths → nested
+{ok, Nested} = dev_codec_flat:from(#{<<"a/b">> => <<"v">>}, #{}, #{}).
+%% => #{<<"a">> => #{<<"b">> => <<"v">>}}
+
+%% Serialize to text
+{ok, Text} = dev_codec_flat:serialize(Flat, #{}).
+
+%% Deserialize from text
+{ok, Map} = dev_codec_flat:deserialize(Text).
+```
+
+---
+
+## What's Next?
+
+You now understand message encoding and signing:
+
+| Codec | Purpose | Key Feature |
+|-------|---------|-------------|
+| [dev_codec_httpsig](/src/dev_codec_httpsig) | Cryptographic signing | RSA-PSS / HMAC-SHA256 |
+| [dev_codec_structured](/src/dev_codec_structured) | Type preservation | `ao-types` annotations |
+| [dev_codec_json](/src/dev_codec_json) | HTTP APIs | JSON serialization |
+| [dev_codec_flat](/src/dev_codec_flat) | Configuration | Path-based keys |
+
+### Sub-devices
+
+| Sub-device | Purpose |
+|------------|---------|
+| [dev_codec_httpsig_conv](/src/dev_codec_httpsig_conv) | Format conversion |
+| [dev_codec_httpsig_keyid](/src/dev_codec_httpsig_keyid) | Key extraction |
+| [dev_codec_httpsig_siginfo](/src/dev_codec_httpsig_siginfo) | Signature metadata |
+| [dev_codec_httpsig_proxy](/src/dev_codec_httpsig_proxy) | HMAC proxying |
+
+### Going Further
+
+1. **Infrastructure** — Node and network management ([Tutorial](/book/dev3))
+2. **Process & Scheduling** — Stateful computation units ([Tutorial](/book/dev4))
+3. **Authentication** — Secrets, wallets, and signing policies ([Tutorial](/book/dev8))
+4. **Full Device Reference** — All 77 devices ([Reference](/devices))
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [dev_codec_httpsig Reference](/src/dev_codec_httpsig)
+- [dev_codec_structured Reference](/src/dev_codec_structured)
+- [dev_codec_json Reference](/src/dev_codec_json)
+- [dev_codec_flat Reference](/src/dev_codec_flat)
+- [Full Device List](/devices)
+
+### Standards
+
+- [RFC 9421](https://www.rfc-editor.org/rfc/rfc9421.html) — HTTP Message Signatures
+- [RFC 8941](https://www.rfc-editor.org/rfc/rfc8941.html) — Structured Field Values
+- [RFC 8259](https://www.rfc-editor.org/rfc/rfc8259.html) — JSON Data Interchange Format
+
+### Related Tutorials
+
+- [HB Core Tutorial 1: Utility Functions](/book/hb1)
+- [Messages & Composition](/book/dev1)
+- [Authentication](/book/dev8)
