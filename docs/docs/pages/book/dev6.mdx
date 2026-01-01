@@ -1,0 +1,802 @@
+# Runtimes
+
+A beginner's guide to code execution in HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **dev_wasm** — Execute WebAssembly with Memory-64 support
+2. **dev_lua** — Run Lua scripts in sandboxed VMs
+3. **dev_wasi** — Virtual filesystem for WASM programs
+4. **dev_cu** — Delegate computation to external Compute Units
+
+These devices form the **execution layer** that runs code in HyperBEAM.
+
+---
+
+## The Big Picture
+
+HyperBEAM supports multiple code execution environments:
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │              Runtime Layer                  │
+                    │                                             │
+   Code ──────────→ │   ┌─────────┐      ┌─────────────┐         │
+   (WASM/Lua)       │   │  Init   │ ──→  │   Compute   │ ──→ Results
+                    │   └────┬────┘      └──────┬──────┘         │
+                    │        │                  │                 │
+                    │   Load Image         Execute Code           │
+                    │   Setup State        Handle Imports         │
+                    │        │                  │                 │
+                    │        ▼                  ▼                 │
+                    │   ┌─────────┐      ┌─────────────┐         │
+                    │   │  WASI   │      │  Snapshot   │         │
+                    │   │   VFS   │      │   State     │         │
+                    │   └─────────┘      └─────────────┘         │
+                    │                                             │
+                    └─────────────────────────────────────────────┘
+```
+
+Think of it like a **multi-language IDE**:
+- **dev_wasm** = The WASM runtime (high-performance compiled code)
+- **dev_lua** = The Lua interpreter (scripting and rapid development)
+- **dev_wasi** = The file system (stdin/stdout/files)
+- **dev_cu** = Remote execution (delegate heavy computation)
+
+Let's explore each runtime.
+
+---
+
+## Part 1: WebAssembly Runtime
+
+> 📖 Reference: [dev_wasm](/src/dev_wasm)
+
+`dev_wasm` executes WebAssembly modules using the **Memory-64 preview standard** via BEAMR (Erlang wrapper for WAMR).
+
+### Loading a WASM Image
+
+```erlang
+%% Cache and load a WASM image
+Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+
+%% Initialize the WASM instance
+{ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+
+%% Check instance was created
+Priv = hb_private:from_message(Msg1),
+{ok, Instance} = hb_ao:resolve(Priv, <<"instance">>, #{}).
+%% Instance is a PID of the WASM executor
+```
+
+### Executing Functions
+
+```erlang
+%% Set function and parameters
+Msg2 = Msg1#{
+    <<"function">> => <<"fac">>,      %% Function name
+    <<"parameters">> => [5.0]          %% Arguments
+},
+
+%% Compute
+{ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+
+%% Get output
+{ok, [120.0]} = hb_ao:resolve(Result, <<"results/output">>, #{}).
+%% 5! = 120
+```
+
+### With Standard Library
+
+WASM modules can import functions from standard libraries:
+
+```erlang
+Msg = #{
+    <<"device">> => <<"wasm-64@1.0">>,
+    <<"image">> => ImageID,
+    %% Configure stdlib devices
+    <<"stdlib/math">> => #{<<"device">> => <<"math@1.0">>},
+    <<"stdlib/io">> => #{<<"device">> => <<"wasi@1.0">>}
+}.
+```
+
+### State Snapshots
+
+Save and restore WASM memory state:
+
+```erlang
+%% After computation, take snapshot
+{ok, Snapshot} = hb_ao:resolve(Msg3, <<"snapshot">>, #{}),
+%% Snapshot contains complete WASM memory state
+
+%% Later, restore from snapshot
+RestoredMsg = OriginalMsg#{<<"snapshot">> => Snapshot},
+{ok, Normalized} = hb_ao:resolve(RestoredMsg, <<"normalize">>, #{}).
+```
+
+### With dev_stack Integration
+
+```erlang
+StackMsg = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => [<<"wasi@1.0">>, <<"wasm-64@1.0">>],
+    <<"stack-keys">> => [<<"init">>, <<"compute">>],
+    <<"input-prefix">> => <<"process">>,
+    <<"output-prefix">> => <<"wasm">>,
+    <<"process">> => #{<<"image">> => ImageID}
+},
+{ok, InitMsg} = hb_ao:resolve(StackMsg, <<"init">>, #{}),
+{ok, ComputeMsg} = hb_ao:resolve(InitMsg, <<"compute">>, #{}).
+```
+
+### WASM Device Lifecycle
+
+| Phase | Function | Description |
+|-------|----------|-------------|
+| `init` | Initialize | Load image, create instance |
+| `compute` | Execute | Run function with params |
+| `snapshot` | Serialize | Save memory state |
+| `normalize` | Restore | Load from snapshot |
+| `terminate` | Cleanup | Release resources |
+
+---
+
+## Part 2: Lua Runtime
+
+> 📖 Reference: [dev_lua](/src/dev_lua)
+
+`dev_lua` executes Lua 5.3 scripts using **Luerl** (Lua in Erlang), with built-in sandboxing and AO-Core integration.
+
+### Creating a Lua Process
+
+```erlang
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => #{
+        <<"content-type">> => <<"application/lua">>,
+        <<"body">> => <<"
+            function add(a, b)
+                return a + b
+            end
+            
+            function greet(name)
+                return 'Hello, ' .. name
+            end
+        ">>
+    }
+}.
+```
+
+### Initializing and Executing
+
+```erlang
+%% Initialize
+{ok, Initialized} = dev_lua:init(Process, #{}, #{}),
+
+%% Call a function
+{ok, Result} = hb_ao:resolve(
+    Initialized,
+    #{
+        <<"path">> => <<"add">>,
+        <<"parameters">> => [5, 3]
+    },
+    #{}
+).
+%% Result: 8
+```
+
+### Multiple Modules
+
+```erlang
+Process = #{
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => [
+        #{<<"body">> => <<"function util_a() return 1 end">>},
+        #{<<"body">> => <<"function util_b() return util_a() + 1 end">>},
+        #{<<"body">> => <<"function main() return util_b() * 2 end">>}
+    ]
+}.
+%% Modules loaded in order, later can reference earlier
+```
+
+### Sandboxing
+
+Lua scripts are sandboxed by default for security:
+
+```erlang
+%% Default sandbox (blocks dangerous operations)
+Process = #{
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => Module,
+    <<"sandbox">> => true
+}.
+
+%% Custom sandbox
+Process = #{
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => Module,
+    <<"sandbox">> => #{
+        ['_G', os, execute] => <<"blocked">>,
+        ['_G', io] => <<"blocked">>
+    }
+}.
+```
+
+**Default Blocked Operations:**
+- `io` — File I/O operations
+- `os.execute`, `os.exit` — System commands
+- `require`, `loadfile`, `dofile` — Module loading
+- `load`, `loadstring` — Dynamic code loading
+
+### AO-Core Library
+
+Lua scripts have access to `ao` library for HyperBEAM integration:
+
+```lua
+-- Access message data
+local value = ao.get("key", base)
+
+-- Update message
+ao.set(base, "key", "value")
+ao.set(base, { key1 = "v1", key2 = "v2" })
+
+-- Resolve another device
+local result = ao.resolve(message)
+local result = ao.resolve(base, "path")
+
+-- Log events
+ao.event("something happened")
+ao.event("group", "event details")
+```
+
+### Snapshots and State
+
+```erlang
+%% Take snapshot
+{ok, Snapshot} = dev_lua:snapshot(Process, #{}, #{}),
+
+%% Restore from snapshot
+Process2 = Process#{<<"snapshot">> => Snapshot},
+{ok, Restored} = dev_lua:normalize(Process2, #{}, #{}).
+```
+
+### Data Conversion
+
+```erlang
+%% Erlang to Lua
+LuaTerm = dev_lua:encode(#{<<"key">> => <<"value">>}, #{}),
+
+%% Lua to Erlang
+ErlTerm = dev_lua:decode(LuaTerm, #{}).
+```
+
+---
+
+## Part 3: WASI Virtual Filesystem
+
+> 📖 Reference: [dev_wasi](/src/dev_wasi)
+
+`dev_wasi` provides a **virtual filesystem** for WASM modules implementing the WASI-preview-1 standard.
+
+### How WASI Works
+
+```
+WASM Program
+    │
+    ├── fd_write(1, ...) ──→ /dev/stdout
+    ├── fd_read(0, ...)  ──→ /dev/stdin
+    └── path_open(...)   ──→ /custom/file
+                              │
+                              ▼
+                         Virtual Filesystem
+                         (In-memory map)
+```
+
+### Initializing WASI
+
+```erlang
+{ok, WasiMsg} = dev_wasi:init(#{}, #{}, #{}),
+
+%% Initial VFS structure
+VFS = hb_ao:get(<<"vfs">>, WasiMsg, #{}).
+%% => #{
+%%     <<"dev">> => #{
+%%         <<"stdin">> => <<>>,
+%%         <<"stdout">> => <<>>,
+%%         <<"stderr">> => <<>>
+%%     }
+%% }
+
+%% File descriptors
+FDs = hb_ao:get(<<"file-descriptors">>, WasiMsg, #{}).
+%% => #{
+%%     <<"0">> => #{<<"filename">> => <<"/dev/stdin">>, <<"offset">> => 0},
+%%     <<"1">> => #{<<"filename">> => <<"/dev/stdout">>, <<"offset">> => 0},
+%%     <<"2">> => #{<<"filename">> => <<"/dev/stderr">>, <<"offset">> => 0}
+%% }
+```
+
+### WASM + WASI Stack
+
+```erlang
+%% Create WASI-enabled WASM stack
+Msg = #{
+    <<"device">> => <<"stack@1.0">>,
+    <<"device-stack">> => [<<"wasi@1.0">>, <<"wasm-64@1.0">>],
+    <<"output-prefixes">> => [<<"wasm">>, <<"wasm">>],
+    <<"stack-keys">> => [<<"init">>, <<"compute">>],
+    <<"function">> => <<"main">>,
+    <<"params">> => [],
+    <<"image">> => ImageID
+},
+{ok, InitMsg} = hb_ao:resolve(Msg, <<"init">>, #{}),
+{ok, Result} = hb_ao:resolve(InitMsg, <<"compute">>, #{}).
+```
+
+### Reading Output
+
+```erlang
+%% Get stdout after execution
+Stdout = dev_wasi:stdout(Result).
+%% Or directly:
+Stdout = hb_ao:get(<<"vfs/dev/stdout">>, Result, #{}).
+```
+
+### WASI Functions
+
+| Function | Description |
+|----------|-------------|
+| `path_open` | Open a file, create FD |
+| `fd_read` | Read from file descriptor |
+| `fd_write` | Write to file descriptor |
+| `clock_time_get` | Get current time |
+
+### AOS Integration
+
+```erlang
+%% Execute AOS WASM module
+Init = generate_wasi_stack("aos-2-pure-xs.wasm", <<"handle">>, []),
+Msg = <<"{\"Action\":\"Eval\",\"Data\":\"return 1 + 1\"}\0">>,
+Env = <<"{\"Process\":{\"Id\":\"AOS\"}}\0">>,
+
+Instance = hb_private:get(<<"wasm/instance">>, Init, #{}),
+{ok, Ptr1} = hb_beamr_io:write_string(Instance, Msg),
+{ok, Ptr2} = hb_beamr_io:write_string(Instance, Env),
+
+Ready = Init#{<<"parameters">> => [Ptr1, Ptr2]},
+{ok, StateRes} = hb_ao:resolve(Ready, <<"compute">>, #{}).
+```
+
+---
+
+## Part 4: Compute Unit Device
+
+> 📖 Reference: [dev_cu](/src/dev_cu)
+
+`dev_cu` delegates computation to **external Compute Units** for distributed processing.
+
+### Push Execution
+
+```erlang
+%% Execute via external CU
+Assignment = #{
+    <<"process">> => ProcessID,
+    <<"slot">> => Slot,
+    <<"message">> => Message
+},
+State = #{
+    assignment => Assignment,
+    logger => Logger
+},
+{ok, StateWithResults} = dev_cu:push(Message, State),
+Results = maps:get(results, StateWithResults).
+```
+
+### Execute Modes
+
+**Full Assignment Mode:**
+```erlang
+CarrierMsg = #tx{
+    data = #{
+        <<"body">> => Message,
+        <<"assignment">> => Assignment
+    }
+},
+{ok, ResultState} = dev_cu:execute(CarrierMsg, #{}).
+```
+
+**Reference Mode:**
+```erlang
+CarrierMsg = #tx{
+    tags = [
+        {<<"process">>, ProcessID},
+        {<<"slot">>, Slot}
+    ]
+},
+{ok, ResultState} = dev_cu:execute(CarrierMsg, #{}).
+```
+
+### Selective Commitment
+
+Request only specific message results:
+
+```erlang
+CarrierMsg = #tx{
+    tags = [
+        {<<"process">>, ProcessID},
+        {<<"slot">>, Slot},
+        {<<"commit-to">>, TargetMessageID}
+    ]
+},
+{ok, ResultState} = dev_cu:execute(CarrierMsg, #{}),
+Commitment = maps:get(results, ResultState).
+%% Returns signed commitment for specific message only
+```
+
+---
+
+## Try It: Complete Runtime Examples
+
+```erlang
+%%% File: test_dev6.erl
+-module(test_dev6).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_dev6
+
+wasm_basic_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
+    
+    %% Load WASM image
+    Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+    
+    %% Initialize
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    
+    %% Check instance exists
+    Priv = hb_private:from_message(Msg1),
+    {ok, Instance} = hb_ao:resolve(Priv, <<"instance">>, #{}),
+    ?assert(is_pid(Instance)),
+    ?debugFmt("WASM init: OK (instance=~p)", [Instance]).
+
+wasm_factorial_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
+    
+    Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    
+    %% Calculate 5!
+    Msg2 = Msg1#{
+        <<"function">> => <<"fac">>,
+        <<"parameters">> => [5.0]
+    },
+    {ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+    {ok, [120.0]} = hb_ao:resolve(Result, <<"results/output">>, #{}),
+    ?debugFmt("WASM factorial: 5! = 120", []).
+
+lua_basic_test() ->
+    %% Create simple Lua process
+    Process = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"
+                function add(a, b)
+                    return a + b
+                end
+            ">>
+        }
+    },
+    
+    {ok, Initialized} = dev_lua:init(Process, #{}, #{}),
+    ?assert(is_map(Initialized)),
+    ?debugFmt("Lua init: OK", []).
+
+lua_functions_test() ->
+    Process = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"
+                function test1() return 1 end
+                function test2() return 2 end
+                function test3() return 3 end
+            ">>
+        }
+    },
+    
+    {ok, Initialized} = dev_lua:init(Process, #{}, #{}),
+    {ok, Functions} = dev_lua:functions(Initialized, #{}, #{}),
+    
+    ?assert(lists:member(<<"test1">>, Functions)),
+    ?assert(lists:member(<<"test2">>, Functions)),
+    ?assert(lists:member(<<"test3">>, Functions)),
+    ?debugFmt("Lua functions: ~p", [Functions]).
+
+lua_encode_decode_test() ->
+    Term = #{<<"key">> => <<"value">>, <<"num">> => 42},
+    Encoded = dev_lua:encode(Term, #{}),
+    Decoded = dev_lua:decode(Encoded, #{}),
+    ?assertEqual(Term, Decoded),
+    ?debugFmt("Lua encode/decode: OK", []).
+
+wasi_init_test() ->
+    {ok, Msg} = dev_wasi:init(#{}, #{}, #{}),
+    
+    %% Check VFS
+    VFS = hb_ao:get(<<"vfs">>, Msg, #{}),
+    ?assert(maps:is_key(<<"dev">>, VFS)),
+    
+    %% Check file descriptors
+    FDs = hb_ao:get(<<"file-descriptors">>, Msg, #{}),
+    ?assert(maps:is_key(<<"0">>, FDs)),
+    ?assert(maps:is_key(<<"1">>, FDs)),
+    ?assert(maps:is_key(<<"2">>, FDs)),
+    
+    ?debugFmt("WASI init: VFS and FDs created", []).
+
+wasi_stdout_test() ->
+    Msg = #{
+        <<"vfs">> => #{
+            <<"dev">> => #{
+                <<"stdout">> => <<"Hello, World!">>
+            }
+        }
+    },
+    ?assertEqual(<<"Hello, World!">>, dev_wasi:stdout(Msg)),
+    ?debugFmt("WASI stdout: OK", []).
+
+cu_exports_test() ->
+    %% Verify CU module exports
+    code:ensure_loaded(dev_cu),
+    ?assert(erlang:function_exported(dev_cu, push, 2)),
+    ?assert(erlang:function_exported(dev_cu, execute, 2)),
+    ?debugFmt("CU exports: OK", []).
+
+complete_wasm_workflow_test() ->
+    ?debugFmt("=== Complete WASM Workflow ===", []),
+    application:ensure_all_started(hb),
+    hb:init(),
+    
+    %% 1. Load image
+    Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
+    ?debugFmt("1. Loaded WASM image", []),
+    
+    %% 2. Initialize
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    ?debugFmt("2. Initialized WASM instance", []),
+    
+    %% 3. Compute factorial
+    Msg2 = Msg1#{<<"function">> => <<"fac">>, <<"parameters">> => [6.0]},
+    {ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+    {ok, [720.0]} = hb_ao:resolve(Result, <<"results/output">>, #{}),
+    ?debugFmt("3. Computed 6! = 720", []),
+    
+    %% 4. Snapshot
+    {ok, Snapshot} = hb_ao:resolve(Result, <<"snapshot">>, #{}),
+    ?assert(maps:is_key(<<"body">>, Snapshot)),
+    ?debugFmt("4. Created snapshot", []),
+    
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_dev6
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: WASM with WASI
+
+```erlang
+%% Full WASI-enabled WASM execution
+generate_wasi_stack(WasmFile, Function, Params) ->
+    Msg0 = dev_wasm:cache_wasm_image(WasmFile),
+    Msg1 = Msg0#{
+        <<"device">> => <<"stack@1.0">>,
+        <<"device-stack">> => [<<"wasi@1.0">>, <<"wasm-64@1.0">>],
+        <<"stack-keys">> => [<<"init">>, <<"compute">>],
+        <<"function">> => Function,
+        <<"params">> => Params
+    },
+    {ok, Msg2} = hb_ao:resolve(Msg1, <<"init">>, #{}),
+    {ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+    Result.
+
+%% Get program output
+Result = generate_wasi_stack("program.wasm", <<"main">>, []),
+Output = dev_wasi:stdout(Result).
+```
+
+### Pattern 2: Lua AOS Process
+
+```erlang
+%% Create AOS-compatible Lua process
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"scheduler-device">> => <<"scheduler@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => #{
+        <<"body">> => <<"
+            Handlers = Handlers or {}
+            
+            function Handlers.add(name, match, handle)
+                table.insert(Handlers, {name=name, match=match, handle=handle})
+            end
+            
+            Handlers.add('Eval',
+                function(m) return m.Action == 'Eval' end,
+                function(m)
+                    local fn = load('return ' .. m.Data)
+                    return fn()
+                end
+            )
+        ">>
+    }
+}.
+```
+
+### Pattern 3: Stateful Computation
+
+```erlang
+%% Execute, snapshot, restore
+execute_with_checkpoint(Process, Code) ->
+    %% Initialize
+    {ok, Init} = dev_lua:init(Process, #{}, #{}),
+    
+    %% Execute code
+    {ok, Executed} = hb_ao:resolve(Init, #{
+        <<"path">> => <<"eval">>,
+        <<"code">> => Code
+    }, #{}),
+    
+    %% Checkpoint
+    {ok, Snapshot} = dev_lua:snapshot(Executed, #{}, #{}),
+    
+    %% Can restore later
+    {ok, Restored} = dev_lua:normalize(
+        Process#{<<"snapshot">> => Snapshot},
+        #{}, #{}
+    ),
+    
+    {Executed, Snapshot}.
+```
+
+### Pattern 4: Import Resolution
+
+```erlang
+%% WASM with custom stdlib
+Process = #{
+    <<"device">> => <<"wasm-64@1.0">>,
+    <<"image">> => ImageID,
+    %% Custom import handlers
+    <<"stdlib/my_lib">> => #{
+        <<"device">> => <<"custom-device@1.0">>
+    },
+    <<"stdlib/wasi_snapshot_preview1">> => #{
+        <<"device">> => <<"wasi@1.0">>
+    }
+}.
+```
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [dev_wasm](/src/dev_wasm) | [dev_lua](/src/dev_lua) | [dev_wasi](/src/dev_wasi) | [dev_cu](/src/dev_cu)
+
+```erlang
+%% === WASM DEVICE ===
+%% Load image
+Msg = dev_wasm:cache_wasm_image("file.wasm").
+
+%% Initialize
+{ok, Init} = hb_ao:resolve(Msg, <<"init">>, #{}).
+
+%% Execute
+Exec = Init#{<<"function">> => <<"name">>, <<"parameters">> => [args]},
+{ok, Result} = hb_ao:resolve(Exec, <<"compute">>, #{}).
+
+%% Get output
+{ok, Output} = hb_ao:resolve(Result, <<"results/output">>, #{}).
+
+%% Snapshot/restore
+{ok, Snap} = hb_ao:resolve(Result, <<"snapshot">>, #{}),
+{ok, Restored} = hb_ao:resolve(Msg#{<<"snapshot">> => Snap}, <<"normalize">>, #{}).
+
+%% Get instance PID
+Instance = dev_wasm:instance(Msg, #{}, #{}).
+
+%% === LUA DEVICE ===
+%% Create process
+Process = #{
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => #{<<"body">> => <<"function test() return 1 end">>}
+}.
+
+%% Initialize
+{ok, Init} = dev_lua:init(Process, #{}, #{}).
+
+%% List functions
+{ok, Funcs} = dev_lua:functions(Init, #{}, #{}).
+
+%% Snapshot/restore
+{ok, Snap} = dev_lua:snapshot(Init, #{}, #{}),
+{ok, Restored} = dev_lua:normalize(Process#{<<"snapshot">> => Snap}, #{}, #{}).
+
+%% Encode/decode
+Lua = dev_lua:encode(Erlang, #{}),
+Erlang = dev_lua:decode(Lua, #{}).
+
+%% === WASI DEVICE ===
+%% Initialize
+{ok, Wasi} = dev_wasi:init(#{}, #{}, #{}).
+
+%% Get stdout
+Output = dev_wasi:stdout(Result).
+Output = hb_ao:get(<<"vfs/dev/stdout">>, Result, #{}).
+
+%% WASI functions
+path_open, fd_read, fd_write, clock_time_get
+
+%% === CU DEVICE ===
+%% Push to external CU
+State = #{assignment => Assignment, logger => Logger},
+{ok, Results} = dev_cu:push(Message, State).
+
+%% Execute carrier
+{ok, ResultState} = dev_cu:execute(CarrierMsg, #{}).
+```
+
+---
+
+## What's Next?
+
+You now understand the execution layer:
+
+| Device | Purpose | Language |
+|--------|---------|----------|
+| [dev_wasm](/src/dev_wasm) | WebAssembly execution | WASM (Memory-64) |
+| [dev_lua](/src/dev_lua) | Lua scripting | Lua 5.3 |
+| [dev_wasi](/src/dev_wasi) | Virtual filesystem | WASI-preview-1 |
+| [dev_cu](/src/dev_cu) | Remote compute | Delegation |
+
+### Helper Devices
+
+| Device | Purpose |
+|--------|---------|
+| [dev_lua_lib](/src/dev_lua_lib) | AO library for Lua |
+
+### Going Further
+
+1. **Payment** — Metering and economics ([Tutorial](/book/dev7))
+2. **Authentication** — Identity and signatures ([Tutorial](/book/dev8))
+3. **Arweave** — Permanent storage ([Tutorial](/book/dev9))
+4. **Full Device Reference** — All 77 devices ([Reference](/devices))
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [dev_wasm Reference](/src/dev_wasm)
+- [dev_lua Reference](/src/dev_lua)
+- [dev_wasi Reference](/src/dev_wasi)
+- [dev_cu Reference](/src/dev_cu)
+- [Full Device List](/devices)
+
+### Related Tutorials
+
+- [Process & Scheduling](/book/dev4)
+- [Storage & Naming](/book/dev5)
+- [Payment](/book/dev7)

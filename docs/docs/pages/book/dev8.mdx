@@ -1,0 +1,855 @@
+# Authentication
+
+A beginner's guide to identity and signatures in HyperBEAM
+
+---
+
+## What You'll Learn
+
+By the end of this tutorial, you'll understand:
+
+1. **dev_auth_hook** — Automatic request signing with node-hosted wallets
+2. **dev_codec_http_auth** — HTTP Basic authentication with PBKDF2
+3. **dev_codec_cookie_auth** — Cookie-based HMAC authentication
+4. **dev_codec_cookie** — Cookie management and storage
+5. **dev_secret** — Secret key management device
+
+These devices form the **authentication layer** for identity and signatures.
+
+---
+
+## The Big Picture
+
+HyperBEAM's authentication system provides multiple ways to sign requests:
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │           Authentication Layer              │
+                    │                                             │
+   Request ───────→ │   ┌─────────────┐    ┌─────────────────┐   │
+                    │   │ Auth Hook   │ ─→ │ Secret Provider │   │
+                    │   └──────┬──────┘    └────────┬────────┘   │
+                    │          │                    │             │
+                    │          ▼                    ▼             │
+                    │   ┌─────────────┐    ┌─────────────────┐   │
+                    │   │  Generate   │ ─→ │   Wallet Gen    │   │
+                    │   │   Secret    │    │  (Deterministic)│   │
+                    │   └──────┬──────┘    └────────┬────────┘   │
+                    │          │                    │             │
+                    │          ▼                    ▼             │
+   Signed Req ←──── │   ┌─────────────┐    ┌─────────────────┐   │
+                    │   │    Sign     │ ─→ │    Finalize     │   │
+                    │   │   Request   │    │   (Set Cookie)  │   │
+                    │   └─────────────┘    └─────────────────┘   │
+                    │                                             │
+                    └─────────────────────────────────────────────┘
+```
+
+Think of it like a **multi-factor authentication system**:
+- **dev_auth_hook** = Login gateway (coordinates authentication)
+- **dev_codec_http_auth** = Username/password (HTTP Basic)
+- **dev_codec_cookie_auth** = Session token (cookie-based)
+- **dev_secret** = Key vault (manages secrets)
+
+Let's explore each component.
+
+---
+
+## Part 1: Authentication Hook
+
+> 📖 Reference: [dev_auth_hook](/src/dev_auth_hook)
+
+`dev_auth_hook` automatically signs incoming requests using **node-hosted wallets**. It's designed for trusted environments like TEEs or personal nodes.
+
+### How the Auth Hook Works
+
+```
+1. Request arrives
+         │
+         ▼
+2. Check activation conditions (when)
+         │
+         ├─ Not relevant → Return unchanged
+         │
+         ▼
+3. Call secret provider (generate)
+         │
+         ▼
+4. Generate wallet from secret
+         │
+         ▼
+5. Sign request and messages
+         │
+         ▼
+6. Call secret provider (finalize)
+         │
+         ▼
+7. Return signed request
+```
+
+### Configuring the Auth Hook
+
+```erlang
+%% Basic cookie-based authentication
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new(),
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"cookie@1.0">>
+            }
+        }
+    }
+}).
+```
+
+### With HTTP Basic Auth
+
+```erlang
+%% HTTP Basic authentication (triggers browser login prompt)
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new(),
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"http-auth@1.0">>,
+                <<"access-control">> => #{
+                    <<"device">> => <<"http-auth@1.0">>
+                }
+            }
+        }
+    }
+}).
+```
+
+### Activation Conditions
+
+Control when the hook activates:
+
+```erlang
+#{
+    <<"when">> => #{
+        %% Activate for uncommitted requests only
+        <<"committers">> => <<"uncommitted">>,
+        
+        %% Activate when authorization header present
+        <<"keys">> => [<<"authorization">>]
+    }
+}
+```
+
+| Condition | Value | Meaning |
+|-----------|-------|---------|
+| `committers` | `<<"always">>` | All requests |
+| `committers` | `<<"uncommitted">>` | Only unsigned (default) |
+| `committers` | `[Addr1, Addr2]` | Only if signed by listed |
+| `keys` | `<<"always">>` | Regardless of keys |
+| `keys` | `[Key1, Key2]` | If any key present |
+
+### Ignored Keys
+
+These keys are excluded from signatures:
+- `<<"secret">>`, `<<"cookie">>`, `<<"set-cookie">>`
+- `<<"path">>`, `<<"method">>`, `<<"authorization">>`
+- `<<"!">>` (commit marker)
+
+---
+
+## Part 2: HTTP Basic Authentication
+
+> 📖 Reference: [dev_codec_http_auth](/src/dev_codec_http_auth)
+
+`dev_codec_http_auth` implements **HTTP Basic authentication** with PBKDF2 key derivation for secure password-based signing.
+
+### Authentication Flow
+
+```
+┌─────────────────────────────────┐
+│ Browser sends request (no auth) │
+└────────────────┬────────────────┘
+                 ▼
+┌─────────────────────────────────┐
+│ Server returns 401 Unauthorized │
+│ WWW-Authenticate: Basic         │
+└────────────────┬────────────────┘
+                 ▼
+┌─────────────────────────────────┐
+│ Browser shows login prompt      │
+│ Username: [________]            │
+│ Password: [________]            │
+└────────────────┬────────────────┘
+                 ▼
+┌─────────────────────────────────┐
+│ Browser resends with:           │
+│ Authorization: Basic <base64>   │
+└────────────────┬────────────────┘
+                 ▼
+┌─────────────────────────────────┐
+│ Server derives key via PBKDF2   │
+│ Signs message with HMAC-SHA256  │
+└─────────────────────────────────┘
+```
+
+### Using HTTP Auth
+
+```erlang
+%% Generate key from credentials
+Credentials = base64:encode(<<"username:password">>),
+Req = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+
+{ok, Key} = dev_codec_http_auth:generate(#{}, Req, #{}).
+%% Key is PBKDF2-derived from credentials
+
+%% Sign a message
+Base = #{<<"data">> => <<"important message">>},
+{ok, Signed} = dev_codec_http_auth:commit(Base, Req, #{}).
+```
+
+### PBKDF2 Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `salt` | SHA256("constant:ao") | Public constant for reproducibility |
+| `iterations` | 1,200,000 | 2× OWASP 2023 recommendation |
+| `alg` | SHA-256 | Hash algorithm |
+| `key-length` | 64 bytes | Output key size |
+
+### Custom Parameters
+
+```erlang
+CustomReq = #{
+    <<"authorization">> => <<"Basic ", Credentials/binary>>,
+    <<"salt">> => <<"custom-salt">>,
+    <<"iterations">> => 500000,
+    <<"alg">> => <<"sha512">>,
+    <<"key-length">> => 32
+},
+{ok, CustomKey} = dev_codec_http_auth:generate(Base, CustomReq, #{}).
+```
+
+### Error Responses
+
+```erlang
+%% No auth header → 401 Unauthorized
+{error, #{
+    <<"status">> => 401,
+    <<"www-authenticate">> => <<"Basic">>,
+    <<"details">> => <<"No authorization header provided.">>
+}}
+
+%% Invalid scheme → 400 Bad Request
+{error, #{
+    <<"status">> => 400,
+    <<"details">> => <<"Unrecognized authorization header: Bearer token123">>
+}}
+```
+
+---
+
+## Part 3: Cookie-Based Authentication
+
+> 📖 Reference: [dev_codec_cookie_auth](/src/dev_codec_cookie_auth)
+
+`dev_codec_cookie_auth` stores secrets in **HTTP cookies** for persistent session-based authentication.
+
+### How Cookie Auth Works
+
+**First Request (No Cookie):**
+```
+Request (no cookies)
+         │
+         ▼
+    Generate new secret
+         │
+         ▼
+    Sign with secret
+         │
+         ▼
+    Store secret in cookie
+         │
+         ▼
+    Add Set-Cookie header
+         │
+         ▼
+Response (with Set-Cookie)
+```
+
+**Subsequent Requests:**
+```
+Request (with cookie)
+         │
+         ▼
+    Extract secret from cookie
+         │
+         ▼
+    Sign with found secret
+         │
+         ▼
+Response
+```
+
+### Using Cookie Auth
+
+```erlang
+%% First commit (generates new secret)
+Base = #{<<"data">> => <<"test">>},
+{ok, Signed} = dev_codec_cookie_auth:commit(Base, #{}, #{}),
+
+%% Extract cookies for next request
+{ok, Cookies} = dev_codec_cookie:extract(Signed, #{}, #{}),
+
+%% Use cookies in next request
+{ok, Req2} = dev_codec_cookie:store(#{}, Cookies, #{}),
+{ok, Signed2} = dev_codec_cookie_auth:commit(Base2, Req2, #{}).
+```
+
+### Cookie Secret Storage
+
+Secrets are stored with hash-based keys:
+
+```erlang
+%% Secret stored as:
+Secret = crypto:strong_rand_bytes(64),
+SecretHash = crypto:hash(sha256, Secret),
+CookieKey = <<"secret-", (hb_util:encode(SecretHash))/binary>>.
+%% Cookie: secret-e3QtMz...=<base64-encoded-secret>
+```
+
+### Generator Interface
+
+For use with auth hook:
+
+```erlang
+%% generate/3 - Creates or retrieves secret
+{ok, RequestWithSecret} = dev_codec_cookie_auth:generate(#{}, Request, #{}).
+%% Returns request with <<"secret">> key
+
+%% finalize/3 - Adds Set-Cookie to response
+{ok, FinalSequence} = dev_codec_cookie_auth:finalize(#{}, HookReq, #{}).
+%% Appends set-cookie message to sequence
+```
+
+---
+
+## Part 4: Cookie Management
+
+> 📖 Reference: [dev_codec_cookie](/src/dev_codec_cookie)
+
+`dev_codec_cookie` handles **parsing, encoding, and storage** of HTTP cookies.
+
+### Parsing Cookies
+
+```erlang
+%% Parse Cookie header
+Msg = #{<<"cookie">> => <<"session=abc123; user=john; theme=dark">>},
+{ok, Parsed} = dev_codec_cookie:from(Msg, #{}, #{}),
+{ok, Cookies} = dev_codec_cookie:extract(Parsed, #{}, #{}).
+%% => #{<<"session">> => <<"abc123">>,
+%%      <<"user">> => <<"john">>,
+%%      <<"theme">> => <<"dark">>}
+
+%% Parse Set-Cookie header
+Msg = #{<<"set-cookie">> => [<<"session=abc123; Path=/; HttpOnly">>]},
+{ok, Cookies} = dev_codec_cookie:extract(Msg, #{}, #{}).
+%% => #{<<"session">> => #{
+%%        <<"value">> => <<"abc123">>,
+%%        <<"attributes">> => #{<<"Path">> => <<"/">>},
+%%        <<"flags">> => [<<"HttpOnly">>]
+%%     }}
+```
+
+### Storing Cookies
+
+```erlang
+%% Store cookies in message
+Base = #{},
+Req = #{
+    <<"session">> => <<"abc123">>,
+    <<"user">> => <<"john">>
+},
+{ok, Updated} = dev_codec_cookie:store(Base, Req, #{}).
+
+%% Get specific cookie
+{ok, Session} = dev_codec_cookie:get_cookie(
+    Updated,
+    #{<<"key">> => <<"session">>},
+    #{}
+).
+```
+
+### Format Conversion
+
+```erlang
+%% Convert to Set-Cookie headers
+{ok, WithSetCookie} = dev_codec_cookie:to(
+    Msg,
+    #{<<"format">> => <<"set-cookie">>},
+    #{}
+),
+SetCookies = maps:get(<<"set-cookie">>, WithSetCookie).
+%% => [<<"session=abc123; Path=/; HttpOnly">>]
+
+%% Convert to Cookie header
+{ok, WithCookie} = dev_codec_cookie:to(
+    Msg,
+    #{<<"format">> => <<"cookie">>},
+    #{}
+),
+Cookie = maps:get(<<"cookie">>, WithCookie).
+%% => <<"session=abc123; user=john">>
+```
+
+### Cookie Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `Path` | URL path scope |
+| `Domain` | Domain scope |
+| `Expires` | Expiration date |
+| `Max-Age` | Lifetime in seconds |
+| `SameSite` | CSRF protection |
+
+| Flag | Description |
+|------|-------------|
+| `Secure` | HTTPS only |
+| `HttpOnly` | No JavaScript access |
+
+---
+
+## Part 5: Secret Key Management
+
+> 📖 Reference: [dev_secret](/src/dev_secret)
+
+`dev_secret` provides **secure key management** for trusted nodes, allowing generation, import, export, and signing with hosted secrets.
+
+### API Endpoints
+
+| Path | Method | Description |
+|------|--------|-------------|
+| `/generate` | GET/POST | Generate new secret |
+| `/import` | POST | Import existing secret |
+| `/list` | GET | List hosted secrets |
+| `/commit` | POST | Sign with secret |
+| `/export` | GET | Export secret(s) |
+| `/sync` | GET | Sync from remote node |
+
+### Generating Secrets
+
+```erlang
+%% Generate in-memory secret
+{ok, Response} = hb_http:get(
+    Node,
+    <<"/~secret@1.0/generate?persist=in-memory">>,
+    #{}
+),
+KeyID = maps:get(<<"body">>, Response),
+Address = maps:get(<<"wallet-address">>, Response).
+```
+
+### Persistence Modes
+
+| Mode | Storage | Key Returned | Use Case |
+|------|---------|--------------|----------|
+| `client` | Not stored | Yes (in cookie) | User-held keys |
+| `in-memory` | RAM only | No | Ephemeral secrets |
+| `non-volatile` | Disk | No | Persistent secrets |
+
+### Signing with Secrets
+
+```erlang
+%% Generate a client secret
+{ok, GenResp} = hb_http:get(
+    Node,
+    <<"/~secret@1.0/generate?persist=client">>,
+    #{}
+),
+Priv = maps:get(<<"priv">>, GenResp),
+
+%% Sign a message
+{ok, Signed} = hb_http:post(
+    Node,
+    #{
+        <<"device">> => <<"secret@1.0">>,
+        <<"path">> => <<"commit">>,
+        <<"body">> => <<"Important data">>,
+        <<"priv">> => Priv
+    },
+    #{}
+).
+```
+
+### Importing and Exporting
+
+```erlang
+%% Import existing wallet
+TestWallet = ar_wallet:new(),
+WalletKey = hb_escape:encode_quotes(ar_wallet:to_json(TestWallet)),
+{ok, _} = hb_http:get(
+    Node,
+    <<"/~secret@1.0/import?persist=in-memory&key=", WalletKey/binary>>,
+    #{}
+).
+
+%% Export secrets (requires admin)
+{ok, Exported} = hb_http:get(
+    Node,
+    (hb_message:commit(#{
+        <<"keyids">> => <<"all">>
+    }, AdminOpts))#{<<"path">> => <<"/~secret@1.0/export">>},
+    #{}
+).
+```
+
+---
+
+## Try It: Complete Authentication Examples
+
+```erlang
+%%% File: test_dev8.erl
+-module(test_dev8).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
+
+%% Run with: rebar3 eunit --module=test_dev8
+
+auth_hook_exports_test() ->
+    code:ensure_loaded(dev_auth_hook),
+    ?assert(erlang:function_exported(dev_auth_hook, request, 3)),
+    ?debugFmt("Auth hook exports: OK", []).
+
+http_auth_generate_test() ->
+    Credentials = base64:encode(<<"user:password">>),
+    Req = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+    {ok, Key} = dev_codec_http_auth:generate(#{}, Req, #{}),
+    ?assert(is_binary(Key)),
+    ?assert(byte_size(Key) > 0),
+    ?debugFmt("HTTP auth generate: OK (key size ~p)", [byte_size(Key)]).
+
+http_auth_no_header_test() ->
+    Result = dev_codec_http_auth:generate(#{}, #{}, #{}),
+    ?assertMatch(
+        {error, #{<<"status">> := 401, <<"www-authenticate">> := <<"Basic">>}},
+        Result
+    ),
+    ?debugFmt("HTTP auth 401: OK", []).
+
+http_auth_commit_test() ->
+    Credentials = base64:encode(<<"user:password">>),
+    Base = #{<<"data">> => <<"test message">>},
+    Req = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+    {ok, Signed} = dev_codec_http_auth:commit(Base, Req, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    ?debugFmt("HTTP auth commit: OK", []).
+
+cookie_auth_commit_test() ->
+    Base = #{<<"data">> => <<"test">>},
+    {ok, Signed} = dev_codec_cookie_auth:commit(Base, #{}, #{}),
+    ?assert(maps:is_key(<<"commitments">>, Signed)),
+    Commitments = maps:get(<<"commitments">>, Signed),
+    ?assertEqual(1, map_size(Commitments)),
+    ?debugFmt("Cookie auth commit: OK", []).
+
+cookie_auth_generate_test() ->
+    {ok, Result} = dev_codec_cookie_auth:generate(#{}, #{}, #{}),
+    ?assert(maps:is_key(<<"secret">>, Result)),
+    Secrets = maps:get(<<"secret">>, Result),
+    ?assert(is_list(Secrets)),
+    ?assertEqual(1, length(Secrets)),
+    ?debugFmt("Cookie auth generate: OK", []).
+
+cookie_parse_test() ->
+    Msg = #{<<"cookie">> => <<"key1=value1; key2=value2">>},
+    {ok, Cookies} = dev_codec_cookie:extract(Msg, #{}, #{}),
+    ?assertEqual(<<"value1">>, maps:get(<<"key1">>, Cookies)),
+    ?assertEqual(<<"value2">>, maps:get(<<"key2">>, Cookies)),
+    ?debugFmt("Cookie parse: OK", []).
+
+cookie_store_test() ->
+    Base = #{},
+    Req = #{
+        <<"session">> => <<"abc123">>,
+        <<"user">> => <<"john">>
+    },
+    {ok, Updated} = dev_codec_cookie:store(Base, Req, #{}),
+    {ok, Cookies} = dev_codec_cookie:extract(Updated, #{}, #{}),
+    ?assertEqual(<<"abc123">>, maps:get(<<"session">>, Cookies)),
+    ?assertEqual(<<"john">>, maps:get(<<"user">>, Cookies)),
+    ?debugFmt("Cookie store: OK", []).
+
+cookie_get_test() ->
+    Opts = hb_private:opts(#{}),
+    Base = hb_private:set(#{}, <<"cookie">>, #{
+        <<"session">> => <<"abc123">>
+    }, Opts),
+    Req = #{<<"key">> => <<"session">>},
+    {ok, Cookie} = dev_codec_cookie:get_cookie(Base, Req, #{}),
+    ?assertEqual(<<"abc123">>, Cookie),
+    ?debugFmt("Cookie get: OK", []).
+
+secret_exports_test() ->
+    code:ensure_loaded(dev_secret),
+    ?assert(erlang:function_exported(dev_secret, generate, 3)),
+    ?assert(erlang:function_exported(dev_secret, import, 3)),
+    ?assert(erlang:function_exported(dev_secret, list, 3)),
+    ?assert(erlang:function_exported(dev_secret, commit, 3)),
+    ?assert(erlang:function_exported(dev_secret, export, 3)),
+    ?debugFmt("Secret device exports: OK", []).
+
+complete_auth_workflow_test() ->
+    ?debugFmt("=== Complete Auth Workflow ===", []),
+    
+    %% 1. HTTP Basic auth flow
+    Credentials = base64:encode(<<"alice:secret123">>),
+    AuthReq = #{<<"authorization">> => <<"Basic ", Credentials/binary>>},
+    {ok, Key} = dev_codec_http_auth:generate(#{}, AuthReq, #{}),
+    ?assert(is_binary(Key)),
+    ?debugFmt("1. HTTP auth key derived", []),
+    
+    %% 2. Sign message with HTTP auth
+    Message = #{<<"action">> => <<"transfer">>, <<"amount">> => 100},
+    {ok, SignedHttp} = dev_codec_http_auth:commit(Message, AuthReq, #{}),
+    ?assert(maps:is_key(<<"commitments">>, SignedHttp)),
+    ?debugFmt("2. Message signed with HTTP auth", []),
+    
+    %% 3. Cookie auth flow
+    {ok, SignedCookie} = dev_codec_cookie_auth:commit(Message, #{}, #{}),
+    ?assert(maps:is_key(<<"commitments">>, SignedCookie)),
+    ?debugFmt("3. Message signed with cookie auth", []),
+    
+    %% 4. Extract and reuse cookie
+    {ok, Cookies} = dev_codec_cookie:extract(SignedCookie, #{}, #{}),
+    SecretKeys = [K || <<"secret-", _/binary>> = K <- maps:keys(Cookies)],
+    ?assert(length(SecretKeys) > 0),
+    ?debugFmt("4. Cookie extracted for reuse", []),
+    
+    ?debugFmt("=== All tests passed! ===", []).
+```
+
+### Run the Tests
+
+```bash
+rebar3 eunit --module=test_dev8
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Cookie Session Authentication
+
+```erlang
+%% Node setup with cookie-based sessions
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new(),
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"secret-provider">> => #{
+                <<"device">> => <<"cookie@1.0">>
+            }
+        }
+    }
+}).
+
+%% Client makes requests - cookies handled automatically
+{ok, Resp} = hb_http:get(Node, <<"/protected-resource">>, #{}).
+%% First request gets Set-Cookie, subsequent use that cookie
+```
+
+### Pattern 2: Username/Password Authentication
+
+```erlang
+%% Node setup with HTTP Basic auth
+Node = hb_http_server:start_node(#{
+    priv_wallet => ar_wallet:new(),
+    on => #{
+        <<"request">> => #{
+            <<"device">> => <<"auth-hook@1.0">>,
+            <<"path">> => <<"request">>,
+            <<"when">> => #{
+                <<"keys">> => [<<"authorization">>]
+            },
+            <<"secret-provider">> => #{
+                <<"device">> => <<"http-auth@1.0">>
+            }
+        }
+    }
+}).
+
+%% Client provides credentials
+Creds = base64:encode(<<"user:pass">>),
+Request = #{
+    <<"path">> => <<"/api/action">>,
+    <<"authorization">> => <<"Basic ", Creds/binary>>
+},
+{ok, Resp} = hb_http:post(Node, Request, #{}).
+```
+
+### Pattern 3: Managed Key Vault
+
+```erlang
+%% Generate and manage secrets on trusted node
+Node = hb_http_server:start_node(#{
+    priv_wallet => AdminWallet
+}),
+
+%% Generate a new secret
+{ok, Gen} = hb_http:get(
+    Node,
+    <<"/~secret@1.0/generate?persist=non-volatile">>,
+    #{}
+),
+KeyID = maps:get(<<"body">>, Gen),
+
+%% Use it to sign messages
+{ok, Signed} = hb_http:post(
+    Node,
+    #{
+        <<"path">> => <<"/~secret@1.0/commit">>,
+        <<"keyid">> => KeyID,
+        <<"body">> => DataToSign
+    },
+    #{}
+).
+```
+
+### Pattern 4: Multi-Node Key Sync
+
+```erlang
+%% Sync secrets between nodes
+{ok, _} = hb_http:get(
+    LocalNode,
+    <<"/~secret@1.0/sync?node=", RemoteNode/binary, "&wallets=all">>,
+    #{}
+).
+```
+
+---
+
+## Quick Reference Card
+
+> 📖 Reference: [dev_auth_hook](/src/dev_auth_hook) | [dev_codec_http_auth](/src/dev_codec_http_auth) | [dev_codec_cookie_auth](/src/dev_codec_cookie_auth) | [dev_secret](/src/dev_secret)
+
+```erlang
+%% === AUTH HOOK ===
+%% Configure on node
+on => #{
+    <<"request">> => #{
+        <<"device">> => <<"auth-hook@1.0">>,
+        <<"secret-provider">> => #{<<"device">> => <<"cookie@1.0">>}
+    }
+}
+
+%% Activation conditions
+<<"when">> => #{
+    <<"committers">> => <<"uncommitted">>,
+    <<"keys">> => [<<"authorization">>]
+}
+
+%% === HTTP BASIC AUTH ===
+%% Generate key from credentials
+Creds = base64:encode(<<"user:pass">>),
+Req = #{<<"authorization">> => <<"Basic ", Creds/binary>>},
+{ok, Key} = dev_codec_http_auth:generate(#{}, Req, #{}).
+
+%% Sign message
+{ok, Signed} = dev_codec_http_auth:commit(Base, Req, #{}).
+
+%% === COOKIE AUTH ===
+%% Sign with auto-generated secret
+{ok, Signed} = dev_codec_cookie_auth:commit(Base, #{}, #{}).
+
+%% Generate secret for hook
+{ok, ReqWithSecret} = dev_codec_cookie_auth:generate(#{}, Req, #{}).
+
+%% === COOKIE MANAGEMENT ===
+%% Parse cookies
+{ok, Cookies} = dev_codec_cookie:extract(Msg, #{}, #{}).
+
+%% Store cookies
+{ok, Updated} = dev_codec_cookie:store(Base, Cookies, #{}).
+
+%% Get specific cookie
+{ok, Value} = dev_codec_cookie:get_cookie(Base, #{<<"key">> => Name}, #{}).
+
+%% === SECRET DEVICE ===
+%% Generate
+{ok, _} = hb_http:get(Node, <<"/~secret@1.0/generate?persist=in-memory">>, #{}).
+
+%% List
+{ok, List} = hb_http:get(Node, <<"/~secret@1.0/list">>, #{}).
+
+%% Commit (sign)
+{ok, Signed} = hb_http:post(Node, #{
+    <<"path">> => <<"/~secret@1.0/commit">>,
+    <<"keyid">> => KeyID,
+    <<"body">> => Data
+}, #{}).
+
+%% Export
+{ok, Exported} = hb_http:get(Node, SignedReq#{
+    <<"path">> => <<"/~secret@1.0/export">>
+}, #{}).
+```
+
+---
+
+## Security Considerations
+
+### Trust Requirements
+
+1. **Node Operator Trust** — Users must trust the node operator
+2. **Environment Security** — Consider TEE or isolated deployment
+3. **Secret Management** — Secrets must be securely generated/stored
+4. **Wallet Determinism** — Same secret always produces same wallet
+
+### Best Practices
+
+1. **Use TEEs** — Deploy in Trusted Execution Environments when possible
+2. **Limit Scope** — Use `when` conditions to limit signing scope
+3. **Monitor Usage** — Log all signing operations for audit
+4. **Rotate Secrets** — Implement secret rotation policies
+5. **HTTPS Only** — Always use TLS for credential transmission
+
+---
+
+## What's Next?
+
+You now understand the authentication layer:
+
+| Device | Purpose | Method |
+|--------|---------|--------|
+| [dev_auth_hook](/src/dev_auth_hook) | Request signing gateway | Hook |
+| [dev_codec_http_auth](/src/dev_codec_http_auth) | Password authentication | PBKDF2 + HMAC |
+| [dev_codec_cookie_auth](/src/dev_codec_cookie_auth) | Session authentication | Cookie + HMAC |
+| [dev_codec_cookie](/src/dev_codec_cookie) | Cookie management | Parse/Store |
+| [dev_secret](/src/dev_secret) | Key vault | Generate/Sign |
+
+### Going Further
+
+1. **Arweave & Data** — Permanent storage ([Tutorial](/book/dev9))
+2. **Full Device Reference** — All 77 devices ([Reference](/devices))
+
+---
+
+## Resources
+
+### HyperBEAM Documentation
+
+- [dev_auth_hook Reference](/src/dev_auth_hook)
+- [dev_codec_http_auth Reference](/src/dev_codec_http_auth)
+- [dev_codec_cookie_auth Reference](/src/dev_codec_cookie_auth)
+- [dev_codec_cookie Reference](/src/dev_codec_cookie)
+- [dev_secret Reference](/src/dev_secret)
+- [Full Device List](/devices)
+
+### Related Tutorials
+
+- [Payment](/book/dev7)
+- [Runtimes](/book/dev6)
+- [Codecs](/book/dev2)
