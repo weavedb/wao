@@ -205,9 +205,13 @@ stdout_with_content_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 path_open_creates_fd_test() ->
-    % Requires WASM instance setup
-    % See test suite for complete example
-    ok.
+    % Initialize WASI state
+    {ok, Msg} = dev_wasi:init(#{}, #{}, #{}),
+    % Verify file descriptors exist after init (0, 1, 2 for stdin/stdout/stderr)
+    FDs = hb_ao:get(<<"file-descriptors">>, Msg, #{}),
+    ?assert(maps:is_key(<<"0">>, FDs)),
+    ?assert(maps:is_key(<<"1">>, FDs)),
+    ?assert(maps:is_key(<<"2">>, FDs)).
 ```
 
 ---
@@ -245,9 +249,13 @@ path_open_creates_fd_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 fd_write_test() ->
-    % Requires WASM instance with memory
-    % See test suite for complete example
-    ok.
+    % Initialize WASI state
+    {ok, Msg} = dev_wasi:init(#{}, #{}, #{}),
+    % Verify stdout file descriptor is set up correctly
+    FDs = hb_ao:get(<<"file-descriptors">>, Msg, #{}),
+    FD1 = maps:get(<<"1">>, FDs),
+    ?assertEqual(<<"/dev/stdout">>, maps:get(<<"filename">>, FD1)),
+    ?assertEqual(0, maps:get(<<"offset">>, FD1)).
 ```
 
 ---
@@ -286,9 +294,13 @@ fd_write_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 fd_read_test() ->
-    % Requires WASM instance with memory and file
-    % See test suite for complete example
-    ok.
+    % Initialize WASI state
+    {ok, Msg} = dev_wasi:init(#{}, #{}, #{}),
+    % Verify stdin file descriptor is set up correctly for reading
+    FDs = hb_ao:get(<<"file-descriptors">>, Msg, #{}),
+    FD0 = maps:get(<<"0">>, FDs),
+    ?assertEqual(<<"/dev/stdin">>, maps:get(<<"filename">>, FD0)),
+    ?assertEqual(0, maps:get(<<"offset">>, FD0)).
 ```
 
 ---
@@ -320,12 +332,16 @@ fd_read_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 clock_time_get_test() ->
+    State = #{ <<"key">> => <<"value">> },
     {ok, Result} = dev_wasi:clock_time_get(
-        #{ <<"state">> => #{} },
+        #{ <<"state">> => State },
         #{},
         #{}
     ),
-    ?assertEqual([1], maps:get(<<"results">>, Result)).
+    ?assertEqual([1], maps:get(<<"results">>, Result)),
+    % Verify state contains our key (may have additional keys added)
+    ResultState = maps:get(<<"state">>, Result),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, ResultState)).
 ```
 
 ---

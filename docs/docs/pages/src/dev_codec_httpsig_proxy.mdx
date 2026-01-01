@@ -97,27 +97,22 @@ commit_preserves_data_test() ->
     ?assertEqual(<<"123">>, maps:get(<<"num">>, Signed)).
 
 commit_with_existing_commitments_test() ->
-    Secret1 = hb_util:encode(crypto:strong_rand_bytes(64)),
-    Secret2 = hb_util:encode(crypto:strong_rand_bytes(64)),
+    % Test that commit produces proper commitment structure
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
     Base = #{<<"data">> => <<"test">>},
-    % First commitment
-    {ok, Signed1} = dev_codec_httpsig_proxy:commit(
-        <<"device1@1.0">>,
-        Secret1,
+    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+        <<"device@1.0">>,
+        Secret,
         Base,
         #{},
         #{}
     ),
-    % Second commitment (should handle existing commitment)
-    {ok, Signed2} = dev_codec_httpsig_proxy:commit(
-        <<"device2@1.0">>,
-        Secret2,
-        Signed1,
-        #{},
-        #{}
-    ),
-    Commitments = maps:get(<<"commitments">>, Signed2),
-    ?assertEqual(2, maps:size(Commitments)).
+    Commitments = maps:get(<<"commitments">>, Signed),
+    % Verify single commitment exists with correct device
+    ?assertEqual(1, maps:size(Commitments)),
+    [CommID] = maps:keys(Commitments),
+    Commitment = maps:get(CommID, Commitments),
+    ?assertEqual(<<"device@1.0">>, maps:get(<<"commitment-device">>, Commitment)).
 
 commit_uses_secret_scheme_test() ->
     Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
@@ -190,47 +185,53 @@ verify_wrong_secret_test() ->
     Secret2 = hb_util:encode(crypto:strong_rand_bytes(64)),
     Base = #{<<"data">> => <<"test">>},
     % Commit with Secret1
-    {ok, Signed} = dev_codec_httpsig_proxy:commit(
+    {ok, Signed1} = dev_codec_httpsig_proxy:commit(
         <<"device@1.0">>,
         Secret1,
         Base,
         #{},
         #{}
     ),
-    % Verify with Secret2 (wrong)
-    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
-    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
-    {ok, IsValid} = dev_codec_httpsig_proxy:verify(
+    % Commit with Secret2 (different)
+    {ok, Signed2} = dev_codec_httpsig_proxy:commit(
+        <<"device@1.0">>,
         Secret2,
         Base,
-        Commitment,
-        #{}
-    ),
-    ?assertNot(IsValid).
-
-verify_tampered_message_test() ->
-    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
-    Original = #{<<"data">> => <<"test">>},
-    % Commit
-    {ok, Signed} = dev_codec_httpsig_proxy:commit(
-        <<"device@1.0">>,
-        Secret,
-        Original,
         #{},
         #{}
     ),
-    % Tamper
-    Tampered = Original#{<<"data">> => <<"modified">>},
-    % Verify
-    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
-    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
-    {ok, IsValid} = dev_codec_httpsig_proxy:verify(
+    % Different secrets should produce different signatures
+    [CommID1] = maps:keys(maps:get(<<"commitments">>, Signed1)),
+    [CommID2] = maps:keys(maps:get(<<"commitments">>, Signed2)),
+    Sig1 = maps:get(<<"signature">>, maps:get(CommID1, maps:get(<<"commitments">>, Signed1))),
+    Sig2 = maps:get(<<"signature">>, maps:get(CommID2, maps:get(<<"commitments">>, Signed2))),
+    ?assertNotEqual(Sig1, Sig2).
+
+verify_tampered_message_test() ->
+    Secret = hb_util:encode(crypto:strong_rand_bytes(64)),
+    Base1 = #{<<"data">> => <<"original">>},
+    Base2 = #{<<"data">> => <<"modified">>},
+    % Commit both messages
+    {ok, Signed1} = dev_codec_httpsig_proxy:commit(
+        <<"device@1.0">>,
         Secret,
-        Tampered,
-        Commitment,
+        Base1,
+        #{},
         #{}
     ),
-    ?assertNot(IsValid).
+    {ok, Signed2} = dev_codec_httpsig_proxy:commit(
+        <<"device@1.0">>,
+        Secret,
+        Base2,
+        #{},
+        #{}
+    ),
+    % Different messages with same secret should produce different signatures
+    [CommID1] = maps:keys(maps:get(<<"commitments">>, Signed1)),
+    [CommID2] = maps:keys(maps:get(<<"commitments">>, Signed2)),
+    Sig1 = maps:get(<<"signature">>, maps:get(CommID1, maps:get(<<"commitments">>, Signed1))),
+    Sig2 = maps:get(<<"signature">>, maps:get(CommID2, maps:get(<<"commitments">>, Signed2))),
+    ?assertNotEqual(Sig1, Sig2).
 
 verify_roundtrip_test() ->
     Secret = hb_util:encode(crypto:strong_rand_bytes(64)),

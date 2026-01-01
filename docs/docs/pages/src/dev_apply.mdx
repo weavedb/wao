@@ -108,15 +108,15 @@ default_single_execution_test() ->
 default_pair_execution_test() ->
     Base = #{
         <<"device">> => <<"apply@1.0">>,
-        <<"container">> => #{ <<"value">> => <<"DATA">> },
-        <<"base">> => <<"container">>
+        <<"container">> => #{ <<"value">> => <<"DATA">> }
     },
     Request = #{
-        <<"path-key">> => <<"value">>,
-        <<"request">> => <<"path-key">>
+        <<"req-msg">> => #{ <<"path">> => <<"value">> },
+        <<"base">> => <<"container">>,
+        <<"request">> => <<"req-msg">>
     },
     {ok, Result} = dev_apply:default(
-        <<"pair">>,
+        <<"undefined">>,
         Base,
         Request,
         #{}
@@ -178,14 +178,14 @@ pair_with_prefix_test() ->
 
 pair_custom_path_test() ->
     Base = #{
-        <<"data">> => #{ <<"nested">> => <<"RESULT">> },
-        <<"base">> => <<"data">>
+        <<"data">> => #{ <<"custom-path">> => <<"RESULT">> }
     },
     Request = #{
-        <<"accessor">> => <<"nested">>,
-        <<"request">> => <<"accessor">>
+        <<"req-msg">> => #{},
+        <<"base">> => <<"data">>,
+        <<"request">> => <<"req-msg">>
     },
-    {ok, Result} = dev_apply:pair(
+    {ok, Result} = dev_apply:default(
         <<"custom-path">>,
         Base,
         Request,

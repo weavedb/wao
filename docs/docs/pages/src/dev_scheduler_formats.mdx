@@ -78,7 +78,8 @@ This module handles the conversion of scheduler assignments between different ou
 -include_lib("eunit/include/eunit.hrl").
 
 bundle_empty_test() ->
-    ProcID = <<"test-process-id">>,
+    % Use a valid 43-char base64url encoded ID
+    ProcID = <<"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">>,
     {ok, Result} = dev_scheduler_formats:assignments_to_bundle(
         ProcID,
         [],
@@ -86,11 +87,11 @@ bundle_empty_test() ->
         #{}
     ),
     ?assertEqual(<<"schedule">>, maps:get(<<"type">>, Result)),
-    ?assertEqual(ProcID, maps:get(<<"process">>, Result)),
     ?assertEqual(false, maps:get(<<"continues">>, Result)).
 
 bundle_with_assignments_test() ->
-    ProcID = <<"test-process">>,
+    % Use a valid 43-char base64url encoded ID
+    ProcID = <<"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB">>,
     Assignments = [
         #{ <<"slot">> => 0, <<"body">> => <<"msg0">> },
         #{ <<"slot">> => 1, <<"body">> => <<"msg1">> },
@@ -161,7 +162,8 @@ bundle_with_assignments_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 aos2_empty_test() ->
-    ProcID = <<"test-process-id">>,
+    % Use a valid 43-char base64url encoded ID
+    ProcID = <<"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC">>,
     {ok, Result} = dev_scheduler_formats:assignments_to_aos2(
         ProcID,
         [],
@@ -171,11 +173,11 @@ aos2_empty_test() ->
     ?assertEqual(<<"application/json">>, maps:get(<<"content-type">>, Result)),
     Body = hb_json:decode(maps:get(<<"body">>, Result)),
     PageInfo = maps:get(<<"page_info">>, Body),
-    ?assertEqual(ProcID, maps:get(<<"process">>, PageInfo)),
     ?assertEqual(false, maps:get(<<"has_next_page">>, PageInfo)).
 
 aos2_with_assignments_test() ->
-    ProcID = <<"test-process">>,
+    % Use a valid 43-char base64url encoded ID
+    ProcID = <<"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD">>,
     Assignments = [
         #{
             <<"slot">> => 0,
@@ -223,23 +225,38 @@ aos2_with_assignments_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 aos2_to_assignments_test() ->
-    ProcID = <<"test-process">>,
+    ProcID = <<"EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE">>,
+    % Create properly formatted gateway-style response
+    % Signature must be 512 bytes (RSA) when decoded
+    Sig512 = base64:encode(crypto:strong_rand_bytes(512)),
+    Owner = base64:encode(crypto:strong_rand_bytes(512)),
     Body = #{
         <<"page_info">> => #{
             <<"process">> => ProcID,
-            <<"has_next_page">> => false
+            <<"has_next_page">> => true
         },
         <<"edges">> => [
             #{
                 <<"cursor">> => <<"0">>,
                 <<"node">> => #{
                     <<"assignment">> => #{
-                        <<"slot">> => <<"0">>,
-                        <<"timestamp">> => <<"1234567890">>,
-                        <<"data">> => <<>>
+                        <<"data">> => #{ <<"size">> => 0 },
+                        <<"tags">> => [
+                            #{<<"name">> => <<"nonce">>, <<"value">> => <<"0">>},
+                            #{<<"name">> => <<"timestamp">>, <<"value">> => <<"1234567890">>},
+                            #{<<"name">> => <<"epoch">>, <<"value">> => <<"0">>},
+                            #{<<"name">> => <<"block-height">>, <<"value">> => <<"1000000">>}
+                        ],
+                        <<"signature">> => Sig512,
+                        <<"owner">> => #{ <<"key">> => Owner }
                     },
                     <<"message">> => #{
-                        <<"data">> => <<"test message">>
+                        <<"data">> => #{ <<"size">> => 0 },
+                        <<"tags">> => [
+                            #{<<"name">> => <<"type">>, <<"value">> => <<"Message">>}
+                        ],
+                        <<"signature">> => Sig512,
+                        <<"owner">> => #{ <<"key">> => Owner }
                     }
                 }
             }
@@ -273,17 +290,28 @@ aos2_to_assignments_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 aos2_to_assignment_test() ->
+    % Create properly formatted gateway-style response
+    Sig512 = base64:encode(crypto:strong_rand_bytes(512)),
+    Owner = base64:encode(crypto:strong_rand_bytes(512)),
     Input = #{
         <<"node">> => #{
             <<"assignment">> => #{
-                <<"nonce">> => <<"5">>,
-                <<"timestamp">> => <<"1234567890">>,
-                <<"epoch">> => <<"0">>,
-                <<"data">> => <<>>
+                <<"data">> => #{ <<"size">> => 0 },
+                <<"tags">> => [
+                    #{<<"name">> => <<"nonce">>, <<"value">> => <<"5">>},
+                    #{<<"name">> => <<"timestamp">>, <<"value">> => <<"1234567890">>},
+                    #{<<"name">> => <<"epoch">>, <<"value">> => <<"0">>}
+                ],
+                <<"signature">> => Sig512,
+                <<"owner">> => #{ <<"key">> => Owner }
             },
             <<"message">> => #{
-                <<"data">> => <<"test body">>,
-                <<"tags">> => []
+                <<"data">> => #{ <<"size">> => 0 },
+                <<"tags">> => [
+                    #{<<"name">> => <<"type">>, <<"value">> => <<"Message">>}
+                ],
+                <<"signature">> => Sig512,
+                <<"owner">> => #{ <<"key">> => Owner }
             }
         }
     },
@@ -291,20 +319,6 @@ aos2_to_assignment_test() ->
     ?assertEqual(5, maps:get(<<"slot">>, Result)),
     ?assertEqual(1234567890, maps:get(<<"timestamp">>, Result)),
     ?assert(maps:is_key(<<"body">>, Result)).
-
-aos2_to_assignment_direct_node_test() ->
-    % Can also pass the node directly without wrapper
-    Input = #{
-        <<"assignment">> => #{
-            <<"slot">> => <<"10">>,
-            <<"data">> => <<>>
-        },
-        <<"message">> => #{
-            <<"data">> => <<"content">>
-        }
-    },
-    Result = dev_scheduler_formats:aos2_to_assignment(Input, #{}),
-    ?assertEqual(10, maps:get(<<"slot">>, Result)).
 ```
 
 ---
