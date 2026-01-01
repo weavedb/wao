@@ -57,6 +57,17 @@ This device implements a multi-layer prefix trie for storing large datasets in n
 }
 ```
 
+**Test Code:**
+```erlang
+-module(dev_trie_info_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    Info = dev_trie:info(),
+    ?assert(is_map(Info)),
+    ?assert(maps:is_key(default, Info)).
+```
+
 ---
 
 ### 2. get/3, get/4
@@ -140,32 +151,32 @@ not_found_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 immediate_set_test() ->
-    Trie = #{
-        <<"device">> => <<"trie@1.0">>,
-        <<"a">> => 1
-    },
-    UpdatedTrie = hb_ao:set(Trie, #{ <<"b">> => 2 }, #{}),
-    ?assert(hb_message:match(
-        #{ <<"a">> => 1, <<"b">> => 2 },
-        UpdatedTrie,
-        primary
-    )).
-
-second_layer_set_test() ->
-    Trie = #{
-        <<"device">> => <<"trie@1.0">>,
-        <<"a">> => #{ <<"b">> => 1 }
-    },
+    % Test setting values with set-depth=1 for predictable behavior
+    Trie = #{ <<"device">> => <<"trie@1.0">> },
     UpdatedTrie = hb_ao:set(
         Trie,
-        #{ <<"a">> => #{ <<"c">> => 2 } },
+        #{
+            <<"set-depth">> => 1,
+            <<"key-a">> => <<"value-a">>,
+            <<"key-b">> => <<"value-b">>
+        },
         #{}
     ),
-    ?assert(hb_message:match(
-        #{ <<"a">> => #{ <<"b">> => 1, <<"c">> => 2 } },
-        UpdatedTrie,
-        primary
-    )).
+    ?assertEqual(<<"value-a">>, hb_ao:get(<<"key-a">>, UpdatedTrie, #{})),
+    ?assertEqual(<<"value-b">>, hb_ao:get(<<"key-b">>, UpdatedTrie, #{})).
+
+second_layer_set_test() ->
+    ?assert(
+        hb_message:match(
+            #{ <<"a">> => #{ <<"b">> => 2, <<"c">> => 3 } },
+            hb_ao:set(
+                #{ <<"device">> => <<"trie@1.0">>, <<"a">> => #{ <<"b">> => 2 } },
+                #{ <<"ac">> => 3 },
+                #{}
+            ),
+            primary
+        )
+    ).
 
 custom_depth_test() ->
     Trie = #{ <<"device">> => <<"trie@1.0">> },

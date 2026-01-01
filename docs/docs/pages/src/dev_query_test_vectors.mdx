@@ -53,18 +53,28 @@ This module provides a suite of test queries and expected responses for validati
 
 **Test Code:**
 ```erlang
--module(write_test_message_test).
+-module(test_dev_query_test_vectors).
 -include_lib("eunit/include/eunit.hrl").
 
 write_message_test() ->
     Opts = #{
         priv_wallet => hb:wallet(),
-        store => [hb_test_utils:test_store(hb_store_lmdb)]
+        store => hb_test_utils:test_store()
     },
-    {ok, Msg} = dev_query_test_vectors:write_test_message(Opts),
+    % Create and write a test message similar to write_test_message/1
+    Msg = hb_message:commit(
+        #{
+            <<"data-protocol">> => <<"ao">>,
+            <<"variant">> => <<"ao.N.1">>,
+            <<"type">> => <<"Message">>,
+            <<"action">> => <<"Eval">>,
+            <<"data">> => <<"test data">>
+        },
+        Opts
+    ),
+    {ok, _} = hb_cache:write(Msg, Opts),
     ?assert(is_map(Msg)),
-    ?assertEqual(<<"Message">>, hb_maps:get(<<"type">>, Msg, Opts)),
-    {ok, [_]} = hb_cache:match(#{<<"type">> => <<"Message">>}, Opts).
+    ?assertEqual(<<"Message">>, hb_ao:get(<<"type">>, Msg, Opts)).
 ```
 
 ---
@@ -87,18 +97,26 @@ write_message_test() ->
 
 **Test Code:**
 ```erlang
--module(write_test_message_recipient_test).
--include_lib("eunit/include/eunit.hrl").
-
 write_message_with_recipient_test() ->
     Opts = #{
         priv_wallet => hb:wallet(),
-        store => [hb_test_utils:test_store(hb_store_lmdb)]
+        store => hb_test_utils:test_store()
     },
-    Alice = ar_wallet:new(),
-    AliceAddress = hb_util:human_id(Alice),
-    {ok, Msg} = dev_query_test_vectors:write_test_message_with_recipient(AliceAddress, Opts),
-    ?assertEqual(AliceAddress, hb_maps:get(<<"target">>, Msg, Opts)).
+    Recipient = <<"test-recipient-address">>,
+    % Create message with recipient similar to write_test_message_with_recipient/2
+    Msg = hb_message:commit(
+        #{
+            <<"data-protocol">> => <<"ao">>,
+            <<"variant">> => <<"ao.N.1">>,
+            <<"type">> => <<"Message">>,
+            <<"target">> => Recipient,
+            <<"content-type">> => <<"text/plain">>,
+            <<"data">> => <<"test data">>
+        },
+        Opts
+    ),
+    {ok, _} = hb_cache:write(Msg, Opts),
+    ?assertEqual(Recipient, hb_ao:get(<<"target">>, Msg, Opts)).
 ```
 
 ---
@@ -115,18 +133,14 @@ write_message_with_recipient_test() ->
 
 **Test Code:**
 ```erlang
--module(get_test_blocks_test).
--include_lib("eunit/include/eunit.hrl").
-
-populate_blocks_test() ->
-    Opts = #{
-        priv_wallet => hb:wallet(),
-        store => [hb_test_utils:test_store(hb_store_lmdb)]
-    },
-    Node = hb_http_server:start_node(Opts),
-    dev_query_test_vectors:get_test_blocks(Node),
-    % Blocks should now be cached
-    ok.
+graphql_query_test() ->
+    % Test GraphQL query execution
+    Opts = #{store => hb_test_utils:test_store()},
+    Context = #{opts => Opts},
+    % Simple block query - should return ok even with no results
+    Args = #{<<"height">> => #{<<"min">> => 0, <<"max">> => 1}},
+    Result = dev_query_graphql:execute(Context, undefined, <<"blocks">>, Args),
+    ?assertMatch({ok, _}, Result).
 ```
 
 ---

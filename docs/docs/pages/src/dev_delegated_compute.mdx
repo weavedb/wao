@@ -1,18 +1,17 @@
-# dev_delegated_compute.erl - Delegated Compute Device
+# dev_faff.erl - Friends and Family Pricing Device
 
 ## Overview
 
-**Purpose:** Execute computation on remote machines via JSON-Iface protocol  
-**Module:** `dev_delegated_compute`  
-**Pattern:** Relay-based external compute with state management  
-**Integration:** Can be used standalone or as Execution-Device for AO processes
+**Purpose:** Allow-list based access control for node resources  
+**Module:** `dev_faff`  
+**Pattern:** Whitelist-only pricing policy with zero-cost access  
+**Integration:** Implements both Pricing and Ledger P4 APIs
 
-This module wraps remote compute engines that implement the JSON-Iface protocol, enabling trusted computation results to be brought into the local node. It handles both assignments and dry-runs, manages checkpoints, and relays computation requests to external servers.
+This module implements a "friends and family" pricing policy that restricts node access to an allow-list of addresses. It serves as both an access control mechanism and an example of custom pricing policy implementation. While fundamentally against permissionlessness principles, it's useful for private nodes and demonstrates P4 API integration.
 
 ## Dependencies
 
-- **HyperBEAM:** `hb_ao`, `hb_maps`, `hb_json`, `hb_util`
-- **Device Layer:** `dev_stack`, `dev_process`, `dev_scheduler_formats`, `dev_json_iface`
+- **HyperBEAM:** `hb_opts`, `hb_ao`, `hb_message`
 - **Records:** `#tx{}` from `include/hb.hrl`
 
 ---
@@ -20,279 +19,149 @@ This module wraps remote compute engines that implement the JSON-Iface protocol,
 ## Public Functions Overview
 
 ```erlang
-%% Lifecycle
--spec init(Msg1, Msg2, Opts) -> {ok, Msg}.
--spec normalize(Msg1, Msg2, Opts) -> {ok, Msg} | {error, Reason}.
+%% Pricing API
+-spec estimate(_, Msg, NodeMsg) -> {ok, Price}.
 
-%% Computation
--spec compute(Msg1, Msg2, Opts) -> {ok, MsgWithResults} | {error, Reason}.
-
-%% State Management
--spec snapshot(Msg, Msg2, Opts) -> {ok, SnapshotResponse}.
+%% Ledger API
+-spec charge(_, Req, NodeMsg) -> {ok, true}.
 ```
 
 ---
 
 ## Public Functions
 
-### 1. init/3
+### 1. estimate/3
 
 ```erlang
--spec init(Msg1, Msg2, Opts) -> {ok, Msg}
-    when
-        Msg1 :: map(),
-        Msg2 :: map(),
-        Opts :: map(),
-        Msg :: map().
-```
-
-**Description:** Initialize the delegated compute device. Currently no special initialization required.
-
-**Test Code:**
-```erlang
--module(dev_delegated_compute_init_test).
--include_lib("eunit/include/eunit.hrl").
-
-init_test() ->
-    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
-    Msg2 = #{},
-    {ok, Result} = dev_delegated_compute:init(Msg1, Msg2, #{}),
-    ?assertEqual(Msg1, Result).
-
-init_preserves_data_test() ->
-    Msg1 = #{
-        <<"device">> => <<"delegated-compute@1.0">>,
-        <<"data">> => <<"test">>
-    },
-    {ok, Result} = dev_delegated_compute:init(Msg1, #{}, #{}),
-    ?assertEqual(<<"test">>, maps:get(<<"data">>, Result)).
-```
-
----
-
-### 2. normalize/3
-
-```erlang
--spec normalize(Msg1, Msg2, Opts) -> {ok, Msg} | {error, Reason}
-    when
-        Msg1 :: map(),
-        Msg2 :: map(),
-        Opts :: map(),
-        Msg :: map(),
-        Reason :: term().
-```
-
-**Description:** Normalize the device by loading snapshots if present. Handles checkpoint-type snapshots by calling `/state` endpoint to restore state on the remote server.
-
-**Snapshot Handling:**
-- Checks for `snapshot` key in Msg1
-- If `type` is `Checkpoint`, loads state to remote server
-- Removes `snapshot` key after loading
-- Uses `POST /state` endpoint with snapshot data
-
-**Test Code:**
-```erlang
--module(dev_delegated_compute_normalize_test).
--include_lib("eunit/include/eunit.hrl").
-
-normalize_no_snapshot_test() ->
-    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
-    Msg2 = #{},
-    {ok, Result} = dev_delegated_compute:normalize(Msg1, Msg2, #{}),
-    ?assertEqual(Msg1, Result).
-
-normalize_with_checkpoint_test() ->
-    Snapshot = #{
-        <<"type">> => <<"Checkpoint">>,
-        <<"data">> => <<"checkpoint-data">>,
-        <<"memory-limit">> => <<"1-gb">>
-    },
-    Msg1 = #{
-        <<"device">> => <<"delegated-compute@1.0">>,
-        <<"snapshot">> => Snapshot
-    },
-    meck:new(hb_ao, [passthrough]),
-    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
-        {ok, #{<<"status">> => 200}}
-    end),
-    {ok, Result} = dev_delegated_compute:normalize(Msg1, #{}, #{}),
-    ?assertNot(maps:is_key(<<"snapshot">>, Result)),
-    meck:unload(hb_ao).
-
-normalize_non_checkpoint_test() ->
-    Snapshot = #{
-        <<"type">> => <<"Other">>,
-        <<"data">> => <<"other-data">>
-    },
-    Msg1 = #{
-        <<"device">> => <<"delegated-compute@1.0">>,
-        <<"snapshot">> => Snapshot
-    },
-    {ok, Result} = dev_delegated_compute:normalize(Msg1, #{}, #{}),
-    ?assertNot(maps:is_key(<<"snapshot">>, Result)).
-```
-
----
-
-### 3. compute/3
-
-```erlang
--spec compute(Msg1, Msg2, Opts) -> {ok, MsgWithResults} | {error, Reason}
-    when
-        Msg1 :: map(),
-        Msg2 :: map(),
-        Opts :: map(),
-        MsgWithResults :: map(),
-        Reason :: term().
-```
-
-**Description:** Execute computation on remote machine. Routes to either assignment computation or dry-run based on message type.
-
-**Execution Modes:**
-
-**Assignment Mode** (`Type = <<"Assignment">>`):
-- Converts to AOS2 format
-- Calls `POST /result/&#123;slot&#125;?process-id=&#123;id&#125;`
-- Stores result permanently
-
-**Dry-Run Mode** (any other type):
-- Converts to JSON-Iface format
-- Calls `POST /dry-run?process-id=&#123;id&#125;`
-- Does not affect state
-
-**Output Structure:**
-```erlang
-#{
-    <<OutputPrefix/binary, "/results">> => ParsedMessage,
-    <<OutputPrefix/binary, "/results/json">> => #{
-        <<"content-type">> => <<"application/json">>,
-        <<"body">> => JSONResponse
-    }
-}
-```
-
-**Test Code:**
-```erlang
--module(dev_delegated_compute_compute_test).
--include_lib("eunit/include/eunit.hrl").
-
-compute_assignment_test() ->
-    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
-    Msg2 = #{
-        <<"type">> => <<"Assignment">>,
-        <<"process-id">> => <<"proc-123">>,
-        <<"slot">> => 1,
-        <<"action">> => <<"test">>
-    },
-    meck:new(hb_ao, [passthrough]),
-    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
-        {ok, #{<<"body">> => <<"{\"ok\": true}">>}}
-    end),
-    meck:new(dev_json_iface, [passthrough]),
-    meck:expect(dev_json_iface, json_to_message, fun(_, _) -> 
-        {ok, #{<<"status">> => <<"ok">>}}
-    end),
-    {ok, Result} = dev_delegated_compute:compute(Msg1, Msg2, #{}),
-    ?assert(maps:is_key(<<"/results">>, Result)),
-    meck:unload([hb_ao, dev_json_iface]).
-
-compute_dryrun_test() ->
-    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
-    Msg2 = #{
-        <<"type">> => <<"Message">>,
-        <<"process-id">> => <<"proc-123">>,
-        <<"action">> => <<"test">>
-    },
-    meck:new(hb_ao, [passthrough]),
-    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
-        {ok, #{<<"body">> => <<"{\"result\": \"test\"}">>}}
-    end),
-    meck:new(dev_json_iface, [passthrough]),
-    meck:expect(dev_json_iface, json_to_message, fun(_, _) -> 
-        {ok, #{<<"result">> => <<"test">>}}
-    end),
-    {ok, Result} = dev_delegated_compute:compute(Msg1, Msg2, #{}),
-    ?assert(maps:is_key(<<"/results">>, Result)),
-    meck:unload([hb_ao, dev_json_iface]).
-
-compute_error_test() ->
-    Msg1 = #{<<"device">> => <<"delegated-compute@1.0">>},
-    Msg2 = #{
-        <<"type">> => <<"Assignment">>,
-        <<"process-id">> => <<"proc-123">>
-    },
-    meck:new(hb_ao, [passthrough]),
-    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
-        {error, <<"Connection failed">>}
-    end),
-    {error, _} = dev_delegated_compute:compute(Msg1, Msg2, #{}),
-    meck:unload(hb_ao).
-```
-
----
-
-### 4. snapshot/3
-
-```erlang
--spec snapshot(Msg, Msg2, Opts) -> {ok, SnapshotResponse}
+-spec estimate(_, Msg, NodeMsg) -> {ok, Price}
     when
         Msg :: map(),
-        Msg2 :: map(),
-        Opts :: map(),
-        SnapshotResponse :: map().
+        NodeMsg :: map(),
+        Price :: 0 | binary().
 ```
 
-**Description:** Generate a snapshot of running computation by calling `POST /snapshot/&#123;process-id&#125;` endpoint on remote server.
+**Description:** Estimate cost of servicing a request. Returns `0` for allowed addresses, `<<"infinity">>` for non-allowed addresses.
 
-**Response Structure:**
-```erlang
-% Success
-{ok, #{
-    <<"type">> => <<"Checkpoint">>,
-    <<"data">> => SnapshotData,
-    ...
-}}
-
-% Error
-{ok, #{
-    <<"error">> => <<"No checkpoint produced.">>,
-    <<"error-details">> => ErrorDetails
-}}
-```
+**Access Control:**
+- Checks if all request signers are in allow-list
+- Allow-list configured via `faff_allow_list` option
+- Returns 0 cost for allowed signers
+- Returns infinity cost for disallowed signers
 
 **Test Code:**
 ```erlang
--module(dev_delegated_compute_snapshot_test).
+-module(dev_faff_estimate_test).
 -include_lib("eunit/include/eunit.hrl").
 
-snapshot_success_test() ->
-    Msg = #{
-        <<"device">> => <<"delegated-compute@1.0">>,
-        <<"process-id">> => <<"proc-123">>
-    },
-    meck:new(hb_ao, [passthrough]),
-    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
-        {ok, #{
-            <<"type">> => <<"Checkpoint">>,
-            <<"data">> => <<"snapshot-data">>
-        }}
-    end),
-    {ok, Result} = dev_delegated_compute:snapshot(Msg, #{}, #{}),
-    ?assertEqual(<<"Checkpoint">>, maps:get(<<"type">>, Result)),
-    meck:unload(hb_ao).
+estimate_allowed_test() ->
+    % When signers match allow list, price should be 0
+    % Note: hb_message:signers returns encoded addresses
+    Wallet = ar_wallet:new(),
+    Address = hb_util:encode(ar_wallet:to_address(Wallet)),
+    Req = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet}),
+    Msg = #{<<"request">> => Req},
+    NodeMsg = #{faff_allow_list => [Address]},
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(0, Price).
 
-snapshot_error_test() ->
-    Msg = #{
-        <<"device">> => <<"delegated-compute@1.0">>,
-        <<"process-id">> => <<"proc-123">>
-    },
-    meck:new(hb_ao, [passthrough]),
-    meck:expect(hb_ao, resolve, fun(_, _, _) -> 
-        {error, <<"Snapshot failed">>}
-    end),
-    {ok, Result} = dev_delegated_compute:snapshot(Msg, #{}, #{}),
-    ?assert(maps:is_key(<<"error">>, Result)),
-    meck:unload(hb_ao).
+estimate_not_allowed_test() ->
+    Wallet = ar_wallet:new(),
+    Req = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet}),
+    Msg = #{<<"request">> => Req},
+    NodeMsg = #{faff_allow_list => []},
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(<<"infinity">>, Price).
+
+estimate_multiple_signers_all_allowed_test() ->
+    Wallet1 = ar_wallet:new(),
+    Wallet2 = ar_wallet:new(),
+    Addr1 = hb_util:encode(ar_wallet:to_address(Wallet1)),
+    Addr2 = hb_util:encode(ar_wallet:to_address(Wallet2)),
+    Req1 = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet1}),
+    Req2 = hb_message:commit(Req1, #{priv_wallet => Wallet2}),
+    Msg = #{<<"request">> => Req2},
+    NodeMsg = #{faff_allow_list => [Addr1, Addr2]},
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(0, Price).
+
+estimate_multiple_signers_partial_test() ->
+    Wallet1 = ar_wallet:new(),
+    Wallet2 = ar_wallet:new(),
+    Addr1 = hb_util:encode(ar_wallet:to_address(Wallet1)),
+    Req1 = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet1}),
+    Req2 = hb_message:commit(Req1, #{priv_wallet => Wallet2}),
+    Msg = #{<<"request">> => Req2},
+    NodeMsg = #{faff_allow_list => [Addr1]},  % Only Wallet1 allowed
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(<<"infinity">>, Price).
+
+estimate_empty_allow_list_test() ->
+    Wallet = ar_wallet:new(),
+    Req = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet}),
+    Msg = #{<<"request">> => Req},
+    NodeMsg = #{},  % No allow list configured
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(<<"infinity">>, Price).
+
+estimate_no_signers_test() ->
+    % With no signers, lists:all returns true (vacuous truth)
+    % so unsigned requests are allowed
+    Msg = #{<<"request">> => #{<<"action">> => <<"test">>}},
+    NodeMsg = #{faff_allow_list => [<<"some-address">>]},
+    {ok, Price} = dev_faff:estimate(unused, Msg, NodeMsg),
+    ?assertEqual(0, Price).
+```
+
+---
+
+### 2. charge/3
+
+```erlang
+-spec charge(_, Req, NodeMsg) -> {ok, true}
+    when
+        Req :: map(),
+        NodeMsg :: map().
+```
+
+**Description:** Charge the user's account. Since this is a friends and family policy with zero cost, always returns success without actually debiting.
+
+**Behavior:**
+- Always returns `{ok, true}`
+- No actual charging occurs
+- Implements required Ledger API interface
+- Assumes estimate/3 already validated access
+
+**Test Code:**
+```erlang
+-module(dev_faff_charge_test).
+-include_lib("eunit/include/eunit.hrl").
+
+charge_test() ->
+    Req = #{<<"action">> => <<"test">>},
+    NodeMsg = #{},
+    {ok, Result} = dev_faff:charge(unused, Req, NodeMsg),
+    ?assertEqual(true, Result).
+
+charge_with_request_test() ->
+    Wallet = ar_wallet:new(),
+    Req = hb_message:commit(#{<<"action">> => <<"test">>}, 
+        #{priv_wallet => Wallet}),
+    NodeMsg = #{faff_allow_list => [ar_wallet:to_address(Wallet)]},
+    {ok, Result} = dev_faff:charge(unused, Req, NodeMsg),
+    ?assertEqual(true, Result).
+
+charge_always_succeeds_test() ->
+    % Even for non-allowed addresses, charge succeeds
+    % (estimate should have rejected before reaching here)
+    Req = #{<<"action">> => <<"test">>},
+    NodeMsg = #{faff_allow_list => []},
+    {ok, Result} = dev_faff:charge(unused, Req, NodeMsg),
+    ?assertEqual(true, Result).
 ```
 
 ---
@@ -300,213 +169,234 @@ snapshot_error_test() ->
 ## Common Patterns
 
 ```erlang
-%% Execute assignment on remote CU
-Msg = #{
-    <<"device">> => <<"delegated-compute@1.0">>,
-    <<"process-id">> => ProcessID
+%% Configure node with allow-list
+NodeMsg = #{
+    faff_allow_list => [
+        <<"address1...">>,
+        <<"address2...">>,
+        <<"address3...">>
+    ]
 },
-Assignment = #{
-    <<"type">> => <<"Assignment">>,
-    <<"process-id">> => ProcessID,
-    <<"slot">> => 1,
-    <<"action">> => <<"execute">>
-},
-{ok, Result} = dev_delegated_compute:compute(Msg, Assignment, Opts),
-Results = maps:get(<<"/results">>, Result).
+application:set_env(hb, node_msg, NodeMsg).
 
-%% Dry-run computation (no state change)
-DryRunMsg = #{
-    <<"type">> => <<"Message">>,
-    <<"process-id">> => ProcessID,
-    <<"action">> => <<"test">>
-},
-{ok, Result} = dev_delegated_compute:compute(Msg, DryRunMsg, Opts),
-JSONResults = maps:get(<<"/results/json">>, Result).
-
-%% Load checkpoint before computation
-Snapshot = #{
-    <<"type">> => <<"Checkpoint">>,
-    <<"data">> => CheckpointData,
-    <<"memory-limit">> => <<"1-gb">>
-},
-Msg = #{
-    <<"device">> => <<"delegated-compute@1.0">>,
-    <<"process-id">> => ProcessID,
-    <<"snapshot">> => Snapshot
-},
-{ok, Normalized} = dev_delegated_compute:normalize(Msg, #{}, Opts),
-{ok, Result} = dev_delegated_compute:compute(Normalized, Assignment, Opts).
-
-%% Create snapshot
-Msg = #{
-    <<"device">> => <<"delegated-compute@1.0">>,
-    <<"process-id">> => ProcessID
-},
-{ok, Snapshot} = dev_delegated_compute:snapshot(Msg, #{}, Opts),
-case maps:get(<<"type">>, Snapshot, undefined) of
-    <<"Checkpoint">> -> 
-        % Save checkpoint
-        CheckpointData = maps:get(<<"data">>, Snapshot);
-    _ ->
-        % Handle error
-        Error = maps:get(<<"error">>, Snapshot)
+%% Check access for a request
+Wallet = ar_wallet:new(),
+Address = ar_wallet:to_address(Wallet),
+Req = hb_message:commit(
+    #{<<"action">> => <<"process">>},
+    #{priv_wallet => Wallet}
+),
+Msg = #{<<"request">> => Req},
+NodeMsg = #{faff_allow_list => [Address]},
+case dev_faff:estimate(unused, Msg, NodeMsg) of
+    {ok, 0} ->
+        % Access allowed, proceed
+        {ok, _} = dev_faff:charge(unused, Req, NodeMsg);
+    {ok, <<"infinity">>} ->
+        % Access denied
+        {error, unauthorized}
 end.
 
-%% Use as process execution device
+%% Use as pricing policy
 Process = #{
     <<"device">> => <<"process@1.0">>,
-    <<"execution-device">> => <<"delegated-compute@1.0">>,
-    <<"process-id">> => ProcessID
+    <<"pricing-policy">> => <<"faff@1.0">>,
+    <<"faff_allow_list">> => AllowedAddresses
 },
-{ok, Result} = hb_ao:resolve(Process, Message, Opts).
+{ok, Result} = hb_ao:resolve(Process, Request, Opts).
+
+%% Multiple signers scenario
+Wallet1 = ar_wallet:new(),
+Wallet2 = ar_wallet:new(),
+Addr1 = ar_wallet:to_address(Wallet1),
+Addr2 = ar_wallet:to_address(Wallet2),
+
+% Create multi-signed request
+Req1 = hb_message:commit(#{<<"action">> => <<"test">>}, 
+    #{priv_wallet => Wallet1}),
+Req2 = hb_message:commit(Req1, #{priv_wallet => Wallet2}),
+
+% Both addresses must be in allow-list
+NodeMsg = #{faff_allow_list => [Addr1, Addr2]},
+Msg = #{<<"request">> => Req2},
+{ok, 0} = dev_faff:estimate(unused, Msg, NodeMsg).
 ```
 
 ---
 
-## API Endpoints
+## Configuration
 
-### POST /result/&#123;slot&#125;
-**Purpose:** Execute assignment and store result
+### Allow-List Setup
 
-**Query Parameters:**
-- `process-id` - Process identifier
-
-**Body:** AOS2-formatted assignment
-
-**Response:** JSON-Iface formatted results
-
----
-
-### POST /dry-run
-**Purpose:** Execute without state changes
-
-**Query Parameters:**
-- `process-id` - Process identifier
-
-**Body:** JSON-Iface formatted message
-
-**Response:** JSON-Iface formatted results
-
----
-
-### POST /state
-**Purpose:** Load checkpoint state
-
-**Body:** Checkpoint data
-
-**Headers:** Checkpoint metadata (without data field)
-
-**Response:** Success/error status
-
----
-
-### POST /snapshot/&#123;process-id&#125;
-**Purpose:** Generate process snapshot
-
-**Body:** Empty object `{}`
-
-**Response:** Checkpoint or error
-
----
-
-## Relay Integration
-
-### Relay Device Usage
-All external calls use `relay@1.0` device:
-
+**Via Options:**
 ```erlang
-#{
-    <<"device">> => <<"relay@1.0">>,
-    <<"content-type">> => <<"application/json">>,
-    <<"path">> => <<"call">>,
-    <<"target">> => <<"payload">>,
-    <<"payload">> => #{
-        <<"path">> => APIPath,
-        <<"method">> => Method,
-        <<"body">> => Body,
-        <<"content-type">> => ContentType
+hb_opts:set(faff_allow_list, [
+    <<"address1...">>,
+    <<"address2...">>
+])
+```
+
+**Via Node Message:**
+```erlang
+NodeMsg = #{
+    faff_allow_list => [
+        <<"address1...">>,
+        <<"address2...">>
+    ]
+}
+```
+
+**Via Application Environment:**
+```erlang
+application:set_env(hb, faff_allow_list, [
+    <<"address1...">>,
+    <<"address2...">>
+])
+```
+
+---
+
+## P4 API Implementation
+
+### Pricing API
+
+**Required Functions:**
+- `estimate/3` - Calculate cost (implemented)
+
+**Optional Functions:**
+- `price/3` - Actual price (uses estimate by default)
+
+### Ledger API
+
+**Required Functions:**
+- `charge/3` - Debit account (implemented as no-op)
+
+**Not Implemented:**
+- `credit/3` - Credit account (not needed for zero-cost policy)
+
+---
+
+## Access Control Flow
+
+```
+1. Request arrives with signatures
+   ↓
+2. Extract request from message
+   ↓
+3. Get all signers from request
+   ↓
+4. Load allow-list from options
+   ↓
+5. Check if ALL signers in allow-list
+   ↓
+   ├─ Yes → Return {ok, 0}
+   └─ No → Return {ok, <<"infinity">>}
+```
+
+---
+
+## Signer Validation
+
+### Single Signer
+```erlang
+Signers = hb_message:signers(Req, NodeMsg)
+% Returns: [<<"signer-address">>]
+
+lists:all(
+    fun(Signer) -> lists:member(Signer, AllowList) end,
+    Signers
+)
+```
+
+### Multiple Signers
+```erlang
+% All signers must be in allow-list
+Signers = [Addr1, Addr2, Addr3]
+AllowList = [Addr1, Addr2, Addr3]
+% Result: true
+
+Signers = [Addr1, Addr2, Addr3]
+AllowList = [Addr1, Addr2]
+% Result: false (Addr3 not in list)
+```
+
+---
+
+## Price Values
+
+### Allowed Access
+```erlang
+{ok, 0}
+```
+- Zero cost
+- Request proceeds normally
+- charge/3 called (returns success)
+
+### Denied Access
+```erlang
+{ok, <<"infinity">>}
+```
+- Infinite cost
+- Request rejected
+- charge/3 not called
+
+---
+
+## Integration Examples
+
+### As Process Pricing Policy
+```erlang
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"pricing-policy">> => #{
+        <<"device">> => <<"faff@1.0">>,
+        <<"allow-list">> => [
+            <<"trusted-addr-1">>,
+            <<"trusted-addr-2">>
+        ]
     }
 }
 ```
 
-### Cache Control
-External calls bypass cache:
+### With Custom Validation
 ```erlang
-Opts#{
-    hashpath => ignore,
-    cache_control => [<<"no-store">>, <<"no-cache">>]
-}
-```
-
----
-
-## Format Conversion
-
-### Assignment → AOS2
-```erlang
-dev_scheduler_formats:assignments_to_aos2(
-    ProcessID,
-    #{Slot => Assignment},
-    false,
-    Opts
-)
-% Returns: #{<<"body">> => JSONBody, ...headers...}
-```
-
-### Message → JSON-Iface
-```erlang
-Body = hb_json:encode(
-    dev_json_iface:message_to_json_struct(Message, Opts)
-)
-```
-
-### JSON-Iface → Message
-```erlang
-{ok, Msg} = dev_json_iface:json_to_message(JSONResponse, Opts)
-```
-
----
-
-## Process ID Resolution
-
-Priority order:
-1. From device state: `dev_process:process_id(Msg1, #{}, Opts)`
-2. From request: `hb_ao:get(<<"process-id">>, Msg2, Opts)`
-
-```erlang
-get_process_id(Msg1, Msg2, Opts) ->
-    case dev_process:process_id(Msg1, #{}, Opts) of
-        not_found -> hb_ao:get(<<"process-id">>, Msg2, Opts);
-        ProcID -> ProcID
-    end
+estimate_with_custom_validation(_, Msg, NodeMsg) ->
+    AllowList = hb_opts:get(faff_allow_list, [], NodeMsg),
+    ExtendedList = AllowList ++ get_dynamic_allow_list(),
+    Req = hb_ao:get(<<"request">>, Msg, NodeMsg),
+    Signers = hb_message:signers(Req, NodeMsg),
+    case all_signers_allowed(Signers, ExtendedList) of
+        true -> {ok, 0};
+        false -> {ok, <<"infinity">>}
+    end.
 ```
 
 ---
 
 ## References
 
-- **JSON-Iface** - `dev_json_iface.erl`
-- **Relay Device** - `dev_relay.erl`
-- **Process Device** - `dev_process.erl`
-- **Scheduler Formats** - `dev_scheduler_formats.erl`
-- **AO Resolution** - `hb_ao.erl`
+- **P4 Pricing API** - HyperBEAM pricing specification
+- **P4 Ledger API** - HyperBEAM ledger specification
+- **Message Signing** - `hb_message.erl`
+- **Options Management** - `hb_opts.erl`
+- **Wallet Operations** - `ar_wallet.erl`
 
 ---
 
 ## Notes
 
-1. **Remote Execution:** All computation happens on external server
-2. **State Management:** Server maintains state between calls
-3. **Checkpoint Support:** Full checkpoint save/restore via snapshots
-4. **Dual Mode:** Supports both assignments and dry-runs
-5. **JSON-Iface:** Uses standard JSON-Iface protocol for compatibility
-6. **AOS2 Format:** Assignments converted to AOS2 format
-7. **Cache Bypass:** External calls always bypass cache
-8. **Relay Pattern:** Uses relay device for all HTTP communication
-9. **Error Handling:** Returns structured errors on failure
-10. **Process Integration:** Can be used as execution device in processes
-11. **Format Agnostic:** Handles format conversion transparently
-12. **Metadata Preservation:** Preserves all metadata through conversions
-13. **Snapshot Cleanup:** Removes snapshot key after loading
-14. **Type Detection:** Automatically detects assignment vs dry-run
-15. **Output Prefix:** Uses stack prefix for result keys
+1. **Zero Cost:** Friends get free access (cost = 0)
+2. **Whitelist Only:** Non-friends cannot access (cost = infinity)
+3. **All Signers:** All request signers must be in allow-list
+4. **No Charging:** charge/3 is a no-op, no actual debiting occurs
+5. **P4 Compatible:** Implements standard Pricing and Ledger APIs
+6. **Configuration Flexible:** Allow-list from options, node message, or app env
+7. **Multi-Signature:** Supports requests signed by multiple parties
+8. **Example Code:** Serves as template for custom pricing policies
+9. **Permissioned Access:** Against permissionlessness but useful for private nodes
+10. **Simple Logic:** Easy to understand and modify for custom policies
+11. **No Credit:** Does not implement credit/3 (not needed)
+12. **Address-Based:** Access control by wallet address
+13. **Runtime Updates:** Allow-list can be updated without restart
+14. **Event Logging:** Logs estimate and charge events for debugging
+15. **Stub APIs:** Provides minimal viable implementation of P4 interfaces

@@ -250,6 +250,10 @@ export default defineConfig({
           text: "Overview",
           link: "/book",
         },
+        /*{
+          text: "HyperBEAM",
+          link: "/book/hyperbeam",
+        },*/
         {
           text: "Setup",
           link: "/book/setup",

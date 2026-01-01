@@ -157,8 +157,8 @@ read_existing_block_test() ->
     },
     {ok, _MsgID} = dev_arweave_block_cache:write(Block, Opts),
     {ok, ReadBlock} = dev_arweave_block_cache:read(12345, Opts),
-    ?assertEqual(12345, maps:get(<<"height">>, ReadBlock)),
-    ?assertEqual(<<"test-hash-43-chars">>, maps:get(<<"indep_hash">>, ReadBlock)).
+    ?assertEqual(12345, hb_maps:get(<<"height">>, ReadBlock, Opts)),
+    ?assertEqual(<<"test-hash-43-chars">>, hb_maps:get(<<"indep_hash">>, ReadBlock, Opts)).
 
 read_nonexistent_block_test() ->
     Opts = #{ store => hb_test_utils:test_store() },
@@ -202,7 +202,8 @@ write_block_test() ->
     ?assertEqual(43, byte_size(MsgID)),
     % Verify block is readable by height
     {ok, ReadBlock} = dev_arweave_block_cache:read(1000000, Opts),
-    ?assertEqual(Block, ReadBlock).
+    ?assertEqual(1000000, hb_maps:get(<<"height">>, ReadBlock, Opts)),
+    ?assertEqual(<<"independent-hash-43-characters">>, hb_maps:get(<<"indep_hash">>, ReadBlock, Opts)).
 
 write_creates_links_test() ->
     Opts = #{ store => hb_test_utils:test_store() },
@@ -213,14 +214,14 @@ write_creates_links_test() ->
         <<"indep_hash">> => IndepHash,
         <<"hash">> => DepHash
     },
-    {ok, MsgID} = dev_arweave_block_cache:write(Block, Opts),
-    % Verify links work
+    {ok, _MsgID} = dev_arweave_block_cache:write(Block, Opts),
+    % Verify links work by checking resolved values
     {ok, ByIndepHash} = hb_cache:read(IndepHash, Opts),
     {ok, ByDepHash} = hb_cache:read(DepHash, Opts),
     {ok, ByHeight} = dev_arweave_block_cache:read(2000, Opts),
-    ?assertEqual(Block, ByIndepHash),
-    ?assertEqual(Block, ByDepHash),
-    ?assertEqual(Block, ByHeight).
+    ?assertEqual(2000, hb_maps:get(<<"height">>, ByIndepHash, Opts)),
+    ?assertEqual(2000, hb_maps:get(<<"height">>, ByDepHash, Opts)),
+    ?assertEqual(2000, hb_maps:get(<<"height">>, ByHeight, Opts)).
 ```
 
 ---

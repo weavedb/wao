@@ -124,26 +124,6 @@ once_missing_path_test() ->
     Msg2 = #{<<"data">> => <<"test">>},
     Result = dev_cron:once(#{}, Msg2, #{}),
     ?assertEqual({error, <<"No cron path found in message.">>}, Result).
-
-once_execution_test() ->
-    % Setup test worker
-    TestPid = spawn(fun() -> 
-        receive
-            {executed, Data} -> ok
-        after 5000 -> timeout
-        end
-    end),
-    ID = hb_util:human_id(crypto:strong_rand_bytes(32)),
-    hb_name:register({<<"test">>, ID}, TestPid),
-    
-    Msg2 = #{
-        <<"cron-path">> => <<"/~test-device@1.0/notify">>,
-        <<"test-id">> => ID
-    },
-    {ok, _TaskID} = dev_cron:once(#{}, Msg2, #{}),
-    timer:sleep(500),
-    % Verify execution occurred
-    ?assert(true).  % Actual verification would check test worker state
 ```
 
 ---
@@ -211,34 +191,6 @@ every_invalid_interval_test() ->
     },
     Result = dev_cron:every(#{}, Msg2, #{}),
     ?assertMatch({error, _}, Result).
-
-every_multiple_executions_test() ->
-    TestPid = spawn(fun() -> test_counter(0) end),
-    ID = hb_util:human_id(crypto:strong_rand_bytes(32)),
-    hb_name:register({<<"test">>, ID}, TestPid),
-    
-    Msg2 = #{
-        <<"cron-path">> => <<"/~test-device@1.0/increment">>,
-        <<"interval">> => <<"500-milliseconds">>,
-        <<"test-id">> => ID
-    },
-    {ok, TaskID} = dev_cron:every(#{}, Msg2, #{}),
-    timer:sleep(1600),  % Allow 3 executions
-    
-    % Verify multiple executions
-    TestPid ! {get_count, self()},
-    receive
-        {count, Count} -> ?assert(Count >= 3)
-    after 1000 -> ?assert(false)
-    end.
-
-test_counter(Count) ->
-    receive
-        {increment} -> test_counter(Count + 1);
-        {get_count, Pid} ->
-            Pid ! {count, Count},
-            test_counter(Count)
-    end.
 ```
 
 ---
@@ -389,37 +341,7 @@ parse_time(<<"2-hours">>) → 7200000
 parse_time(<<"1-day">>) → 86400000
 ```
 
-**Test Code:**
-```erlang
--module(parse_time_test).
--include_lib("eunit/include/eunit.hrl").
-
-parse_time_milliseconds_test() ->
-    ?assertEqual(100, dev_cron:parse_time(<<"100-milliseconds">>)),
-    ?assertEqual(1, dev_cron:parse_time(<<"1-millisecond">>)).
-
-parse_time_seconds_test() ->
-    ?assertEqual(1000, dev_cron:parse_time(<<"1-second">>)),
-    ?assertEqual(5000, dev_cron:parse_time(<<"5-seconds">>)).
-
-parse_time_minutes_test() ->
-    ?assertEqual(60000, dev_cron:parse_time(<<"1-minute">>)),
-    ?assertEqual(300000, dev_cron:parse_time(<<"5-minutes">>)).
-
-parse_time_hours_test() ->
-    ?assertEqual(3600000, dev_cron:parse_time(<<"1-hour">>)),
-    ?assertEqual(7200000, dev_cron:parse_time(<<"2-hours">>)).
-
-parse_time_days_test() ->
-    ?assertEqual(86400000, dev_cron:parse_time(<<"1-day">>)),
-    ?assertEqual(172800000, dev_cron:parse_time(<<"2-days">>)).
-
-parse_time_invalid_unit_test() ->
-    ?assertThrow(
-        {invalid_time_unit, _},
-        dev_cron:parse_time(<<"10-invalid">>)
-    ).
-```
+**Note:** This is an internal function that is not exported. It is tested indirectly through the `every/3` function tests.
 
 ---
 

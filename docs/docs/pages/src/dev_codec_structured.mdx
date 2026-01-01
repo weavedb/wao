@@ -322,7 +322,7 @@ decode_ao_types_from_list_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 is_list_true_test() ->
-    Types = #{<<".#">> => <<"list">>},
+    Types = #{<<".">> => <<"list">>},
     ?assert(dev_codec_structured:is_list_from_ao_types(Types, #{})).
 
 is_list_false_test() ->
@@ -449,7 +449,7 @@ implicit_keys_test() ->
 
 commit_test() ->
     Wallet = ar_wallet:new(),
-    Msg = #{<<"data">> => 42},
+    Msg = #{<<"data">> => <<"42">>},
     {ok, Signed} = dev_codec_structured:commit(
         Msg,
         #{<<"type">> => <<"rsa-pss-sha512">>},
@@ -459,15 +459,14 @@ commit_test() ->
 
 verify_test() ->
     Wallet = ar_wallet:new(),
-    Msg = #{<<"data">> => 42},
+    Msg = #{<<"data">> => <<"42">>},
     {ok, Signed} = dev_codec_structured:commit(
         Msg,
         #{<<"type">> => <<"rsa-pss-sha512">>},
         #{priv_wallet => Wallet}
     ),
-    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
-    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
-    {ok, IsValid} = dev_codec_structured:verify(Msg, Commitment, #{}),
+    % RSA-PSS produces multiple commitments
+    IsValid = hb_message:verify(Signed, all, #{}),
     ?assert(IsValid).
 ```
 

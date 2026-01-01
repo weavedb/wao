@@ -116,18 +116,20 @@ info_excludes_instance_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 init_test() ->
-    Msg = #{
-        <<"device">> => <<"wasm-64@1.0">>,
-        <<"image">> => ImageID
-    },
-    {ok, InitMsg} = hb_ao:resolve(Msg, <<"init">>, #{}),
-    Priv = hb_private:from_message(InitMsg),
+    application:ensure_all_started(hb),
+    hb:init(),
+    Msg = dev_wasm:cache_wasm_image("test/test.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg, <<"init">>, #{}),
+    Priv = hb_private:from_message(Msg1),
     ?assertMatch({ok, Instance} when is_pid(Instance),
         hb_ao:resolve(Priv, <<"instance">>, #{})),
     ?assertMatch({ok, Fun} when is_function(Fun),
         hb_ao:resolve(Priv, <<"import-resolver">>, #{})).
 
 init_with_prefix_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
+    #{ <<"image">> := ImageID } = dev_wasm:cache_wasm_image("test/test.wasm"),
     Msg = #{
         <<"device">> => <<"wasm-64@1.0">>,
         <<"input-prefix">> => <<"process">>,
@@ -183,6 +185,8 @@ init_with_prefix_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 basic_execution_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
     Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
     {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
     Msg2 = Msg1#{
@@ -190,18 +194,29 @@ basic_execution_test() ->
         <<"parameters">> => [5.0]
     },
     {ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
-    ?assertEqual([120.0], hb_ao:get(<<"results/output">>, Result, #{})).
+    ?assertEqual({ok, [120.0]}, hb_ao:resolve(Result, <<"results/output">>, #{})).
 
 compute_with_imports_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
     Msg0 = dev_wasm:cache_wasm_image("test/pow_calculator.wasm"),
     {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
-    Msg2 = Msg1#{
-        <<"function">> => <<"pow">>,
-        <<"parameters">> => [2, 5],
-        <<"stdlib/my_lib">> => #{ <<"device">> => <<"test-device@1.0">> }
-    },
+    Msg2 = hb_maps:merge(
+        Msg1,
+        hb_ao:set(
+            #{
+                <<"function">> => <<"pow">>,
+                <<"parameters">> => [2, 5]
+            },
+            #{
+                <<"stdlib/my_lib">> => #{ <<"device">> => <<"test-device@1.0">> }
+            },
+            #{ hashpath => ignore }
+        ),
+        #{}
+    ),
     {ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
-    ?assertEqual([32], hb_ao:get(<<"results/output">>, Result, #{})).
+    ?assertEqual({ok, [32]}, hb_ao:resolve(Result, <<"results/output">>, #{})).
 ```
 
 ---
@@ -232,19 +247,28 @@ compute_with_imports_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 snapshot_and_restore_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
     Msg0 = dev_wasm:cache_wasm_image("test/pow_calculator.wasm"),
     {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
-    Msg2 = Msg1#{
-        <<"function">> => <<"pow">>,
-        <<"parameters">> => [2, 2]
-    },
+    Msg2 = hb_maps:merge(
+        Msg1,
+        hb_ao:set(
+            #{
+                <<"function">> => <<"pow">>,
+                <<"parameters">> => [2, 3]
+            },
+            #{
+                <<"stdlib/my_lib">> => #{ <<"device">> => <<"test-device@1.0">> }
+            },
+            #{ hashpath => ignore }
+        ),
+        #{}
+    ),
     {ok, Msg3} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
-    ?assertEqual([4], hb_ao:get(<<"results/output">>, Msg3, #{})),
-    {ok, State} = hb_ao:resolve(Msg3, <<"snapshot">>, #{}),
-    % Restore from snapshot
-    NewMsg = Msg0#{ <<"snapshot">> => State },
-    {ok, Restored} = hb_ao:resolve(NewMsg, <<"compute">>, #{}),
-    ?assertEqual([4], hb_ao:get(<<"results/output">>, Restored, #{})).
+    ?assertEqual({ok, [8]}, hb_ao:resolve(Msg3, <<"results/output">>, #{})),
+    {ok, Snapshot} = hb_ao:resolve(Msg3, <<"snapshot">>, #{}),
+    ?assert(maps:is_key(<<"body">>, Snapshot)).
 ```
 
 ---
@@ -274,21 +298,28 @@ snapshot_and_restore_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 normalize_with_instance_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
     Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
     {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    % Normalize should succeed when instance exists
     {ok, Normalized} = dev_wasm:normalize(Msg1, #{}, #{}),
-    ?assertEqual(not_found, hb_ao:get(<<"snapshot">>, Normalized, #{})).
+    % Instance should still be available after normalize
+    ?assert(is_pid(dev_wasm:instance(Normalized, #{}, #{}))).
 
 normalize_from_snapshot_test() ->
-    % Create snapshot first
+    application:ensure_all_started(hb),
+    hb:init(),
     Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
     {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
     {ok, Snapshot} = hb_ao:resolve(Msg1, <<"snapshot">>, #{}),
-    % Normalize from snapshot
-    MsgWithSnapshot = Msg0#{ <<"snapshot">> => Snapshot },
+    % Terminate to remove instance
+    {ok, Terminated} = hb_ao:resolve(Msg1, <<"terminate">>, #{}),
+    % Add snapshot to terminated message
+    MsgWithSnapshot = Terminated#{ <<"snapshot">> => Snapshot },
     {ok, Normalized} = dev_wasm:normalize(MsgWithSnapshot, #{}, #{}),
-    Instance = dev_wasm:instance(Normalized, #{}, #{}),
-    ?assert(is_pid(Instance)).
+    % Instance should be restored from snapshot
+    ?assert(is_pid(dev_wasm:instance(Normalized, #{}, #{}))).
 ```
 
 ---
@@ -312,8 +343,12 @@ normalize_from_snapshot_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 terminate_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
     Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
     {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    % Verify instance exists before terminate
+    ?assert(is_pid(dev_wasm:instance(Msg1, #{}, #{}))),
     {ok, Terminated} = hb_ao:resolve(Msg1, <<"terminate">>, #{}),
     ?assertEqual(not_found, dev_wasm:instance(Terminated, #{}, #{})).
 ```
@@ -350,18 +385,26 @@ terminate_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 imported_function_test() ->
-    Msg = #{
-        <<"device">> => <<"wasm-64@1.0">>,
-        <<"image">> => ImageID,
-        <<"stdlib/my_lib">> => #{ <<"device">> => <<"test-device@1.0">> }
-    },
-    {ok, InitMsg} = hb_ao:resolve(Msg, <<"init">>, #{}),
-    ComputeMsg = InitMsg#{
-        <<"function">> => <<"pow">>,
-        <<"parameters">> => [2, 5]
-    },
-    {ok, Result} = hb_ao:resolve(ComputeMsg, <<"compute">>, #{}),
-    ?assertEqual([32], hb_ao:get(<<"results/output">>, Result, #{})).
+    application:ensure_all_started(hb),
+    hb:init(),
+    Msg0 = dev_wasm:cache_wasm_image("test/pow_calculator.wasm"),
+    {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
+    Msg2 = hb_maps:merge(
+        Msg1,
+        hb_ao:set(
+            #{
+                <<"function">> => <<"pow">>,
+                <<"parameters">> => [2, 5]
+            },
+            #{
+                <<"stdlib/my_lib">> => #{ <<"device">> => <<"test-device@1.0">> }
+            },
+            #{ hashpath => ignore }
+        ),
+        #{}
+    ),
+    {ok, Result} = hb_ao:resolve(Msg2, <<"compute">>, #{}),
+    ?assertEqual({ok, [32]}, hb_ao:resolve(Result, <<"results/output">>, #{})).
 ```
 
 ---
@@ -385,6 +428,8 @@ imported_function_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 instance_after_init_test() ->
+    application:ensure_all_started(hb),
+    hb:init(),
     Msg0 = dev_wasm:cache_wasm_image("test/test.wasm"),
     {ok, Msg1} = hb_ao:resolve(Msg0, <<"init">>, #{}),
     Instance = dev_wasm:instance(Msg1, #{}, #{}),

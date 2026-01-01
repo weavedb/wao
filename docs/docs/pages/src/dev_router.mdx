@@ -267,10 +267,12 @@ match_no_route_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 register_route_test() ->
+    Wallet = hb:wallet(),
     RemoteRouter = hb_http_server:start_node(#{
-        operator => hb_util:encode(ar_wallet:to_address(hb:wallet()))
+        operator => hb_util:encode(ar_wallet:to_address(Wallet))
     }),
     Opts = #{
+        priv_wallet => Wallet,
         router_opts => #{
             <<"offered">> => [
                 #{

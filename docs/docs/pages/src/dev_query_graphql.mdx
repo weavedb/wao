@@ -131,7 +131,8 @@ execute_message_query_test() ->
 execute_arweave_query_test() ->
     Opts = #{store => [hb_test_utils:test_store()]},
     Context = #{opts => Opts},
-    Args = #{},
+    % transactions query requires id or tags args
+    Args = #{<<"id">> => <<"test-id">>},
     % Non-message fields are routed to dev_query_arweave
     Result = dev_query_graphql:execute(Context, undefined, <<"transactions">>, Args),
     ?assertMatch({ok, _}, Result).

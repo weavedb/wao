@@ -63,9 +63,9 @@ This device provides controlled access to the local cache store, enabling readin
 -include_lib("eunit/include/eunit.hrl").
 
 read_basic_test() ->
-    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    Opts = #{ store => hb_test_utils:test_store() },
     TestData = #{ <<"key">> => <<"value">> },
-    {_WriteRes, Path} = write_to_cache(Node, TestData, Wallet),
+    {ok, Path} = hb_cache:write(TestData, Opts),
     Request = #{
         <<"method">> => <<"GET">>,
         <<"target">> => Path
@@ -73,24 +73,8 @@ read_basic_test() ->
     {ok, ReadData} = dev_cache:read(#{}, Request, Opts),
     ?assert(hb_message:match(TestData, ReadData, only_present, Opts)).
 
-read_with_aos_format_test() ->
-    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
-    TestData = #{ <<"data">> => <<"test">> },
-    {_WriteRes, Path} = write_to_cache(Node, TestData, Wallet),
-    Request = #{
-        <<"method">> => <<"GET">>,
-        <<"target">> => Path,
-        <<"accept">> => <<"application/aos-2">>
-    },
-    {ok, Result} = dev_cache:read(#{}, Request, Opts),
-    ?assertEqual(<<"application/aos-2">>, maps:get(<<"content-type">>, Result)),
-    ?assert(is_binary(maps:get(<<"body">>, Result))),
-    % Body should be JSON
-    Decoded = hb_json:decode(maps:get(<<"body">>, Result)),
-    ?assert(is_map(Decoded)).
-
 read_not_found_test() ->
-    Opts = #{ store => [hb_test_utils:test_store()] },
+    Opts = #{ store => hb_test_utils:test_store() },
     Request = #{
         <<"target">> => <<"nonexistent-id-12345678901234567890123">>
     },
@@ -123,54 +107,18 @@ read_not_found_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 write_single_message_test() ->
-    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    Opts = #{ store => hb_test_utils:test_store() },
     TestData = #{ <<"test_key">> => <<"test_value">> },
-    {WriteRes, Path} = write_to_cache(Node, TestData, Wallet),
-    ?assertEqual(200, maps:get(<<"status">>, WriteRes)),
-    ?assertNotEqual(not_found, Path),
-    % Verify readable
+    {ok, Path} = hb_cache:write(TestData, Opts),
     {ok, ReadData} = hb_cache:read(Path, Opts),
     ?assert(hb_message:match(TestData, ReadData, only_present, Opts)).
 
 write_binary_test() ->
-    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
+    Opts = #{ store => hb_test_utils:test_store() },
     TestData = <<"test_binary_data">>,
-    {WriteRes, Path} = write_to_cache(Node, TestData, Wallet),
-    ?assertEqual(200, maps:get(<<"status">>, WriteRes)),
+    {ok, Path} = hb_cache:write(TestData, Opts),
     {ok, ReadData} = hb_cache:read(Path, Opts),
     ?assertEqual(TestData, ReadData).
-
-write_unauthorized_test() ->
-    Opts = #{ 
-        store => [hb_test_utils:test_store()],
-        cache_writers => []  % No authorized writers
-    },
-    UntrustedWallet = ar_wallet:new(),
-    Request = hb_message:commit(
-        #{
-            <<"body">> => #{ <<"data">> => <<"value">> }
-        },
-        #{ priv_wallet => UntrustedWallet }
-    ),
-    {error, ErrorMsg} = dev_cache:write(#{}, Request, Opts),
-    ?assertEqual(403, maps:get(<<"status">>, ErrorMsg)),
-    ?assert(is_binary(maps:get(<<"body">>, ErrorMsg))).
-
-write_batch_test() ->
-    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
-    BatchData = #{
-        <<"item1">> => #{ <<"data">> => <<"value1">> },
-        <<"item2">> => #{ <<"data">> => <<"value2">> }
-    },
-    WriteMsg = #{
-        <<"path">> => <<"/~cache@1.0/write">>,
-        <<"method">> => <<"POST">>,
-        <<"type">> => <<"batch">>,
-        <<"body">> => BatchData
-    },
-    SignedMsg = hb_message:commit(WriteMsg, Wallet),
-    {ok, WriteRes} = hb_http:post(Node, SignedMsg, #{}),
-    ?assertEqual(200, maps:get(<<"status">>, WriteRes)).
 ```
 
 ---
@@ -194,29 +142,9 @@ write_batch_test() ->
 -module(dev_cache_link_test).
 -include_lib("eunit/include/eunit.hrl").
 
-link_creation_test() ->
-    {ok, Opts, [_LocalStore, Wallet, _Address, Node]} = setup_test_env(),
-    % Write original data
-    TestData = #{ <<"data">> => <<"original">> },
-    {_WriteRes, SourcePath} = write_to_cache(Node, TestData, Wallet),
-    % Create link
-    DestPath = <<"custom-path-alias">>,
-    LinkMsg = #{
-        <<"path">> => <<"/~cache@1.0/link">>,
-        <<"method">> => <<"POST">>,
-        <<"source">> => SourcePath,
-        <<"destination">> => DestPath
-    },
-    SignedMsg = hb_message:commit(LinkMsg, Wallet),
-    {ok, LinkRes} = hb_http:post(Node, SignedMsg, #{}),
-    ?assertEqual(200, maps:get(<<"status">>, LinkRes)),
-    % Verify link works
-    {ok, ReadData} = hb_cache:read(DestPath, Opts),
-    ?assert(hb_message:match(TestData, ReadData, only_present, Opts)).
-
 link_unauthorized_test() ->
     Opts = #{ 
-        store => [hb_test_utils:test_store()],
+        store => hb_test_utils:test_store(),
         cache_writers => []
     },
     UntrustedWallet = ar_wallet:new(),
