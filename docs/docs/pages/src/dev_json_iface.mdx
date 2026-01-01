@@ -1,379 +1,358 @@
-# dev_json_iface.erl - WASM-HyperBEAM JSON Interface
+# dev_lua.erl - Lua 5.3 Execution Device
 
 ## Overview
 
-**Purpose:** JSON-based interface for WASM execution to interact with HyperBEAM/AO systems  
-**Module:** `dev_json_iface`  
-**Pattern:** Two-pass execution with JSON serialization/deserialization  
-**Integration:** WASM environment, process execution, message handling
+**Purpose:** Execute Lua scripts within HyperBEAM processes  
+**Module:** `dev_lua`  
+**Pattern:** Sandboxed Lua VM with AO-Core library integration  
+**Integration:** Process execution device, WASM alternative, AOS compatibility
 
-This device provides a bridge between WASM execution environments and HyperBEAM, using JSON as the shared data representation. It handles the conversion of messages and processes to/from JSON format, enabling WASM modules to interact with the AO ecosystem.
+This module provides Lua 5.3 execution capabilities for HyperBEAM processes. It initializes Lua virtual machines, loads modules, applies sandboxing rules, and executes Lua functions. The device includes the full AO-Core library for Lua scripts and supports process state management through snapshots.
 
 ## Dependencies
 
-- **HyperBEAM:** `hb_ao`, `hb_message`, `hb_json`, `hb_util`, `hb_cache`, `hb_private`, `hb_maps`
-- **Device Layer:** `dev_stack`
-- **Records:** `#tx{}` from `include/hb.hrl`
+- **Erlang/OTP:** `luerl` (Lua implementation in Erlang)
+- **HyperBEAM:** `hb_ao`, `hb_cache`, `hb_private`, `hb_opts`, `hb_util`, `hb_message`
+- **Devices:** `dev_lua_lib`, `dev_message`
+- **Arweave:** `ar_wallet`
 
 ---
 
 ## Public Functions Overview
 
 ```erlang
+%% Device Info
+-spec info(Base) -> DeviceInfo.
+
 %% Lifecycle
--spec init(M1, M2, Opts) -> {ok, Msg}.
+-spec init(Base, Req, Opts) -> {ok, BaseWithState} | {error, Reason}.
+-spec normalize(Base, Req, Opts) -> {ok, BaseWithSnapshot} | {error, Reason}.
+-spec snapshot(Base, Req, Opts) -> {ok, Snapshot}.
 
-%% Computation
--spec compute(M1, M2, Opts) -> {ok, MsgWithResults}.
+%% Execution
+-spec functions(Base, Req, Opts) -> {ok, [FunctionName]}.
 
-%% Message Conversion
--spec message_to_json_struct(Msg, Opts) -> JSONStruct.
--spec message_to_json_struct(Msg, Features, Opts) -> JSONStruct.
--spec json_to_message(JSON, Opts) -> {ok, Message}.
-
-%% Test Helpers
--spec generate_stack(File) -> Stack.
--spec generate_stack(File, Mode) -> Stack.
--spec generate_stack(File, Mode, Opts) -> Stack.
--spec generate_aos_msg(ProcID, Code) -> Message.
+%% Utilities
+-spec encode(Term, Opts) -> LuaTerm.
+-spec decode(LuaTerm, Opts) -> Term.
+-spec pure_lua_process_benchmark(BenchMsgs) -> ok.
 ```
 
 ---
 
 ## Public Functions
 
-### 1. init/3
+### 1. info/1
 
 ```erlang
--spec init(M1, M2, Opts) -> {ok, Msg}
+-spec info(Base) -> DeviceInfo
     when
-        M1 :: map(),
-        M2 :: map(),
-        Opts :: map(),
-        Msg :: map().
+        Base :: map(),
+        DeviceInfo :: #{
+            default => fun(),
+            excludes => [binary()]
+        }.
 ```
 
-**Description:** Initialize the JSON interface device by setting the handler function.
+**Description:** Return device information. Sets default handler to `compute/4` and excludes base message keys plus utility functions.
+
+**Excluded Functions:**
+- `keys`, `set` (message@1.0 functions)
+- `encode`, `decode` (public utilities)
+- All keys present in Base message
 
 **Test Code:**
 ```erlang
--module(dev_json_iface_init_test).
+-module(dev_lua_info_test).
 -include_lib("eunit/include/eunit.hrl").
 
-init_test() ->
-    M1 = #{},
-    {ok, Result} = dev_json_iface:init(M1, #{}, #{}),
-    ?assertEqual(<<"handle">>, maps:get(<<"function">>, Result)).
+info_test() ->
+    Base = #{<<"custom-key">> => <<"value">>},
+    Info = dev_lua:info(Base),
+    ?assert(is_map(Info)),
+    ?assert(maps:is_key(default, Info)),
+    ?assert(maps:is_key(excludes, Info)).
+
+info_excludes_test() ->
+    Base = #{<<"my-func">> => <<"test">>},
+    Info = dev_lua:info(Base),
+    Excludes = maps:get(excludes, Info),
+    ?assert(lists:member(<<"keys">>, Excludes)),
+    ?assert(lists:member(<<"set">>, Excludes)),
+    ?assert(lists:member(<<"encode">>, Excludes)),
+    ?assert(lists:member(<<"decode">>, Excludes)),
+    ?assert(lists:member(<<"my-func">>, Excludes)).
 ```
 
 ---
 
-### 2. compute/3
+### 2. init/3
 
 ```erlang
--spec compute(M1, M2, Opts) -> {ok, MsgWithResults}
+-spec init(Base, Req, Opts) -> {ok, BaseWithState} | {error, Reason}
     when
-        M1 :: map(),
-        M2 :: map(),
+        Base :: map(),
+        Req :: map(),
         Opts :: map(),
-        MsgWithResults :: map().
+        BaseWithState :: map(),
+        Reason :: term().
 ```
 
-**Description:** Execute computation in two passes: prepare WASM environment (pass 1) and read results (pass 2).
+**Description:** Initialize the Lua VM by loading modules and installing libraries.
 
-**Pass 1: Preparation**
-- Load process and message
-- Convert to JSON format
-- Write to WASM environment
-- Set up function call parameters
+**Initialization Steps:**
+1. Check if already initialized (has state)
+2. Find modules from `module` key
+3. Load module code (from cache if ID)
+4. Initialize new Lua state
+5. Load all modules into state
+6. Apply sandboxing rules
+7. Install AO-Core library
+8. Return base with state in private storage
 
-**Pass 2: Results**
-- Read output from WASM environment
-- Parse JSON results
-- Extract outbox messages and data
-- Return structured results
+**Module Sources:**
+- Binary string (inline code)
+- Message ID (fetch from cache)
+- Message with `body` or `data` key
+- List of any above
 
 **Test Code:**
 ```erlang
--module(dev_json_iface_compute_test).
+-module(dev_lua_init_test).
 -include_lib("eunit/include/eunit.hrl").
 
-compute_pass1_test() ->
-    M1 = #{
-        <<"pass">> => 1,
-        <<"process">> => #{<<"id">> => <<"proc-123">>}
-    },
-    M2 = #{
-        <<"body">> => #{<<"action">> => <<"test">>},
-        <<"block-height">> => 1000
-    },
-    meck:new(hb_cache, [passthrough]),
-    meck:expect(hb_cache, ensure_all_loaded, fun(M, _) -> M end),
-    {ok, Result} = dev_json_iface:compute(M1, M2, #{}),
-    ?assertEqual(<<"handle">>, maps:get(<<"function">>, Result)),
-    ?assert(maps:is_key(<<"parameters">>, Result)),
-    meck:unload(hb_cache).
-
-compute_pass2_test() ->
-    M1 = #{
-        <<"pass">> => 2,
-        <<"process">> => #{<<"id">> => <<"proc-123">>}
-    },
-    M2 = #{
-        <<"results">> => #{
-            <<"output">> => hb_json:encode(#{
-                <<"Data">> => <<"result-data">>,
-                <<"Messages">> => []
-            })
+init_with_inline_module_test() ->
+    Base = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"function test() return 42 end">>
         }
     },
-    {ok, Result} = dev_json_iface:compute(M1, M2, #{}),
-    ?assert(maps:is_key(<<"results">>, Result)).
+    {ok, Result} = dev_lua:init(Base, #{}, #{}),
+    ?assert(is_map(Result)).
+
+init_with_module_id_test() ->
+    % Verify module exports init/3
+    code:ensure_loaded(dev_lua),
+    ?assert(erlang:function_exported(dev_lua, init, 3)).
+
+init_already_initialized_test() ->
+    State = luerl:init(),
+    Base = hb_private:set(#{}, <<"state">>, State, #{}),
+    {ok, Result} = dev_lua:init(Base, #{}, #{}),
+    ?assertEqual(Base, Result).
+
+init_multiple_modules_test() ->
+    Modules = [
+        #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"function mod1() return 1 end">>
+        },
+        #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"function mod2() return 2 end">>
+        }
+    ],
+    Base = #{<<"module">> => Modules},
+    {ok, Result} = dev_lua:init(Base, #{}, #{}),
+    ?assert(is_map(Result)).
 ```
 
 ---
 
-### 3. message_to_json_struct/2, message_to_json_struct/3
+### 3. functions/3
 
 ```erlang
--spec message_to_json_struct(Msg, Opts) -> JSONStruct
+-spec functions(Base, Req, Opts) -> {ok, [FunctionName]} | {error, not_found}
     when
-        Msg :: map(),
+        Base :: map(),
+        Req :: map(),
         Opts :: map(),
-        JSONStruct :: map().
-
--spec message_to_json_struct(Msg, Features, Opts) -> JSONStruct
-    when
-        Msg :: map(),
-        Features :: [atom()],
-        Opts :: map(),
-        JSONStruct :: map().
+        FunctionName :: binary().
 ```
 
-**Description:** Convert a HyperBEAM message to JSON-compatible structure.
+**Description:** Return list of all functions in the Lua global environment.
 
-**Conversion Process:**
-1. Convert message to TABM format
-2. Remove commitments
-3. Extract ID, owner, signature
-4. Prepare tags in JSON format
-5. Extract data, target, anchor
-6. Build JSON structure
-
-**JSON Structure:**
-```erlang
-#{
-    <<"Id">> => MessageID,
-    <<"Owner">> => OwnerAddress,
-    <<"From">> => FromAddress,
-    <<"Target">> => TargetID,
-    <<"Anchor">> => LastTX,
-    <<"Data">> => Data,
-    <<"Tags">> => [#{<<"name">> => Name, <<"value">> => Value}],
-    <<"Signature">> => Signature
-}
-```
-
-**Features:**
-- `owner_as_address` - Use address format for owner (default)
+**Execution:** Runs Lua code to iterate `_G` table and collect function names.
 
 **Test Code:**
 ```erlang
--module(dev_json_iface_message_to_json_test).
+-module(dev_lua_functions_test).
 -include_lib("eunit/include/eunit.hrl").
 
-message_to_json_basic_test() ->
-    Msg = #{
-        <<"action">> => <<"test">>,
-        <<"data">> => <<"test-data">>
+functions_test() ->
+    Base = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<
+                "function test1() end\n",
+                "function test2() end\n"
+            >>
+        }
     },
-    JSON = dev_json_iface:message_to_json_struct(Msg, #{}),
-    ?assert(is_map(JSON)),
-    ?assert(maps:is_key(<<"Id">>, JSON)),
-    ?assert(maps:is_key(<<"Owner">>, JSON)),
-    ?assert(maps:is_key(<<"Tags">>, JSON)),
-    ?assert(maps:is_key(<<"Data">>, JSON)).
+    {ok, Initialized} = dev_lua:init(Base, #{}, #{}),
+    {ok, Functions} = dev_lua:functions(Initialized, #{}, #{}),
+    ?assert(is_list(Functions)),
+    ?assert(lists:member(<<"test1">>, Functions)),
+    ?assert(lists:member(<<"test2">>, Functions)).
 
-message_to_json_with_signature_test() ->
-    Wallet = ar_wallet:new(),
-    Msg = hb_message:commit(
-        #{<<"data">> => <<"test">>},
-        #{priv_wallet => Wallet}
-    ),
-    JSON = dev_json_iface:message_to_json_struct(Msg, #{}),
-    ?assert(byte_size(maps:get(<<"Signature">>, JSON)) > 0),
-    ?assert(byte_size(maps:get(<<"Owner">>, JSON)) > 0).
-
-message_to_json_with_tags_test() ->
-    Msg = #{
-        <<"action">> => <<"test">>,
-        <<"custom-tag">> => <<"value">>
-    },
-    JSON = dev_json_iface:message_to_json_struct(Msg, #{}),
-    Tags = maps:get(<<"Tags">>, JSON),
-    ?assert(is_list(Tags)),
-    ?assert(length(Tags) > 0).
-
-message_to_json_with_target_test() ->
-    TargetID = <<"target-process-id">>,
-    Msg = #{
-        <<"target">> => TargetID,
-        <<"data">> => <<"test">>
-    },
-    JSON = dev_json_iface:message_to_json_struct(Msg, #{}),
-    ?assertEqual(TargetID, maps:get(<<"Target">>, JSON)).
+functions_not_initialized_test() ->
+    Base = #{},
+    {error, not_found} = dev_lua:functions(Base, #{}, #{}).
 ```
 
 ---
 
-### 4. json_to_message/2
+### 4. snapshot/3
 
 ```erlang
--spec json_to_message(JSON, Opts) -> {ok, Message}
+-spec snapshot(Base, Req, Opts) -> {ok, Snapshot}
     when
-        JSON :: binary() | map(),
+        Base :: map(),
+        Req :: map(),
         Opts :: map(),
-        Message :: map().
+        Snapshot :: map().
 ```
 
-**Description:** Convert JSON response from WASM execution to HyperBEAM message format.
+**Description:** Create a snapshot of the current Lua state for persistence.
 
-**Input Formats:**
-- Binary JSON string
-- Erlang map (pre-parsed)
-
-**Result Structure:**
+**Snapshot Structure:**
 ```erlang
 #{
-    <<"outbox">> => [OutboxMessage1, OutboxMessage2, ...],
-    <<"data">> => Data
+    <<"state">> => SerializedLuaState,
+    <<"version">> => <<"1.0">>,
+    <<"timestamp">> => Timestamp
 }
 ```
 
 **Test Code:**
 ```erlang
--module(dev_json_iface_json_to_message_test).
+-module(dev_lua_snapshot_test).
 -include_lib("eunit/include/eunit.hrl").
 
-json_to_message_binary_test() ->
-    JSON = hb_json:encode(#{
-        <<"Data">> => <<"result-data">>,
-        <<"Messages">> => []
-    }),
-    {ok, Msg} = dev_json_iface:json_to_message(JSON, #{}),
-    ?assert(is_map(Msg)),
-    ?assert(maps:is_key(<<"outbox">>, Msg)),
-    ?assert(maps:is_key(<<"data">>, Msg)).
+snapshot_test() ->
+    Base = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"x = 42">>
+        }
+    },
+    {ok, Initialized} = dev_lua:init(Base, #{}, #{}),
+    {ok, Snapshot} = dev_lua:snapshot(Initialized, #{}, #{}),
+    ?assert(is_map(Snapshot)),
+    ?assert(maps:is_key(<<"state">>, Snapshot)).
+```
 
-json_to_message_with_outbox_test() ->
-    JSON = #{
-        <<"Data">> => <<"result">>,
-        <<"Messages">> => [
-            #{
-                <<"Target">> => <<"target-1">>,
-                <<"Data">> => <<"msg-data">>,
-                <<"Tags">> => []
-            }
+---
+
+### 5. normalize/3
+
+```erlang
+-spec normalize(Base, Req, Opts) -> {ok, BaseWithSnapshot} | {error, Reason}
+    when
+        Base :: map(),
+        Req :: map(),
+        Opts :: map(),
+        BaseWithSnapshot :: map(),
+        Reason :: term().
+```
+
+**Description:** Restore Lua state from a snapshot if present.
+
+**Normalization Flow:**
+1. Check for snapshot in Base
+2. If found, extract state
+3. Replace current state with snapshot state
+4. Remove snapshot from message
+
+**Test Code:**
+```erlang
+-module(dev_lua_normalize_test).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_with_snapshot_test() ->
+    % Create and snapshot a state
+    Base1 = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"value = 123">>
+        }
+    },
+    {ok, Initialized} = dev_lua:init(Base1, #{}, #{}),
+    {ok, Snapshot} = dev_lua:snapshot(Initialized, #{}, #{}),
+    
+    % Create new base with snapshot
+    Base2 = #{
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => <<"value = 0">>
+        },
+        <<"snapshot">> => Snapshot
+    },
+    {ok, Normalized} = dev_lua:normalize(Base2, #{}, #{}),
+    ?assert(is_map(Normalized)),
+    ?assertNot(maps:is_key(<<"snapshot">>, Normalized)).
+
+normalize_without_snapshot_test() ->
+    Base = #{},
+    {ok, Normalized} = dev_lua:normalize(Base, #{}, #{}),
+    ?assertEqual(Base, Normalized).
+```
+
+---
+
+### 6. encode/2, decode/2
+
+```erlang
+-spec encode(Term, Opts) -> LuaTerm
+    when
+        Term :: term(),
+        Opts :: map(),
+        LuaTerm :: term().
+
+-spec decode(LuaTerm, Opts) -> Term
+    when
+        LuaTerm :: term(),
+        Opts :: map(),
+        Term :: term().
+```
+
+**Description:** Convert between Erlang and Lua data structures.
+
+**Encoding Rules:**
+- Maps → Lua tables
+- Lists → Lua arrays (numeric indices)
+- Binaries → Lua strings
+- Numbers → Lua numbers
+- Atoms → Lua strings
+
+**Test Code:**
+```erlang
+-module(dev_lua_encode_decode_test).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_decode_map_test() ->
+    Term = #{<<"key">> => <<"value">>, <<"num">> => 42},
+    Encoded = dev_lua:encode(Term, #{}),
+    Decoded = dev_lua:decode(Encoded, #{}),
+    ?assertEqual(Term, Decoded).
+
+encode_decode_list_test() ->
+    Term = [1, 2, 3, 4, 5],
+    Encoded = dev_lua:encode(Term, #{}),
+    Decoded = dev_lua:decode(Encoded, #{}),
+    ?assertEqual(Term, Decoded).
+
+encode_decode_nested_test() ->
+    Term = #{
+        <<"users">> => [
+            #{<<"name">> => <<"Alice">>, <<"age">> => 30},
+            #{<<"name">> => <<"Bob">>, <<"age">> => 25}
         ]
     },
-    {ok, Msg} = dev_json_iface:json_to_message(JSON, #{}),
-    Outbox = maps:get(<<"outbox">>, Msg),
-    ?assert(is_map(Outbox)),
-    ?assert(map_size(Outbox) > 0).
-
-json_to_message_error_test() ->
-    JSON = #{<<"Error">> => <<"Execution failed">>},
-    {ok, Msg} = dev_json_iface:json_to_message(JSON, #{}),
-    ?assertEqual(<<"Execution failed">>, maps:get(<<"data">>, Msg)).
-```
-
----
-
-### 5. generate_stack/1, generate_stack/2, generate_stack/3
-
-```erlang
--spec generate_stack(File) -> Stack
-    when
-        File :: binary(),
-        Stack :: map().
-
--spec generate_stack(File, Mode, Opts) -> Stack
-    when
-        File :: binary(),
-        Mode :: binary(),
-        Opts :: map(),
-        Stack :: map().
-```
-
-**Description:** Generate a complete WASM execution stack for testing.
-
-**Stack Composition:**
-- `wasi@1.0` - WASI environment
-- `json-iface@1.0` - JSON interface (this device)
-- `wasm-64@1.0` - 64-bit WASM execution
-- `multipass@1.0` - Multi-pass execution
-
-**Test Code:**
-```erlang
--module(dev_json_iface_generate_stack_test).
--include_lib("eunit/include/eunit.hrl").
-
-generate_stack_test() ->
-    Stack = dev_json_iface:generate_stack("test/aos-2-pure-xs.wasm"),
-    ?assert(is_map(Stack)),
-    ?assertEqual(<<"stack@1.0">>, maps:get(<<"device">>, Stack)),
-    ?assert(maps:is_key(<<"process">>, Stack)),
-    ?assert(maps:is_key(<<"device-stack">>, Stack)).
-
-generate_stack_with_mode_test() ->
-    Stack = dev_json_iface:generate_stack(
-        "test/aos-2-pure-xs.wasm",
-        <<"WASM">>
-    ),
-    ?assert(is_map(Stack)).
-```
-
----
-
-### 6. generate_aos_msg/2, generate_aos_msg/3
-
-```erlang
--spec generate_aos_msg(ProcID, Code) -> Message
-    when
-        ProcID :: binary(),
-        Code :: binary(),
-        Message :: map().
-```
-
-**Description:** Generate an AOS-style evaluation message for testing.
-
-**Message Structure:**
-```erlang
-#{
-    <<"path">> => <<"compute">>,
-    <<"body">> => #{
-        <<"action">> => <<"Eval">>,
-        <<"data">> => Code,
-        <<"target">> => ProcessID
-    },
-    <<"block-height">> => 1
-}
-```
-
-**Test Code:**
-```erlang
--module(dev_json_iface_generate_aos_msg_test).
--include_lib("eunit/include/eunit.hrl").
-
-generate_aos_msg_test() ->
-    ProcID = <<"proc-123">>,
-    Code = <<"return 1+1">>,
-    Msg = dev_json_iface:generate_aos_msg(ProcID, Code),
-    ?assert(is_map(Msg)),
-    ?assertEqual(<<"compute">>, maps:get(<<"path">>, Msg)),
-    Body = maps:get(<<"body">>, Msg),
-    ?assertEqual(<<"Eval">>, maps:get(<<"action">>, Body)),
-    ?assertEqual(Code, maps:get(<<"data">>, Body)).
+    Encoded = dev_lua:encode(Term, #{}),
+    Decoded = dev_lua:decode(Encoded, #{}),
+    ?assertEqual(Term, Decoded).
 ```
 
 ---
@@ -381,280 +360,359 @@ generate_aos_msg_test() ->
 ## Common Patterns
 
 ```erlang
-%% Create WASM stack for AOS execution
-Stack = dev_json_iface:generate_stack("path/to/aos.wasm"),
-Process = hb_ao:get(<<"process">>, Stack, #{}),
-ProcessID = hb_message:id(Process, all).
-
-%% Execute AOS code
-Code = <<"return 1+1">>,
-Msg = dev_json_iface:generate_aos_msg(ProcessID, Code),
-{ok, Result} = hb_ao:resolve(Stack, Msg, #{}),
-Data = hb_ao:get(<<"results/data">>, Result, #{}).
-
-%% Convert message to JSON for WASM
-HBMessage = #{
-    <<"action">> => <<"test">>,
-    <<"data">> => <<"payload">>
-},
-JSONStruct = dev_json_iface:message_to_json_struct(HBMessage, #{}),
-JSONString = hb_json:encode(JSONStruct).
-
-%% Parse WASM results back to HyperBEAM
-ResultJSON = <<"{\\"Data\\": \\"result\\", \\"Messages\\": []}">>,
-{ok, ResultMsg} = dev_json_iface:json_to_message(ResultJSON, #{}),
-Outbox = maps:get(<<"outbox">>, ResultMsg).
-
-%% Two-pass execution
-% Pass 1: Prepare
-M1 = #{<<"pass">> => 1, <<"process">> => Process},
-M2 = #{<<"body">> => Message},
-{ok, Prepared} = dev_json_iface:compute(M1, M2, #{}),
-
-% Pass 2: Extract results
-M1Updated = Prepared#{<<"pass">> => 2},
-M2Results = #{<<"results">> => #{<<"output">> => WASMOutput}},
-{ok, Final} = dev_json_iface:compute(M1Updated, M2Results, #{}).
-```
-
----
-
-## JSON-Iface Message Format
-
-### Input to WASM
-
-**Process JSON:**
-```json
-{
-  "Process": {
-    "Id": "process-id",
-    "Owner": "owner-address",
-    "Tags": [{"name": "Type", "value": "Process"}]
-  }
-}
-```
-
-**Message JSON:**
-```json
-{
-  "Id": "message-id",
-  "Owner": "owner-address",
-  "From": "from-address",
-  "Target": "target-id",
-  "Anchor": "last-tx",
-  "Data": "message-data",
-  "Tags": [
-    {"name": "Action", "value": "Eval"},
-    {"name": "Custom", "value": "Value"}
-  ],
-  "Signature": "signature-base64",
-  "Module": "module-tx-id",
-  "Block-Height": 1000
-}
-```
-
-### Output from WASM
-
-**Success Response:**
-```json
-{
-  "Data": "result-data",
-  "Messages": [
-    {
-      "Target": "target-process",
-      "Data": "outbox-message-data",
-      "Tags": [{"name": "Action", "value": "Response"}],
-      "Anchor": ""
+%% Create Lua process
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => #{
+        <<"content-type">> => <<"application/lua">>,
+        <<"body">> => LuaCode
     }
-  ],
-  "patches": []
-}
-```
+},
+{ok, Initialized} = hb_ao:resolve(Process, <<"init">>, Opts).
 
-**Error Response:**
-```json
-{
-  "Error": "Error message describing what went wrong"
-}
-```
+%% Execute Lua function
+{ok, Result} = hb_ao:resolve(
+    Initialized,
+    #{
+        <<"path">> => <<"my_function">>,
+        <<"parameters">> => [Arg1, Arg2]
+    },
+    Opts
+).
 
----
-
-## Tag Handling
-
-### ANS-104 Tags (Preserved)
-```erlang
-% If message has ANS-104 commitment with original-tags
-Commitment = #{
-    <<"original-tags">> => [
-        {<<"Action">>, <<"Eval">>},
-        {<<"Custom">>, <<"Value">>}
+%% Load multiple modules
+Process = #{
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => [
+        #{<<"content-type">> => <<"application/lua">>, <<"body">> => Mod1},
+        #{<<"content-type">> => <<"application/lua">>, <<"body">> => Mod2}
     ]
 },
-% Original tags are preserved in exact order
-```
+{ok, Initialized} = hb_ao:resolve(Process, <<"init">>, Opts).
 
-### Header-Case Tags (Generated)
-```erlang
-% If no original-tags, convert keys to header-case
-#{
-    <<"action">> => <<"test">>,
-    <<"custom-key">> => <<"value">>
-}
-% Becomes:
-[
-    #{<<"name">> => <<"Action">>, <<"value">> => <<"test">>},
-    #{<<"name">> => <<"Custom-Key">>, <<"value">> => <<"value">>}
-]
+%% Apply sandboxing
+Process = #{
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => Module,
+    <<"sandbox">> => true  % Use default sandbox
+},
+{ok, Initialized} = dev_lua:init(Process, #{}, Opts).
+
+%% Custom sandbox
+Process = #{
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => Module,
+    <<"sandbox">> => #{
+        ['_G', os, execute] => <<"sandboxed">>,
+        ['_G', io] => <<"sandboxed">>
+    }
+},
+{ok, Initialized} = dev_lua:init(Process, #{}, Opts).
+
+%% Snapshot and restore
+{ok, Snapshot} = dev_lua:snapshot(Process, #{}, Opts),
+{ok, _} = hb_cache:write(Snapshot, Opts),
+
+% Later, restore
+Process2 = Process#{<<"snapshot">> => Snapshot},
+{ok, Restored} = dev_lua:normalize(Process2, #{}, Opts).
 ```
 
 ---
 
-## Message Denormalization
+## Sandboxing
 
-### Owner Handling
+### Default Sandbox
 ```erlang
-% Adds owner and signature from primary signer
-Message#{
-    <<"owner">> => HumanReadableAddress,
-    <<"signature">> => Base64Signature,
-    <<"id">> => MessageID
+-define(DEFAULT_SANDBOX, [
+    {['_G', io], <<"sandboxed">>},
+    {['_G', file], <<"sandboxed">>},
+    {['_G', os, execute], <<"sandboxed">>},
+    {['_G', os, exit], <<"sandboxed">>},
+    {['_G', os, getenv], <<"sandboxed">>},
+    {['_G', os, remove], <<"sandboxed">>},
+    {['_G', os, rename], <<"sandboxed">>},
+    {['_G', os, tmpname], <<"sandboxed">>},
+    {['_G', package], <<"sandboxed">>},
+    {['_G', loadfile], <<"sandboxed">>},
+    {['_G', require], <<"sandboxed">>},
+    {['_G', dofile], <<"sandboxed">>},
+    {['_G', load], <<"sandboxed">>},
+    {['_G', loadstring], <<"sandboxed">>}
+]).
+```
+
+### Sandbox Options
+
+**Boolean (default):**
+```erlang
+#{<<"sandbox">> => true}
+% Uses DEFAULT_SANDBOX
+```
+
+**List (all return "sandboxed"):**
+```erlang
+#{
+    <<"sandbox">> => [
+        ['_G', os],
+        ['_G', io]
+    ]
 }
 ```
 
-### From-Process Handling
+**Map (custom returns):**
 ```erlang
-% Sets From to from-process tag or owner address
-From = hb_ao:get(
-    <<"from-process">>,
-    Message,
-    hb_util:encode(OwnerAddress),
+#{
+    <<"sandbox">> => #{
+        ['_G', os, execute] => <<"blocked">>,
+        ['_G', io] => fun() -> error("IO disabled") end
+    }
+}
+```
+
+### Security Benefits
+- Prevents file system access
+- Blocks process execution
+- Disables module loading
+- Protects environment variables
+- Prevents code injection
+
+---
+
+## AO-Core Library
+
+### Automatic Installation
+The `dev_lua_lib` is automatically installed during `init/3`:
+```erlang
+{ok, State3} = dev_lua_lib:install(Base, State2, Opts)
+```
+
+### Available Functions
+```lua
+-- AO-Core resolution
+ao.resolve(message)
+ao.resolve(base, path)
+
+-- Message manipulation
+ao.get(key, base)
+ao.set(base, key, value)
+ao.set(base, updates)
+
+-- Event logging
+ao.event(event)
+ao.event(group, event)
+```
+
+### Device Sandbox
+```erlang
+#{
+    <<"device-sandbox">> => [
+        <<"message@1.0">>,
+        <<"custom-device@1.0">>
+    ]
+}
+% Only listed devices available in ao.resolve()
+```
+
+---
+
+## Module Loading
+
+### Module Sources
+
+**Inline Binary:**
+```erlang
+#{
+    <<"module">> => #{
+        <<"content-type">> => <<"application/lua">>,
+        <<"body">> => <<"function test() return 1 end">>
+    }
+}
+```
+
+**Module ID:**
+```erlang
+#{
+    <<"module">> => <<"module-id-abc123...">>
+}
+% Fetched from cache via hb_cache:read/2
+```
+
+**Module Message:**
+```erlang
+#{
+    <<"module">> => #{
+        <<"name">> => <<"my-module">>,
+        <<"body">> => LuaCode
+    }
+}
+```
+
+**Multiple Modules:**
+```erlang
+#{
+    <<"module">> => [
+        ModuleID1,
+        #{<<"body">> => Code2},
+        #{<<"body">> => Code3}
+    ]
+}
+```
+
+### Loading Order
+Modules are loaded in order they appear in the list. Later modules can reference functions from earlier modules.
+
+---
+
+## State Management
+
+### Private Storage
+Lua state is stored in message private data:
+```erlang
+hb_private:set(Base, <<"state">>, LuerlState, Opts)
+```
+
+### State Isolation
+Each process has its own Lua VM:
+- No shared state between processes
+- Each execution independent
+- Snapshots capture complete state
+
+### State Serialization
+```erlang
+% Create snapshot
+{ok, Snapshot} = snapshot(Base, #{}, Opts),
+
+% Snapshot contains serialized state
+State = maps:get(<<"state">>, Snapshot),
+
+% Restore from snapshot
+Base2 = Base#{<<"snapshot">> => Snapshot},
+{ok, Restored} = normalize(Base2, #{}, Opts)
+```
+
+---
+
+## Execution Model
+
+### Function Call
+```lua
+function my_function(arg1, arg2)
+    return arg1 + arg2
+end
+```
+
+```erlang
+{ok, Result} = hb_ao:resolve(
+    Process,
+    #{
+        <<"path">> => <<"my_function">>,
+        <<"parameters">> => [5, 3]
+    },
     Opts
-)
+),
+% Result: 8
+```
+
+### Default Handler
+Unrecognized paths resolve to Lua function calls:
+```
+GET /path/to/function
+→ Calls: function(params)
 ```
 
 ---
 
-## Execution Flow
+## Process Integration
 
-### Pass 1: Environment Preparation
-```
-1. Load process and message from state
-2. Denormalize message (add owner, ID)
-3. Convert both to JSON structures
-4. Add Module (image) and Block-Height
-5. Encode to JSON strings
-6. Write to WASM environment
-7. Set function = "handle"
-8. Set parameters = [MsgJSON, ProcessJSON]
-```
-
-### Pass 2: Result Extraction
-```
-1. Read output from WASM environment
-2. Parse JSON result
-3. Extract Data, Messages, patches
-4. Convert Messages to outbox format
-5. Add from-process and from-image tags
-6. Return structured result with outbox
-```
-
----
-
-## Result Post-Processing
-
-### Outbox Message Enhancement
-```erlang
-% Each outbox message gets:
-OutboxMsg#{
-    <<"from-process">> => ProcessID,
-    <<"from-image">> => ModuleID
-}
-```
-
-### Patches Application
-```erlang
-% Patches modify process state
-Patches = [
-    #{<<"key">> => <<"state-key">>, <<"value">> => NewValue}
-]
-```
-
----
-
-## Environment Abstraction
-
-### Write Function
-```erlang
-% Default: Use JSON strings directly
-Params = [MsgStr, ProcessStr]
-
-% Custom: Use write function
-{ok, MsgPtr} = WriteFn(MsgStr),
-{ok, ProcPtr} = WriteFn(ProcessStr),
-Params = [MsgPtr, ProcPtr]
-```
-
-### Read Function
-```erlang
-% Default: Use output directly
-Output = RawOutput
-
-% Custom: Use read function
-{ok, Output} = ReadFn(RawOutput)
-```
-
----
-
-## Stack Integration
-
-### Device Stack
+### As Execution Device
 ```erlang
 #{
-    <<"device">> => <<"stack@1.0">>,
-    <<"device-stack">> => [
-        <<"wasi@1.0">>,        % WASI environment
-        <<"json-iface@1.0">>,  % This device
-        <<"wasm-64@1.0">>,     % WASM execution
-        <<"multipass@1.0">>    % Multi-pass
-    ],
-    <<"passes">> => 2,
-    <<"stack-keys">> => [<<"init">>, <<"compute">>]
+    <<"device">> => <<"process@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => LuaModule
 }
 ```
 
-### Pass Management
-- Pass 1: `json-iface@1.0` prepares environment
-- Between passes: `wasm-64@1.0` executes WASM
-- Pass 2: `json-iface@1.0` extracts results
+### With Scheduler
+```erlang
+#{
+    <<"device">> => <<"process@1.0">>,
+    <<"scheduler-device">> => <<"scheduler@1.0">>,
+    <<"execution-device">> => <<"lua@5.3a">>,
+    <<"module">> => LuaModule,
+    <<"authority">> => AuthorityAddress
+}
+```
+
+---
+
+## AOS Compatibility
+
+### AOS Processes
+```erlang
+generate_lua_process("path/to/hyper-aos.lua", Opts)
+```
+
+Creates process compatible with AOS:
+- Eval action support
+- Message handlers
+- Send() function
+- Process state management
+
+### AOS Messages
+```erlang
+#{
+    <<"action">> => <<"Eval">>,
+    <<"data">> => <<"return 1 + 1">>,
+    <<"target">> => ProcessID
+}
+```
+
+---
+
+## Performance
+
+### Benchmarking
+```erlang
+dev_lua:pure_lua_process_benchmark(100)
+% Executes 100 messages and reports performance
+```
+
+### Optimization Tips
+- Minimize module size
+- Use local variables in Lua
+- Batch operations when possible
+- Consider WASM for compute-heavy tasks
 
 ---
 
 ## References
 
-- **WASM Device** - `dev_wasm.erl`
-- **WASI Device** - `dev_wasi.erl`
-- **Stack Device** - `dev_stack.erl`
-- **Multipass Device** - `dev_multipass.erl`
-- **Message Handling** - `hb_message.erl`
-- **JSON** - `hb_json.erl`
+- **Lua Library** - `dev_lua_lib.erl`
+- **Luerl** - Lua in Erlang implementation
+- **AO Resolution** - `hb_ao.erl`
+- **Cache** - `hb_cache.erl`
+- **Private Storage** - `hb_private.erl`
 
 ---
 
 ## Notes
 
-1. **Two-Pass:** Requires multipass execution (prep + results)
-2. **JSON Bridge:** Connects WASM and HyperBEAM ecosystems
-3. **AOS Compatible:** Full support for AOS message format
-4. **Tag Preservation:** Maintains original ANS-104 tag order
-5. **Owner Normalization:** Adds owner/signature to messages
-6. **Outbox Enhancement:** Adds from-process/from-image tags
-7. **Error Handling:** Parses Error field from WASM output
-8. **Environment Abstraction:** Supports custom read/write functions
-9. **Process Context:** Passes process definition to WASM
-10. **Block Height:** Includes block height in message context
-11. **Signature Encoding:** Base64-encodes 512-byte signatures
-12. **Target Support:** Handles message targeting
-13. **Anchor Support:** Includes last transaction anchor
-14. **Patches:** Supports state patches from WASM
-15. **Test Helpers:** Comprehensive testing utilities included
+1. **Lua 5.3:** Uses Luerl (Lua in Erlang) implementation
+2. **Sandboxing:** Default sandbox blocks dangerous operations
+3. **AO Library:** Full AO-Core integration via dev_lua_lib
+4. **Multiple Modules:** Supports loading multiple Lua files
+5. **State Snapshots:** Complete VM state can be saved/restored
+6. **Function Discovery:** Can list all global functions
+7. **Module Sources:** Inline code, IDs, or messages
+8. **Security:** Sandboxing prevents file/process/network access
+9. **Device Sandbox:** Restricts available devices in ao.resolve()
+10. **Encode/Decode:** Bidirectional Erlang ↔ Lua conversion
+11. **Private State:** Lua VM stored in message private data
+12. **Default Handler:** Unknown paths → Lua function calls
+13. **Process Compatible:** Works as execution-device in processes
+14. **AOS Support:** Full compatibility with AOS processes
+15. **Benchmarking:** Built-in performance testing utilities

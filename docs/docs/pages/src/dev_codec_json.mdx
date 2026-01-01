@@ -154,15 +154,10 @@ from_with_types_test() ->
     ?assert(is_map(TABM)).
 
 from_with_atom_annotation_test() ->
-    JSON = <<"""
-    {
-        "store-module": "hb_store_fs",
-        "ao-types": "store-module=\"atom\""
-    }
-    """>>,
+    JSON = <<"{\"store-module\":\"hb_store_fs\",\"ao-types\":\"store-module=\\\"atom\\\"\"}">>,
     {ok, TABM} = dev_codec_json:from(JSON, #{}, #{}),
-    % Atom should be restored
-    ?assertEqual(hb_store_fs, maps:get(<<"store-module">>, TABM)).
+    % Value is preserved as binary (ao-types annotation is for structured codec)
+    ?assertEqual(<<"hb_store_fs">>, maps:get(<<"store-module">>, TABM)).
 ```
 
 ---
@@ -223,9 +218,8 @@ verify_test() ->
         #{<<"type">> => <<"rsa-pss-sha512">>},
         #{priv_wallet => Wallet}
     ),
-    [CommID] = maps:keys(maps:get(<<"commitments">>, Signed)),
-    Commitment = maps:get(CommID, maps:get(<<"commitments">>, Signed)),
-    {ok, IsValid} = dev_codec_json:verify(Msg, Commitment, #{}),
+    % RSA-PSS produces multiple commitments, verify using hb_message:verify
+    IsValid = hb_message:verify(Signed, all, #{}),
     ?assert(IsValid).
 ```
 

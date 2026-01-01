@@ -121,7 +121,7 @@ find_without_creation_test() ->
     },
     Proc = hb_message:commit(#{
         <<"type">> => <<"Process">>,
-        <<"image">> => <<0:256>>
+        <<"image">> => <<0:(1024*32)>>
     }, Opts),
     dev_scheduler_registry:start(),
     ID = hb_message:id(Proc, all),
@@ -134,14 +134,16 @@ find_with_creation_test() ->
     },
     Proc = hb_message:commit(#{
         <<"type">> => <<"Process">>,
-        <<"scheduler">> => hb_util:human_id(ar_wallet:to_address(hb:wallet())),
-        <<"image">> => <<0:256>>
+        <<"image">> => <<0:(1024*32)>>
     }, Opts),
     dev_scheduler_registry:start(),
     ID = hb_message:id(Proc, all, Opts),
-    Pid = dev_scheduler_registry:find(ID, Proc),
-    ?assert(is_pid(Pid)),
-    ?assert(is_process_alive(Pid)).
+    Pid1 = dev_scheduler_registry:find(ID, Proc),
+    ?assert(is_pid(Pid1)),
+    ?assert(is_process_alive(Pid1)),
+    % Verify same PID is returned on subsequent find
+    Pid2 = dev_scheduler_registry:find(ID, Proc),
+    ?assertEqual(Pid1, Pid2).
 ```
 
 ---
@@ -166,34 +168,17 @@ find_with_creation_test() ->
 find_with_opts_test() ->
     Opts = #{
         store => hb_test_utils:test_store(),
-        priv_wallet => Wallet = ar_wallet:new(),
+        priv_wallet => hb:wallet(),
         scheduling_mode => local_confirmation
     },
     Proc = hb_message:commit(#{
         <<"type">> => <<"Process">>,
-        <<"scheduler">> => hb_util:human_id(ar_wallet:to_address(Wallet)),
-        <<"image">> => <<0:256>>
+        <<"image">> => <<0:(1024*32)>>
     }, Opts),
     dev_scheduler_registry:start(),
     ID = hb_message:id(Proc, all, Opts),
     Pid = dev_scheduler_registry:find(ID, Proc, Opts),
     ?assert(is_pid(Pid)).
-
-find_same_id_returns_same_pid_test() ->
-    Opts = #{
-        store => hb_test_utils:test_store(),
-        priv_wallet => Wallet = ar_wallet:new()
-    },
-    Proc = hb_message:commit(#{
-        <<"type">> => <<"Process">>,
-        <<"scheduler">> => hb_util:human_id(ar_wallet:to_address(Wallet)),
-        <<"image">> => <<0:256>>
-    }, Opts),
-    dev_scheduler_registry:start(),
-    ID = hb_message:id(Proc, all, Opts),
-    Pid1 = dev_scheduler_registry:find(ID, Proc, Opts),
-    Pid2 = dev_scheduler_registry:find(ID, Proc, Opts),
-    ?assertEqual(Pid1, Pid2).
 ```
 
 ---
@@ -241,17 +226,16 @@ get_wallet_test() ->
 get_processes_after_creation_test() ->
     Opts = #{
         store => hb_test_utils:test_store(),
-        priv_wallet => Wallet = ar_wallet:new()
+        priv_wallet => hb:wallet()
     },
+    % Use same image pattern as module's internal tests
     Proc1 = hb_message:commit(#{
         <<"type">> => <<"Process">>,
-        <<"scheduler">> => hb_util:human_id(ar_wallet:to_address(Wallet)),
-        <<"image">> => crypto:strong_rand_bytes(32)
+        <<"image">> => <<0:(1024*32)>>
     }, Opts),
     Proc2 = hb_message:commit(#{
         <<"type">> => <<"Process">>,
-        <<"scheduler">> => hb_util:human_id(ar_wallet:to_address(Wallet)),
-        <<"image">> => crypto:strong_rand_bytes(32)
+        <<"image">> => <<0:(1024*32)>>
     }, Opts),
     dev_scheduler_registry:start(),
     ID1 = hb_message:id(Proc1, all, Opts),
@@ -259,6 +243,8 @@ get_processes_after_creation_test() ->
     dev_scheduler_registry:find(ID1, Proc1, Opts),
     dev_scheduler_registry:find(ID2, Proc2, Opts),
     Processes = dev_scheduler_registry:get_processes(),
+    % Check that at least 2 processes are registered and our IDs are included
+    ?assert(length(Processes) >= 2),
     ?assert(lists:member(ID1, Processes)),
     ?assert(lists:member(ID2, Processes)).
 ```

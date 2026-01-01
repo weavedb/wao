@@ -96,10 +96,10 @@ from_multipart_body_test() ->
     Boundary = <<"boundary123">>,
     Body = 
         <<"--", Boundary/binary, "\r\n",
-          "Content-Disposition: inline\r\n",
+          "content-disposition: inline\r\n",
           "\r\n",
           "inline content\r\n",
-          "--", Boundary/binary, "--\r\n">>,
+          "--", Boundary/binary, "--">>,
     HTTP = #{
         <<"content-type">> => <<"multipart/form-data; boundary=", Boundary/binary>>,
         <<"body">> => Body
@@ -146,8 +146,11 @@ to_with_commitments_test() ->
         <<"data">> => <<"test">>,
         <<"commitments">> => #{
             <<"sig1">> => #{
+                <<"commitment-device">> => <<"httpsig@1.0">>,
+                <<"type">> => <<"hmac-sha256">>,
                 <<"signature">> => <<"abc123">>,
-                <<"committed">> => [<<"data">>]
+                <<"committed">> => [<<"data">>],
+                <<"keyid">> => <<"test-key">>
             }
         }
     },
@@ -204,9 +207,12 @@ encode_http_msg_simple_test() ->
     ?assert(binary:match(Binary, <<"key: value">>) =/= nomatch).
 
 encode_http_msg_with_crlf_test() ->
-    HTTP = #{<<"header">> => <<"value">>},
+    HTTP = #{
+        <<"header1">> => <<"value1">>,
+        <<"header2">> => <<"value2">>
+    },
     Binary = dev_codec_httpsig_conv:encode_http_msg(HTTP, #{}),
-    % Should use CRLF line endings
+    % Multiple headers should be separated by CRLF
     ?assert(binary:match(Binary, <<"\r\n">>) =/= nomatch).
 ```
 

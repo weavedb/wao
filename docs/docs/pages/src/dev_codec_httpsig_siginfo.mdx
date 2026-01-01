@@ -70,6 +70,7 @@ commitments_to_siginfo_test() ->
     Msg = #{<<"data">> => <<"test">>},
     Commitments = #{
         <<"sig1">> => #{
+            <<"commitment-device">> => <<"httpsig@1.0">>,
             <<"signature">> => hb_util:encode(<<"abc123">>),
             <<"committed">> => [<<"data">>],
             <<"keyid">> => <<"key1">>,
@@ -92,13 +93,17 @@ commitments_to_siginfo_multiple_test() ->
     Msg = #{<<"key1">> => <<"val1">>, <<"key2">> => <<"val2">>},
     Commitments = #{
         <<"sig1">> => #{
+            <<"commitment-device">> => <<"httpsig@1.0">>,
             <<"signature">> => hb_util:encode(<<"abc">>),
             <<"committed">> => [<<"key1">>],
+            <<"keyid">> => <<"k1">>,
             <<"type">> => <<"hmac-sha256">>
         },
         <<"sig2">> => #{
+            <<"commitment-device">> => <<"httpsig@1.0">>,
             <<"signature">> => hb_util:encode(<<"def">>),
             <<"committed">> => [<<"key2">>],
+            <<"keyid">> => <<"k2">>,
             <<"type">> => <<"rsa-pss-sha512">>
         }
     },
@@ -132,7 +137,7 @@ siginfo_to_commitments_test() ->
     Msg = #{
         <<"data">> => <<"test">>,
         <<"signature">> => <<"comm-abc=:dGVzdA==:">>,
-        <<"signature-input">> => <<"comm-abc=(\"data\");keyid=\"test\"">>
+        <<"signature-input">> => <<"comm-abc=(\"data\");keyid=\"test\";alg=\"hmac-sha256\"">>
     },
     Result = dev_codec_httpsig_siginfo:siginfo_to_commitments(Msg, [], #{}),
     ?assert(is_map(Result)),
@@ -147,7 +152,7 @@ siginfo_to_commitments_with_body_keys_test() ->
     Msg = #{
         <<"body">> => <<"content">>,
         <<"signature">> => <<"comm-xyz=:c2lnbmF0dXJl:">>,
-        <<"signature-input">> => <<"comm-xyz=(\"content-digest\");keyid=\"k1\"">>
+        <<"signature-input">> => <<"comm-xyz=(\"content-digest\");keyid=\"k1\";alg=\"hmac-sha256\"">>
     },
     BodyKeys = [<<"body">>],
     Result = dev_codec_httpsig_siginfo:siginfo_to_commitments(Msg, BodyKeys, #{}),
@@ -214,24 +219,32 @@ from_siginfo_keys_simple_test() ->
     BodyKeys = [],
     SigInfoKeys = [<<"key1">>, <<"key2">>],
     Result = dev_codec_httpsig_siginfo:from_siginfo_keys(HTTPMsg, BodyKeys, SigInfoKeys),
-    ?assertEqual([<<"key1">>, <<"key2">>], Result).
+    % Returns a map with indexed keys
+    ?assert(is_map(Result)),
+    ?assertEqual(<<"key1">>, maps:get(<<"1">>, Result)),
+    ?assertEqual(<<"key2">>, maps:get(<<"2">>, Result)).
 
 from_siginfo_keys_with_content_digest_test() ->
     HTTPMsg = #{},
     BodyKeys = [<<"body">>],
     SigInfoKeys = [<<"content-digest">>, <<"other">>],
     Result = dev_codec_httpsig_siginfo:from_siginfo_keys(HTTPMsg, BodyKeys, SigInfoKeys),
-    ?assert(lists:member(<<"body">>, Result)),
-    ?assertNot(lists:member(<<"content-digest">>, Result)).
+    ?assert(is_map(Result)),
+    Values = maps:values(Result),
+    ?assert(lists:member(<<"body">>, Values)),
+    ?assertNot(lists:member(<<"content-digest">>, Values)).
 
 from_siginfo_keys_removes_specifiers_test() ->
     HTTPMsg = #{},
     BodyKeys = [],
     SigInfoKeys = [<<"@method">>, <<"@path">>, <<"key">>],
     Result = dev_codec_httpsig_siginfo:from_siginfo_keys(HTTPMsg, BodyKeys, SigInfoKeys),
-    ?assertNot(lists:member(<<"@method">>, Result)),
-    ?assertNot(lists:member(<<"@path">>, Result)),
-    ?assert(lists:member(<<"key">>, Result)).
+    ?assert(is_map(Result)),
+    Values = maps:values(Result),
+    % @ specifiers are removed
+    ?assertNot(lists:member(<<"@method">>, Values)),
+    ?assertNot(lists:member(<<"@path">>, Values)),
+    ?assert(lists:member(<<"key">>, Values)).
 ```
 
 ---
@@ -320,13 +333,22 @@ remove_derived_specifiers_no_change_test() ->
 -include_lib("eunit/include/eunit.hrl").
 
 commitment_to_sig_name_test() ->
-    Commitment = #{<<"signature">> => hb_util:encode(<<"test-sig">>)},
+    Commitment = #{
+        <<"signature">> => hb_util:encode(<<"test-sig">>),
+        <<"keyid">> => <<"test-key">>,
+        <<"commitment-device">> => <<"httpsig@1.0">>
+    },
     Name = dev_codec_httpsig_siginfo:commitment_to_sig_name(Commitment),
     ?assert(is_binary(Name)),
-    ?assert(binary:match(Name, <<"comm-">>) =/= nomatch).
+    % Format is: {device}.{keyid} with @ replaced by -
+    ?assert(binary:match(Name, <<"httpsig-1.0">>) =/= nomatch).
 
 commitment_to_sig_name_deterministic_test() ->
-    Commitment = #{<<"signature">> => hb_util:encode(<<"sig">>)},
+    Commitment = #{
+        <<"signature">> => hb_util:encode(<<"sig">>),
+        <<"keyid">> => <<"key1">>,
+        <<"commitment-device">> => <<"httpsig@1.0">>
+    },
     Name1 = dev_codec_httpsig_siginfo:commitment_to_sig_name(Commitment),
     Name2 = dev_codec_httpsig_siginfo:commitment_to_sig_name(Commitment),
     ?assertEqual(Name1, Name2).

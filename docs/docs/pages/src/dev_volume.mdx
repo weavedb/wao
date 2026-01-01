@@ -182,8 +182,8 @@ public_key_success_test() ->
     Opts = #{ priv_wallet => Wallet },
     {ok, Result} = dev_volume:public_key(#{}, #{}, Opts),
     ?assert(maps:is_key(<<"public_key">>, Result)),
-    ?assert(maps:is_key(<<"format">>, Result)),
-    ?assertEqual(<<"PEM">>, maps:get(<<"format">>, Result)).
+    ?assert(maps:is_key(<<"status">>, Result)),
+    ?assertEqual(200, maps:get(<<"status">>, Result)).
 
 public_key_no_wallet_test() ->
     Opts = #{},
