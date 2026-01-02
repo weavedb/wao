@@ -4,7 +4,7 @@
 
 **From Zero to Building Custom Devices**
 
-This book teaches you to build custom HyperBEAM devices. You'll start by learning Erlang, then progressively work through the codebase from low-level primitives to high-level devices. By the end, you'll understand every module and be ready to create your own.
+This book teaches you to build on HyperBEAM — the OS for the verifiable internet. Start with the foundation, learn Erlang, then work through the codebase from core resolution to device implementation. By the end, you'll understand every module and be ready to build.
 
 :::warning
 This book is in early development. Content may be incomplete or change without notice.
@@ -18,6 +18,7 @@ Written for [HyperBEAM v0.9-milestone-3-beta-3](https://github.com/permaweb/Hype
 
 ## Contents
 
+0. [HyperBEAM](#prologue-hyperbeam)
 1. [Setup](#chapter-1-setup)
 2. [Erlang](#chapter-2-erlang)
 3. [Project Structure](#chapter-3-project-structure)
@@ -25,6 +26,16 @@ Written for [HyperBEAM v0.9-milestone-3-beta-3](https://github.com/permaweb/Hype
 5. [HyperBEAM Core](#chapter-5-hyperbeam-core)
 6. [Devices](#chapter-6-devices)
 7. [Building Your Own Devices](#chapter-7-building-your-own-devices)
+
+---
+
+## Prologue: HyperBEAM
+
+The foundation of the AI era: the verifiable internet. AO-Core extends HTTP with verifiability. HyperBEAM is the OS. Learn the stack (messages, devices, processes, hashpath, attestation), then what you can build on top.
+
+:::tip
+[HyperBEAM](/book/hyperbeam)
+:::
 
 ---
 
@@ -319,249 +330,220 @@ Built-in devices implementing AO-Core protocol behaviors.
 
 ---
 
-### Core Message Device
+### 1. Messages & Composition
 
-The foundation device that every other device builds upon.
+The foundational device and composition patterns.
 
-:::info[Tutorial Coming Soon]
-*Core Message Device Tutorial*
+:::tip
+[Messages & Composition Tutorial](/book/dev1)
 :::
 
 | Module | Description |
 |--------|-------------|
 | [dev_message](/src/dev_message) | Core device implementing get, set, keys, remove—the foundation of all devices |
-
----
-
-### Codecs
-
-Message encoding and decoding for different wire formats.
-
-:::info[Tutorial Coming Soon]
-*Codecs Tutorial*
-:::
-
-| Module | Description |
-|--------|-------------|
-| [dev_codec_ans104](/src/dev_codec_ans104) | Converts messages to/from ANS-104 data items for Arweave storage |
-| [dev_codec_ans104_from](/src/dev_codec_ans104_from) | Decodes ANS-104 binary format into HyperBEAM messages |
-| [dev_codec_ans104_to](/src/dev_codec_ans104_to) | Encodes HyperBEAM messages into ANS-104 binary format |
-| [dev_codec_flat](/src/dev_codec_flat) | Simple key-value encoding for debugging and simple wire format |
-| [dev_codec_json](/src/dev_codec_json) | JSON encoding/decoding for HTTP APIs and debugging |
-| [dev_codec_structured](/src/dev_codec_structured) | RFC 9651 Structured Fields for HTTP header encoding |
-| [dev_codec_httpsig](/src/dev_codec_httpsig) | HTTP Message Signatures for request/response signing |
-| [dev_codec_httpsig_conv](/src/dev_codec_httpsig_conv) | Conversions for HTTP signature components |
-| [dev_codec_httpsig_keyid](/src/dev_codec_httpsig_keyid) | Key ID management for HTTP signatures |
-| [dev_codec_httpsig_proxy](/src/dev_codec_httpsig_proxy) | Proxy support for HTTP signature forwarding |
-| [dev_codec_httpsig_siginfo](/src/dev_codec_httpsig_siginfo) | Signature metadata extraction and validation |
-| [dev_codec_cookie](/src/dev_codec_cookie) | Cookie-based authentication encoding |
-| [dev_codec_cookie_auth](/src/dev_codec_cookie_auth) | Cookie authentication validation and generation |
-| [dev_codec_http_auth](/src/dev_codec_http_auth) | HTTP authentication header processing |
-
----
-
-### Composition
-
-Combining devices into stacks and pipelines.
-
-:::info[Tutorial Coming Soon]
-*Composition Tutorial*
-:::
-
-| Module | Description |
-|--------|-------------|
-| [dev_stack](/src/dev_stack) | Chains devices into ordered execution pipelines with pass-through |
+| [dev_stack](/src/dev_stack) | Chains devices into ordered execution pipelines with Fold and Map modes |
 | [dev_multipass](/src/dev_multipass) | Runs message through stack multiple times until stable or limit |
-| [dev_hook](/src/dev_hook) | Registers callbacks triggered before/after device execution |
-| [dev_apply](/src/dev_apply) | Applies messages to each other enabling higher-order operations |
-| [dev_patch](/src/dev_patch) | Merges partial updates into messages preserving unmodified keys |
+| [dev_apply](/src/dev_apply) | Dynamic path execution with base:/request: prefixes |
+| [dev_patch](/src/dev_patch) | Moving data between message paths |
 | [dev_dedup](/src/dev_dedup) | Prevents duplicate message processing with configurable detection |
 
 ---
 
-### Infrastructure
+### 2. Codecs
 
-Node and network management.
+Message encoding, decoding, and cryptographic signing.
 
-:::info[Tutorial Coming Soon]
-*Infrastructure Tutorial*
+:::tip
+[Codecs Tutorial](/book/dev2)
 :::
 
 | Module | Description |
 |--------|-------------|
-| [dev_router](/src/dev_router) | Matches message paths against patterns and routes to device stacks |
-| [dev_relay](/src/dev_relay) | Forwards messages to other HyperBEAM nodes with discovery and retry |
-| [dev_name](/src/dev_name) | Resolves human-readable names to IDs via configured resolver chain |
-| [dev_local_name](/src/dev_local_name) | Maps names to IDs within a single node using in-memory storage |
-| [dev_meta](/src/dev_meta) | Returns node metadata including version, capabilities, and public key |
+| [dev_codec_httpsig](/src/dev_codec_httpsig) | HTTP Message Signatures (RFC 9421) |
+| ↳ [dev_codec_httpsig_conv](/src/dev_codec_httpsig_conv) | Conversions for signature components |
+| ↳ [dev_codec_httpsig_keyid](/src/dev_codec_httpsig_keyid) | Key ID management |
+| ↳ [dev_codec_httpsig_proxy](/src/dev_codec_httpsig_proxy) | Proxy support for signature forwarding |
+| ↳ [dev_codec_httpsig_siginfo](/src/dev_codec_httpsig_siginfo) | Signature metadata extraction |
+| [dev_codec_structured](/src/dev_codec_structured) | RFC 9651 Structured Fields with ao-types annotations |
+| [dev_codec_json](/src/dev_codec_json) | JSON encoding/decoding for HTTP APIs |
+| [dev_codec_flat](/src/dev_codec_flat) | Path-based flat map encoding for configuration |
+
+---
+
+### 3. Infrastructure
+
+Node configuration, routing, and lifecycle management.
+
+:::tip
+[Infrastructure Tutorial](/book/dev3)
+:::
+
+| Module | Description |
+|--------|-------------|
+| [dev_meta](/src/dev_meta) | Node configuration, initialization, and request handling |
+| [dev_router](/src/dev_router) | Message routing with load balancing strategies |
+| [dev_relay](/src/dev_relay) | Synchronous and asynchronous message relay between nodes |
+| [dev_node_process](/src/dev_node_process) | Singleton process management for node services |
+| [dev_hook](/src/dev_hook) | Lifecycle hooks for request/response processing |
 | [dev_manifest](/src/dev_manifest) | Defines process configuration—device stack, scheduler, compute limits |
 
 ---
 
-### Process Management
+### 4. Process & Scheduling
 
-Stateful computation units and their lifecycle.
+Stateful computation units and deterministic message ordering.
 
-:::info[Tutorial Coming Soon]
-*Process Management Tutorial*
+:::tip
+[Process & Scheduling Tutorial](/book/dev4)
 :::
 
 | Module | Description |
 |--------|-------------|
-| [dev_process](/src/dev_process) | Creates processes, loads state, executes messages, persists state changes |
-| [dev_process_cache](/src/dev_process_cache) | Caches computed process states for fast replay with invalidation |
-| [dev_process_worker](/src/dev_process_worker) | Manages worker pools for parallel process execution and distribution |
-| [dev_node_process](/src/dev_node_process) | Singleton processes running once per node with persistent state |
+| [dev_process](/src/dev_process) | Core AO process execution coordinator |
+| ↳ [dev_process_cache](/src/dev_process_cache) | Caches computed process states |
+| ↳ [dev_process_worker](/src/dev_process_worker) | Worker pools for parallel execution |
+| [dev_scheduler](/src/dev_scheduler) | Message ordering and slot assignment |
+| ↳ [dev_scheduler_cache](/src/dev_scheduler_cache) | Caches scheduler assignments |
+| ↳ [dev_scheduler_formats](/src/dev_scheduler_formats) | Format version handling |
+| ↳ [dev_scheduler_registry](/src/dev_scheduler_registry) | Process registration and discovery |
+| ↳ [dev_scheduler_server](/src/dev_scheduler_server) | Long-running server process |
+| [dev_push](/src/dev_push) | Recursive message delivery between processes |
+| [dev_cron](/src/dev_cron) | Time-based scheduled execution with cron expressions |
 
 ---
 
-### Scheduler
+### 5. Storage & Naming
 
-Deterministic message ordering and execution scheduling.
+Data persistence and name resolution.
 
-:::info[Tutorial Coming Soon]
-*Scheduler Tutorial*
+:::tip
+[Storage & Naming Tutorial](/book/dev5)
 :::
 
 | Module | Description |
 |--------|-------------|
-| [dev_scheduler](/src/dev_scheduler) | Assigns slots to messages maintaining deterministic ordering |
-| [dev_scheduler_cache](/src/dev_scheduler_cache) | Caches scheduler assignments for fast lookup with consistency |
-| [dev_scheduler_formats](/src/dev_scheduler_formats) | Handles different format versions for scheduler messages |
-| [dev_scheduler_registry](/src/dev_scheduler_registry) | Registers processes with schedulers and handles discovery |
-| [dev_scheduler_server](/src/dev_scheduler_server) | Long-running process handling scheduling requests and state |
-| [dev_push](/src/dev_push) | Sends messages to processes without waiting, fire-and-forget |
-| [dev_cron](/src/dev_cron) | Triggers messages on time schedules with cron expressions and intervals |
+| [dev_cache](/src/dev_cache) | Read/write data with access control |
+| [dev_lookup](/src/dev_lookup) | Retrieve resources by ID with format negotiation |
+| [dev_local_name](/src/dev_local_name) | Register human-readable names for resources |
+| [dev_name](/src/dev_name) | Resolve names through configurable resolver chains |
 
 ---
 
-### Arweave
-
-Direct blockchain interaction.
-
-:::info[Tutorial Coming Soon]
-*Arweave Devices Tutorial*
-:::
-
-| Module | Description |
-|--------|-------------|
-| [dev_arweave](/src/dev_arweave) | Gateway device for fetching data from and posting transactions to Arweave |
-| [dev_arweave_block_cache](/src/dev_arweave_block_cache) | Caches Arweave blocks locally reducing gateway requests |
-| [dev_poda](/src/dev_poda) | Generates and verifies cryptographic proofs that data exists on Arweave |
-
----
-
-### Security
-
-Authentication, secrets, and trusted execution.
-
-:::info[Tutorial Coming Soon]
-*Security Tutorial*
-:::
-
-| Module | Description |
-|--------|-------------|
-| [dev_secret](/src/dev_secret) | Stores and retrieves secrets securely with encryption and access control |
-| [dev_volume](/src/dev_volume) | Volume device for mounting, unmounting, and listing storage volumes |
-| [dev_auth_hook](/src/dev_auth_hook) | Verifies caller identity before processing and rejects unauthorized requests |
-| [dev_snp](/src/dev_snp) | AMD SEV-SNP attestation for hardware-backed Trusted Execution Environment |
-| [dev_snp_nif](/src/dev_snp_nif) | Native C interface for low-level AMD SEV-SNP operations |
-| [dev_green_zone](/src/dev_green_zone) | Defines security boundaries for sensitive operations requiring TEE |
-
----
-
-### Query & Replication
-
-Finding and syncing data across nodes and Arweave.
-
-:::info[Tutorial Coming Soon]
-*Query & Replication Tutorial*
-:::
-
-| Module | Description |
-|--------|-------------|
-| [dev_query](/src/dev_query) | Searches messages by criteria with filtering, pagination, and sorting |
-| [dev_query_arweave](/src/dev_query_arweave) | Queries Arweave gateway for transactions and blocks via GraphQL |
-| [dev_query_graphql](/src/dev_query_graphql) | Executes GraphQL queries against configured endpoints |
-| [dev_copycat](/src/dev_copycat) | Copies data between stores/nodes with sync and conflict resolution |
-| [dev_copycat_arweave](/src/dev_copycat_arweave) | Replicates data from Arweave to local storage for availability |
-| [dev_copycat_graphql](/src/dev_copycat_graphql) | Uses GraphQL queries to discover and replicate data |
-| [dev_lookup](/src/dev_lookup) | Finds messages by various criteria including ID, tags, and sender |
-| [dev_cache](/src/dev_cache) | Explicit cache control—read, write, invalidate cache directly |
-
----
-
-### Runtimes
+### 6. Runtimes
 
 Code execution environments—WASM, Lua, delegated compute.
 
-:::info[Tutorial Coming Soon]
-*Runtimes Tutorial*
+:::tip
+[Runtimes Tutorial](/book/dev6)
 :::
 
 | Module | Description |
 |--------|-------------|
-| [dev_json_iface](/src/dev_json_iface) | JSON-based interface simplifying WASM module integration |
-| [dev_wasm](/src/dev_wasm) | Loads and runs WebAssembly modules managing memory and imports |
-| [dev_wasi](/src/dev_wasi) | WebAssembly System Interface providing filesystem and I/O to WASM |
-| [dev_delegated_compute](/src/dev_delegated_compute) | Offloads computation to other nodes with result verification |
-| [dev_genesis_wasm](/src/dev_genesis_wasm) | Configures initial WASM module as default execution environment |
-| [dev_lua](/src/dev_lua) | Embeds Lua 5.3 interpreter for lightweight scripting within HyperBEAM |
-| [dev_lua_lib](/src/dev_lua_lib) | HyperBEAM API bindings exposed to Lua scripts |
+| [dev_wasm](/src/dev_wasm) | Execute WebAssembly with Memory-64 support |
+| ↳ [dev_wasi](/src/dev_wasi) | Virtual filesystem for WASM programs |
+| ↳ [dev_json_iface](/src/dev_json_iface) | JSON interface for WASM modules |
+| ↳ [dev_genesis_wasm](/src/dev_genesis_wasm) | Initial WASM module configuration |
+| [dev_lua](/src/dev_lua) | Run Lua scripts in sandboxed VMs |
+| ↳ [dev_lua_lib](/src/dev_lua_lib) | HyperBEAM API bindings for Lua |
+| [dev_cu](/src/dev_cu) | Delegate to external Compute Units |
+| ↳ [dev_delegated_compute](/src/dev_delegated_compute) | Remote computation with verification |
 
 ---
 
-### Payment
+### 7. Payment
 
-Compute metering and billing.
+Pricing and payment in HyperBEAM.
 
-:::info[Tutorial Coming Soon]
-*Payment Tutorial*
+:::tip
+[Payment Tutorial](/book/dev7)
 :::
 
 | Module | Description |
 |--------|-------------|
-| [dev_cu](/src/dev_cu) | Measures computation cost tracking CPU time, memory, and I/O |
-| [dev_faff](/src/dev_faff) | Defines fee structures, calculates costs, validates payment policies |
-| [dev_simple_pay](/src/dev_simple_pay) | Basic pay-per-request processor checking balance and deducting fees |
-| [dev_p4](/src/dev_p4) | Advanced payment protocol with channels, streaming, and settlement |
+| [dev_p4](/src/dev_p4) | Core payment ledger and pricing orchestrator |
+| [dev_simple_pay](/src/dev_simple_pay) | Per-request pricing with balance management |
+| [dev_faff](/src/dev_faff) | Allow-list based access control |
 
 ---
 
-### Utilities
+### 8. Authentication
 
-Development and debugging tools.
+Identity and signatures.
 
-:::info[Tutorial Coming Soon]
-*Device Utilities Tutorial*
+:::tip
+[Authentication Tutorial](/book/dev8)
 :::
 
 | Module | Description |
 |--------|-------------|
-| [dev_trie](/src/dev_trie) | Prefix tree implementation for efficient key lookup and iteration |
-| [dev_profile](/src/dev_profile) | Records execution timing and memory allocation for profiling |
-| [dev_hyperbuddy](/src/dev_hyperbuddy) | Web-based interactive debugging UI for message and cache inspection |
-| [dev_cacheviz](/src/dev_cacheviz) | Generates visual representation of cache contents for debugging |
-| [dev_whois](/src/dev_whois) | Looks up node information by address returning capabilities and endpoints |
-| [dev_monitor](/src/dev_monitor) | Tracks system health—memory, disk, network—with alerting |
-| [dev_test](/src/dev_test) | Test device with configurable responses and error injection |
+| [dev_auth_hook](/src/dev_auth_hook) | Automatic request signing with node-hosted wallets |
+| [dev_codec_http_auth](/src/dev_codec_http_auth) | HTTP Basic authentication with PBKDF2 |
+| [dev_codec_cookie](/src/dev_codec_cookie) | Cookie management and storage |
+| ↳ [dev_codec_cookie_auth](/src/dev_codec_cookie_auth) | Cookie-based HMAC authentication |
+| [dev_secret](/src/dev_secret) | Secret key management device |
 
 ---
 
-### Test Vectors
+### 9. Arweave & Data
 
-Reference test cases for conformance.
+Permanent storage and data retrieval.
 
-:::info[Tutorial Coming Soon]
-*Test Vectors Tutorial*
+:::tip
+[Arweave & Data Tutorial](/book/dev9)
 :::
 
 | Module | Description |
 |--------|-------------|
-| [dev_codec_cookie_test_vectors](/src/dev_codec_cookie_test_vectors) | Test cases for cookie parsing and serialization conformance |
-| [dev_query_test_vectors](/src/dev_query_test_vectors) | Test cases for query device behavior conformance |
-| [dev_lua_test](/src/dev_lua_test) | Integration test cases for Lua runtime execution |
-| [dev_lua_test_ledgers](/src/dev_lua_test_ledgers) | Test cases for Lua-based ledger operations |
+| [dev_arweave](/src/dev_arweave) | Arweave network interface |
+| ↳ [dev_arweave_block_cache](/src/dev_arweave_block_cache) | Caches Arweave blocks locally |
+| [dev_codec_ans104](/src/dev_codec_ans104) | ANS-104 data item codec |
+| ↳ [dev_codec_ans104_from](/src/dev_codec_ans104_from) | Decode ANS-104 to messages |
+| ↳ [dev_codec_ans104_to](/src/dev_codec_ans104_to) | Encode messages to ANS-104 |
+| [dev_query](/src/dev_query) | Cache search and discovery |
+| ↳ [dev_query_arweave](/src/dev_query_arweave) | Arweave gateway GraphQL |
+| ↳ [dev_query_graphql](/src/dev_query_graphql) | GraphQL query executor |
+| [dev_copycat](/src/dev_copycat) | Message indexing from external sources |
+| ↳ [dev_copycat_arweave](/src/dev_copycat_arweave) | Replicate from Arweave |
+| ↳ [dev_copycat_graphql](/src/dev_copycat_graphql) | GraphQL-based discovery |
+| [dev_poda](/src/dev_poda) | Generates and verifies proofs that data exists on Arweave |
+
+---
+
+### Supplemental Devices
+
+:::note
+Additional devices for security, debugging, and testing.
+:::
+
+#### Security & TEE
+
+| Module | Description |
+|--------|-------------|
+| [dev_volume](/src/dev_volume) | Volume device for mounting, unmounting, and listing storage volumes |
+| [dev_snp](/src/dev_snp) | AMD SEV-SNP attestation for TEE |
+| ↳ [dev_snp_nif](/src/dev_snp_nif) | Native C interface for SNP |
+| [dev_green_zone](/src/dev_green_zone) | Defines security boundaries for sensitive operations requiring TEE |
+
+#### Utilities & Debugging
+
+| Module | Description |
+|--------|-------------|
+| [dev_trie](/src/dev_trie) | Prefix tree implementation for efficient key lookup |
+| [dev_profile](/src/dev_profile) | Records execution timing and memory allocation |
+| [dev_hyperbuddy](/src/dev_hyperbuddy) | Web-based interactive debugging UI |
+| [dev_cacheviz](/src/dev_cacheviz) | Generates visual representation of cache contents |
+| [dev_whois](/src/dev_whois) | Looks up node information by address |
+| [dev_monitor](/src/dev_monitor) | Tracks system health with alerting |
+| [dev_test](/src/dev_test) | Test device with configurable responses |
+
+#### Test Vectors
+
+| Module | Description |
+|--------|-------------|
+| ↳ [dev_codec_cookie_test_vectors](/src/dev_codec_cookie_test_vectors) | Cookie parsing conformance tests |
+| ↳ [dev_query_test_vectors](/src/dev_query_test_vectors) | Query device behavior tests |
+| ↳ [dev_lua_test](/src/dev_lua_test) | Lua runtime integration tests |
+| ↳ [dev_lua_test_ledgers](/src/dev_lua_test_ledgers) | Lua ledger operation tests |
 
 ---
 
