@@ -1,0 +1,343 @@
+# HyperBEAM
+
+**The OS for the Verifiable Internet**
+
+---
+
+## The Foundation of the AI Era: The Verifiable Internet
+
+The web runs on trust. You trust servers to compute correctly, store data safely, stay online. That model is breaking.
+
+**Servers die.** Companies disappear. Data gets deleted. The average website lives 2 years.
+
+**AI changes everything.** Agents can't trust — they can only verify. One unverifiable link breaks the chain.
+
+**AI forgets.** Models have no persistent memory. The verifiable internet gives AI long memory.
+
+**Infrastructure is siloed.** Every cloud is a walled garden. Every blockchain is an island.
+
+The verifiable internet provides:
+- **Verifiability** — Prove computation, not just trust it
+- **Permanence** — Data that outlives companies (and AI context windows)
+- **Composability** — Everything works together
+- **Scale** — Internet-scale, not blockchain-scale
+
+---
+
+## AO-Core Is the Protocol
+
+**AO-Core** is the verifiable internet — the permaweb. **HyperBEAM** is the implementation.
+
+AO-Core extends HTTP with verifiability. Same URLs, same methods, same headers — but every request is signed, every response is attested, every compute step is verifiable.
+
+AO-Core defines how messages resolve, how devices compose, how hashpaths prove computation. HyperBEAM implements it.
+
+```
+Traditional:  Apps → Cloud → VMs → OS → Hardware     "Trust the provider"
+Verifiable:   Apps → Devices → HyperBEAM → Nodes     "Verify everything"
+```
+
+---
+
+# The Stack
+
+How the verifiable internet works.
+
+---
+
+## URL = Resolution Chain
+
+A URL is a **resolution chain** — each segment resolves through a device.
+
+```
+GET /~process@1.0/ABC123/slot/5/state
+         ↓          ↓      ↓   ↓   ↓
+       device    process  func arg key
+         └────resolve──resolve──resolve──resolve────→ Result
+```
+
+Every response can include:
+- **Result** — The computed value
+- **Hashpath** — Proof of computation steps
+- **Attestation** — Who computed it
+
+---
+
+## Message
+
+Everything is a **message**. Content-addressed. Specifies its own device.
+
+A message contains:
+- **device** — Which device handles this message
+- **path** — What operation to perform
+- **data** — The payload
+- **commitments** — Cryptographic signatures (optional)
+
+### HTTP Message Signatures
+
+HyperBEAM uses **HTTP Message Signatures** (RFC 9421) — a web standard.
+
+Signature methods are extensible. Built-in support includes:
+- `rsa-pss-sha512` — Asymmetric (RSA-4096 keys)
+- `hmac-sha256` — Symmetric (shared secret)
+- Ethereum signatures — secp256k1 compatible
+
+Why this matters:
+- **Web standard** — RFC 9421, not a proprietary scheme
+- **Extensible** — Any signature scheme can be added
+- **Selective signing** — Commit to specific keys only
+- **Stackable** — Multiple signatures on the same message
+
+The `httpsig@1.0` device handles signature creation and verification.
+
+---
+
+## Device
+
+A **device** is a computation handler. In HyperBEAM, devices are Erlang modules — but native Rust/C/C++ execution is possible via NIFs.
+
+Devices compose. Stack them:
+
+```
+Message → Router → Scheduler → Process → WASM → Result
+```
+
+### Common Devices
+
+| Device | Purpose |
+|--------|---------|
+| `message@1.0` | Base operations (get, set, id) |
+| `httpsig@1.0` | HTTP Message Signatures (RFC 9421) |
+| `router@1.0` | Route requests |
+| `scheduler@1.0` | Order messages into slots |
+| `process@1.0` | Manage process state |
+| `wasm-64@1.0` | Execute WASM (powers AOS) |
+| `lua@5.3` | Execute Lua (powers AOS) |
+| `stack@1.0` | Compose devices |
+
+---
+
+## Process & Scheduler
+
+Blockchain-like architecture — but actor-oriented.
+
+**Process** = Stateful actor with ordered slot sequence. Each process has an ID, a device stack, state, and a sequence of slots.
+
+**Scheduler** = Orders messages into slots
+
+```
+Incoming: [M1, M2, M3] → Scheduler → Slot 5, 6, 7
+```
+
+### Why This Scales
+
+```
+Blockchain:  1 global sequence   → ~15 TPS (all nodes validate all)
+HyperBEAM:   N process sequences → unlimited (processes are independent)
+```
+
+Ordered, deterministic, replayable — without the bottleneck.
+
+**Most data doesn't need global consensus.** Consensus doesn't scale globally — blockchains prove this daily. HyperBEAM is built for scalable networks with verifiability, not global consensus.
+
+---
+
+## Hashpath
+
+**Hashpath** = Proof of computation steps.
+
+```
+Step 1:  ID1                   # initial
+Step 2:  ID1/ID2               # base / applied
+Step 3:  hash(ID1,ID2)/ID3     # compress, extend
+Step 4:  hash(prev,ID3)/ID4    # always 2 parts max
+```
+
+```
+Hashpath: Qm3x...abc/Zy9k...xyz
+          ─────────── ───────────
+          accumulated   latest
+          history       step
+```
+
+Results are cached at hashpath addresses — the hashpath itself serves as the cache key.
+
+---
+
+## Attestation
+
+**Attestation** = Who computed it. A cryptographic signature from the node that performed the computation.
+
+### TEE Attestation
+
+**TEE** (Trusted Execution Environment) provides hardware-verified computation. The hardware itself attests correctness.
+
+1. Code runs in TEE
+2. TEE generates attestation key
+3. TEE signs result
+4. Anyone can verify
+
+- **Correct computation** — Hardware guarantees the code ran unmodified
+- **Attestation** — TEE-generated key signs the result
+
+**Greenzone** is the TEE network for AO-Core — a decentralized network of TEE nodes providing hardware-attested computation. No need to run your own TEE infrastructure.
+
+**Privacy: The Next Frontier.** Today, TEE is primarily about verifiable compute. But privacy is the next biggest thing — computation where the operator can't see the data, users prove computation without revealing inputs, and confidential data stays confidential.
+
+---
+
+## Compute Options
+
+**Deterministic** (WASM, Lua) — Same input = same output. Replayable.
+
+**Non-Deterministic** (LLMs, external APIs) — Output may vary.
+
+Both are first-class in HyperBEAM. The compute step is always verifiable — whether or not the result itself is deterministic.
+
+---
+
+## Data Handling
+
+Intelligent multi-layer caching. Not everything needs to go to Arweave — but Arweave provides permanent data verifiability when you need it.
+
+| Layer | Speed | Persistence |
+|-------|-------|-------------|
+| Memory Cache | Fastest | Ephemeral |
+| Local Store | Fast | Persistent on node |
+| Network Cache | Medium | Fetch from other nodes |
+| Arweave | Slowest | Permanent and verifiable |
+
+---
+
+## Security Spectrum
+
+Different levels of verification:
+
+| Level | Meaning |
+|-------|---------|
+| **Signature** | "I said it" |
+| **Hashpath** | "These steps happened" |
+| **Attestation** | "This node computed it" |
+
+99% of data needs verifiability, not consensus. Consensus doesn't scale globally.
+
+---
+
+# What You Can Build
+
+HyperBEAM is the foundation. Everything composes on top.
+
+---
+
+## AOS: One Example
+
+[**AOS**](https://cookbook_ao.arweave.net/) is a smart contract platform built on HyperBEAM, supporting both Lua and WASM. It's one use case — a tiny slice of what's possible.
+
+```
+AOS = process@1.0 + scheduler@1.0 + (lua@5.3 | wasm-64@1.0)
+```
+
+AO also has [staked liquidity on Ethereum](https://ao.arweave.net/#/mint/deposits/) and a [fair launch token mechanism](https://ao.arweave.net/#/delegate/) — projects can self-fund through token fair launch. All running on top of HyperBEAM.
+
+But why stop at Lua/WASM? You can build:
+- **EVM-compatible chains** — Solidity smart contracts on AO-Core (see [Load Network](https://www.load.network/))
+- **JavaScript runtime** — JS-based smart contracts
+- **MoveVM** — Sui/Aptos-style contracts
+- **Python execution** — ML models as smart contracts
+- **Your own VM** — Any execution environment
+
+All of them integrate with the verifiable internet. All of them compose with each other.
+
+---
+
+## DePIN OS
+
+HyperBEAM is the operating system for **DePIN** — Decentralized Physical Infrastructure Networks.
+
+Physical infrastructure: compute nodes, GPU clusters, storage networks, bandwidth providers, IoT devices.
+
+HyperBEAM orchestrates: verifiable task assignment, proof of work done, attestation of results, payment settlement.
+
+Every physical resource becomes a verifiable service:
+- **GPU compute** — Verifiable AI training and inference (see [Apus Network](https://www.apus.network/))
+- **Storage** — Proof of storage with Arweave integration
+- **Bandwidth** — Attested data delivery
+- **Sensors** — Signed telemetry from IoT devices
+
+DePIN without verification is just distributed infrastructure. HyperBEAM makes it *verifiable* distributed infrastructure.
+
+---
+
+## As a Device Developer
+
+Devices are the building blocks. You can create:
+
+**Execution Environments** — Blockchain VMs (EVM, SVM, MoveVM), language runtimes (Python, JavaScript), AI inference engines
+
+**Data Systems** — Databases (SQL, NoSQL, vector), file systems, search indexes
+
+**Protocol Logic** — DeFi primitives, identity systems, governance mechanisms
+
+**Infrastructure** — Oracles, bridges, relayers
+
+A device is an Erlang module — with native Rust/C/C++ via NIFs when you need performance. If it computes, it can be a device.
+
+---
+
+## As an Application Developer
+
+Build on the composable stack:
+
+**Your App** → Pick your devices (`process@1.0`, `scheduler@1.0`, `wasm-64@1.0`, `your-custom@1.0`) → HyperBEAM handles resolution, caching, attestation, persistence
+
+What becomes possible:
+- **AI agent networks** — Agents that verify each other's work
+- **Autonomous systems** — Programs that run forever, owned by no one
+- **Verifiable APIs** — Every response comes with proof
+- **Permanent applications** — Survive servers, companies, time
+- **Cross-protocol composition** — EVM + SVM + custom logic in one flow
+
+---
+
+## The Vision
+
+| Concept | Definition |
+|---------|------------|
+| Message | Signed, content-addressed, specifies device |
+| Device | Composable computation handler |
+| Process | Stateful actor |
+| Scheduler | Message ordering |
+| Hashpath | Proof of computation steps |
+| Attestation | Who computed it |
+| URL | Resolution chain |
+| Result | Cached, attested |
+
+**AO-Core** is the verifiable internet (permaweb). **HyperBEAM** is the OS.
+
+HyperBEAM is early. The codebase is evolving. The documentation is being written.
+
+But this is the biggest bet in the AI era.
+
+AI needs infrastructure it can verify, not trust. The old internet can't provide that. Blockchains can't scale to provide that. 
+
+AO-Core can. The permaweb. Verifiable computation at internet scale. Everything composable. The OS for what comes next.
+
+---
+
+## What You'll Learn
+
+This book teaches you HyperBEAM from the ground up:
+
+1. **Setup** — Run a node
+2. **Erlang** — Read the code
+3. **Core** — Resolution, caching, hashpath
+4. **Devices** — Process, scheduler, WASM
+5. **Building** — Create your own devices
+
+By the end, you'll understand every module and be ready to build.
+
+---
+
+:::tip[Let's Begin]
+[Chapter 1: Setup](/book/setup) — Get HyperBEAM running on your machine.
+:::
