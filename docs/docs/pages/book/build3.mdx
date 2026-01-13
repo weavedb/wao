@@ -1,0 +1,674 @@
+# L3: Authenticated API Gateway
+
+Build an advanced device with authentication, payment processing, task scheduling, and request routing.
+
+## What You'll Build
+
+A full-featured API gateway with these endpoints:
+
+```
+POST /~gateway@1.0/register_key       Register API key (requires signature)
+POST /~gateway@1.0/authenticate       Authenticate with API key
+GET  /~gateway@1.0/balance            Check token balance
+POST /~gateway@1.0/deposit            Deposit tokens
+POST /~gateway@1.0/withdraw           Withdraw tokens
+POST /~gateway@1.0/api_call           Make API call (costs tokens)
+POST /~gateway@1.0/schedule           Schedule recurring task
+GET  /~gateway@1.0/tasks              List scheduled tasks
+POST /~gateway@1.0/cancel_task        Cancel a task
+POST /~gateway@1.0/add_route          Add routing rule
+GET  /~gateway@1.0/routes             List routing rules
+```
+
+## What You'll Learn
+
+| Concept | Purpose |
+|---------|---------|
+| Message signatures | Verify request authenticity |
+| API key management | Stateless authentication |
+| Token balances | Pay-per-use API access |
+| Task scheduling | Cron-based recurring tasks |
+| Request routing | URL pattern matching |
+
+## Prerequisites
+
+- Completed [L1: Key-Value Store](/book/build1)
+- Completed [L2: Data Processor](/book/build2)
+- Understanding of [Message Signing](/book/hb4)
+
+---
+
+## Part 1: Device Structure
+
+Create `HyperBEAM/src/dev_gateway.erl`:
+
+```erlang
+%%%-------------------------------------------------------------------
+%%% @doc Authenticated API Gateway Device
+%%%
+%%% Full-featured gateway with auth, payment, scheduling, routing.
+%%%
+%%% @end
+%%%-------------------------------------------------------------------
+-module(dev_gateway).
+-export([
+    info/3,
+    %% Auth
+    register_key/3, authenticate/3,
+    %% Payment
+    balance/3, deposit/3, withdraw/3,
+    %% API
+    api_call/3,
+    %% Scheduling
+    schedule/3, tasks/3, cancel_task/3,
+    %% Routing
+    add_route/3, routes/3
+]).
+-include("include/hb.hrl").
+
+-define(KEYS_KEY, <<"gateway-keys">>).
+-define(BALANCES_KEY, <<"gateway-balances">>).
+-define(TASKS_KEY, <<"gateway-tasks">>).
+-define(ROUTES_KEY, <<"gateway-routes">>).
+-define(API_COST, 10).
+```
+
+### Storage Pattern
+
+This device stores all state in the `<<"priv">>` map directly (no cache). This works well for in-memory state that doesn't need to persist across restarts.
+
+```erlang
+%% Load data from priv map
+load_data(M1, Key, _Opts) ->
+    case maps:get(<<"priv">>, M1, #{}) of
+        #{Key := Data} when is_map(Data) -> Data;
+        _ -> #{}
+    end.
+
+%% Save data to priv map
+save_data(M1, Key, Data, _Opts) ->
+    Priv = maps:get(<<"priv">>, M1, #{}),
+    M1#{<<"priv">> => Priv#{Key => Data}}.
+```
+
+---
+
+## Part 2: Device Info
+
+```erlang
+%%====================================================================
+%% Device Info
+%%====================================================================
+
+info(_M1, _M2, _Opts) ->
+    {ok, #{
+        <<"name">> => <<"gateway">>,
+        <<"version">> => <<"1.0">>,
+        <<"description">> => <<"Authenticated API Gateway">>,
+        <<"features">> => [
+            <<"api-key-auth">>,
+            <<"token-payment">>,
+            <<"task-scheduling">>,
+            <<"request-routing">>
+        ]
+    }}.
+```
+
+---
+
+## Part 3: Authentication
+
+### Getting Message Signers
+
+Every signed message contains a list of signers (wallet addresses). Use `hb_message:signers/2` to extract them:
+
+```erlang
+get_signer(M2, Opts) ->
+    case hb_message:signers(M2, Opts) of
+        [] -> not_found;
+        [Signer | _] -> Signer
+    end.
+```
+
+### Register API Key
+
+Users register API keys by sending a signed request. The signer's address is linked to the generated key.
+
+```erlang
+%%====================================================================
+%% Authentication
+%%====================================================================
+
+register_key(M1, M2, Opts) ->
+    case get_signer(M2, Opts) of
+        not_found ->
+            {error, #{<<"status">> => 401, <<"error">> => <<"Request not signed">>}};
+        Signer ->
+            APIKey = generate_api_key(),
+            Keys = load_data(M1, ?KEYS_KEY, Opts),
+            NewKeys = maps:put(APIKey, Signer, Keys),
+            M1Updated = save_data(M1, ?KEYS_KEY, NewKeys, Opts),
+            {ok, maps:merge(M1Updated, #{
+                <<"api_key">> => APIKey,
+                <<"address">> => Signer
+            })}
+    end.
+
+generate_api_key() ->
+    hb_util:encode(crypto:strong_rand_bytes(32)).
+```
+
+### Authenticate
+
+Validate an API key and return the associated address:
+
+```erlang
+authenticate(M1, M2, Opts) ->
+    case maps:get(<<"api-key">>, M2, not_found) of
+        not_found ->
+            {error, #{<<"status">> => 401, <<"error">> => <<"Missing API key">>}};
+        Key ->
+            Keys = load_data(M1, ?KEYS_KEY, Opts),
+            case maps:get(Key, Keys, not_found) of
+                not_found ->
+                    {error, #{<<"status">> => 401, <<"error">> => <<"Invalid">>}};
+                Address ->
+                    {ok, #{<<"authenticated">> => true, <<"address">> => Address}}
+            end
+    end.
+```
+
+### Unified Authentication Helper
+
+Support both API key and signature-based authentication:
+
+```erlang
+get_authenticated_address(M1, M2, Opts) ->
+    case maps:get(<<"api-key">>, M2, not_found) of
+        not_found ->
+            case get_signer(M2, Opts) of
+                not_found -> {error, #{<<"status">> => 401, <<"error">> => <<"Not authenticated">>}};
+                Signer -> Signer
+            end;
+        APIKey ->
+            Keys = load_data(M1, ?KEYS_KEY, Opts),
+            case maps:get(APIKey, Keys, not_found) of
+                not_found -> {error, #{<<"status">> => 401, <<"error">> => <<"Invalid API key">>}};
+                Address -> Address
+            end
+    end.
+```
+
+---
+
+## Part 4: Payment Processing
+
+### Check Balance
+
+```erlang
+%%====================================================================
+%% Payment
+%%====================================================================
+
+balance(M1, M2, Opts) ->
+    case get_authenticated_address(M1, M2, Opts) of
+        {error, E} -> {error, E};
+        Addr ->
+            Balances = load_data(M1, ?BALANCES_KEY, Opts),
+            {ok, #{<<"address">> => Addr, <<"balance">> => maps:get(Addr, Balances, 0)}}
+    end.
+```
+
+### Deposit
+
+```erlang
+deposit(M1, M2, Opts) ->
+    case get_authenticated_address(M1, M2, Opts) of
+        {error, E} -> {error, E};
+        Addr ->
+            Amount = maps:get(<<"amount">>, M2, 0),
+            case Amount > 0 of
+                false ->
+                    {error, #{<<"status">> => 400, <<"error">> => <<"Invalid amount">>}};
+                true ->
+                    Balances = load_data(M1, ?BALANCES_KEY, Opts),
+                    NewBalance = maps:get(Addr, Balances, 0) + Amount,
+                    NewBalances = maps:put(Addr, NewBalance, Balances),
+                    M1Updated = save_data(M1, ?BALANCES_KEY, NewBalances, Opts),
+                    {ok, maps:merge(M1Updated, #{
+                        <<"deposited">> => Amount,
+                        <<"balance">> => NewBalance
+                    })}
+            end
+    end.
+```
+
+### Withdraw
+
+```erlang
+withdraw(M1, M2, Opts) ->
+    case get_authenticated_address(M1, M2, Opts) of
+        {error, E} -> {error, E};
+        Addr ->
+            Amount = maps:get(<<"amount">>, M2, 0),
+            Balances = load_data(M1, ?BALANCES_KEY, Opts),
+            CurrentBalance = maps:get(Addr, Balances, 0),
+            case {Amount > 0, CurrentBalance >= Amount} of
+                {false, _} ->
+                    {error, #{<<"status">> => 400, <<"error">> => <<"Invalid amount">>}};
+                {_, false} ->
+                    {error, #{<<"status">> => 402, <<"error">> => <<"Insufficient balance">>}};
+                {true, true} ->
+                    NewBalance = CurrentBalance - Amount,
+                    NewBalances = maps:put(Addr, NewBalance, Balances),
+                    M1Updated = save_data(M1, ?BALANCES_KEY, NewBalances, Opts),
+                    {ok, maps:merge(M1Updated, #{
+                        <<"withdrawn">> => Amount,
+                        <<"balance">> => NewBalance
+                    })}
+            end
+    end.
+```
+
+---
+
+## Part 5: Protected API
+
+API calls cost tokens. Check balance before processing, then deduct:
+
+```erlang
+%%====================================================================
+%% Protected API
+%%====================================================================
+
+api_call(M1, M2, Opts) ->
+    case get_authenticated_address(M1, M2, Opts) of
+        {error, E} -> {error, E};
+        Address ->
+            Balances = load_data(M1, ?BALANCES_KEY, Opts),
+            Balance = maps:get(Address, Balances, 0),
+            case Balance >= ?API_COST of
+                false ->
+                    {error, #{
+                        <<"status">> => 402,
+                        <<"error">> => <<"Insufficient balance">>,
+                        <<"required">> => ?API_COST,
+                        <<"balance">> => Balance
+                    }};
+                true ->
+                    Action = maps:get(<<"action">>, M2, <<"default">>),
+                    Data = maps:get(<<"data">>, M2, #{}),
+                    Result = #{
+                        <<"action">> => Action,
+                        <<"processed">> => true,
+                        <<"timestamp">> => erlang:system_time(second),
+                        <<"input">> => Data
+                    },
+                    NewBalance = Balance - ?API_COST,
+                    NewBalances = maps:put(Address, NewBalance, Balances),
+                    M1Updated = save_data(M1, ?BALANCES_KEY, NewBalances, Opts),
+                    {ok, maps:merge(M1Updated, #{
+                        <<"result">> => Result,
+                        <<"charged">> => ?API_COST,
+                        <<"balance">> => NewBalance
+                    })}
+            end
+    end.
+```
+
+---
+
+## Part 6: Task Scheduling
+
+### Schedule a Task
+
+Create recurring tasks with cron expressions:
+
+```erlang
+%%====================================================================
+%% Scheduling
+%%====================================================================
+
+schedule(M1, M2, Opts) ->
+    case get_authenticated_address(M1, M2, Opts) of
+        {error, E} -> {error, E};
+        Addr ->
+            Cron = maps:get(<<"cron">>, M2, <<"* * * * *">>),
+            Action = maps:get(<<"action">>, M2, not_found),
+            Data = maps:get(<<"data">>, M2, #{}),
+            case Action of
+                not_found ->
+                    {error, #{<<"status">> => 400, <<"error">> => <<"Missing action">>}};
+                _ ->
+                    TaskID = generate_task_id(),
+                    Task = #{
+                        <<"id">> => TaskID, <<"owner">> => Addr,
+                        <<"cron">> => Cron, <<"action">> => Action,
+                        <<"data">> => Data, <<"created">> => erlang:system_time(second),
+                        <<"status">> => <<"active">>
+                    },
+                    Tasks = load_data(M1, ?TASKS_KEY, Opts),
+                    M1Updated = save_data(M1, ?TASKS_KEY, maps:put(TaskID, Task, Tasks), Opts),
+                    {ok, maps:merge(M1Updated, #{
+                        <<"task_id">> => TaskID,
+                        <<"cron">> => Cron,
+                        <<"status">> => <<"scheduled">>
+                    })}
+            end
+    end.
+
+generate_task_id() ->
+    hb_util:encode(crypto:strong_rand_bytes(16)).
+```
+
+### List Tasks
+
+Filter tasks by owner:
+
+```erlang
+tasks(M1, M2, Opts) ->
+    case get_authenticated_address(M1, M2, Opts) of
+        {error, E} -> {error, E};
+        Addr ->
+            AllTasks = load_data(M1, ?TASKS_KEY, Opts),
+            UserTasks = maps:filter(fun(_K, V) -> maps:get(<<"owner">>, V) =:= Addr end, AllTasks),
+            {ok, #{<<"tasks">> => maps:values(UserTasks), <<"count">> => maps:size(UserTasks)}}
+    end.
+```
+
+### Cancel a Task
+
+Only the owner can cancel their own tasks:
+
+```erlang
+cancel_task(M1, M2, Opts) ->
+    case {get_authenticated_address(M1, M2, Opts), maps:get(<<"id">>, M2, not_found)} of
+        {{error, E}, _} -> {error, E};
+        {_, not_found} ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing task ID">>}};
+        {Addr, TID} ->
+            Tasks = load_data(M1, ?TASKS_KEY, Opts),
+            case maps:get(TID, Tasks, not_found) of
+                not_found ->
+                    {error, #{<<"status">> => 404, <<"error">> => <<"Not found">>}};
+                Task ->
+                    case maps:get(<<"owner">>, Task) of
+                        Addr ->
+                            UpdatedTask = Task#{<<"status">> => <<"cancelled">>},
+                            M1Updated = save_data(M1, ?TASKS_KEY, maps:put(TID, UpdatedTask, Tasks), Opts),
+                            {ok, maps:merge(M1Updated, #{<<"task_id">> => TID, <<"status">> => <<"cancelled">>})};
+                        _ ->
+                            {error, #{<<"status">> => 403, <<"error">> => <<"Forbidden">>}}
+                    end
+            end
+    end.
+```
+
+---
+
+## Part 7: Request Routing
+
+### Add a Route
+
+```erlang
+%%====================================================================
+%% Routing
+%%====================================================================
+
+add_route(M1, M2, Opts) ->
+    case {maps:get(<<"template">>, M2, not_found), maps:get(<<"node">>, M2, not_found)} of
+        {not_found, _} ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing template">>}};
+        {_, not_found} ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing node">>}};
+        {T, N} ->
+            Route = #{
+                <<"template">> => T, <<"node">> => N,
+                <<"methods">> => maps:get(<<"methods">>, M2, [<<"GET">>, <<"POST">>]),
+                <<"created">> => erlang:system_time(second)
+            },
+            Routes = load_data(M1, ?ROUTES_KEY, Opts),
+            M1Updated = save_data(M1, ?ROUTES_KEY, maps:put(T, Route, Routes), Opts),
+            {ok, maps:merge(M1Updated, #{<<"route">> => Route, <<"status">> => <<"added">>})}
+    end.
+```
+
+### List Routes
+
+```erlang
+routes(M1, _M2, Opts) ->
+    Routes = load_data(M1, ?ROUTES_KEY, Opts),
+    {ok, #{<<"routes">> => maps:values(Routes), <<"count">> => maps:size(Routes)}}.
+```
+
+---
+
+## Part 8: Testing
+
+Test the device using `hb_ao:resolve` with the `{as, Module, Msg}` pattern.
+
+### Test Setup
+
+```erlang
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+setup_test_env() ->
+    application:ensure_all_started(hb),
+    Store = hb_test_utils:test_store(hb_store_fs),
+    Wallet = ar_wallet:new(),
+    #{store => [Store], priv_wallet => Wallet}.
+```
+
+### Test Device Info
+
+```erlang
+%% Test device info via hb_ao:resolve
+info_test() ->
+    application:ensure_all_started(hb),
+    {ok, Info} = hb_ao:resolve(
+        {as, dev_gateway, #{}},
+        #{<<"path">> => <<"info">>},
+        #{}
+    ),
+    ?assertEqual(<<"gateway">>, maps:get(<<"name">>, Info)).
+```
+
+### Test Payment Flow
+
+```erlang
+%% Test payment flow via hb_ao:resolve
+payment_flow_test() ->
+    Opts = setup_test_env(),
+    Wallet = maps:get(priv_wallet, Opts),
+    M1 = #{},
+
+    %% Sign a message with amount
+    SignedMsg = hb_message:commit(#{<<"amount">> => 1000}, #{priv_wallet => Wallet}),
+
+    %% Deposit via hb_ao:resolve
+    {ok, DepRes} = hb_ao:resolve(
+        {as, dev_gateway, M1},
+        maps:merge(SignedMsg, #{<<"path">> => <<"deposit">>}),
+        Opts
+    ),
+    ?assertEqual(1000, maps:get(<<"balance">>, DepRes)),
+
+    %% Check balance
+    {ok, BalRes} = hb_ao:resolve(
+        {as, dev_gateway, DepRes},
+        maps:merge(SignedMsg, #{<<"path">> => <<"balance">>}),
+        Opts
+    ),
+    ?assertEqual(1000, maps:get(<<"balance">>, BalRes)),
+
+    %% Withdraw
+    WithdrawMsg = hb_message:commit(#{<<"amount">> => 500}, #{priv_wallet => Wallet}),
+    {ok, WithRes} = hb_ao:resolve(
+        {as, dev_gateway, DepRes},
+        maps:merge(WithdrawMsg, #{<<"path">> => <<"withdraw">>}),
+        Opts
+    ),
+    ?assertEqual(500, maps:get(<<"balance">>, WithRes)).
+```
+
+### Test API Call
+
+```erlang
+%% Test API call via hb_ao:resolve
+api_call_test() ->
+    Opts = setup_test_env(),
+    Wallet = maps:get(priv_wallet, Opts),
+    M1 = #{},
+
+    %% Deposit first
+    SignedMsg = hb_message:commit(#{<<"amount">> => 100}, #{priv_wallet => Wallet}),
+    {ok, DepRes} = hb_ao:resolve(
+        {as, dev_gateway, M1},
+        maps:merge(SignedMsg, #{<<"path">> => <<"deposit">>}),
+        Opts
+    ),
+
+    %% Make API call
+    APICallMsg = hb_message:commit(#{
+        <<"action">> => <<"test">>,
+        <<"data">> => #{<<"foo">> => <<"bar">>}
+    }, #{priv_wallet => Wallet}),
+    {ok, APIRes} = hb_ao:resolve(
+        {as, dev_gateway, DepRes},
+        maps:merge(APICallMsg, #{<<"path">> => <<"api_call">>}),
+        Opts
+    ),
+    ?assertEqual(10, maps:get(<<"charged">>, APIRes)),
+    ?assertEqual(90, maps:get(<<"balance">>, APIRes)).
+```
+
+### Test Scheduling
+
+```erlang
+%% Test scheduling via hb_ao:resolve
+scheduling_test() ->
+    Opts = setup_test_env(),
+    Wallet = maps:get(priv_wallet, Opts),
+    M1 = #{},
+
+    %% Schedule a task
+    SchedMsg = hb_message:commit(#{
+        <<"action">> => <<"test-action">>,
+        <<"cron">> => <<"0 * * * *">>,
+        <<"data">> => #{<<"key">> => <<"value">>}
+    }, #{priv_wallet => Wallet}),
+    {ok, SchedRes} = hb_ao:resolve(
+        {as, dev_gateway, M1},
+        maps:merge(SchedMsg, #{<<"path">> => <<"schedule">>}),
+        Opts
+    ),
+    ?assertEqual(<<"scheduled">>, maps:get(<<"status">>, SchedRes)),
+
+    %% List tasks
+    {ok, TasksRes} = hb_ao:resolve(
+        {as, dev_gateway, SchedRes},
+        maps:merge(SchedMsg, #{<<"path">> => <<"tasks">>}),
+        Opts
+    ),
+    ?assertEqual(1, maps:get(<<"count">>, TasksRes)).
+```
+
+### Test Routing
+
+```erlang
+%% Test routing via hb_ao:resolve
+routing_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+
+    %% Add route
+    {ok, AddRes} = hb_ao:resolve(
+        {as, dev_gateway, M1},
+        #{
+            <<"path">> => <<"add_route">>,
+            <<"template">> => <<"/api/users/*">>,
+            <<"node">> => #{<<"prefix">> => <<"http://backend:8080">>}
+        },
+        Opts
+    ),
+    ?assertEqual(<<"added">>, maps:get(<<"status">>, AddRes)),
+
+    %% List routes
+    {ok, RoutesRes} = hb_ao:resolve(
+        {as, dev_gateway, AddRes},
+        #{<<"path">> => <<"routes">>},
+        Opts
+    ),
+    ?assertEqual(1, maps:get(<<"count">>, RoutesRes)).
+
+-endif.
+```
+
+### Run Tests
+
+```bash
+rebar3 eunit --module=dev_gateway
+```
+
+---
+
+## Part 8: Device Registration
+
+Register the gateway device to use with the `~device@version` URL syntax.
+
+### Add to sys.config
+
+```erlang
+{hb, [
+    {preloaded_devices, [
+        %% ... existing devices ...
+        #{name => <<"gateway@1.0">>, module => dev_gateway}
+    ]}
+]}
+```
+
+### Or Register at Runtime
+
+```erlang
+hb:init(#{
+    preloaded_devices => [
+        #{name => <<"gateway@1.0">>, module => dev_gateway}
+    ]
+}).
+```
+
+### Verify Registration
+
+```
+GET  http://localhost:8734/~gateway@1.0/info
+POST http://localhost:8734/~gateway@1.0/deposit?amount=100
+POST http://localhost:8734/~gateway@1.0/call?endpoint=/api/data
+```
+
+---
+
+## Key Concepts
+
+| Concept | Implementation |
+|---------|---------------|
+| Authentication | `hb_message:signers/2` or API key lookup |
+| Balance tracking | In-memory map in `<<"priv">>` |
+| Cost enforcement | Check balance before API calls |
+| Ownership | Filter by authenticated address |
+| Routing | Template-to-node mapping |
+
+---
+
+## Next Steps
+
+- **[L4: Data Platform](/book/build4)** - Add Arweave persistence and bundles
+- **[L5: JS Smart Contracts](/book/build5)** - WASM execution
+
+---
+
+## Resources
+
+- [hb_message Reference](/src/hb_message)
+- [Authentication Tutorial](/book/dev4)
+- [Scheduling Tutorial](/book/dev5)
