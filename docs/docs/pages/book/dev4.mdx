@@ -638,18 +638,13 @@ complete_workflow_test() ->
     Process = dev_process:test_aos_process(),
     ?debugFmt("1. Created AOS process", []),
     
-    %% 2. Schedule a handler that sends messages
-    Script = <<"
-        Counter = Counter or 0
-        Counter = Counter + 1
-        return 'Count: ' .. Counter
-    ">>,
-    dev_process:schedule_aos_call(Process, Script),
-    dev_process:schedule_aos_call(Process, Script),
-    dev_process:schedule_aos_call(Process, Script),
+    %% 2. Schedule computations (simple single-line scripts)
+    dev_process:schedule_aos_call(Process, <<"Counter = 1">>),
+    dev_process:schedule_aos_call(Process, <<"Counter = Counter + 1">>),
+    dev_process:schedule_aos_call(Process, <<"return Counter">>),
     ?debugFmt("2. Scheduled 3 computations", []),
     
-    %% 3. Compute slots
+    %% 3. Compute each slot in order
     {ok, _} = hb_ao:resolve(Process, #{<<"path">> => <<"compute">>, <<"slot">> => 0}, #{}),
     {ok, _} = hb_ao:resolve(Process, #{<<"path">> => <<"compute">>, <<"slot">> => 1}, #{}),
     {ok, State} = hb_ao:resolve(Process, #{<<"path">> => <<"compute">>, <<"slot">> => 2}, #{}),
@@ -657,10 +652,10 @@ complete_workflow_test() ->
     
     %% 4. Check result
     Result = hb_ao:get(<<"results/data">>, State, #{}),
-    ?assertEqual(<<"Count: 3">>, Result),
+    ?assertEqual(<<"2">>, Result),
     ?debugFmt("4. Result: ~s", [Result]),
     
-    ?debugFmt("=== All tests passed! ===", []).
+    ?debugFmt("=== Complete workflow passed! ===", []).
 ```
 
 ### Run the Tests

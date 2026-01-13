@@ -1,0 +1,392 @@
+# Building an ERC20 Token Device
+
+A simple tutorial on HyperBEAM device development
+
+---
+
+## What We're Building
+
+A basic token with the standard ERC20 interface:
+
+```
+┌─────────────────────────────────────────┐
+│              dev_token                  │
+├─────────────────────────────────────────┤
+│  State:                                 │
+│  • balances: #{address => amount}       │
+│  • allowances: #{owner => #{spender =>  │
+│                             amount}}    │
+├─────────────────────────────────────────┤
+│  Operations:                            │
+│  • transfer(to, value)                  │
+│  • approve(spender, value)              │
+│  • transferFrom(from, to, value)        │
+│  • balanceOf(account)                   │
+│  • allowance(owner, spender)            │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## Device Structure
+
+```erlang
+-module(dev_token).
+
+%% Lifecycle
+-export([info/3, init/3, compute/3, snapshot/3, normalize/3]).
+
+%% Operations
+-export([transfer/3, approve/3, transfer_from/3]).
+
+%% Queries
+-export([balance_of/3, allowance/3, total_supply/3]).
+```
+
+---
+
+## State
+
+```erlang
+#{
+    <<"name">> => <<"MyToken">>,
+    <<"symbol">> => <<"MTK">>,
+    <<"decimals">> => 18,
+    <<"total_supply">> => 1000000,
+    <<"owner">> => <<"alice">>,
+    
+    <<"balances">> => #{
+        <<"alice">> => 900000,
+        <<"bob">> => 100000
+    },
+    
+    <<"allowances">> => #{
+        <<"alice">> => #{
+            <<"bob">> => 50000  % Bob can spend 50000 of Alice's tokens
+        }
+    }
+}
+```
+
+---
+
+## Initialize
+
+```erlang
+init(Msg, Msg2, Opts) ->
+    Name = hb_ao:get(<<"name">>, Msg2, <<"Token">>, Opts),
+    Symbol = hb_ao:get(<<"symbol">>, Msg2, <<"TKN">>, Opts),
+    TotalSupply = hb_ao:get(<<"total_supply">>, Msg2, 0, Opts),
+    Creator = get_signer(Msg2, Opts),
+    
+    InitialState = #{
+        <<"name">> => Name,
+        <<"symbol">> => Symbol,
+        <<"total_supply">> => TotalSupply,
+        <<"balances">> => #{Creator => TotalSupply},
+        <<"allowances">> => #{}
+    },
+    
+    {ok, hb_ao:set(Msg, InitialState, Opts)}.
+```
+
+**Patterns:**
+- `hb_ao:get/4` — Get config with default value
+- `get_signer/2` — Extract address from attestations
+- `hb_ao:set/3` — Set state
+
+---
+
+## Transfer
+
+```erlang
+do_transfer(Msg, From, To, Value, Opts) ->
+    Balances = hb_ao:get(<<"balances">>, Msg, #{}, Opts),
+    FromBalance = maps:get(From, Balances, 0),
+    
+    case FromBalance >= Value of
+        false ->
+            {ok, set_error(Msg, <<"Insufficient balance">>, Opts)};
+        true ->
+            ToBalance = maps:get(To, Balances, 0),
+            NewBalances = Balances#{
+                From => FromBalance - Value,
+                To => ToBalance + Value
+            },
+            
+            State1 = hb_ao:set(Msg, <<"balances">>, NewBalances, Opts),
+            
+            {ok, hb_ao:set(State1, #{
+                <<"success">> => true,
+                <<"from">> => From,
+                <<"to">> => To,
+                <<"value">> => Value
+            }, Opts)}
+    end.
+```
+
+**Pattern:** Validate first, then update state atomically.
+
+---
+
+## Approve & TransferFrom
+
+```erlang
+%% Approve: owner allows spender to transfer up to value
+handle_approve(Msg1, Msg2, Opts) ->
+    Owner = get_signer(Msg2, Opts),
+    Spender = hb_ao:get([<<"body">>, <<"Spender">>], Msg2, Opts),
+    Value = hb_ao:get([<<"body">>, <<"Value">>], Msg2, 0, Opts),
+    
+    Allowances = hb_ao:get(<<"allowances">>, Msg1, #{}, Opts),
+    OwnerAllowances = maps:get(Owner, Allowances, #{}),
+    NewOwnerAllowances = OwnerAllowances#{Spender => Value},
+    NewAllowances = Allowances#{Owner => NewOwnerAllowances},
+    
+    State1 = hb_ao:set(Msg1, <<"allowances">>, NewAllowances, Opts),
+    {ok, State1}.
+
+%% TransferFrom: spender moves tokens from owner to recipient
+handle_transfer_from(Msg1, Msg2, Opts) ->
+    Spender = get_signer(Msg2, Opts),
+    From = hb_ao:get([<<"body">>, <<"From">>], Msg2, Opts),
+    To = hb_ao:get([<<"body">>, <<"To">>], Msg2, Opts),
+    Value = hb_ao:get([<<"body">>, <<"Value">>], Msg2, 0, Opts),
+    
+    %% Check allowance
+    CurrentAllowance = get_allowance(Msg1, From, Spender, Opts),
+    
+    case CurrentAllowance >= Value of
+        false ->
+            {ok, set_error(Msg1, <<"Insufficient allowance">>, Opts)};
+        true ->
+            %% Decrease allowance
+            State1 = decrease_allowance(Msg1, From, Spender, Value, Opts),
+            %% Do transfer
+            do_transfer(State1, From, To, Value, Opts)
+    end.
+```
+
+---
+
+## Action Routing
+
+```erlang
+compute(Msg1, Msg2, Opts) ->
+    Action = hb_ao:get([<<"body">>, <<"Action">>], Msg2, <<"none">>, Opts),
+    
+    case normalize_action(Action) of
+        <<"Transfer">> -> handle_transfer(Msg1, Msg2, Opts);
+        <<"Approve">> -> handle_approve(Msg1, Msg2, Opts);
+        <<"TransferFrom">> -> handle_transfer_from(Msg1, Msg2, Opts);
+        <<"BalanceOf">> -> handle_balance_of(Msg1, Msg2, Opts);
+        _ -> {ok, Msg1}
+    end.
+```
+
+---
+
+## Authentication
+
+```erlang
+get_signer(Msg, Opts) ->
+    case hb_ao:get(<<"attestations">>, Msg, [], Opts) of
+        [] -> 
+            hb_ao:get(<<"from">>, Msg, <<"anonymous">>, Opts);
+        [First | _] -> 
+            maps:get(<<"address">>, First, <<"anonymous">>)
+    end.
+```
+
+**Pattern:** The signer's address comes from attestations (cryptographic signatures).
+
+---
+
+## PATCH Device (Path Resolution)
+
+Expose state via HTTP GET:
+
+```erlang
+-export([get/3]).
+
+get(Msg1, Msg2, Opts) ->
+    Path = hb_ao:get(<<"path">>, Msg2, [], Opts),
+    handle_get_path(Msg1, Path, Opts).
+
+handle_get_path(Msg, [<<"balance">>, Address], Opts) ->
+    Balances = hb_ao:get(<<"balances">>, Msg, #{}, Opts),
+    Balance = maps:get(Address, Balances, 0),
+    {ok, Balance};
+
+handle_get_path(Msg, [<<"allowance">>, Owner, Spender], Opts) ->
+    Allowances = hb_ao:get(<<"allowances">>, Msg, #{}, Opts),
+    OwnerAllowances = maps:get(Owner, Allowances, #{}),
+    {ok, maps:get(Spender, OwnerAllowances, 0)};
+
+handle_get_path(Msg, [<<"info">>], Opts) ->
+    {ok, #{
+        <<"name">> => hb_ao:get(<<"name">>, Msg, Opts),
+        <<"symbol">> => hb_ao:get(<<"symbol">>, Msg, Opts),
+        <<"total_supply">> => hb_ao:get(<<"total_supply">>, Msg, 0, Opts)
+    }};
+
+handle_get_path(_Msg, Path, _Opts) ->
+    {error, #{<<"error">> => <<"Unknown path">>, <<"path">> => Path}}.
+```
+
+### HTTP Access
+
+```bash
+# Get balance
+curl https://node.hyperbeam.io/<pid>/balance/alice
+# → 1000
+
+# Get allowance
+curl https://node.hyperbeam.io/<pid>/allowance/alice/bob
+# → 500
+
+# Get token info
+curl https://node.hyperbeam.io/<pid>/info
+# Returns: name, symbol, total_supply as JSON
+```
+
+### JavaScript
+
+```javascript
+// Direct path access (no message needed)
+const balance = await hb.get(pid + "/balance/alice");
+const info = await hb.get(pid + "/info");
+```
+
+**Pattern:** The `get/3` function returns raw values, not wrapped in Msg. This makes HTTP responses clean.
+
+---
+
+## Usage
+
+### Deploy Token
+
+```javascript
+const { pid } = await hb.spawn({
+    "execution-device": "token@1.0",
+    "name": "MyToken",
+    "symbol": "MTK",
+    "total_supply": 1000000
+});
+```
+
+### Transfer
+
+```javascript
+await hb.message({
+    pid,
+    body: {
+        Action: "Transfer",
+        To: "bob",
+        Value: 100
+    }
+});
+```
+
+### Approve & TransferFrom
+
+```javascript
+// Alice approves Bob
+await hb.message({
+    pid,
+    body: {
+        Action: "Approve",
+        Spender: "bob",
+        Value: 500
+    },
+    signer: aliceWallet
+});
+
+// Bob transfers from Alice to Charlie
+await hb.message({
+    pid,
+    body: {
+        Action: "TransferFrom",
+        From: "alice",
+        To: "charlie",
+        Value: 200
+    },
+    signer: bobWallet
+});
+```
+
+### Query Balance
+
+```javascript
+const { balance } = await hb.dryrun({
+    pid,
+    body: {
+        Action: "BalanceOf",
+        Account: "alice"
+    }
+});
+```
+
+---
+
+## Tests
+
+```erlang
+transfer_test() ->
+    {ok, State1} = init(#{}, make_init_msg(<<"Token">>, <<"TKN">>, 1000, <<"alice">>), #{}),
+    
+    {ok, State2} = compute(State1, make_msg(<<"Transfer">>, #{
+        <<"To">> => <<"bob">>,
+        <<"Value">> => 100
+    }, <<"alice">>), #{}),
+    
+    ?assertEqual(true, maps:get(<<"success">>, State2)),
+    
+    Balances = maps:get(<<"balances">>, State2),
+    ?assertEqual(900, maps:get(<<"alice">>, Balances)),
+    ?assertEqual(100, maps:get(<<"bob">>, Balances)).
+```
+
+Run:
+```bash
+rebar3 eunit --module=dev_token
+```
+
+---
+
+## Concepts Demonstrated
+
+| Concept | Usage |
+|---------|-------|
+| `hb_ao:get/4` | Read state with defaults |
+| `hb_ao:set/3` | Update state |
+| Attestations | Authenticate sender |
+| Nested maps | Allowances structure |
+| Action routing | compute/3 dispatch |
+| Validation | Check before state change |
+| PATCH device | get/3 for HTTP path resolution |
+
+---
+
+## Quick Reference
+
+### Actions (via compute)
+
+| Action | Parameters | Returns |
+|--------|------------|---------|
+| Transfer | To, Value | success, from, to, value |
+| Approve | Spender, Value | success, owner, spender, value |
+| TransferFrom | From, To, Value | success, from, to, value |
+| BalanceOf | Account | account, balance |
+| Allowance | Owner, Spender | owner, spender, allowance |
+| TotalSupply | — | total_supply |
+
+### Paths (via get)
+
+| Path | Returns |
+|------|---------|
+| `/balance/<address>` | balance (integer) |
+| `/allowance/<owner>/<spender>` | allowance (integer) |
+| `/info` | name, symbol, decimals, total_supply |
+| `/total_supply` | total_supply (integer) |
+| `/balances` | all balances (map) |

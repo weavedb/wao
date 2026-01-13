@@ -362,6 +362,32 @@ export default defineConfig({
             },
           ],
         },
+        {
+          text: "Build Your Own",
+          collapsed: true,
+          items: [
+            {
+              text: "L1: Key-Value Store",
+              link: "/book/build1",
+            },
+            {
+              text: "L2: Data Processor",
+              link: "/book/build2",
+            },
+            {
+              text: "L3: API Gateway",
+              link: "/book/build3",
+            },
+            {
+              text: "L4: Data Platform",
+              link: "/book/build4",
+            },
+            {
+              text: "L5: JS Smart Contract",
+              link: "/book/build5",
+            },
+          ],
+        },
       ],
     },
     {
