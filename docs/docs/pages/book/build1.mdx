@@ -1,0 +1,650 @@
+# L1: Key-Value Store Device
+
+Build your first HyperBEAM device with persistent storage.
+
+## What You'll Build
+
+A personal key-value store device with these endpoints:
+
+```
+GET  /~kv@1.0/info              Device metadata
+GET  /~kv@1.0/get?key=KEY       Get value
+POST /~kv@1.0/set?key=KEY       Set value
+POST /~kv@1.0/delete?key=KEY    Delete key
+GET  /~kv@1.0/keys              List all keys
+```
+
+## What You'll Learn
+
+| Module | Purpose |
+|--------|---------|
+| `hb_maps` | Read request parameters |
+| `hb_private` | Store private state references |
+| `hb_cache` | Content-addressed persistent storage |
+| `hb_store` | Storage backend abstraction |
+
+## Prerequisites
+
+- HyperBEAM cloned and compiled ([Setup Guide](/book/setup))
+- Basic Erlang knowledge ([Erlang Crash Course](/book/erlang))
+
+---
+
+## Part 1: Device Structure
+
+Every HyperBEAM device is an Erlang module with functions that handle requests. Each function receives three arguments:
+
+```erlang
+my_function(M1, M2, Opts) ->
+    %% M1 = Base message (device state)
+    %% M2 = Request message (user's request)
+    %% Opts = Execution options (store, cache settings)
+    {ok, Result} | {error, Reason}.
+```
+
+### The Module Header
+
+Create `HyperBEAM/src/dev_kv.erl`:
+
+```erlang
+%%%-------------------------------------------------------------------
+%%% @doc Key-Value Store Device
+%%%
+%%% A personal key-value store with persistent storage.
+%%%
+%%% API:
+%%%   GET  /~kv@1.0/info              Device metadata
+%%%   GET  /~kv@1.0/get?key=KEY       Get value
+%%%   POST /~kv@1.0/set?key=KEY       Set value (body = value)
+%%%   POST /~kv@1.0/delete?key=KEY    Delete key
+%%%   GET  /~kv@1.0/keys              List all keys
+%%%
+%%% @end
+%%%-------------------------------------------------------------------
+-module(dev_kv).
+-export([info/3, get/3, set/3, delete/3, keys/3]).
+-include("include/hb.hrl").
+
+-define(STATE_KEY, <<"kv-state-id">>).
+```
+
+**Key points:**
+- Export all public functions with `/3` (three arguments)
+- Include `hb.hrl` for common macros
+- Define constants for state keys
+
+---
+
+## Part 2: Device Info
+
+The `info/3` function returns device metadata:
+
+```erlang
+%%====================================================================
+%% Public API
+%%====================================================================
+
+%% @doc Device metadata
+info(_M1, _M2, _Opts) ->
+    {ok, #{
+        <<"name">> => <<"kv">>,
+        <<"version">> => <<"1.0">>,
+        <<"description">> => <<"Personal Key-Value Store with Persistence">>,
+        <<"author">> => <<"HyperBEAM Book">>
+    }}.
+```
+
+---
+
+## Part 3: Reading Parameters with hb_maps
+
+Use `hb_maps:get/4` to read parameters from the request message:
+
+```erlang
+%% Read a key with default value
+Key = hb_maps:get(<<"key">>, M2, not_found, Opts),
+
+%% Pattern match on result
+case hb_maps:get(<<"key">>, M2, not_found, Opts) of
+    not_found -> handle_missing();
+    Value -> handle_value(Value)
+end.
+```
+
+:::warning[Important]
+Use `hb_maps:get/4` for reading request parameters. Do NOT use `hb_ao:get` as it performs resolution which can transform values unexpectedly.
+:::
+
+### Implementing GET
+
+```erlang
+%% @doc Get value by key
+get(M1, M2, Opts) ->
+    case hb_maps:get(<<"key">>, M2, not_found, Opts) of
+        not_found ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing 'key' parameter">>}};
+        Key ->
+            State = load_state(M1, Opts),
+            case maps:get(Key, State, not_found) of
+                not_found ->
+                    {error, #{<<"status">> => 404, <<"error">> => <<"Key not found">>}};
+                Value ->
+                    {ok, #{<<"key">> => Key, <<"value">> => Value}}
+            end
+    end.
+```
+
+---
+
+## Part 4: Private State with hb_private
+
+The `hb_private` module stores state that's invisible to external callers. We use it to store a reference (ID) to our persisted state.
+
+### How Private State Works
+
+```
+Message (visible to user):
+#{
+    <<"device">> => <<"kv@1.0">>,
+    <<"public">> => <<"data">>
+}
+
+Private State (hidden):
+#{
+    <<"kv-state-id">> => <<"cache-id-pointing-to-state">>
+}
+```
+
+### Private State API
+
+```erlang
+%% Get a value from private state
+Value = hb_private:get(Key, M1, Default, Opts),
+
+%% Set private state (returns updated message)
+M1Updated = hb_private:set(M1, #{Key => Value}, Opts).
+```
+
+### Implementing SET
+
+```erlang
+%% @doc Set key to value
+set(M1, M2, Opts) ->
+    case hb_maps:get(<<"key">>, M2, not_found, Opts) of
+        not_found ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing 'key' parameter">>}};
+        Key ->
+            Value = hb_maps:get(<<"value">>, M2, <<>>, Opts),
+            State = load_state(M1, Opts),
+            NewState = maps:put(Key, Value, State),
+            M1Updated = save_state(M1, NewState, Opts),
+            {ok, maps:merge(M1Updated, #{
+                <<"status">> => <<"stored">>,
+                <<"key">> => Key
+            })}
+    end.
+```
+
+---
+
+## Part 5: Persistence with hb_cache
+
+The `hb_cache` module provides content-addressed storage. Data is stored by its hash, ensuring integrity and deduplication.
+
+### Cache API
+
+```erlang
+%% Write to cache (returns content-addressed ID)
+{ok, ID} = hb_cache:write(Data, Opts),
+
+%% Read from cache
+{ok, Data} = hb_cache:read(ID, Opts),
+not_found = hb_cache:read(<<"nonexistent">>, Opts),
+
+%% Load all nested links in a map
+LoadedData = hb_cache:ensure_all_loaded(Data, Opts).
+```
+
+### Internal State Functions
+
+```erlang
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+%% @private Load state from cache
+load_state(M1, Opts) ->
+    case hb_private:get(?STATE_KEY, M1, not_found, Opts) of
+        not_found ->
+            #{};
+        StateID ->
+            case hb_cache:read(StateID, Opts) of
+                {ok, State} ->
+                    hb_cache:ensure_all_loaded(State, Opts);
+                not_found ->
+                    #{}
+            end
+    end.
+
+%% @private Save state to cache
+save_state(M1, State, Opts) ->
+    {ok, StateID} = hb_cache:write(State, Opts),
+    hb_private:set(M1, #{?STATE_KEY => StateID}, Opts).
+```
+
+---
+
+## Part 6: Delete and Keys
+
+### Implementing DELETE
+
+```erlang
+%% @doc Delete key
+delete(M1, M2, Opts) ->
+    case hb_maps:get(<<"key">>, M2, not_found, Opts) of
+        not_found ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing 'key' parameter">>}};
+        Key ->
+            State = load_state(M1, Opts),
+            case maps:is_key(Key, State) of
+                false ->
+                    {error, #{<<"status">> => 404, <<"error">> => <<"Key not found">>}};
+                true ->
+                    NewState = maps:remove(Key, State),
+                    M1Updated = save_state(M1, NewState, Opts),
+                    {ok, maps:merge(M1Updated, #{
+                        <<"status">> => <<"deleted">>,
+                        <<"key">> => Key
+                    })}
+            end
+    end.
+```
+
+### Implementing KEYS
+
+```erlang
+%% @doc List all keys
+keys(M1, _M2, Opts) ->
+    State = load_state(M1, Opts),
+    Keys = maps:keys(State),
+    {ok, #{<<"keys">> => Keys, <<"count">> => length(Keys)}}.
+```
+
+---
+
+## Part 7: Storage Backends
+
+HyperBEAM supports multiple storage backends:
+
+| Backend | Module | Best For |
+|---------|--------|----------|
+| Filesystem | `hb_store_fs` | Development |
+| LMDB | `hb_store_lmdb` | Production reads |
+| RocksDB | `hb_store_rocksdb` | Write-heavy workloads |
+
+The cache uses whatever store is configured in Opts.
+
+---
+
+## Part 8: Testing
+
+HyperBEAM devices use EUnit for testing. Tests can call device functions directly.
+
+### Test Setup
+
+```erlang
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+setup_test_env() ->
+    application:ensure_all_started(hb),
+    Store = hb_test_utils:test_store(hb_store_fs),
+    #{store => [Store]}.
+```
+
+### Test Device Info
+
+```erlang
+%% Test device info - direct call
+info_test() ->
+    {ok, Info} = info(#{}, #{}, #{}),
+    ?assertEqual(<<"kv">>, maps:get(<<"name">>, Info)),
+    ?assertEqual(<<"1.0">>, maps:get(<<"version">>, Info)).
+```
+
+### Test Set and Get
+
+```erlang
+%% Test set and get - direct function calls
+set_get_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+    M2_set = #{<<"key">> => <<"foo">>, <<"value">> => <<"bar">>},
+
+    %% Set value
+    {ok, SetRes} = set(M1, M2_set, Opts),
+    ?assertEqual(<<"stored">>, maps:get(<<"status">>, SetRes)),
+
+    %% Get value - use the returned message which has the state
+    M2_get = #{<<"key">> => <<"foo">>},
+    {ok, GetRes} = get(SetRes, M2_get, Opts),
+    ?assertEqual(<<"bar">>, maps:get(<<"value">>, GetRes)).
+```
+
+### Test Delete
+
+```erlang
+%% Test delete - direct function calls
+delete_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+
+    %% Set then delete
+    {ok, SetRes} = set(M1, #{<<"key">> => <<"temp">>, <<"value">> => <<"data">>}, Opts),
+    {ok, DelRes} = delete(SetRes, #{<<"key">> => <<"temp">>}, Opts),
+    ?assertEqual(<<"deleted">>, maps:get(<<"status">>, DelRes)),
+
+    %% Verify gone
+    {error, _} = get(DelRes, #{<<"key">> => <<"temp">>}, Opts).
+```
+
+### Test Keys
+
+```erlang
+%% Test keys - direct function calls
+keys_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+
+    {ok, M2} = set(M1, #{<<"key">> => <<"a">>, <<"value">> => <<"1">>}, Opts),
+    {ok, M3} = set(M2, #{<<"key">> => <<"b">>, <<"value">> => <<"2">>}, Opts),
+
+    {ok, KeysRes} = keys(M3, #{}, Opts),
+    ?assertEqual(2, maps:get(<<"count">>, KeysRes)).
+```
+
+### Test Error Handling
+
+```erlang
+%% Test error handling - direct function calls
+error_handling_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+
+    %% Missing key parameter
+    {error, E1} = get(M1, #{}, Opts),
+    ?assertEqual(400, maps:get(<<"status">>, E1)),
+
+    %% Key not found
+    {error, E2} = get(M1, #{<<"key">> => <<"nonexistent">>}, Opts),
+    ?assertEqual(404, maps:get(<<"status">>, E2)).
+
+-endif.
+```
+
+### Run Tests
+
+```bash
+rebar3 eunit --module=dev_kv
+```
+
+---
+
+## Complete Code
+
+Here's the complete `dev_kv.erl`:
+
+```erlang
+%%%-------------------------------------------------------------------
+%%% @doc Key-Value Store Device
+%%%
+%%% A personal key-value store with persistent storage.
+%%%
+%%% API:
+%%%   GET  /~kv@1.0/info              Device metadata
+%%%   GET  /~kv@1.0/get?key=KEY       Get value
+%%%   POST /~kv@1.0/set?key=KEY       Set value (body = value)
+%%%   POST /~kv@1.0/delete?key=KEY    Delete key
+%%%   GET  /~kv@1.0/keys              List all keys
+%%%
+%%% @end
+%%%-------------------------------------------------------------------
+-module(dev_kv).
+-export([info/3, get/3, set/3, delete/3, keys/3]).
+-include("include/hb.hrl").
+
+-define(STATE_KEY, <<"kv-state-id">>).
+
+%%====================================================================
+%% Public API
+%%====================================================================
+
+%% @doc Device metadata
+info(_M1, _M2, _Opts) ->
+    {ok, #{
+        <<"name">> => <<"kv">>,
+        <<"version">> => <<"1.0">>,
+        <<"description">> => <<"Personal Key-Value Store with Persistence">>,
+        <<"author">> => <<"HyperBEAM Book">>
+    }}.
+
+%% @doc Get value by key
+get(M1, M2, Opts) ->
+    case hb_maps:get(<<"key">>, M2, not_found, Opts) of
+        not_found ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing 'key' parameter">>}};
+        Key ->
+            State = load_state(M1, Opts),
+            case maps:get(Key, State, not_found) of
+                not_found ->
+                    {error, #{<<"status">> => 404, <<"error">> => <<"Key not found">>}};
+                Value ->
+                    {ok, #{<<"key">> => Key, <<"value">> => Value}}
+            end
+    end.
+
+%% @doc Set key to value
+set(M1, M2, Opts) ->
+    case hb_maps:get(<<"key">>, M2, not_found, Opts) of
+        not_found ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing 'key' parameter">>}};
+        Key ->
+            Value = hb_maps:get(<<"value">>, M2, <<>>, Opts),
+            State = load_state(M1, Opts),
+            NewState = maps:put(Key, Value, State),
+            M1Updated = save_state(M1, NewState, Opts),
+            {ok, maps:merge(M1Updated, #{
+                <<"status">> => <<"stored">>,
+                <<"key">> => Key
+            })}
+    end.
+
+%% @doc Delete key
+delete(M1, M2, Opts) ->
+    case hb_maps:get(<<"key">>, M2, not_found, Opts) of
+        not_found ->
+            {error, #{<<"status">> => 400, <<"error">> => <<"Missing 'key' parameter">>}};
+        Key ->
+            State = load_state(M1, Opts),
+            case maps:is_key(Key, State) of
+                false ->
+                    {error, #{<<"status">> => 404, <<"error">> => <<"Key not found">>}};
+                true ->
+                    NewState = maps:remove(Key, State),
+                    M1Updated = save_state(M1, NewState, Opts),
+                    {ok, maps:merge(M1Updated, #{
+                        <<"status">> => <<"deleted">>,
+                        <<"key">> => Key
+                    })}
+            end
+    end.
+
+%% @doc List all keys
+keys(M1, _M2, Opts) ->
+    State = load_state(M1, Opts),
+    Keys = maps:keys(State),
+    {ok, #{<<"keys">> => Keys, <<"count">> => length(Keys)}}.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+%% @private Load state from cache
+load_state(M1, Opts) ->
+    case hb_private:get(?STATE_KEY, M1, not_found, Opts) of
+        not_found ->
+            #{};
+        StateID ->
+            case hb_cache:read(StateID, Opts) of
+                {ok, State} ->
+                    hb_cache:ensure_all_loaded(State, Opts);
+                not_found ->
+                    #{}
+            end
+    end.
+
+%% @private Save state to cache
+save_state(M1, State, Opts) ->
+    {ok, StateID} = hb_cache:write(State, Opts),
+    hb_private:set(M1, #{?STATE_KEY => StateID}, Opts).
+
+%%====================================================================
+%% Tests - Direct function calls to test device logic
+%%====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+setup_test_env() ->
+    application:ensure_all_started(hb),
+    Store = hb_test_utils:test_store(hb_store_fs),
+    #{store => [Store]}.
+
+%% Test device info - direct call
+info_test() ->
+    {ok, Info} = info(#{}, #{}, #{}),
+    ?assertEqual(<<"kv">>, maps:get(<<"name">>, Info)),
+    ?assertEqual(<<"1.0">>, maps:get(<<"version">>, Info)).
+
+%% Test set and get - direct function calls
+set_get_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+    M2_set = #{<<"key">> => <<"foo">>, <<"value">> => <<"bar">>},
+
+    %% Set value
+    {ok, SetRes} = set(M1, M2_set, Opts),
+    ?assertEqual(<<"stored">>, maps:get(<<"status">>, SetRes)),
+
+    %% Get value - use the returned message which has the state
+    M2_get = #{<<"key">> => <<"foo">>},
+    {ok, GetRes} = get(SetRes, M2_get, Opts),
+    ?assertEqual(<<"bar">>, maps:get(<<"value">>, GetRes)).
+
+%% Test delete - direct function calls
+delete_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+
+    %% Set then delete
+    {ok, SetRes} = set(M1, #{<<"key">> => <<"temp">>, <<"value">> => <<"data">>}, Opts),
+    {ok, DelRes} = delete(SetRes, #{<<"key">> => <<"temp">>}, Opts),
+    ?assertEqual(<<"deleted">>, maps:get(<<"status">>, DelRes)),
+
+    %% Verify gone
+    {error, _} = get(DelRes, #{<<"key">> => <<"temp">>}, Opts).
+
+%% Test keys - direct function calls
+keys_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+
+    {ok, M2} = set(M1, #{<<"key">> => <<"a">>, <<"value">> => <<"1">>}, Opts),
+    {ok, M3} = set(M2, #{<<"key">> => <<"b">>, <<"value">> => <<"2">>}, Opts),
+
+    {ok, KeysRes} = keys(M3, #{}, Opts),
+    ?assertEqual(2, maps:get(<<"count">>, KeysRes)).
+
+%% Test error handling - direct function calls
+error_handling_test() ->
+    Opts = setup_test_env(),
+    M1 = #{},
+
+    %% Missing key parameter
+    {error, E1} = get(M1, #{}, Opts),
+    ?assertEqual(400, maps:get(<<"status">>, E1)),
+
+    %% Key not found
+    {error, E2} = get(M1, #{<<"key">> => <<"nonexistent">>}, Opts),
+    ?assertEqual(404, maps:get(<<"status">>, E2)).
+
+-endif.
+```
+
+---
+
+## Part 9: Device Registration
+
+To use your device with the `~device@version` URL syntax, register it as a preloaded device.
+
+### Add to sys.config
+
+Edit `HyperBEAM/config/sys.config` and add your device to the `preloaded_devices` list:
+
+```erlang
+{hb, [
+    {preloaded_devices, [
+        %% ... existing devices ...
+        #{name => <<"kv@1.0">>, module => dev_kv}
+    ]}
+]}
+```
+
+### Or Register at Runtime
+
+```erlang
+hb:init(#{
+    preloaded_devices => [
+        #{name => <<"kv@1.0">>, module => dev_kv}
+    ]
+}).
+```
+
+### Verify Registration
+
+After starting HyperBEAM, your device responds to:
+
+```
+GET  http://localhost:8734/~kv@1.0/info
+POST http://localhost:8734/~kv@1.0/set?key=test
+```
+
+---
+
+## Key Concepts
+
+| Concept | Module | Key Functions |
+|---------|--------|---------------|
+| Device structure | - | `info/3`, `get/3`, `set/3` |
+| Reading parameters | `hb_maps` | `get/4` |
+| Private state | `hb_private` | `get/4`, `set/3` |
+| Persistence | `hb_cache` | `write/2`, `read/2`, `ensure_all_loaded/2` |
+| Storage | `hb_store` | Backend abstraction |
+
+---
+
+## Next Steps
+
+- **[L2: Data Processor](/book/build2)** - Add codecs and message signing
+- **[L3: API Gateway](/book/build3)** - Add authentication and payment
+- **[L4: Data Platform](/book/build4)** - Add Arweave persistence
+- **[L5: JS Smart Contracts](/book/build5)** - WASM execution
+
+---
+
+## Resources
+
+- [hb_cache Reference](/src/hb_cache)
+- [hb_private Reference](/src/hb_private)
+- [hb_store Reference](/src/hb_store)
+- [Setup Guide](/book/setup)
