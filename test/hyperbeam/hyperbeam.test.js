@@ -41,13 +41,13 @@ const URL = "http://localhost:10001"
 describe("Hyperbeam Legacynet", function () {
   let hb, hbeam, server
   before(async () => {
-    server = new Server({ port: 6359, log: true, hb_url: URL })
+    //server = new Server({ port: 6359, log: true, hb_url: URL })
     hbeam = await new HyperBEAM({ reset: true }).ready()
   })
   beforeEach(async () => (hb = hbeam.hb))
   after(async () => {
     hbeam.kill()
-    server.end()
+    //server.end()
   })
 
   it("should interact with a hyperbeam node", async () => {
