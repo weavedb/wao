@@ -56,7 +56,7 @@
     "express": "^5.1.0",
     "fast-sha256": "^1.3.0",
     "graphql": "^16.10.0",
-    "hbsig": "^0.2.5",
+    "hbsig": "file:./hbsig",
     "http-message-signatures": "^1.0.4",
     "lmdb": "^3.2.2",
     "localforage": "^1.10.0",
