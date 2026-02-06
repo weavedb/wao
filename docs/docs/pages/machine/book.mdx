@@ -1,0 +1,510 @@
+---
+type: documentation
+category: hyperbeam-reference
+format: machine-readable
+version: 1.0
+purpose: AI-optimized HyperBEAM device development guide
+target_audience: AI assistants helping developers build HyperBEAM devices
+---
+
+# HyperBEAM Book - Machine Readable Reference
+
+## METADATA
+- **Title**: The HyperBEAM Book (Pre-Release)
+- **Subtitle**: From Zero to Building Custom Devices
+- **Status**: Early Development (Content Incomplete)
+- **Target Version**: HyperBEAM v0.9-milestone-3-beta-3
+- **Language**: Erlang (Primary)
+- **Learning Path**: Erlang → Codebase Structure → Arweave Utils → HB Core → Devices → Custom Development
+
+## DOCUMENT_STRUCTURE
+```
+Book Overview
+├── Chapter 1: Setup
+├── Chapter 2: Erlang
+├── Chapter 3: Project Structure
+├── Chapter 4: Arweave Utils (7 modules)
+├── Chapter 5: HyperBEAM Core (11 sections, 50+ modules)
+│   ├── 1. Utilities (6 modules)
+│   ├── 2. Configuration (4 modules)
+│   ├── 3. Data Structures (4 modules)
+│   ├── 4. Storage (6 modules)
+│   ├── 5. Caching (2 modules)
+│   ├── 6. HTTP Client (7 modules)
+│   ├── 7. Remote Storage (2 modules)
+│   ├── 8. Protocol (2 modules)
+│   ├── 9. HTTP Server (1 module)
+│   ├── 10. WASM (2 modules)
+│   ├── 11. Application (5 modules)
+│   └── Supplemental (Volume, Monitoring, Testing)
+├── Chapter 6: Devices (130+ modules in 12 categories)
+└── Chapter 7: Building Your Own Devices
+```
+
+## CHAPTER_1_SETUP
+**Objective**: Get HyperBEAM running on local machine
+**Tutorial**: /book/setup
+**Prerequisites**: None
+
+## CHAPTER_2_ERLANG
+**Objective**: Learn Erlang language fundamentals
+**Reason**: HyperBEAM codebase is written in Erlang
+**Tutorial**: /book/erlang
+**Type**: Crash Course
+
+## CHAPTER_3_STRUCTURE
+**Objective**: Understand codebase organization
+**Tutorial**: /book/structure
+**Importance**: Required before reading individual modules
+
+## CHAPTER_4_ARWEAVE_UTILS
+**Objective**: Learn Arweave blockchain primitives
+**Context**: HyperBEAM stores everything on Arweave
+**Tutorial**: /book/ar
+**Module_Count**: 7
+
+### MODULES
+
+#### rsa_pss
+- **Path**: /src/rsa_pss
+- **Function**: RSA-PSS signature algorithm per RFC 3447
+- **Used_By**: ar_wallet for all cryptographic operations
+
+#### ar_wallet
+- **Path**: /src/ar_wallet
+- **Functions**:
+  - Generates RSA-4096 keypairs
+  - Loads JWK keyfiles
+  - Signs data
+  - Verifies signatures
+  - Derives addresses
+
+#### ar_deep_hash
+- **Path**: /src/ar_deep_hash
+- **Function**: Computes Arweave's recursive SHA-384 hash
+- **Purpose**: Transaction and data item ID generation
+
+#### ar_bundles
+- **Path**: /src/ar_bundles
+- **Functions**:
+  - Creates ANS-104 data items and bundles
+  - Signs and serializes
+  - Deserializes
+
+#### ar_tx
+- **Path**: /src/ar_tx
+- **Function**: Handles Layer 1 Arweave transactions
+- **Operations**: Creation, signing, serialization
+
+#### ar_timestamp
+- **Path**: /src/ar_timestamp
+- **Function**: Fetches current block height and timestamp
+- **Purpose**: Time synchronization with Arweave network
+
+#### ar_rate_limiter
+- **Path**: /src/ar_rate_limiter
+- **Type**: Token bucket rate limiter
+- **Purpose**: Prevent overwhelming Arweave gateways with requests
+
+## CHAPTER_5_HYPERBEAM_CORE
+**Objective**: Understand the runtime environment for devices
+**Learning_Flow**: Utilities → Configuration → Data → Storage → Network → Protocol
+**Tutorial**: /book/hb1 through /book/hb11
+**Module_Count**: 50+
+
+### SECTION_1_UTILITIES
+**Category**: Pure helper functions
+**Tutorial**: /book/hb1
+**Modules**: 6
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_util | General utilities | Base64url, ID generation, type coercion, debug printing |
+| hb_json | JSON operations | Encoding/decoding maps, lists, binaries, primitives |
+| hb_escape | String safety | URI percent-encoding, path escaping |
+| hb_structured_fields | HTTP headers | RFC 9651 parser for dictionaries, lists, typed values |
+| hb_keccak | Hashing | Keccak-256 via NIF, Ethereum address derivation |
+| hb_crypto | Multi-algorithm signing | RSA, ECDSA, Ed25519 with format conversion |
+
+### SECTION_2_CONFIGURATION
+**Category**: Settings management
+**Tutorial**: /book/hb2
+**Flow**: Defaults → Node Config → Per-Message Overrides
+**Modules**: 4
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_opts | Configuration resolution | Hierarchical option merging from multiple sources |
+| hb_private | Secrets management | Private keys, signing context, keeps secrets out of cache |
+| hb_features | Feature flags | Enable/disable functionality, gradual rollouts |
+| hb_path | Path handling | Parse segments, match wildcards, handle templates |
+
+### SECTION_3_DATA_STRUCTURES
+**Category**: Message format and operations
+**Tutorial**: /book/hb3
+**Core_Concept**: Messages are maps
+**Modules**: 4
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_maps | Enhanced map operations | Auto link resolution, nested path traversal |
+| hb_message | Message lifecycle | Create, compute IDs, sign with attestations, verify |
+| hb_link | Content addressing | References that resolve through cache with hashpath |
+| hb_singleton | Format conversion | Flat path-based ↔ nested hierarchical |
+
+### SECTION_4_STORAGE
+**Category**: Persistent data storage
+**Tutorial**: /book/hb4
+**Architecture**: Pluggable backends
+**Modules**: 6
+
+| Module | Backend_Type | Key_Capabilities |
+|--------|-------------|------------------|
+| hb_store | Abstract interface | Read, write, list, delete operations |
+| hb_store_opts | Configuration parser | Creates store instances with fallback chains |
+| hb_store_fs | Filesystem | Stores data as files in directories |
+| hb_store_lmdb | LMDB (default) | Fast, reliable, concurrent readers via NIF |
+| hb_store_rocksdb | RocksDB | LSM-tree for write-heavy workloads via NIF |
+| hb_store_lru | In-memory cache | Wraps any store with LRU for read performance |
+
+### SECTION_5_CACHING
+**Category**: Content-addressed caching
+**Tutorial**: /book/hb5
+**Layer**: On top of storage
+**Modules**: 2
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_cache | Message caching | Store by content hash, recursive link resolution, expand nested |
+| hb_cache_control | HTTP headers | Parse Cache-Control, determine cacheability |
+
+### SECTION_6_HTTP_CLIENT
+**Category**: Outbound HTTP requests
+**Tutorial**: /book/hb6
+**Modules**: 7
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_http_client | HTTP client | Gun wrapper with pooling and retries |
+| hb_http_client_sup | Supervisor | Connection pool lifecycle and restarts |
+| hb_http_multi | Parallel requests | Send to multiple nodes, aggregate results |
+| hb_http | Convenience helpers | GET/POST with codec negotiation |
+| hb_gateway_client | Arweave API | Fetch transactions, data, blocks |
+| hb_client | High-level client | Combined gateway operations |
+| hb_router | Node selection | Health checks and routing preferences |
+
+### SECTION_7_REMOTE_STORAGE
+**Category**: Network-based storage backends
+**Tutorial**: /book/hb7
+**Modules**: 2
+
+| Module | Source_Type | Key_Capabilities |
+|--------|------------|------------------|
+| hb_store_gateway | Arweave gateway | Fetch on cache miss, read-only |
+| hb_store_remote_node | HyperBEAM nodes | Distributed storage |
+
+### SECTION_8_PROTOCOL
+**Category**: Core routing and execution
+**Tutorial**: /book/hb8
+**Core_Function**: hb_ao:resolve/3 (all requests flow through this)
+**Modules**: 2
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_ao | Protocol core | Routes every request to devices |
+| hb_ao_device | Device loader | Load by name, cache, dispatch to handlers |
+
+### SECTION_9_HTTP_SERVER
+**Category**: Inbound HTTP handling
+**Tutorial**: /book/hb9
+**Modules**: 1
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_http_server | HTTP server | Cowboy handlers routing to hb_ao with codec negotiation |
+
+### SECTION_10_WASM
+**Category**: WebAssembly execution
+**Tutorial**: /book/hb10
+**Modules**: 2
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_beamr | WASM runtime | WAMR interface, module loading and execution |
+| hb_beamr_io | I/O primitives | Provides stdin/stdout and file access to WASM |
+
+### SECTION_11_APPLICATION
+**Category**: OTP application structure
+**Tutorial**: /book/hb11
+**Modules**: 5
+
+| Module | Primary_Function | Key_Capabilities |
+|--------|-----------------|------------------|
+| hb_name | Process registry | Register and lookup by name |
+| hb_persistent | State durability | Store process state to survive restarts |
+| hb_sup | Main supervisor | Supervision tree and restart strategies |
+| hb_app | Application behavior | Start/stop callbacks and initialization |
+| hb | Top-level API | Start/stop nodes and convenience functions |
+
+### SECTION_SUPPLEMENTAL
+**Note**: Not directly related to building devices
+**Categories**: Volume, Monitoring, Testing
+
+#### Volume (1 module)
+| Module | Function |
+|--------|----------|
+| hb_volume | Manages storage partitions, mounting/unmounting, data routing |
+
+#### Monitoring (8 modules)
+| Module | Function |
+|--------|----------|
+| hb_format | Pretty-prints messages, stack traces, binaries for debugging |
+| hb_event | ?event macro for structured logging with levels and context |
+| hb_logger | Log formatting and routing to console/file with rotation |
+| hb_tracer | Records message flow with trace IDs and timing |
+| hb_debugger | Interactive step debugger with state inspection |
+| hb_cache_render | Generates DOT/GraphViz graphs of cache contents |
+| hb_metrics_collector | Prometheus metrics for request counts and latencies |
+| hb_process_monitor | Process health monitoring, failure detection, status reporting |
+
+#### Testing (5 modules)
+| Module | Function |
+|--------|----------|
+| hb_test_utils | Common test fixtures, assertion helpers, mock setup |
+| hb_ao_test_vectors | Protocol conformance test vectors |
+| hb_message_test_vectors | Message creation, signing, ID computation tests |
+| hb_http_benchmark_tests | Performance benchmarks for throughput and latency |
+| hb_examples | Usage examples demonstrating common patterns |
+
+## CHAPTER_6_DEVICES
+**Objective**: Learn built-in devices implementing AO-Core protocol
+**Module_Count**: 130+
+**Categories**: 12
+
+### CATEGORY_1_CORE_MESSAGE_DEVICE
+**Foundation**: All other devices build upon this
+**Modules**: 1
+
+| Module | Operations | Description |
+|--------|-----------|-------------|
+| dev_message | get, set, keys, remove | Foundation of all devices |
+
+### CATEGORY_2_CODECS
+**Purpose**: Message encoding/decoding for wire formats
+**Modules**: 13
+
+| Module | Format | Description |
+|--------|--------|-------------|
+| dev_codec_ans104 | ANS-104 | Converts messages to/from ANS-104 for Arweave |
+| dev_codec_ans104_from | ANS-104 | Decodes ANS-104 binary to HyperBEAM messages |
+| dev_codec_ans104_to | ANS-104 | Encodes HyperBEAM messages to ANS-104 binary |
+| dev_codec_flat | Key-value | Simple encoding for debugging |
+| dev_codec_json | JSON | HTTP APIs and debugging |
+| dev_codec_structured | RFC 9651 | HTTP header encoding |
+| dev_codec_httpsig | HTTP Signatures | Request/response signing |
+| dev_codec_httpsig_conv | HTTP Signatures | Component conversions |
+| dev_codec_httpsig_keyid | HTTP Signatures | Key ID management |
+| dev_codec_httpsig_proxy | HTTP Signatures | Proxy support for forwarding |
+| dev_codec_httpsig_siginfo | HTTP Signatures | Metadata extraction and validation |
+| dev_codec_cookie | Cookies | Cookie-based auth encoding |
+| dev_codec_cookie_auth | Cookies | Cookie auth validation and generation |
+| dev_codec_http_auth | HTTP Auth | Authentication header processing |
+
+### CATEGORY_3_COMPOSITION
+**Purpose**: Combining devices into stacks and pipelines
+**Modules**: 6
+
+| Module | Pattern | Description |
+|--------|---------|-------------|
+| dev_stack | Sequential | Chains devices into ordered execution pipelines |
+| dev_multipass | Iterative | Runs through stack multiple times until stable |
+| dev_hook | Event-driven | Callbacks before/after device execution |
+| dev_apply | Higher-order | Applies messages to each other |
+| dev_patch | Merging | Merges partial updates preserving unmodified keys |
+| dev_dedup | Filtering | Prevents duplicate message processing |
+
+### CATEGORY_4_INFRASTRUCTURE
+**Purpose**: Node and network management
+**Modules**: 6
+
+| Module | Function | Description |
+|--------|----------|-------------|
+| dev_router | Routing | Matches paths against patterns, routes to device stacks |
+| dev_relay | Forwarding | Forwards messages to other HyperBEAM nodes |
+| dev_name | Name resolution | Resolves human-readable names to IDs |
+| dev_local_name | Local naming | Maps names to IDs within single node |
+| dev_meta | Metadata | Returns node version, capabilities, public key |
+| dev_manifest | Configuration | Defines process config—device stack, scheduler, limits |
+
+### CATEGORY_5_PROCESS_MANAGEMENT
+**Purpose**: Stateful computation units and lifecycle
+**Modules**: 4
+
+| Module | Function | Description |
+|--------|----------|-------------|
+| dev_process | Process lifecycle | Creates, loads state, executes, persists changes |
+| dev_process_cache | State caching | Caches computed states for fast replay |
+| dev_process_worker | Worker pools | Parallel process execution and distribution |
+| dev_node_process | Singleton processes | One per node with persistent state |
+
+### CATEGORY_6_SCHEDULER
+**Purpose**: Deterministic message ordering and execution
+**Modules**: 7
+
+| Module | Function | Description |
+|--------|----------|-------------|
+| dev_scheduler | Slot assignment | Assigns slots maintaining deterministic ordering |
+| dev_scheduler_cache | Assignment cache | Fast lookup with consistency |
+| dev_scheduler_formats | Format versioning | Handles different message format versions |
+| dev_scheduler_registry | Process registry | Registers processes with schedulers |
+| dev_scheduler_server | Long-running service | Handles scheduling requests and state |
+| dev_push | Fire-and-forget | Sends messages without waiting |
+| dev_cron | Time-based triggers | Cron expressions and intervals |
+
+### CATEGORY_7_ARWEAVE
+**Purpose**: Direct blockchain interaction
+**Modules**: 3
+
+| Module | Function | Description |
+|--------|----------|-------------|
+| dev_arweave | Gateway device | Fetch data and post transactions to Arweave |
+| dev_arweave_block_cache | Block caching | Caches Arweave blocks locally |
+| dev_poda | Proofs | Generates/verifies cryptographic proofs for data existence |
+
+### CATEGORY_8_SECURITY
+**Purpose**: Authentication, secrets, trusted execution
+**Modules**: 6
+
+| Module | Function | Description |
+|--------|----------|-------------|
+| dev_secret | Secret storage | Stores/retrieves secrets with encryption and access control |
+| dev_volume | Volume management | Mounting, unmounting, listing storage volumes |
+| dev_auth_hook | Authentication | Verifies caller identity, rejects unauthorized |
+| dev_snp | TEE attestation | AMD SEV-SNP for hardware-backed Trusted Execution |
+| dev_snp_nif | Native interface | C interface for low-level AMD SEV-SNP ops |
+| dev_green_zone | Security boundaries | Defines boundaries for sensitive ops requiring TEE |
+
+### CATEGORY_9_QUERY_REPLICATION
+**Purpose**: Finding and syncing data across nodes and Arweave
+**Modules**: 8
+
+| Module | Function | Description |
+|--------|----------|-------------|
+| dev_query | Message search | Search by criteria with filtering, pagination, sorting |
+| dev_query_arweave | Arweave queries | Query gateway for transactions/blocks via GraphQL |
+| dev_query_graphql | GraphQL execution | Execute queries against configured endpoints |
+| dev_copycat | Data copying | Copies between stores/nodes with sync and conflict resolution |
+| dev_copycat_arweave | Arweave replication | Replicate from Arweave to local storage |
+| dev_copycat_graphql | GraphQL replication | Uses GraphQL to discover and replicate data |
+| dev_lookup | Message finding | Find by ID, tags, sender |
+| dev_cache | Cache control | Read, write, invalidate cache directly |
+
+### CATEGORY_10_RUNTIMES
+**Purpose**: Code execution environments
+**Modules**: 7
+
+| Module | Runtime | Description |
+|--------|---------|-------------|
+| dev_json_iface | WASM | JSON interface simplifying WASM integration |
+| dev_wasm | WASM | Loads and runs WebAssembly modules |
+| dev_wasi | WASM | WebAssembly System Interface (filesystem, I/O) |
+| dev_delegated_compute | Remote | Offloads computation to other nodes with verification |
+| dev_genesis_wasm | WASM | Configures initial WASM module as default environment |
+| dev_lua | Lua | Embeds Lua 5.3 interpreter |
+| dev_lua_lib | Lua | HyperBEAM API bindings for Lua scripts |
+
+### CATEGORY_11_PAYMENT
+**Purpose**: Compute metering and billing
+**Modules**: 4
+
+| Module | Function | Description |
+|--------|----------|-------------|
+| dev_cu | Cost measurement | Tracks CPU time, memory, I/O |
+| dev_faff | Fee structures | Defines fees, calculates costs, validates policies |
+| dev_simple_pay | Basic payment | Pay-per-request with balance checking |
+| dev_p4 | Advanced payment | Channels, streaming, settlement |
+
+### CATEGORY_12_UTILITIES
+**Purpose**: Development and debugging tools
+**Modules**: 6
+
+| Module | Function | Description |
+|--------|----------|-------------|
+| dev_trie | Data structure | Prefix tree for efficient key lookup |
+| dev_profile | Performance | Records timing and memory allocation |
+| dev_hyperbuddy | Web UI | Interactive debugging UI for messages and cache |
+| dev_cacheviz | Visualization | Visual representation of cache contents |
+| dev_whois | Node lookup | Looks up node info by address |
+| dev_monitor | System monitoring | Tracks memory, disk, network with alerting |
+| dev_test | Testing | Configurable responses and error injection |
+
+### CATEGORY_13_TEST_VECTORS
+**Purpose**: Reference test cases for conformance
+**Modules**: 4
+
+| Module | Tests | Description |
+|--------|-------|-------------|
+| dev_codec_cookie_test_vectors | Cookie codec | Parsing and serialization conformance |
+| dev_query_test_vectors | Query device | Query behavior conformance |
+| dev_lua_test | Lua runtime | Integration test cases |
+| dev_lua_test_ledgers | Lua ledgers | Ledger operation tests |
+
+## CHAPTER_7_BUILDING_CUSTOM_DEVICES
+**Objective**: Build your own devices
+**Prerequisites**: Understand entire codebase from previous chapters
+
+### TUTORIALS
+
+| Language | Tutorial_Path | Description |
+|----------|--------------|-------------|
+| Erlang | /tutorials/creating-devices | Native devices with full HyperBEAM integration |
+| Rust | /tutorials/devices-rust | High-performance NIFs for compute-intensive ops |
+| C++ | /tutorials/devices-cpp | Native implementations with direct memory access |
+
+## RESOURCES
+
+### Official Links
+- **Documentation**: https://hyperbeam.ar.io/
+- **GitHub Repository**: https://github.com/permaweb/HyperBEAM
+- **WAO Decoding Guide**: https://docs.wao.eco/hyperbeam/decoding-from-scratch
+
+## QUICK_REFERENCE
+
+### Key Concepts
+- **Device**: Modular component implementing specific functionality
+- **Message**: Map-based data structure (core data type)
+- **Content Addressing**: Data referenced by hash
+- **hb_ao:resolve/3**: Core function—all requests flow through this
+- **Stack**: Sequential pipeline of devices
+- **Codec**: Encoder/decoder for wire format
+
+### Critical Modules (Must Know)
+1. **hb_ao** - Core protocol routing
+2. **hb_message** - Message lifecycle
+3. **hb_cache** - Content-addressed storage
+4. **dev_message** - Foundation device
+5. **dev_stack** - Device composition
+
+### Learning Path
+```
+1. Setup HyperBEAM
+2. Learn Erlang basics
+3. Understand project structure
+4. Study Arweave utils (7 modules)
+5. Deep dive HB Core (50+ modules in order)
+6. Explore devices by category (130+ modules)
+7. Build custom devices
+```
+
+### Module Count Summary
+- **Arweave Utils**: 7 modules
+- **HB Core**: 50+ modules
+- **Devices**: 130+ modules
+- **Total**: 180+ modules
+
+## STATUS_NOTES
+- Book is in early development
+- Some chapters have "Tutorial Coming Soon" status
+- Every chapter includes hands-on tutorials
+- Each module links to full API reference
+- Written for HyperBEAM v0.9-milestone-3-beta-3

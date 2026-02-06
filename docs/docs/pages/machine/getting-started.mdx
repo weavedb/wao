@@ -1,0 +1,132 @@
+---
+type: documentation
+category: getting-started
+format: machine-readable
+version: 1.0
+purpose: AI-optimized context for WAO SDK
+---
+
+# WAO SDK - Machine Readable Reference
+
+## METADATA
+- **Project**: WAO SDK
+- **Domain**: Arweave/AO Development
+- **Type**: Testing Framework + SDK + Local Runtime
+- **Primary Language**: JavaScript/TypeScript + Lua
+
+## CORE_DEFINITION
+WAO SDK is a development toolkit for Arweave/AO that provides:
+1. Enhanced syntax for aoconnect
+2. In-memory AO unit emulation for testing
+3. Standalone local AO runtime
+4. Browser-based AO environment
+5. HyperBEAM integration
+
+## FEATURES
+
+### Feature_1: Enhanced AO SDK
+**Category**: Developer Experience
+**Description**: Syntactic sugar and message piping for aoconnect
+**Benefits**:
+- Elegant syntax enhancements
+- Seamless message piping
+- Simplified GraphQL operations
+**Related**: aoconnect replacement
+
+### Feature_2: High-Speed Testing Framework
+**Category**: Testing
+**Performance_Metrics**:
+- 1000x faster than mainnet
+- 100x faster than arlocal + ao-localnet
+**Method**: In-memory AO unit emulation
+**Comparison**:
+  - Mainnet: 1x (baseline)
+  - arlocal + ao-localnet: 10x
+  - WAO: 1000x
+
+### Feature_3: Standalone Local AO Units
+**Category**: Runtime
+**Command**: `npx wao`
+**Description**: Lightweight local AO units
+**Deployment_Options**:
+- Standalone desktop units
+- Web-embeddable units
+- Local computer deployment
+
+### Feature_4: Browser-Based AO Environment
+**Category**: Web Interface
+**URL**: https://preview.wao.eco
+**Components**:
+- MU (Message Unit)
+- SU (Scheduler Unit)
+- CU (Compute Unit)
+- Gateway
+**Tools_Included**:
+- AOS terminal
+- Code editor
+- Local AO explorer (debugging)
+
+### Feature_5: HyperBEAM SDK Integration
+**Category**: Integration
+**Documentation**: https://permaweb.github.io/HyperBEAM/
+**Compatibility**:
+- HyperBEAM nodes
+- Mainnet AOS processes
+**Capability**: Launch HyperBEAM node from JS test code
+**Use_Case**: Sandbox environment creation
+
+### Feature_6: Custom Device Testing
+**Category**: Advanced Integration
+**Supported_Languages**:
+- Erlang
+- Rust
+- C++
+**Workflow**: Create custom HyperBEAM devices → Test in JavaScript
+
+## QUICK_REFERENCE
+
+### Commands
+```bash
+npx wao  # Launch local AO units
+```
+
+### URLs
+- Browser Environment: https://preview.wao.eco
+- HyperBEAM Docs: https://permaweb.github.io/HyperBEAM/
+
+### Related_Technologies
+- aoconnect (drop-in replacement)
+- arlocal (comparison: WAO is 100x faster)
+- ao-localnet (comparison: WAO is 100x faster)
+- HyperBEAM (compatible)
+
+### Key_Components
+- MU: Message Unit
+- SU: Scheduler Unit
+- CU: Compute Unit
+- Gateway: AO Gateway
+- AOS: AO Shell/Terminal
+
+## ARCHITECTURE_OVERVIEW
+```
+WAO SDK
+├── Enhanced aoconnect (syntax sugar)
+├── In-Memory Testing (1000x speed)
+├── Local Runtime (npx wao)
+├── Browser Environment (preview.wao.eco)
+│   ├── MU/SU/CU/Gateway
+│   ├── AOS Terminal
+│   ├── Code Editor
+│   └── AO Explorer
+└── HyperBEAM Integration
+    ├── Node Launch
+    └── Custom Device Support (Erlang/Rust/C++)
+```
+
+## USE_CASES
+1. **Development**: Use enhanced SDK syntax for cleaner code
+2. **Testing**: Run tests 1000x faster in-memory
+3. **Local Development**: Deploy local AO units with one command
+4. **Web Development**: Build/test in browser without setup
+5. **Advanced Testing**: Create HyperBEAM sandbox environments
+6. **Custom Devices**: Develop and test HyperBEAM devices in multiple languages

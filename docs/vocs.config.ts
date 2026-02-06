@@ -151,11 +151,32 @@ export default defineConfig({
   title: "WizardAO",
   ogImageUrl:
     "https://vocs.dev/api/og?logo=%logo&title=%title&description=%description",
+  vite: {
+    plugins: [
+      {
+        name: 'inject-language-switcher',
+        transformIndexHtml(html) {
+          return html.replace(
+            '</head>',
+            '<script src="/language-switcher.js"></script></head>'
+          );
+        },
+      },
+    ],
+  },
   topNav: [
     { text: "Get Started", link: "/getting-started" },
     { text: "HyperBEAM", link: "/book" },
     { text: "Mobile", link: "/mobile" },
     { text: "SDK", link: "/api/ao" },
+    {
+      text: "Language",
+      items: [
+        { text: "English", link: "/getting-started" },
+        { text: "简体中文", link: "/zh/getting-started" },
+        { text: "Machine-Readable", link: "/machine/getting-started" },
+      ],
+    },
   ],
   socials: [
     {

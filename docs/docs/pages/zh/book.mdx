@@ -1,0 +1,576 @@
+# HyperBEAM 手册（预发布版）
+
+![](/images/book.jpg)
+
+**从零开始构建自定义设备**
+
+本手册将教你构建自定义 HyperBEAM 设备。你将从学习 Erlang 开始，然后逐步深入代码库，从底层原语到高层设备。学完后，你将理解每个模块，并准备好创建自己的设备。
+
+:::warning
+本手册正处于早期开发阶段。内容可能不完整或随时更改，恕不另行通知。
+:::
+
+:::note[关于本手册]
+针对 [HyperBEAM v0.9-milestone-3-beta-3](https://github.com/permaweb/HyperBEAM/releases/tag/v0.9-milestone-3-beta-3) 编写。每章都包含实操教程，每个模块都链接到完整的 API 参考。
+:::
+
+---
+
+## 第 1 章：环境配置
+
+在你的机器上运行 HyperBEAM。
+
+:::tip
+[环境配置教程](/book/setup)
+:::
+
+---
+
+## 第 2 章：Erlang
+
+HyperBEAM 使用 Erlang 编写。你必须先学习这门语言才能阅读代码。
+
+:::tip
+[Erlang 速成教程](/book/erlang)
+:::
+
+---
+
+## 第 3 章：项目结构
+
+在阅读各个模块之前，先了解代码库的组织方式。
+
+:::tip
+[项目结构教程](/book/structure)
+:::
+
+---
+
+## 第 4 章：Arweave 工具集
+
+Arweave 区块链原语。HyperBEAM 将所有数据存储在 Arweave 上——这些模块是基础。
+
+:::tip
+[Arweave 工具集教程](/book/ar)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [rsa_pss](/src/rsa_pss) | 符合 RFC 3447 的 RSA-PSS 签名算法，供 ar_wallet 用于所有加密操作 |
+| [ar_wallet](/src/ar_wallet) | 生成 RSA-4096 密钥对、加载 JWK 密钥文件、签名数据、验证签名、派生地址 |
+| [ar_deep_hash](/src/ar_deep_hash) | 计算 Arweave 的递归 SHA-384 哈希，用于生成交易和数据项 ID |
+| [ar_bundles](/src/ar_bundles) | 创建、签名、序列化和反序列化 ANS-104 数据项和捆绑包 |
+| [ar_tx](/src/ar_tx) | 处理 Arweave 第一层交易，包括创建、签名和序列化 |
+| [ar_timestamp](/src/ar_timestamp) | 从 Arweave 网络获取当前区块高度和时间戳，用于时间同步 |
+| [ar_rate_limiter](/src/ar_rate_limiter) | 令牌桶限流器，防止请求过多压垮 Arweave 网关 |
+
+---
+
+## 第 5 章：HyperBEAM 核心
+
+设备运行的运行时环境。理解这些模块有助于你编写更好的设备并调试问题。
+
+你将从纯工具函数开始，然后学习数据如何在系统中流动——从配置到存储到网络，再到将一切联系起来的协议。
+
+---
+
+### 1. 工具集
+
+整个代码库中使用的纯辅助函数。
+
+:::tip
+[工具集教程](/book/hb1)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_util](/src/hb_util) | Base64url 编码、唯一 ID 生成、类型转换和调试打印工具 |
+| [hb_json](/src/hb_json) | JSON 编码和解码包装器，支持映射、列表、二进制和原语 |
+| [hb_escape](/src/hb_escape) | URI 百分号编码、路径段转义和安全字符串处理 |
+| [hb_structured_fields](/src/hb_structured_fields) | RFC 9651 HTTP 结构化字段解析器，用于字典、列表和类型化值 |
+| [hb_keccak](/src/hb_keccak) | 通过 NIF 进行 Keccak-256 哈希，还可从公钥派生以太坊地址 |
+| [hb_crypto](/src/hb_crypto) | 多算法签名辅助函数，支持 RSA、ECDSA、Ed25519 及格式转换 |
+
+---
+
+### 2. 配置
+
+HyperBEAM 的设置如何从默认值流经节点配置再到每条消息的覆盖。
+
+:::tip
+[配置教程](/book/hb2)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_opts](/src/hb_opts) | 分层配置，从消息到节点配置再到默认值解析选项 |
+| [hb_private](/src/hb_private) | 管理私钥和签名上下文，将机密信息排除在缓存数据之外 |
+| [hb_features](/src/hb_features) | 功能标志系统，用于启用/禁用功能和逐步推出 |
+| [hb_path](/src/hb_path) | 将路径解析为段、使用通配符匹配模式、处理模板 |
+
+---
+
+### 3. 数据结构
+
+消息是映射（map）。这些模块定义了如何创建、签名、链接和转换消息。
+
+:::tip
+[数据结构教程](/book/hb3)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_maps](/src/hb_maps) | 增强的映射操作，具有自动链接解析和嵌套路径遍历功能 |
+| [hb_message](/src/hb_message) | 创建消息、计算 ID、使用证明签名、验证签名 |
+| [hb_link](/src/hb_link) | 通过缓存解析的内容寻址引用，具有哈希路径计算功能 |
+| [hb_singleton](/src/hb_singleton) | 在扁平的基于路径的键和嵌套的分层消息格式之间转换 |
+
+---
+
+### 4. 存储
+
+具有可插拔后端的持久数据存储。
+
+:::tip
+[存储教程](/book/hb4)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_store](/src/hb_store) | 抽象存储接口，定义读取、写入、列出、删除操作 |
+| [hb_store_opts](/src/hb_store_opts) | 解析存储配置并使用回退链创建存储实例 |
+| [hb_store_fs](/src/hb_store_fs) | 文件系统存储后端，将数据存储为目录中的文件 |
+| [hb_store_lmdb](/src/hb_store_lmdb) | 通过 NIF 的 LMDB 后端——快速、可靠、默认存储，支持并发读取器 |
+| [hb_store_rocksdb](/src/hb_store_rocksdb) | 通过 NIF 的 RocksDB LSM 树后端，用于写入密集型工作负载 |
+| [hb_store_lru](/src/hb_store_lru) | 使用内存 LRU 缓存包装任何存储，以提高读取性能 |
+
+---
+
+### 5. 缓存
+
+存储之上的内容寻址缓存层。
+
+:::tip
+[缓存教程](/book/hb5)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_cache](/src/hb_cache) | 按内容哈希存储消息、递归解析链接、展开嵌套消息 |
+| [hb_cache_control](/src/hb_cache_control) | 解析 HTTP Cache-Control 头并确定响应的可缓存性 |
+
+---
+
+### 6. HTTP 客户端
+
+向网关和其他节点发出的出站 HTTP 请求。
+
+:::tip
+[HTTP 客户端教程](/book/hb6)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_http_client](/src/hb_http_client) | HTTP 客户端包装器，管理带有池化和重试的 Gun 连接 |
+| [hb_http_client_sup](/src/hb_http_client_sup) | HTTP 客户端连接池的监督器，处理生命周期和重启 |
+| [hb_http_multi](/src/hb_http_multi) | 向多个节点发送并行请求并聚合结果 |
+| [hb_http](/src/hb_http) | 便捷的 GET/POST 辅助函数，具有编解码器协商和响应解析功能 |
+| [hb_gateway_client](/src/hb_gateway_client) | Arweave 网关 API 客户端，用于获取交易、数据和区块 |
+| [hb_client](/src/hb_client) | 高级 Arweave 客户端，结合了常见任务的网关操作 |
+| [hb_router](/src/hb_router) | 根据健康检查和路由偏好选择要联系的节点 |
+
+---
+
+### 7. 远程存储
+
+通过网络获取数据的存储后端。
+
+:::tip
+[远程存储教程](/book/hb7)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_store_gateway](/src/hb_store_gateway) | 在缓存未命中时从 Arweave 网关获取数据，只读远程存储 |
+| [hb_store_remote_node](/src/hb_store_remote_node) | 从其他 HyperBEAM 节点获取数据，实现分布式存储 |
+
+---
+
+### 8. 协议
+
+HyperBEAM 的核心。每个请求都通过 `hb_ao:resolve/3` 流转。
+
+:::tip
+[协议教程](/book/hb8)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_ao](/src/hb_ao) | 核心协议，实现将每个请求路由到设备的 resolve/3 |
+| [hb_ao_device](/src/hb_ao_device) | 按名称加载设备模块、缓存它们、将调用分派给处理器 |
+
+---
+
+### 9. HTTP 服务器
+
+入站 HTTP 处理。
+
+:::tip
+[HTTP 服务器教程](/book/hb9)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_http_server](/src/hb_http_server) | Cowboy 处理器，将 HTTP 请求路由到 hb_ao，具有编解码器协商功能 |
+
+---
+
+### 10. WASM
+
+WebAssembly 执行环境。
+
+:::tip
+[WASM 教程](/book/hb10)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_beamr](/src/hb_beamr) | 通过 WAMR 的 WASM 运行时接口，管理模块加载和执行 |
+| [hb_beamr_io](/src/hb_beamr_io) | 为 WASM 模块提供 I/O 原语，包括 stdin/stdout 和文件 |
+
+---
+
+### 11. 应用程序
+
+OTP 应用程序结构和节点生命周期。
+
+:::tip
+[应用程序教程](/book/hb11)
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_name](/src/hb_name) | 在节点内按名称注册和查找 Erlang 进程 |
+| [hb_persistent](/src/hb_persistent) | 持久存储进程状态以在重启后保留，具有一致性保证 |
+| [hb_sup](/src/hb_sup) | 主监督器，定义监督树和重启策略 |
+| [hb_app](/src/hb_app) | OTP 应用程序行为，具有 start/stop 回调和初始化 |
+| [hb](/src/hb) | 顶层 API，用于启动/停止节点和便捷函数 |
+
+---
+
+### 补充模块
+
+:::note
+这些模块与构建设备没有直接关系。它们涵盖节点操作、调试和测试基础设施。
+:::
+
+#### 卷管理
+
+存储分区和数据路由。
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_volume](/src/hb_volume) | 管理存储分区、处理挂载/卸载和数据路由 |
+
+#### 监控
+
+日志记录、跟踪、调试和指标。
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_format](/src/hb_format) | 美化打印消息、堆栈跟踪和二进制数据以进行调试输出 |
+| [hb_event](/src/hb_event) | 定义 ?event 宏，用于具有级别和上下文的结构化日志记录 |
+| [hb_logger](/src/hb_logger) | 格式化日志事件并路由到控制台/文件，支持轮转 |
+| [hb_tracer](/src/hb_tracer) | 记录消息通过设备的流动，包含跟踪 ID 和计时数据 |
+| [hb_debugger](/src/hb_debugger) | 用于设备执行的交互式步进调试器，具有状态检查功能 |
+| [hb_cache_render](/src/hb_cache_render) | 生成 DOT/GraphViz 图，显示缓存内容和关系 |
+| [hb_metrics_collector](/src/hb_metrics_collector) | 收集并暴露请求计数和延迟的 Prometheus 指标 |
+| [hb_process_monitor](/src/hb_process_monitor) | 监控 Erlang 进程健康、检测故障、报告状态 |
+
+#### 测试
+
+测试工具和符合性测试。
+
+| 模块 | 说明 |
+|--------|-------------|
+| [hb_test_utils](/src/hb_test_utils) | 常见测试夹具、断言辅助函数和模拟设置工具 |
+| [hb_ao_test_vectors](/src/hb_ao_test_vectors) | 协议符合性测试向量，确保 hb_ao 兼容性 |
+| [hb_message_test_vectors](/src/hb_message_test_vectors) | 消息创建、签名和 ID 计算的测试向量 |
+| [hb_http_benchmark_tests](/src/hb_http_benchmark_tests) | 测量吞吐量和延迟分布的性能基准 |
+| [hb_examples](/src/hb_examples) | 演示常见模式和最佳实践的使用示例 |
+
+---
+
+## 第 6 章：设备
+
+实现 AO-Core 协议行为的内置设备。
+
+---
+
+### 核心消息设备
+
+所有其他设备构建的基础设备。
+
+:::info[教程即将推出]
+*核心消息设备教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_message](/src/dev_message) | 核心设备，实现 get、set、keys、remove——所有设备的基础 |
+
+---
+
+### 编解码器
+
+不同传输格式的消息编码和解码。
+
+:::info[教程即将推出]
+*编解码器教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_codec_ans104](/src/dev_codec_ans104) | 将消息与 ANS-104 数据项相互转换，用于 Arweave 存储 |
+| [dev_codec_ans104_from](/src/dev_codec_ans104_from) | 将 ANS-104 二进制格式解码为 HyperBEAM 消息 |
+| [dev_codec_ans104_to](/src/dev_codec_ans104_to) | 将 HyperBEAM 消息编码为 ANS-104 二进制格式 |
+| [dev_codec_flat](/src/dev_codec_flat) | 简单的键值对编码，用于调试和简单的传输格式 |
+| [dev_codec_json](/src/dev_codec_json) | HTTP API 和调试的 JSON 编码/解码 |
+| [dev_codec_structured](/src/dev_codec_structured) | HTTP 头编码的 RFC 9651 结构化字段 |
+| [dev_codec_httpsig](/src/dev_codec_httpsig) | 请求/响应签名的 HTTP 消息签名 |
+| [dev_codec_httpsig_conv](/src/dev_codec_httpsig_conv) | HTTP 签名组件的转换 |
+| [dev_codec_httpsig_keyid](/src/dev_codec_httpsig_keyid) | HTTP 签名的密钥 ID 管理 |
+| [dev_codec_httpsig_proxy](/src/dev_codec_httpsig_proxy) | HTTP 签名转发的代理支持 |
+| [dev_codec_httpsig_siginfo](/src/dev_codec_httpsig_siginfo) | 签名元数据提取和验证 |
+| [dev_codec_cookie](/src/dev_codec_cookie) | 基于 Cookie 的身份验证编码 |
+| [dev_codec_cookie_auth](/src/dev_codec_cookie_auth) | Cookie 身份验证验证和生成 |
+| [dev_codec_http_auth](/src/dev_codec_http_auth) | HTTP 身份验证头处理 |
+
+---
+
+### 组合
+
+将设备组合成堆栈和管道。
+
+:::info[教程即将推出]
+*组合教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_stack](/src/dev_stack) | 将设备链接成有序的执行管道，具有穿透功能 |
+| [dev_multipass](/src/dev_multipass) | 将消息多次通过堆栈运行，直到稳定或达到限制 |
+| [dev_hook](/src/dev_hook) | 注册在设备执行前后触发的回调 |
+| [dev_apply](/src/dev_apply) | 将消息相互应用，实现高阶操作 |
+| [dev_patch](/src/dev_patch) | 将部分更新合并到消息中，保留未修改的键 |
+| [dev_dedup](/src/dev_dedup) | 使用可配置的检测防止重复消息处理 |
+
+---
+
+### 基础设施
+
+节点和网络管理。
+
+:::info[教程即将推出]
+*基础设施教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_router](/src/dev_router) | 将消息路径与模式匹配并路由到设备堆栈 |
+| [dev_relay](/src/dev_relay) | 将消息转发到其他 HyperBEAM 节点，具有发现和重试功能 |
+| [dev_name](/src/dev_name) | 通过配置的解析器链将人类可读名称解析为 ID |
+| [dev_local_name](/src/dev_local_name) | 使用内存存储在单个节点内将名称映射到 ID |
+| [dev_meta](/src/dev_meta) | 返回节点元数据，包括版本、功能和公钥 |
+| [dev_manifest](/src/dev_manifest) | 定义进程配置——设备堆栈、调度器、计算限制 |
+
+---
+
+### 进程管理
+
+有状态计算单元及其生命周期。
+
+:::info[教程即将推出]
+*进程管理教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_process](/src/dev_process) | 创建进程、加载状态、执行消息、持久化状态更改 |
+| [dev_process_cache](/src/dev_process_cache) | 缓存计算的进程状态，以便快速重放，具有失效功能 |
+| [dev_process_worker](/src/dev_process_worker) | 管理用于并行进程执行和分发的工作池 |
+| [dev_node_process](/src/dev_node_process) | 每个节点运行一次的单例进程，具有持久状态 |
+
+---
+
+### 调度器
+
+确定性消息排序和执行调度。
+
+:::info[教程即将推出]
+*调度器教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_scheduler](/src/dev_scheduler) | 为消息分配槽位，保持确定性排序 |
+| [dev_scheduler_cache](/src/dev_scheduler_cache) | 缓存调度器分配，以便快速查找，具有一致性 |
+| [dev_scheduler_formats](/src/dev_scheduler_formats) | 处理调度器消息的不同格式版本 |
+| [dev_scheduler_registry](/src/dev_scheduler_registry) | 向调度器注册进程并处理发现 |
+| [dev_scheduler_server](/src/dev_scheduler_server) | 处理调度请求和状态的长时运行进程 |
+| [dev_push](/src/dev_push) | 发送消息到进程而不等待，即发即弃 |
+| [dev_cron](/src/dev_cron) | 使用 cron 表达式和间隔触发基于时间的消息 |
+
+---
+
+### Arweave
+
+直接区块链交互。
+
+:::info[教程即将推出]
+*Arweave 设备教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_arweave](/src/dev_arweave) | 从 Arweave 获取数据和向 Arweave 发布交易的网关设备 |
+| [dev_arweave_block_cache](/src/dev_arweave_block_cache) | 本地缓存 Arweave 区块，减少网关请求 |
+| [dev_poda](/src/dev_poda) | 生成和验证数据存在于 Arweave 上的加密证明 |
+
+---
+
+### 安全性
+
+身份验证、机密和可信执行。
+
+:::info[教程即将推出]
+*安全性教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_secret](/src/dev_secret) | 使用加密和访问控制安全地存储和检索机密 |
+| [dev_volume](/src/dev_volume) | 用于挂载、卸载和列出存储卷的卷设备 |
+| [dev_auth_hook](/src/dev_auth_hook) | 在处理前验证调用者身份并拒绝未授权的请求 |
+| [dev_snp](/src/dev_snp) | 用于硬件支持的可信执行环境的 AMD SEV-SNP 证明 |
+| [dev_snp_nif](/src/dev_snp_nif) | 用于底层 AMD SEV-SNP 操作的本地 C 接口 |
+| [dev_green_zone](/src/dev_green_zone) | 为需要 TEE 的敏感操作定义安全边界 |
+
+---
+
+### 查询与复制
+
+在节点和 Arweave 之间查找和同步数据。
+
+:::info[教程即将推出]
+*查询与复制教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_query](/src/dev_query) | 按条件搜索消息，具有过滤、分页和排序功能 |
+| [dev_query_arweave](/src/dev_query_arweave) | 通过 GraphQL 查询 Arweave 网关的交易和区块 |
+| [dev_query_graphql](/src/dev_query_graphql) | 对配置的端点执行 GraphQL 查询 |
+| [dev_copycat](/src/dev_copycat) | 在存储/节点之间复制数据，具有同步和冲突解决功能 |
+| [dev_copycat_arweave](/src/dev_copycat_arweave) | 将数据从 Arweave 复制到本地存储以提高可用性 |
+| [dev_copycat_graphql](/src/dev_copycat_graphql) | 使用 GraphQL 查询发现和复制数据 |
+| [dev_lookup](/src/dev_lookup) | 通过各种条件查找消息，包括 ID、标签和发送者 |
+| [dev_cache](/src/dev_cache) | 显式缓存控制——直接读取、写入、使缓存失效 |
+
+---
+
+### 运行时
+
+代码执行环境——WASM、Lua、委托计算。
+
+:::info[教程即将推出]
+*运行时教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_json_iface](/src/dev_json_iface) | 简化 WASM 模块集成的基于 JSON 的接口 |
+| [dev_wasm](/src/dev_wasm) | 加载和运行 WebAssembly 模块，管理内存和导入 |
+| [dev_wasi](/src/dev_wasi) | WebAssembly 系统接口，为 WASM 提供文件系统和 I/O |
+| [dev_delegated_compute](/src/dev_delegated_compute) | 将计算卸载到其他节点，具有结果验证功能 |
+| [dev_genesis_wasm](/src/dev_genesis_wasm) | 将初始 WASM 模块配置为默认执行环境 |
+| [dev_lua](/src/dev_lua) | 在 HyperBEAM 中嵌入 Lua 5.3 解释器以进行轻量级脚本编写 |
+| [dev_lua_lib](/src/dev_lua_lib) | 暴露给 Lua 脚本的 HyperBEAM API 绑定 |
+
+---
+
+### 支付
+
+计算计量和计费。
+
+:::info[教程即将推出]
+*支付教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_cu](/src/dev_cu) | 测量计算成本，跟踪 CPU 时间、内存和 I/O |
+| [dev_faff](/src/dev_faff) | 定义费用结构、计算成本、验证支付策略 |
+| [dev_simple_pay](/src/dev_simple_pay) | 基本的按请求付费处理器，检查余额并扣除费用 |
+| [dev_p4](/src/dev_p4) | 具有通道、流式传输和结算的高级支付协议 |
+
+---
+
+### 工具
+
+开发和调试工具。
+
+:::info[教程即将推出]
+*设备工具教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_trie](/src/dev_trie) | 前缀树实现，用于高效的键查找和迭代 |
+| [dev_profile](/src/dev_profile) | 记录执行计时和内存分配以进行性能分析 |
+| [dev_hyperbuddy](/src/dev_hyperbuddy) | 基于 Web 的交互式调试 UI，用于消息和缓存检查 |
+| [dev_cacheviz](/src/dev_cacheviz) | 生成缓存内容的可视化表示以进行调试 |
+| [dev_whois](/src/dev_whois) | 按地址查找节点信息，返回功能和端点 |
+| [dev_monitor](/src/dev_monitor) | 跟踪系统健康——内存、磁盘、网络——具有警报功能 |
+| [dev_test](/src/dev_test) | 具有可配置响应和错误注入的测试设备 |
+
+---
+
+### 测试向量
+
+符合性的参考测试用例。
+
+:::info[教程即将推出]
+*测试向量教程*
+:::
+
+| 模块 | 说明 |
+|--------|-------------|
+| [dev_codec_cookie_test_vectors](/src/dev_codec_cookie_test_vectors) | Cookie 解析和序列化符合性的测试用例 |
+| [dev_query_test_vectors](/src/dev_query_test_vectors) | 查询设备行为符合性的测试用例 |
+| [dev_lua_test](/src/dev_lua_test) | Lua 运行时执行的集成测试用例 |
+| [dev_lua_test_ledgers](/src/dev_lua_test_ledgers) | 基于 Lua 的账本操作的测试用例 |
+
+---
+
+## 第 7 章：构建你自己的设备
+
+现在你已经理解了代码库，可以构建自己的设备了。
+
+:::info[教程即将推出]
+*构建设备概述*
+:::
+
+| 教程 | 说明 |
+|----------|-------------|
+| [Erlang 自定义设备](/tutorials/creating-devices) | 具有完整 HyperBEAM 集成的原生 Erlang 设备 |
+| [Rust 自定义设备](/tutorials/devices-rust) | 用于计算密集型操作的高性能 NIF |
+| [C++ 自定义设备](/tutorials/devices-cpp) | 具有直接内存访问的原生实现 |
+
+---
+
+## 资源
+
+- [官方文档](https://hyperbeam.ar.io/)
+- [GitHub 仓库](https://github.com/permaweb/HyperBEAM)
+- [从零开始解码 HyperBEAM](https://docs.wao.eco/hyperbeam/decoding-from-scratch)
