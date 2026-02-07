@@ -50,18 +50,18 @@ const URL = "http://localhost:10001"
 
 describe("Hyperbeam Legacynet", function () {
   let hb, hbeam
-  before(async () => (hbeam = await new HyperBEAM({ reset: true }).ready()))
+  before(async () => (hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true }).ready()))
   beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
-  it.only("should deploy a process", async () => {
+  it("should deploy a process #1 - ans104 format", async () => {
     const ao = await new AO2({ hb: "ans104" }).init(hbeam.jwk)
     const { p, pid } = await ao.deploy({ src_data })
     console.log((await p.msg("Inc", { To: pid })).res.Messages[0])
     console.log(await p.msg("Get"))
   })
 
-  it("should deploy a process", async () => {
+  it("should deploy a process #2 - httpsig format", async () => {
     const { out: address } = await hb.get({ path: "/~meta@1.0/info/address" })
     const ao = await new AO2({ hb: "httpsig" }).init(hbeam.jwk)
     const ao2 = await new AO2({ hb: "httpsig" }).init(hbeam.jwk)

@@ -10,6 +10,11 @@
  * @returns {*} JavaScript value
  */
 export function erl_str_from(str, binaryMode = false) {
+  // Handle null/undefined input
+  if (str === null || str === undefined) {
+    return null
+  }
+
   // Handle the new response format
   if (str.startsWith("#erl_response{")) {
     const rawMatch = str.match(/#erl_response\{raw=(.*?),formatted=(.*?)\}$/s)

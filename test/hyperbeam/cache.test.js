@@ -13,7 +13,13 @@ describe("Hyperbeam Device", function () {
     const { cache_writers } = await hb.g("/~meta@1.0/info")
     assert.deepEqual(cache_writers, [hb.addr])
     const bin = Buffer.from("abc")
-    const { path } = await hb.p("/~cache@1.0/write", { body: bin })
+    // Use post with ao-body-key header for binary body
+    const { headers: h } = await hb.post({
+      path: "/~cache@1.0/write",
+      "ao-body-key": "body",
+      body: bin,
+    })
+    const path = h.path
     assert.equal(await hb.g("/~cache@1.0/read", { target: path }), "abc")
     await hb.p("/~cache@1.0/link", {
       source: path,

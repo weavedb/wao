@@ -31,16 +31,16 @@ describe("Hyperbeam Device", function () {
   beforeEach(async () => (hb = hbeam.hb))
 
   after(async () => hbeam.kill())
-  // data is not persistent at 10000, but persistent at 10001
+  // data is not persistent after reset: true
   it("should fail", async () => {
-    const hb2 = new HB({ jwk: hbeam.jwk, url: "http://localhost:10000" })
-    const { pid } = await hb2.spawn({})
-    const { edges } = await hb2.messages({ pid })
+    const { pid } = await hb.spawn({})
+    const { edges } = await hb.messages({ pid })
     assert.equal(edges.length, 1)
     hbeam.kill()
-    hbeam = await new HyperBEAM({ reset: false }).ready()
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    const hb2 = hbeam.hb
 
-    // this fails
+    // this fails because data was wiped on reset
     await assert.rejects(hb2.messages({ pid }))
   })
 })
