@@ -282,11 +282,15 @@ export const toHttpSigner = signer => {
       const { publicKey, alg = "rsa-pss-sha512" } = injected
 
       const publicKeyBuffer = toView(publicKey)
+      // Use standard base64 encoding for keyid to be compatible with HyperBEAM's
+      // base64:decode in dev_codec_httpsig_keyid:apply_scheme
+      // Include "publickey:" prefix so HyperBEAM knows the key scheme
+      const keyidBase64 = `publickey:${publicKeyBuffer.toString("base64")}`
 
       const signingParameters = createSigningParameters({
         params,
         paramValues: {
-          keyid: base64url.encode(publicKeyBuffer),
+          keyid: keyidBase64,
           alg,
         },
       })

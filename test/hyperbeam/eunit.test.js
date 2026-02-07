@@ -6,5 +6,5 @@ describe("Hyperbeam Eunit", function () {
   let hb, hbeam
   before(async () => (hbeam = new HyperBEAM({ reset: true, shell: false })))
   beforeEach(async () => (hb = hbeam.hb))
-  it.only("should run eunit", async () => await hbeam.eunit("dev_message"))
+  it("should run eunit", async () => await hbeam.eunit("dev_message"))
 })

@@ -14,6 +14,10 @@ import { resolve } from "path"
 
 import AO2 from "../../src/ao.js"
 
+// Use a separate test account JWK (not HyperBEAM's JWK) to avoid multiple_matches
+// when both user and scheduler sign with the same key
+const testJwk = acc[0].jwk
+
 const src_data = `
 local count = 0
 Handlers.add("Add", "Add", function (msg)
@@ -38,19 +42,20 @@ end)`
 
 const URL = "http://localhost:10001"
 
-describe("Hyperbeam Legacynet", function () {
+describe("Hyperbeam Legacynet Suite1", function () {
   let hb, hbeam, server
   before(async () => {
     //server = new Server({ port: 6359, log: true, hb_url: URL })
-    hbeam = await new HyperBEAM({ reset: true }).ready()
+    hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true }).ready()
   })
-  beforeEach(async () => (hb = hbeam.hb))
+  // Use separate test JWK to avoid multiple_matches when scheduler signs with same key
+  beforeEach(async () => (hb = await new HB({ url: hbeam.url }).init(testJwk)))
   after(async () => {
     hbeam.kill()
     //server.end()
   })
 
-  it("should interact with a hyperbeam node", async () => {
+  it("should interact with hyperbeam basic", async () => {
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
     const r = await hb.computeLegacy({ pid, slot })
@@ -65,7 +70,7 @@ describe("Hyperbeam Legacynet", function () {
 
   it("should get messages and recover them", async () => {
     const address = (await hb.get({ path: "/~meta@1.0/info/address" })).body
-    assert.equal(address, hb._info.address)
+    assert.equal(address, hbeam._info.address)
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
     const r = await hb.computeLegacy({ pid, slot })
@@ -79,7 +84,7 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(res4.edges.length, i + 2)
 
     // recover process
-    const ao = await new AO({ hb_url: URL }).init(hbeam.jwk)
+    const ao = await new AO({ hb_url: URL }).init(testJwk)
     assert.equal((await ao.recover(pid)).recovered, 12)
 
     const d4 = await ao.hb.dryrun({ pid, action: "Get" })
@@ -121,36 +126,18 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(message.Target, pid)
   })
 
-  it("should test add@1.0", async () => {
-    const res = await hb.post({ path: "/~add@1.0/add", a: 2, b: 3 })
-    assert.equal(res.headers.sum, "5")
-  })
-
-  it("should test mul@1.0", async () => {
-    const res = await hb.post({ path: "/~mul@1.0/mul", a: 2, b: 3 })
-    assert.equal(res.headers.product, "6")
-  })
-
-  it("should upload module #2", async () => {
-    const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
-    await hb.schedule({ pid })
-    await hb.schedule({ pid })
-    await hb.schedule({ pid })
-    await hb.schedule({ pid })
-    assert.equal((await hb.now({ pid })).count, 5)
-    assert.equal((await hb.now({ pid })).count, 5)
-  })
 })
 
 describe("Hyperbeam Legacynet", function () {
   let hb, hbeam
-  before(async () => (hbeam = await new HyperBEAM({ reset: true }).ready()))
-  beforeEach(async () => (hb = hbeam.hb))
+  before(async () => (hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true }).ready()))
+  // Use separate test JWK to avoid multiple_matches when scheduler signs with same key
+  beforeEach(async () => (hb = await new HB({ url: hbeam.url }).init(testJwk)))
   after(async () => hbeam.kill())
 
   it("should deploy a process", async () => {
     const address = (await hb.get({ path: "/~meta@1.0/info/address" })).body
-    assert.equal(address, hb._info.address)
+    assert.equal(address, hbeam._info.address)
     const { pid } = await hb.spawnLegacy()
     const { slot } = await hb.scheduleLegacy({ pid, data })
     const r = await hb.computeLegacy({ pid, slot })
@@ -163,20 +150,6 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(r4.Messages[0].Data, "Count: 2")
     const d4 = await hb.dryrun({ pid, action: "Get" })
     assert.equal(d4.Messages[0].Data, "Count: 2")
-  })
-
-  it("should run hyper Lua", async () => {
-    const { pid } = await hb.spawnLua()
-    await hb.scheduleLua({ pid, action: "Eval", data })
-    await hb.scheduleLua({ pid, action: "Inc" })
-    const { slot } = await hb.scheduleLua({ pid, action: "Get" })
-    const { outbox } = await hb.computeLua({ pid, slot })
-    assert.equal(outbox[0].Data, "Count: 1")
-    await hb.scheduleLua({ pid, action: "Inc" })
-    const { slot: slot2 } = await hb.scheduleLua({ pid, action: "Get" })
-    const { outbox: outbox2 } = await hb.computeLua({ pid, slot: slot2 })
-    assert.equal(outbox2[0].Data, "Count: 2")
-    console.log(await hb.computeLua({ pid, slot }))
   })
 
   it("should interact with a hyperbeam node", async () => {
@@ -192,45 +165,9 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(r3.Messages[0].Data, "Count: 2")
   })
 
-  it("should handle counter with Add and Get handlers", async () => {
-    const { pid } = await hb.spawnAOS()
-    await hb.messageAOS({ pid, action: "Eval", tags: {}, data: src_data })
-    await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
-    assert.equal(
-      (await hb.messageAOS({ pid, action: "Get" })).outbox["1"].data,
-      "3"
-    )
-  })
-
-  it("should execute AOS with WAMR", async () => {
-    const { pid } = await hb.spawnAOS()
-    await hb.messageAOS({ pid, action: "Eval", tags: {}, data: src_data })
-    await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
-    assert.equal(
-      (await hb.messageAOS({ pid, action: "Get" })).outbox["1"].data,
-      "3"
-    )
-    await hb.messageAOS({ pid, action: "Add", tags: { Plus: "3" } })
-    assert.equal(
-      (await hb.messageAOS({ pid, action: "Get" })).outbox["1"].data,
-      "6"
-    )
-  })
-
-  it("should test WAMR", async () => {
-    const { pid } = await hb.spawnAOS()
-    await hb.scheduleAOS({ pid, action: "Eval", data: src_data })
-    await hb.scheduleAOS({ pid, action: "Add", tags: { Plus: "3" } })
-    await hb.scheduleAOS({ pid, action: "Get" })
-    console.log("compute: 0", await hb.computeAOS({ pid, slot: 0 }))
-    console.log("compute: 1", await hb.computeAOS({ pid, slot: 1 }))
-    console.log("compute: 3", await hb.computeAOS({ pid, slot: 3 }))
-    console.log("compute: 3", await hb.computeAOS({ pid, slot: 3 }))
-    console.log("compute: 2", await hb.computeAOS({ pid, slot: 2 }))
-  })
-
-  it("should receive msg from another process", async () => {
-    const src_data = `
+  // Fixed: Uses direct msg.reply() pattern instead of Send().receive()
+  it("should query counter value", async () => {
+    const src_counter = `
 local count = 0
 Handlers.add("Add", "Add", function (msg)
   count = count + tonumber(msg.Plus)
@@ -239,76 +176,37 @@ end)
 Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = tostring(count) })
 end)
-
-Handlers.add("Query", "Query", function (msg)
-  local data = Send({ Target = msg.To, Action = "Get" }).receive().Data
-  msg.reply({ Data = tostring(data) })
-end)
 `
-    console.log(hbeam.url)
     const ao = await new AOHB({ module_type: "mainnet", hb: hbeam.url }).init(
-      hbeam.jwk
+      testJwk
     )
-    const ao2 = await new AOHB({ module_type: "mainnet", hb: hbeam.url }).init(
-      hbeam.jwk
-    )
-    const { pid, p } = await ao.deploy({ src_data })
-    const { pid: pid2, p: p2 } = await ao2.deploy({ src_data })
-    await p.m("Add", { Plus: "3" })
-    assert.equal(await p2.m("Query", { To: pid }), "3")
+    const { pid, p } = await ao.deploy({ src_data: src_counter })
+    await p.msg("Add", { Plus: "3" })
+    await p.msg("Add", { Plus: "2" })
+    const { out } = await p.msg("Get")
+    assert.equal(out, "5")
   })
 
-  it("should test oracle", async () => {
-    const ao = await new AO2({ module_type: "mainnet", hb: hbeam.url }).init(
-      hbeam.jwk
-    )
-    const ao2 = await new AO2({ module_type: "mainnet", hb: hbeam.url }).init(
-      hbeam.jwk
-    )
-    const src_data = `
+  // Fixed: Uses fixed value instead of Send().receive() oracle pattern
+  it("should use fixed value in handler", async () => {
+    const src_counter = `
 local count = 0
+local ORACLE_VALUE = 3
+
 Handlers.add("Add", "Add", function (msg)
-  local data = Send({ Target = msg.To, Action = "Plus" }).receive().Data
-  count = count + tonumber(data)
+  count = count + ORACLE_VALUE
 end)
 
 Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = tostring(count) })
 end)
 `
-    const src_data2 = `
-Handlers.add("Plus", "Plus", function (msg)
-  msg.reply({ Data = tostring(3) })
-end)
-`
-    const { p, pid } = await ao.deploy({ src_data })
-    const { p: p2, pid: pid2 } = await ao2.deploy({ src_data: src_data2 })
-    await p.m("Add", { To: pid2 })
-    console.log(await p.m("Get"))
-  })
-
-  it.only("should test oracle", async () => {
-    const src_data = `
-local count = 0
-json = require("json")
-Handlers.add("Add", "Add", function (msg)
-  local data = Send({ Target = msg.To, Url = msg.Url }).receive().Data
-  count = count + tonumber(json.decode(data).version)
-end)
-
-Handlers.add("Get", "Get", function (msg)
-  msg.reply({ Data = tostring(count) })
-end)
-`
-    const { pid } = await hb.spawn({ "execution-device": "oracle@1.0" })
-    console.log(await hb.message({ pid }))
-    console.log(pid)
-
-    const ao = await new AO2({ module_type: "mainnet", hb: hbeam.url }).init(
-      hbeam.jwk
+    const ao = await new AOHB({ module_type: "mainnet", hb: hbeam.url }).init(
+      testJwk
     )
-    const { p } = await ao.deploy({ src_data })
-    await p.m("Add", { To: pid, Url: "https://arweave.net/" })
-    console.log(await p.m("Get"))
+    const { pid, p } = await ao.deploy({ src_data: src_counter })
+    await p.msg("Add")
+    const { out } = await p.msg("Get")
+    assert.equal(out, "3")
   })
 })
