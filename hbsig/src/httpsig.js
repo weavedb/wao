@@ -2,6 +2,7 @@
 
 import { hash } from "fast-sha256"
 import { flat_from, flat_to } from "./flat.js"
+import { structured_from as structuredFrom, structured_to as structuredTo } from "./structured.js"
 
 const CRLF = "\r\n"
 const DOUBLE_CRLF = CRLF + CRLF
@@ -120,17 +121,18 @@ function boundaryFromParts(parts) {
   return bytesToBase64url(hashBytes)
 }
 
-// Helper to determine inline key
+// Helper to determine inline key - matches Erlang's inline_key/2
 function inlineKey(msg) {
-  const inlineBodyKey = msg["inline-body-key"]
-  if (inlineBodyKey) {
-    return [{}, inlineBodyKey]
+  // Check for ao-body-key (Erlang uses ao-body-key, not inline-body-key)
+  const aoBodyKey = msg["ao-body-key"]
+  if (aoBodyKey) {
+    return [{}, aoBodyKey]
   }
   if ("body" in msg) {
     return [{}, "body"]
   }
   if ("data" in msg) {
-    return [{ "inline-body-key": "data" }, "data"]
+    return [{ "ao-body-key": "data" }, "data"]
   }
   return [{}, "body"]
 }
@@ -182,6 +184,13 @@ function ungroupIds(msg) {
   return result
 }
 
+// Get the size of a map (matches Erlang's maps:size behavior)
+// This counts ALL keys including ao-types - empty means literally {}
+function mapSize(obj) {
+  if (typeof obj !== "object" || obj === null) return 0
+  return Object.keys(obj).length
+}
+
 // Group maps for body encoding - following Erlang logic exactly
 function groupMaps(map, parent = "", top = {}) {
   if (
@@ -210,8 +219,18 @@ function groupMaps(map, parent = "", top = {}) {
       !Array.isArray(value) &&
       !Buffer.isBuffer(value)
     ) {
-      // Recursively process nested objects
-      newTop = groupMaps(value, flatK, newTop)
+      // Check size of the nested object (including metadata keys like ao-types)
+      // Empty means literally {} - a map with only ao-types is NOT empty
+      const size = mapSize(value)
+
+      if (size === 0) {
+        // Empty map (no data keys) - add empty-message marker
+        // This matches Erlang's group_maps behavior for empty maps
+        newTop[flatK] = { "ao-types": "empty-message" }
+      } else {
+        // Recursively process nested objects
+        newTop = groupMaps(value, flatK, newTop)
+      }
     } else if (typeof value === "string" && value.length > MAX_HEADER_LENGTH) {
       // Value too large for header, lift to top level
       newTop[flatK] = value
@@ -235,11 +254,27 @@ function groupMaps(map, parent = "", top = {}) {
   }
 }
 
+// Helper to compute content-digest for a body value
+function computePartDigest(bodyValue) {
+  let bodyBytes
+  if (Buffer.isBuffer(bodyValue)) {
+    bodyBytes = new Uint8Array(bodyValue)
+  } else if (typeof bodyValue === "string") {
+    bodyBytes = stringToBytes(bodyValue, "binary")
+  } else {
+    bodyBytes = stringToBytes(String(bodyValue), "binary")
+  }
+  const hashBytes = hash(bodyBytes)
+  return `sha-256=:${bytesToBase64(hashBytes)}:`
+}
+
 // Encode multipart body part
+// NOTE: This matches Erlang's encode_body_part/4 which does NOT apply inline_key
+// logic to nested parts. For nested maps, ALL fields become headers (except 'body'
+// which becomes the part body). The inline_key logic is only for top-level messages.
 function encodeBodyPart(partName, bodyPart, inlineKey) {
   const disposition =
     partName === inlineKey ? "inline" : `form-data;name="${partName}"`
-  const isInline = partName === inlineKey
 
   if (
     typeof bodyPart === "object" &&
@@ -247,101 +282,45 @@ function encodeBodyPart(partName, bodyPart, inlineKey) {
     !Array.isArray(bodyPart) &&
     !Buffer.isBuffer(bodyPart)
   ) {
-    // Check if this part has ao-types
-    const hasAoTypes = "ao-types" in bodyPart
+    // Collect all headers (everything except 'body' and 'priv')
+    const allEntries = []
 
-    if (hasAoTypes) {
-      // For parts WITH ao-types: sort all entries alphabetically
-      const allEntries = []
+    for (const [key, value] of Object.entries(bodyPart)) {
+      if (key === "body" || key === "priv") continue
 
-      // Collect all entries except body
-      for (const [key, value] of Object.entries(bodyPart)) {
-        if (key === "body") continue
-
-        if (key === "ao-types") {
-          // Keep ao-types as-is (Buffer or string)
-          let valueStr = value
-          if (Buffer.isBuffer(value)) {
-            valueStr = value.toString("binary")
-          }
-          allEntries.push({ key: "ao-types", line: `ao-types: ${valueStr}` })
-        } else {
-          // Handle Buffer values properly
-          let valueStr = value
-          if (Buffer.isBuffer(value)) {
-            // Use binary/latin1 encoding to preserve all byte values 0-255
-            valueStr = value.toString("binary")
-          }
-          allEntries.push({ key: key, line: `${key}: ${valueStr}` })
-        }
+      // Handle Buffer values properly
+      let valueStr = value
+      if (Buffer.isBuffer(value)) {
+        // Use binary/latin1 encoding to preserve all byte values 0-255
+        valueStr = value.toString("binary")
       }
-
-      // Add content-disposition
-      allEntries.push({
-        key: "content-disposition",
-        line: `content-disposition: ${disposition}`,
-      })
-
-      // Sort alphabetically by key
-      allEntries.sort((a, b) => a.key.localeCompare(b.key))
-
-      // Build the lines
-      const lines = allEntries.map(entry => entry.line)
-
-      // Body handling
-      const body = bodyPart.body || ""
-      if (body) {
-        lines.push("") // Always add empty line before body
-        lines.push(body)
-      }
-
-      return lines.join(CRLF)
-    } else {
-      // For parts WITHOUT ao-types
-      const allEntries = []
-
-      for (const [key, value] of Object.entries(bodyPart)) {
-        if (key === "body") continue
-        // Handle Buffer values properly
-        let valueStr = value
-        if (Buffer.isBuffer(value)) {
-          // Use binary/latin1 encoding to preserve all byte values 0-255
-          valueStr = value.toString("binary")
-        }
-        allEntries.push({ key: key, line: `${key}: ${valueStr}` })
-      }
-
-      const lines = []
-
-      if (isInline) {
-        // Inline parts without ao-types: sort ALL fields alphabetically including content-disposition
-        allEntries.push({
-          key: "content-disposition",
-          line: `content-disposition: ${disposition}`,
-        })
-
-        // Sort by key
-        allEntries.sort((a, b) => a.key.localeCompare(b.key))
-
-        // Extract the lines
-        lines.push(...allEntries.map(entry => entry.line))
-      } else {
-        // Regular parts: content-disposition first, then fields
-        lines.push(`content-disposition: ${disposition}`)
-        lines.push(...allEntries.map(entry => entry.line))
-      }
-
-      // Body handling
-      const body = bodyPart.body || ""
-      if (body) {
-        lines.push("") // Always add empty line before body
-        lines.push(body)
-      }
-
-      return lines.join(CRLF)
+      allEntries.push({ key: key, line: `${key}: ${valueStr}` })
     }
+
+    // Add content-disposition
+    allEntries.push({
+      key: "content-disposition",
+      line: `content-disposition: ${disposition}`,
+    })
+
+    // Sort all entries by key alphabetically - matches Erlang behavior
+    allEntries.sort((a, b) => a.key.localeCompare(b.key))
+
+    // Build the lines
+    const lines = allEntries.map(entry => entry.line)
+
+    // Only the 'body' field (if present) becomes the part body
+    const body = bodyPart.body
+    if (body !== "" && body !== undefined && body !== null) {
+      lines.push("") // Always add empty line before body
+      lines.push(Buffer.isBuffer(body) ? body.toString("binary") : String(body))
+    }
+
+    return lines.join(CRLF)
   } else if (typeof bodyPart === "string" || Buffer.isBuffer(bodyPart)) {
-    return `content-disposition: ${disposition}${DOUBLE_CRLF}${bodyPart}`
+    // Use binary/latin1 encoding to preserve byte values 0-255
+    const bodyStr = Buffer.isBuffer(bodyPart) ? bodyPart.toString("binary") : bodyPart
+    return `content-disposition: ${disposition}${DOUBLE_CRLF}${bodyStr}`
   }
   return ""
 }
@@ -696,12 +675,20 @@ export function httpsig_from(http) {
 
 /**
  * Convert TABM to HTTP message
+ * Implements bundle mode like Erlang's dev_codec_httpsig_conv:to/3 with bundle=true
  */
 export function httpsig_to(tabm) {
   if (typeof tabm === "string") return tabm
 
+  // Bundle logic: TABM → structured → TABM
+  // This matches Erlang's behavior when bundle=true:
+  // 1. Convert TABM to structured@1.0 (interprets ao-types, decodes to native types)
+  // 2. Convert back to TABM (re-encodes with ao-types)
+  const structured = structuredTo(tabm)
+  const bundledTabm = structuredFrom(structured)
+
   // Group IDs
-  const withGroupedIds = groupIds(tabm)
+  const withGroupedIds = groupIds(bundledTabm)
 
   // Remove private and signature-related keys
   const stripped = { ...withGroupedIds }
@@ -713,26 +700,25 @@ export function httpsig_to(tabm) {
   const [inlineFieldHdrs, inlineKeyVal] = inlineKey(tabm)
 
   // Check if this is a flat structure that should stay as headers
-  // A flat structure has no nested objects (maps)
-  const hasNestedMaps = Object.values(stripped).some(
-    value =>
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value) &&
-      !Buffer.isBuffer(value)
-  )
+  // A flat structure has no nested objects (maps), excluding:
+  // - Arrays (JS arrays, not numbered maps)
+  // - Buffers
+  // Note: List-encoded maps (numbered maps with .="list") ARE nested maps
+  // and should trigger multipart encoding, matching Erlang's behavior
+  const hasNestedMaps = Object.values(stripped).some(value => {
+    // Not an object
+    if (typeof value !== "object" || value === null) return false
+    // Arrays and Buffers are not nested maps
+    if (Array.isArray(value) || Buffer.isBuffer(value)) return false
+    // Any other object (including list-encoded maps) is a nested map
+    return true
+  })
 
   // If it's just a flat map with strings/primitives, keep as headers
   // This matches Erlang's behavior where flat maps don't become multipart
   if (!hasNestedMaps) {
     // For flat structures, just return with normalized keys
-    // This matches Erlang which returns the map unchanged
-    const result = { ...inlineFieldHdrs }
-
-    for (const [key, value] of Object.entries(stripped)) {
-      // Keep Buffers as Buffers - don't convert to strings
-      result[key] = value
-    }
+    const result = { ...inlineFieldHdrs, ...stripped }
 
     // Handle inline body key - move data from inline key to body
     if (inlineKeyVal && inlineKeyVal !== "body" && result[inlineKeyVal]) {
@@ -740,9 +726,28 @@ export function httpsig_to(tabm) {
       delete result[inlineKeyVal]
     }
 
-    // If there's a body, add content-digest
+    // If the only field is ao-types (no actual data), return empty object
+    // This matches Erlang's behavior where ao-types-only messages become empty
+    const dataKeys = Object.keys(result).filter(k =>
+      k !== "ao-types" &&
+      k !== "ao-ids" &&
+      k !== "inline-body-key" &&
+      k !== "ao-body-key"
+    )
+    if (dataKeys.length === 0) {
+      return {}
+    }
+
+    // If there's a non-empty body, add content-digest
+    // Erlang doesn't add content-digest for empty bodies (<<>>)
     if (result.body) {
-      return addContentDigest(result)
+      const bodyIsEmpty = Buffer.isBuffer(result.body)
+        ? result.body.length === 0
+        : (typeof result.body === "string" && result.body.length === 0)
+
+      if (!bodyIsEmpty) {
+        return addContentDigest(result)
+      }
     }
 
     return result
@@ -837,7 +842,7 @@ export function httpsig_to(tabm) {
 
     const result = {
       ...headers,
-      "body-keys": bodyKeysList.map(k => `"${k}"`).join(", "),
+      // Note: body-keys is NOT included in httpsig output - it's only used for parsing
       "content-type": `multipart/form-data; boundary="${boundary}"`,
       body: finalBody,
     }
