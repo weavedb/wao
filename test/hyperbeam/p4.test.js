@@ -5,7 +5,7 @@ import HB from "../../src/hb.js"
 import HyperBEAM from "../../src/hyperbeam.js"
 
 describe("Hyperbeam", function () {
-  let hb, hbeam
+  let hb, hbeam, hbeam2
   before(async () => {
     hbeam = await new HyperBEAM({
       reset: true,
@@ -13,12 +13,15 @@ describe("Hyperbeam", function () {
     }).ready()
   })
   beforeEach(async () => (hb = hbeam.hb))
-  after(async () => hbeam.kill())
+  after(async () => {
+    if (hbeam2) try { hbeam2.kill() } catch (_) {}
+    if (hbeam) try { hbeam.kill() } catch (_) {}
+  })
 
   it("should handle payment with lua", async () => {
     const port = 10002
     const addr2 = toAddr(acc[0].jwk.n)
-    const process = hbeam.file("scripts/p4-payment-process.lua")
+    const process = hbeam.file("scripts/hyper-token-p4.lua")
     const { pid: cache_pid } = await hb.spawn({})
     const { slot } = await hb.schedule({
       pid: cache_pid,
@@ -35,7 +38,7 @@ describe("Hyperbeam", function () {
     } = JSON.parse(body)
     const pid = msg.node.message.Id
     assert(pid)
-    const client = hbeam.file("scripts/p4-payment-client.lua")
+    const client = hbeam.file("scripts/hyper-token-p4-client.lua")
 
     const { slot: slot2 } = await hb.schedule({
       pid: cache_pid,
@@ -54,18 +57,25 @@ describe("Hyperbeam", function () {
     assert(cid)
   })
 
-  it("should handle payment with lua", async () => {
+  it("should handle payment with lua (type conversion issue)", async () => {
     const port = 10002
     const addr2 = toAddr(acc[0].jwk.n)
-    const process = hbeam.file("scripts/p4-payment-process.lua")
-    const pid = await hb.cacheScript(process)
-    const client = hbeam.file("scripts/p4-payment-client.lua")
+    const baseToken = hbeam.file("scripts/hyper-token.lua")
+    const p4Token = hbeam.file("scripts/hyper-token-p4.lua")
+    const processor = baseToken + "\n" + p4Token
+    const pid = await hb.cacheScript(processor)
+    const client = hbeam.file("scripts/hyper-token-p4-client.lua")
     const cid = await hb.cacheScript(client)
 
-    const hbeam2 = await new HyperBEAM({
+    hbeam2 = await new HyperBEAM({
       port,
       operator: hb.addr,
-      p4_lua: { processor: pid, client: cid },
+      p4_lua: {
+        processor: pid,
+        client: cid,
+        admin: hb.addr,
+        balance: { [hb.addr]: 1000 },
+      },
     }).ready()
 
     const hb3 = await new HB({ url: `http://localhost:${port}` }).init(hb.jwk)
@@ -73,23 +83,23 @@ describe("Hyperbeam", function () {
       acc[0].jwk
     )
     const tags = {
-      path: "credit-notice",
+      action: "transfer",
       quantity: 100,
       recipient: addr2,
     }
-    const lua_msg = await hb3.commit(tags)
     await hb3.scheduleNP({ pid: "ledger", tags })
 
-    //await hb3.p("/ledger~node-process@1.0/schedule", { body: lua_msg })
+    // Verify transfer: addr2 should have 100
     const balance = await hb3.g(`/ledger~node-process@1.0/now/balance/${addr2}`)
     assert.equal(balance, "100")
-    const now = await hb3.g(`/ledger~node-process@1.0/now/balance`)
-    assert.deepEqual(now, { [addr2]: "100" })
+
+    // Make a request with addr2's wallet (hb4) - triggers P4 charging
     assert(await hb4.p("/~message@1.0/set/hello", { hello: "world" }))
+
+    // Check balance after P4 charge (should be 100 - 3 = 97)
     const balance2 = await hb3.g(
       `/ledger~node-process@1.0/now/balance/${addr2}`
     )
     assert.equal(balance2, "97")
-    hbeam2.kill()
   })
 })

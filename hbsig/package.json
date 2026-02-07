@@ -2,7 +2,8 @@
   "name": "hbsig",
   "version": "0.2.8",
   "type": "module",
-  "main": "index.js",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
   "scripts": {
     "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs",
     "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/",
@@ -13,12 +14,12 @@
   "license": "MIT",
   "exports": {
     ".": {
-      "require": "./cjs/index.js",
-      "import": "./esm/index.js"
+      "require": "./dist/cjs/index.js",
+      "import": "./dist/esm/index.js"
     },
     "./nocrypto": {
-      "require": "./cjs/nocrypto.js",
-      "import": "./esm/nocrypto.js"
+      "require": "./dist/cjs/nocrypto.js",
+      "import": "./dist/esm/nocrypto.js"
     }
   },
   "devDependencies": {

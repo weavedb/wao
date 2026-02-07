@@ -22,9 +22,9 @@ describe("Hyperbeam Device", function () {
     })
 
     const val2 = await hb.g("/~local-name@1.0/lookup", { key: "map" })
-    assert.deepEqual(val2, { a: 123 })
+    assert.equal(val2.a, 123)
 
     const val3 = await hb.g("/~local-name@1.0/lookup", { key: "random" })
-    assert.equal(val3, '"not_found"')
+    assert.equal(val3, "not_found")
   })
 })

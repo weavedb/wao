@@ -71,6 +71,57 @@ function pathToParts(path) {
 }
 
 /**
+ * Convert a value to string format to match Erlang codec behavior
+ * Erlang dev_codec_flat only handles binaries, so all leaf values become strings
+ * @param {*} value - Value to convert
+ * @returns {string|Object} - String for leaf values, or recursively processed object
+ */
+function valueToString(value) {
+  if (typeof value === "object" && value !== null && !Array.isArray(value) && !Buffer.isBuffer(value)) {
+    // Recursively process nested objects
+    const result = {}
+    for (const [k, v] of Object.entries(value)) {
+      result[k] = valueToString(v)
+    }
+    return result
+  }
+  if (typeof value === "string") {
+    return value
+  }
+  if (typeof value === "number") {
+    return String(value)
+  }
+  if (typeof value === "boolean") {
+    return String(value)
+  }
+  if (value === null) {
+    return "null"
+  }
+  if (Array.isArray(value)) {
+    // Convert array elements to strings first, then format as Erlang list
+    // Erlang's io_lib:format("~p", [List]) produces binary syntax like [<<"a">>,<<"b">>]
+    const elements = value.map(v => {
+      if (typeof v === "string") {
+        return `<<"${v}">>`
+      } else if (typeof v === "number") {
+        return String(v)
+      } else if (typeof v === "boolean") {
+        return v ? "true" : "false"
+      } else if (v === null) {
+        return "null"
+      } else {
+        return String(v)
+      }
+    })
+    return `[${elements.join(",")}]`
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString()
+  }
+  return String(value)
+}
+
+/**
  * Helper function to inject a value at a specific path in a nested object
  * @param {Array} pathParts - Array of path parts
  * @param {*} value - Value to inject
@@ -80,6 +131,9 @@ function injectAtPath(pathParts, value, obj) {
   if (pathParts.length === 0) {
     throw new Error("Path cannot be empty")
   }
+
+  // Convert value to match Erlang codec behavior
+  const convertedValue = valueToString(value)
 
   if (pathParts.length === 1) {
     const key = pathParts[0]
@@ -91,20 +145,20 @@ function injectAtPath(pathParts, value, obj) {
       if (
         typeof existing === "object" &&
         existing !== null &&
-        typeof value === "object" &&
-        value !== null &&
+        typeof convertedValue === "object" &&
+        convertedValue !== null &&
         !Array.isArray(existing) &&
-        !Array.isArray(value)
+        !Array.isArray(convertedValue)
       ) {
-        obj[key] = { ...existing, ...value }
+        obj[key] = { ...existing, ...convertedValue }
       } else {
         // Path collision
         throw new Error(
-          `Path collision at key: ${key}, existing: ${JSON.stringify(existing)}, value: ${JSON.stringify(value)}`
+          `Path collision at key: ${key}, existing: ${JSON.stringify(existing)}, value: ${JSON.stringify(convertedValue)}`
         )
       }
     } else {
-      obj[key] = value
+      obj[key] = convertedValue
     }
     return
   }
@@ -117,7 +171,7 @@ function injectAtPath(pathParts, value, obj) {
     throw new Error(`Cannot create nested path at non-object key: ${key}`)
   }
 
-  injectAtPath(rest, value, obj[key])
+  injectAtPath(rest, convertedValue, obj[key])
 }
 
 /**
