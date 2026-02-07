@@ -73,7 +73,7 @@ function to(tabm) {
   // Build result with empty values first
   const result = {}
 
-  // Add empty values based on their types
+  // Add empty values based on their types (these may be overwritten if data exists)
   for (const [key, type] of Object.entries(types)) {
     if (type === "empty-binary") {
       result[key] = ""
@@ -111,11 +111,19 @@ function to(tabm) {
       value !== null &&
       !Array.isArray(value)
     ) {
+      // Check if the child object itself indicates it's a list via .="list" in its ao-types
+      const childAoTypes = value["ao-types"] || ""
+      const childTypes = parseAoTypes(childAoTypes)
+      const isChildList = childTypes["."] === "list"
+
       // Recursively decode child TABM
       const childDecoded = to(value)
-      const type = types[normalizedKey]
 
-      if (type === "list") {
+      // Only convert numbered map to array if the child object itself
+      // declares it's a list via .="list" in its ao-types.
+      // This preserves original keys when the parent declares the type
+      // but the child doesn't have the list marker.
+      if (isChildList) {
         // Convert numbered map back to ordered list
         result[rawKey] = messageToOrderedList(childDecoded)
       } else {
@@ -206,9 +214,23 @@ function decodeValue(type, value) {
     case "float":
       return parseFloat(value)
 
+    case "boolean":
+      // SF boolean format: ?1 = true, ?0 = false
+      // Convert to native boolean, will be encoded as "atom" type
+      if (value === "?1") return true
+      if (value === "?0") return false
+      // Fallback for other formats
+      return value === "true" || value === "1"
+
     case "atom":
       const atomItem = parseStructuredItem(value)
-      return atomItem.replace(/^"|"$/g, "") // Remove quotes
+      const atomName = atomItem.replace(/^"|"$/g, "") // Remove quotes
+      // Convert to Symbol to preserve atom type through round-trip
+      // Special cases for common atoms that JS has native types for
+      if (atomName === "true") return true
+      if (atomName === "false") return false
+      if (atomName === "null") return null
+      return Symbol.for(atomName)
 
     case "list":
       return parseStructuredList(value).map(item => {
@@ -236,7 +258,8 @@ function decodeValue(type, value) {
  * @returns {*} - Parsed value
  */
 function parseStructuredItem(value) {
-  // This is a simplified parser - you'd want to use a proper structured fields parser
+  // Handle non-string values (e.g., numbers from HyperBEAM responses)
+  if (typeof value !== "string") return String(value)
   if (value.startsWith('"') && value.endsWith('"')) {
     return value.slice(1, -1) // Remove quotes
   }
@@ -249,10 +272,14 @@ function parseStructuredItem(value) {
  * @returns {Array} - Parsed list
  */
 function parseStructuredList(value) {
-  // This is a simplified parser - you'd want to use a proper structured fields parser
+  if (typeof value !== "string") return [value]
   return value.split(", ").map(item => {
     if (item.startsWith('"') && item.endsWith('"')) {
-      return item.slice(1, -1) // Remove quotes
+      // Remove quotes and unescape SF string escapes
+      // In SF strings: \" = " and \\ = \
+      return item.slice(1, -1)
+        .replace(/\\"/g, '"')     // \" -> "
+        .replace(/\\\\/g, '\\')   // \\ -> \
     }
     return item
   })
@@ -264,44 +291,72 @@ function parseStructuredList(value) {
  * @returns {object} - TABM
  */
 function from(msg) {
-  // Handle non-map values
-  if (
-    msg instanceof Buffer ||
-    typeof msg !== "object" ||
-    msg === null ||
-    Array.isArray(msg)
-  ) {
+  // Handle binary input - passthrough
+  if (msg instanceof Buffer || msg instanceof Uint8Array) {
     return msg
   }
 
-  // Normalize keys first
-  const normalizedMap = {}
-  for (const [key, value] of Object.entries(msg)) {
-    const normKey = key.toLowerCase()
-    normalizedMap[normKey] = value
+  // Handle non-object values - passthrough
+  if (typeof msg !== "object" || msg === null) {
+    return msg
   }
 
-  // Get sorted keys (normalized)
-  const sortedKeys = Object.keys(normalizedMap).sort()
+  // Handle arrays - convert to numbered map with .="list" in ao-types
+  // Mirrors Erlang: from(List, Req, Opts) when is_list(List)
+  if (Array.isArray(msg)) {
+    // Convert to numbered map (1-based indexing like Erlang)
+    const numberedMap = {}
+    msg.forEach((item, idx) => {
+      numberedMap[(idx + 1).toString()] = item
+    })
+
+    // Recursively process the numbered map
+    const result = from(numberedMap)
+
+    // Add .="list" to ao-types to indicate this message is a list
+    const existingAoTypes = result["ao-types"] || ""
+    if (existingAoTypes) {
+      result["ao-types"] = '.="list", ' + existingAoTypes
+    } else {
+      result["ao-types"] = '.="list"'
+    }
+
+    return result
+  }
+
+  // Process keys - preserve original case to match Erlang behavior
+  // HTTP headers are case-insensitive but JSON/map keys preserve case
+  const keysMap = {}
+  for (const [key, value] of Object.entries(msg)) {
+    keysMap[key] = value
+  }
+
+  // Get sorted keys (preserving case)
+  const sortedKeys = Object.keys(keysMap).sort()
 
   const types = []
   const values = []
 
   // Process each key in sorted order
-  for (const normKey of sortedKeys) {
-    const value = normalizedMap[normKey]
+  for (const key of sortedKeys) {
+    const value = keysMap[key]
 
-    // Handle empty values
+    // Handle empty binaries/strings - just include as-is, no type annotation
+    // (Erlang doesn't add empty-binary type, it just keeps the empty binary)
     if (value === "" || (value instanceof Buffer && value.length === 0)) {
-      types.push([normKey, "empty-binary"])
+      values.push([key, value])
       continue
     }
 
+    // Empty arrays - convert to numbered map with .="list" in ao-types
+    // (Erlang doesn't add empty-list type, just the list marker)
     if (Array.isArray(value) && value.length === 0) {
-      types.push([normKey, "empty-list"])
+      values.push([key, from(value)])
       continue
     }
 
+    // Empty objects - just include as-is, no type annotation
+    // (Erlang doesn't add empty-message type, it just keeps the empty map)
     if (
       typeof value === "object" &&
       value !== null &&
@@ -309,43 +364,30 @@ function from(msg) {
       !(value instanceof Buffer) &&
       Object.keys(value).length === 0
     ) {
-      types.push([normKey, "empty-message"])
+      values.push([key, value])
       continue
     }
 
     // Handle binary/string values
     if (value instanceof Buffer || value instanceof Uint8Array) {
-      values.push([normKey, value])
+      values.push([key, value])
       continue
     }
 
     if (typeof value === "string") {
-      values.push([normKey, value])
+      values.push([key, value])
       continue
     }
 
     // Handle nested maps
     if (typeof value === "object" && !Array.isArray(value) && value !== null) {
-      values.push([normKey, from(value)])
+      values.push([key, from(value)])
       continue
     }
 
-    // Handle arrays
+    // Handle arrays - from() converts to numbered map with .="list" in ao-types
     if (Array.isArray(value) && value.length > 0) {
-      if (shouldConvertToNumberedMap(value)) {
-        // Convert to numbered map (1-based indexing)
-        const numberedMap = {}
-        value.forEach((item, idx) => {
-          numberedMap[(idx + 1).toString()] = item
-        })
-        types.push([normKey, "list"])
-        values.push([normKey, from(numberedMap)])
-      } else {
-        // Encode as list string
-        const [type, encoded] = encodeValue(value)
-        types.push([normKey, type])
-        values.push([normKey, encoded])
-      }
+      values.push([key, from(value)])
       continue
     }
 
@@ -353,13 +395,12 @@ function from(msg) {
     if (
       typeof value === "symbol" ||
       typeof value === "number" ||
-      Array.isArray(value) ||
       typeof value === "boolean" ||
       value === null
     ) {
       const [type, encoded] = encodeValue(value)
-      types.push([normKey, type])
-      values.push([normKey, encoded])
+      types.push([key, type])
+      values.push([key, encoded])
       continue
     }
   }
@@ -381,53 +422,12 @@ function from(msg) {
 }
 
 /**
- * Check if an array should be converted to numbered map
- * Rules based on Erlang behavior:
- * 1. Contains any objects/maps → convert
- * 2. Contains empty arrays (but NOT empty buffers) → convert
- * 3. All items are arrays (array of arrays) → convert
- * 4. Otherwise → encode as string
- */
-function shouldConvertToNumberedMap(arr) {
-  let allArrays = true
-  let hasObjects = false
-  let hasEmptyArrays = false
-
-  for (const item of arr) {
-    // Check for objects (not arrays or buffers)
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      !Array.isArray(item) &&
-      !Buffer.isBuffer(item)
-    ) {
-      hasObjects = true
-    }
-    // Check for empty arrays only (NOT empty buffers)
-    else if (Array.isArray(item) && item.length === 0) {
-      hasEmptyArrays = true
-    }
-    // Track if all items are arrays
-    else if (!Array.isArray(item)) {
-      allArrays = false
-    }
-  }
-
-  // Convert if: has objects, has empty arrays, or all items are non-empty arrays
-  return (
-    hasObjects ||
-    hasEmptyArrays ||
-    (allArrays && arr.length > 0 && arr.every(item => Array.isArray(item)))
-  )
-}
-
-/**
  * Encode a value with its type
  */
 function encodeValue(value) {
-  // Null (as atom)
+  // Null (as atom) - use token format (unquoted)
   if (value === null) {
-    return ["atom", '"null"']
+    return ["atom", "null"]
   }
 
   // Integer
@@ -437,24 +437,23 @@ function encodeValue(value) {
 
   // Float
   if (typeof value === "number") {
-    // Format like Erlang with scientific notation
+    // Format like Erlang's float_to_binary - scientific notation with full precision
+    // Erlang's float_to_binary/1 uses ~20 decimal digits and keeps trailing zeros
     let str = value.toExponential(20)
-    // Remove trailing zeros but keep at least one
-    str = str.replace(/(\.\d*?)0+e/, "$1e").replace(/\.e/, ".0e")
-    // Ensure 2-digit exponent
+    // Ensure 2-digit exponent with sign
     str = str.replace(/e([+-])(\d)$/, "e$10$2")
     return ["float", str]
   }
 
-  // Boolean (as atom)
+  // Boolean (as atom) - use token format (unquoted)
   if (typeof value === "boolean") {
-    return ["atom", `"${value}"`]
+    return ["atom", value.toString()]
   }
 
-  // Symbol (as atom)
+  // Symbol (as atom) - use token format (unquoted)
   if (typeof value === "symbol") {
     const name = Symbol.keyFor(value) || value.description || ""
-    return ["atom", `"${name}"`]
+    return ["atom", name]
   }
 
   // List

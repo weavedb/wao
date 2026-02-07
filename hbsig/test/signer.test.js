@@ -2,12 +2,13 @@ import assert from "assert"
 import { after, describe, it, before, beforeEach } from "node:test"
 import { modIn, modOut } from "./lib/test-utils.js"
 import { verify } from "../src/signer-utils.js"
-import { HyperBEAM } from "wao/test"
-import cases, { errors } from "./lib/cases.js"
+import { HyperBEAM } from "../../src/test.js"
+import cases from "./lib/cases.js"
 import { normalize } from "../src/erl_json.js"
 import { createSigner } from "../src/signer.js"
 import { send } from "../src/send.js"
 import { erl_str_from, erl_str_to } from "../src/erl_str.js"
+
 describe("Hyperbeam Signer", function () {
   let hbeam, sign
   before(async () => {
@@ -39,6 +40,9 @@ describe("Hyperbeam Signer", function () {
       }
     }
     console.log(`${err.length} / ${_cases.length} failed!`)
-    if (err) for (let v of err) console.log(v)
+    if (err.length > 0) {
+      for (let v of err) console.log(v)
+      throw new Error(`${err.length} test case(s) failed`)
+    }
   })
 })

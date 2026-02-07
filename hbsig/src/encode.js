@@ -46,7 +46,16 @@ function handleSingleEmptyBinaryField(obj) {
       (fieldValue.length === 0 || fieldValue.byteLength === 0)
     ) {
       const headers = {}
-      headers["ao-types"] = `${fieldName.toLowerCase()}="empty-binary"`
+      // For 'body' field, we can't send it as a header (reserved name, gets stripped).
+      // Use inline-body-key to signal that body was present but empty.
+      // The modOut function will reconstruct body: <<>> when it sees inline-body-key: body
+      // with no actual body content.
+      if (fieldName.toLowerCase() === "body") {
+        headers["inline-body-key"] = "body"
+        return { headers, body: undefined }
+      }
+      // Include the key with empty value - empty string becomes empty binary in Erlang
+      headers[fieldName.toLowerCase()] = ""
       return { headers, body: undefined }
     }
   }
@@ -208,14 +217,17 @@ function processHeaderFields(obj, bodyKeys, headers, headerTypes) {
         )
       } else if (typeof value === "string") {
         if (value.length === 0) {
-          headerTypes.push(`${key.toLowerCase()}="empty-binary"`)
+          // Empty string becomes empty binary in Erlang - no ao-types needed
+          headers[key] = ""
         } else if (hasNonAscii(value)) {
           continue
         } else {
           headers[key] = value
         }
       } else if (Array.isArray(value) && value.length === 0) {
-        headerTypes.push(`${key.toLowerCase()}="empty-list"`)
+        // Empty array - use list type annotation
+        headers[key] = ""
+        headerTypes.push(`${key.toLowerCase()}="list"`)
       } else if (Array.isArray(value) && !value.some(item => isPojo(item))) {
         const hasNonAsciiItems = value.some(
           item => typeof item === "string" && hasNonAscii(item)
@@ -231,9 +243,18 @@ function processHeaderFields(obj, bodyKeys, headers, headerTypes) {
         isBytes(value) &&
         (value.length === 0 || value.byteLength === 0)
       ) {
-        headerTypes.push(`${key.toLowerCase()}="empty-binary"`)
+        // Empty buffer becomes empty binary in Erlang - no ao-types needed
+        // For 'body' field, we can't send it as a header (reserved name, gets stripped).
+        // Use inline-body-key to signal that body was present but empty.
+        if (key.toLowerCase() === "body") {
+          headers["inline-body-key"] = "body"
+        } else {
+          headers[key] = ""
+        }
       } else if (isPojo(value) && Object.keys(value).length === 0) {
-        headerTypes.push(`${key.toLowerCase()}="empty-message"`)
+        // Empty object - use map type annotation
+        headers[key] = ""
+        headerTypes.push(`${key.toLowerCase()}="map"`)
       }
     } else {
       // Fields that need body still get type annotations
@@ -290,6 +311,14 @@ async function handleSingleBodyKeyOptimization(
   headers,
   headerTypes
 ) {
+  // Skip this optimization if there are other header fields - need full multipart encoding
+  // to be compatible with HyperBEAM scheduler endpoint
+  const otherFields = Object.keys(obj).filter(k => !bodyKeys.includes(k) && !bodyKeys.some(bk => bk.startsWith(`${k}/`)))
+  if (otherFields.length > 0 && bodyKeys.length === 1) {
+    // Have other header fields + single body key = need multipart, skip optimization
+    return null
+  }
+
   if (bodyKeys.length === 1) {
     const singleKey = bodyKeys[0]
     const value = getValueByPath(obj, singleKey)
@@ -489,14 +518,16 @@ function processArrayItems(
     }
 
     if (typeof item === "string" && item === "") {
-      partTypes.push(`${index}="empty-binary"`)
+      // Empty strings become empty binaries naturally - no type annotation needed
     } else if (isPojo(item) && Object.keys(item).length === 0) {
-      partTypes.push(`${index}="empty-message"`)
+      // Use "map" instead of "empty-message" for structured codec compatibility
+      partTypes.push(`${index}="map"`)
     } else if (isPojo(item)) {
       // Non-empty objects are handled elsewhere
     } else if (Array.isArray(item)) {
       if (item.length === 0) {
-        partTypes.push(`${index}="empty-list"`)
+        // Use "list" instead of "empty-list" for structured codec compatibility
+        partTypes.push(`${index}="list"`)
       } else {
         partTypes.push(`${index}="list"`)
         const encodedItems = item
@@ -567,7 +598,7 @@ function processArrayItems(
     } else if (isBytes(item)) {
       const buffer = toBuffer(item)
       if (buffer.length === 0) {
-        partTypes.push(`${index}="empty-binary"`)
+        // Empty buffers become empty binaries naturally - no type annotation needed
       } else {
         partTypes.push(`${index}="binary"`)
       }
@@ -656,11 +687,10 @@ function processObjectFields(value, bodyKey, sortedBodyKeys) {
   const arrayTypes = []
 
   // First collect array types
+  // Note: Use "list" for both empty and non-empty arrays for structured codec compatibility
   for (const [k, v] of Object.entries(value)) {
     if (Array.isArray(v)) {
-      arrayTypes.push(
-        `${k.toLowerCase()}="${v.length === 0 ? "empty-list" : "list"}"`
-      )
+      arrayTypes.push(`${k.toLowerCase()}="list"`)
     }
   }
 
@@ -693,11 +723,12 @@ function processObjectFields(value, bodyKey, sortedBodyKeys) {
         `${k.toLowerCase()}="${Number.isInteger(v) ? "integer" : "float"}"`
       )
     } else if (typeof v === "string" && v.length === 0) {
-      objectTypes.push(`${k.toLowerCase()}="empty-binary"`)
+      // Empty strings become empty binaries naturally - no type annotation needed
     } else if (isBytes(v) && (v.length === 0 || v.byteLength === 0)) {
-      objectTypes.push(`${k.toLowerCase()}="empty-binary"`)
+      // Empty buffers become empty binaries naturally - no type annotation needed
     } else if (isPojo(v) && Object.keys(v).length === 0) {
-      objectTypes.push(`${k.toLowerCase()}="empty-message"`)
+      // Use "map" instead of "empty-message" for structured codec compatibility
+      objectTypes.push(`${k.toLowerCase()}="map"`)
     }
 
     if (typeof v === "string") {
@@ -720,6 +751,12 @@ function processObjectFields(value, bodyKey, sortedBodyKeys) {
     } else if (isBytes(v)) {
       const buffer = toBuffer(v)
       binaryFields.push({ key: k, buffer })
+    } else if (Array.isArray(v) && v.length === 0) {
+      // Empty array - include the key so Erlang knows it exists
+      fieldLines.push(`${k}: `)
+    } else if (isPojo(v) && Object.keys(v).length === 0) {
+      // Empty object - include the key so Erlang knows it exists
+      fieldLines.push(`${k}: `)
     } else if (Array.isArray(v) && v.length > 0) {
       const childPath = `${bodyKey}/${k}`
       if (!sortedBodyKeys.includes(childPath)) {

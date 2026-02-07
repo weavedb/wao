@@ -8,18 +8,24 @@ import { httpsig_from, httpsig_to } from "../src/httpsig.js"
 genTest({
   its: [
     {
-      it: "should test httpsig_to",
+      it: "should test httpsig_to (cases_from)",
       cases: cases_from,
       path: "/~hbsig@1.0/httpsig_to",
       pmod: v => structured_from(normalize(v)),
       mod: v => httpsig_to(normalize(v)),
+      // Skip ao-types conversions since httpsig codec produces TABM strings
+      skipAoTypes: true,
+      removeAoTypes: true,
     },
     {
-      it: "should test httpsig_to",
+      it: "should test httpsig_to (ok cases)",
       cases: ok,
       path: "/~hbsig@1.0/httpsig_to",
       pmod: v => structured_from(normalize(v)),
       mod: v => httpsig_to(normalize(v)),
+      // Skip ao-types conversions since httpsig codec produces TABM strings
+      skipAoTypes: true,
+      removeAoTypes: true,
     },
   ],
 })

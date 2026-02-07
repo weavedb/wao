@@ -26,7 +26,7 @@ export function decodeSigInput(signatureInput, signatureName = null) {
       // Extract from signature name to the next signature (if any) or end
       const nextSigMatch = signatureInput
         .substring(startIndex + signatureName.length)
-        .match(/,\s*[a-zA-Z0-9-]+=/)
+        .match(/,\s*[a-zA-Z0-9_-]+=/)
       const endIndex = nextSigMatch
         ? startIndex + signatureName.length + nextSigMatch.index
         : signatureInput.length
@@ -38,13 +38,13 @@ export function decodeSigInput(signatureInput, signatureName = null) {
     const signatures = {}
 
     // Split by signature entries (handle multiple signatures)
-    const entries = inputToDecode.split(/,(?=\s*[a-zA-Z0-9-]+=)/)
+    const entries = inputToDecode.split(/,(?=\s*[a-zA-Z0-9_-]+=)/)
 
     for (const entry of entries) {
       const trimmedEntry = entry.trim()
 
       // Match signature-name=(components);params format
-      const match = trimmedEntry.match(/^([a-zA-Z0-9-]+)=\(([^)]*)\)(.*)$/)
+      const match = trimmedEntry.match(/^([a-zA-Z0-9_-]+)=\(([^)]*)\)(.*)$/)
       if (!match) {
         continue
       }
@@ -126,15 +126,33 @@ export function extractPubKey(headers, signatureName) {
   if (!decoded) return null
 
   // If we decoded a specific signature, use its keyid
-  const keyid =
-    signatureName && decoded.params
-      ? decoded.params.keyid
-      : Object.values(decoded)[0]?.params?.keyid
+  // When no specific signatureName, prefer RSA signature over HMAC
+  // (HMAC keyid is "constant:ao" which is not a real public key)
+  let keyid = null
+  if (signatureName && decoded.params) {
+    keyid = decoded.params.keyid
+  } else {
+    const entries = Object.values(decoded)
+    const rsaEntry = entries.find(e => e.params?.alg?.startsWith("rsa-"))
+    keyid = rsaEntry?.params?.keyid || entries[0]?.params?.keyid
+  }
 
   if (!keyid) return null
 
   try {
-    return base64url.toBuffer(keyid)
+    // Strip scheme prefix if present (e.g., "publickey:base64data" -> "base64data")
+    let keyidToDecode = keyid
+    if (keyid.includes(":")) {
+      const colonIndex = keyid.indexOf(":")
+      keyidToDecode = keyid.substring(colonIndex + 1)
+    }
+    // Handle both base64url and standard base64 encoding
+    // Standard base64 uses +/ while base64url uses -_
+    if (keyidToDecode.includes("+") || keyidToDecode.includes("/")) {
+      // Standard base64 - convert to buffer directly
+      return Buffer.from(keyidToDecode, "base64")
+    }
+    return base64url.toBuffer(keyidToDecode)
   } catch (error) {
     return null
   }

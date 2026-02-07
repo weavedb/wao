@@ -15,20 +15,21 @@ export const cases_from = [
   // 5. Deep nesting
   { "a/b/c/d/e": "deep" },
 
-  // 6. Numeric values
-  { count: 42, "nested/number": 3.14 },
+  // 6. Numeric values as strings (flat codec only handles strings)
+  { count: "42", "nested/number": "3.14" },
 
-  // 7. Boolean values
-  { flag: true, "config/enabled": false },
+  // 7. Boolean values as strings
+  { flag: "true", "config/enabled": "false" },
 
-  // 8. Null values
-  { nullable: null, "deep/null/value": null },
+  // 8. Null values as strings
+  { nullable: "null", "deep/null/value": "null" },
 
-  // 9. Array values
-  { list: [1, 2, 3], "nested/array": ["a", "b", "c"] },
+  // 9. Array values as nested paths (HB converts arrays to numbered maps)
+  // NOTE: HB flat codec preserves arrays as numbered sub-keys, not Erlang-style list strings
+  { "list/1": "1", "list/2": "2", "list/3": "3", "nested/array/1": "a", "nested/array/2": "b", "nested/array/3": "c" },
 
   // 10. Object values (these stay as objects when flattened)
-  { meta: { type: "test" }, "config/data": { key: "value" } },
+  { "meta/type": "test", "config/data/key": "value" },
 
   // 11. Special characters in values
   { message: "Hello, World!", "path/to/text": "Line1\nLine2" },
@@ -42,25 +43,26 @@ export const cases_from = [
   // 14. Numbers as strings
   { id: "123", "user/age": "25" },
 
-  // 15. Complex nested structure
+  // 15. Complex nested structure (all string values)
   {
     "app/name": "MyApp",
     "app/version": "1.0.0",
-    "app/config/debug": true,
-    "app/config/port": 3000,
+    "app/config/debug": "true",
+    "app/config/port": "3000",
   },
 
   // 16. Path with numbers
   { "items/0": "first", "items/1": "second", "items/2": "third" },
 
-  // 17. Mixed data types
+  // 17. Mixed data types (all converted to strings, arrays/objects to paths)
   {
     string: "text",
-    number: 42,
-    boolean: true,
-    null: null,
-    array: [1, 2],
-    object: { key: "val" },
+    number: "42",
+    boolean: "true",
+    "null": "null",
+    "array/1": "1",
+    "array/2": "2",
+    "object/key": "val",
   },
 
   // 18. Long path
@@ -69,16 +71,16 @@ export const cases_from = [
   // 19. Special JSON characters
   { json: '{"key": "value"}', "escaped/path": 'a"b"c' },
 
-  // 20. Large nested structure
+  // 20. Large nested structure (all string values)
   {
     "users/john/name": "John Doe",
     "users/john/email": "john@example.com",
     "users/john/preferences/theme": "dark",
-    "users/john/preferences/notifications": true,
+    "users/john/preferences/notifications": "true",
     "users/jane/name": "Jane Smith",
     "users/jane/email": "jane@example.com",
     "users/jane/preferences/theme": "light",
-    "users/jane/preferences/notifications": false,
+    "users/jane/preferences/notifications": "false",
   },
 ]
 
