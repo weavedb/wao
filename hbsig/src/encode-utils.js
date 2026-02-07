@@ -94,6 +94,8 @@ export function getValueByPath(obj, path) {
 }
 
 // Get the ao-type for a value
+// Note: dev_codec_structured.erl only supports: integer, float, atom, list, map
+// Do NOT use empty-binary, empty-list, empty-message as they cause binary_to_existing_atom errors
 export function getAoType(value) {
   if (
     typeof value === "boolean" ||
@@ -105,15 +107,19 @@ export function getAoType(value) {
   } else if (typeof value === "number") {
     return Number.isInteger(value) ? "integer" : "float"
   } else if (typeof value === "string" && value.length === 0) {
-    return "empty-binary"
+    // Empty strings become empty binaries naturally - no type annotation needed
+    return null
   } else if (isBytes(value) && (value.length === 0 || value.byteLength === 0)) {
-    return "empty-binary"
+    // Empty buffers become empty binaries naturally - no type annotation needed
+    return null
   } else if (Array.isArray(value) && value.length === 0) {
-    return "empty-list"
+    // Use "list" for empty arrays (structured codec compatible)
+    return "list"
   } else if (Array.isArray(value)) {
     return "list"
   } else if (isPojo(value) && Object.keys(value).length === 0) {
-    return "empty-message"
+    // Use "map" for empty objects (structured codec compatible)
+    return "map"
   }
   return null
 }
