@@ -41,7 +41,6 @@ export async function send(signedMsg, fetchImpl = fetch) {
   ) {
     fetchOptions.body = signedMsg.body
   }
-
   const response = await fetchImpl(signedMsg.url, fetchOptions)
   if (response.status >= 400) {
     throw new Error(`${response.status}: ${await response.text()}`)
@@ -54,7 +53,9 @@ export const httpSigName = address => {
   const hexString = [...decoded.subarray(1, 9)]
     .map(byte => byte.toString(16).padStart(2, "0"))
     .join("")
-  return `http-sig-${hexString}`
+  // Use 'comm-' prefix to match HyperBEAM's siginfo_to_commitments pattern
+  // (it strips <<"comm-", Rest/binary>> before parsing structured fields)
+  return `comm-${hexString}`
 }
 
 const toView = value => {
@@ -80,11 +81,15 @@ export const toHttpSigner = signer => {
       const { publicKey, alg = "rsa-pss-sha512" } = injected
 
       const publicKeyBuffer = toView(publicKey)
+      // Use standard base64 encoding for keyid to be compatible with HyperBEAM's
+      // base64:decode in dev_codec_httpsig_keyid:apply_scheme
+      // Include "publickey:" prefix so HyperBEAM knows the key scheme
+      const keyidBase64 = `publickey:${publicKeyBuffer.toString("base64")}`
 
       const signingParameters = createSigningParameters({
         params,
         paramValues: {
-          keyid: base64url.encode(publicKeyBuffer),
+          keyid: keyidBase64,
           alg,
         },
       })

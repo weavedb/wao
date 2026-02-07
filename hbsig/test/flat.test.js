@@ -10,12 +10,18 @@ genTest({
       cases: cases_from,
       path: "/~hbsig@1.0/flat_from",
       mod: v => flat_from(normalize(v)),
+      // Skip ao-types processing and remove ao-types field for flat codec
+      skipAoTypes: true,
+      removeAoTypes: true,
     },
     {
       it: "should test flat_to",
       cases: cases_to,
       path: "/~hbsig@1.0/flat_to",
       mod: v => flat_to(normalize(v)),
+      // Skip ao-types processing and remove ao-types field for flat codec
+      skipAoTypes: true,
+      removeAoTypes: true,
     },
   ],
 })

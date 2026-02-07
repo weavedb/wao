@@ -29,7 +29,9 @@ describe("Hyperbeam Device", function () {
         ).body
       ).version
     )
-    const cast = await hb.getJSON({
+    // Use get() instead of getJSON() for cast - the response is plain text "OK"
+    // not a structured multipart message, so structured_to() won't have a body field
+    const cast = await hb.get({
       path: "/~relay@1.0/cast",
       "relay-path": "http://localhost:6359",
     })
