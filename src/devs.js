@@ -5,6 +5,7 @@ export default {
   flat: { name: "flat@1.0", module: "dev_codec_flat" },
   httpsig: { name: "httpsig@1.0", module: "dev_codec_httpsig" },
   structured: { name: "structured@1.0", module: "dev_codec_structured" },
+  hbsig: { name: "hbsig@1.0", module: "dev_hbsig" },
   wao: { name: "wao@1.0", module: "dev_wao" },
 
   // process

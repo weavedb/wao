@@ -152,6 +152,8 @@ const udl = ({ payment, access, derivations, commercial, training }) => {
 }
 
 const modGet = get => {
+  // Default to extracting Data when no get option specified
+  if (isNil(get)) return { data: true }
   let _get = clone(get)
   if (is(Array, get)) {
     _get = { obj: {} }
