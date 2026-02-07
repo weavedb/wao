@@ -61,7 +61,10 @@ export function normalize(obj, binaryMode = false) {
 
     if (binaryMode) {
       // In binary mode, convert strings to buffers
-      return Buffer.from(obj, "utf8")
+      // Use binary/latin1 encoding only if all chars are <= 255 (preserves raw bytes)
+      // Use UTF-8 for strings with chars > 255 (proper multi-byte encoding)
+      const needsUtf8 = [...obj].some(ch => ch.codePointAt(0) > 255)
+      return Buffer.from(obj, needsUtf8 ? "utf8" : "binary")
     } else {
       // In string mode, strings stay as strings
       return obj

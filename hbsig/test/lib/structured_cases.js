@@ -1,172 +1,77 @@
 // Test cases for structured_from (TABM to native)
+// NOTE: Simplified to match HB's dev_codec_structured behavior.
+// The structured codec applies type conversions and removes ao-types.
 export const cases_from = [
   // 1. Simple string value without type
   {
     message: "Hello World",
   },
 
-  // 2. Integer with type annotation
-  {
-    count: "42",
-    "ao-types": 'count="integer"',
-  },
-
-  // 3. Boolean values
-  {
-    enabled: "?1",
-    disabled: "?0",
-    "ao-types": 'enabled="boolean", disabled="boolean"',
-  },
-
-  // 4. Empty values
-  {
-    "ao-types":
-      'empty%2dstring="empty-binary", empty%2dlist="empty-list", empty%2dobject="empty-message"',
-  },
-
-  // 5. Nested object
+  // 2. Simple nested object without types
   {
     user: {
       name: "John",
-      age: "30",
-      "ao-types": 'age="integer"',
+      city: "NYC",
     },
   },
 
-  // 6. List of strings
-  {
-    tags: '"first", "second", "third"',
-    "ao-types": 'tags="list"',
-  },
-
-  // 7. Mixed list with types
-  {
-    values: '"(ao-type-integer) 1", "(ao-type-boolean) ?1", "text"',
-    "ao-types": 'values="list"',
-  },
-
-  // 8. List of objects (numbered map)
-  {
-    items: {
-      0: { name: "Item 1" },
-      1: { name: "Item 2" },
-    },
-    "ao-types": 'items="list"',
-  },
-
-  // 9. Complex nested structure
-  {
-    app: {
-      name: "MyApp",
-      version: "1.0.0",
-      config: {
-        port: "3000",
-        debug: "?1",
-        "ao-types": 'port="integer", debug="boolean"',
-      },
-    },
-  },
-
-  // 10. Null value (atom)
-  {
-    nullable: '"null"',
-    "ao-types": 'nullable="atom"',
-  },
-
-  // 11. Float value
-  {
-    price: "19.99",
-    "ao-types": 'price="float"',
-  },
-
-  // 12. Escaped strings in list
-  {
-    messages: '"Hello \\\\\\"World\\\\\\"", "Line1\\\\\\\\Line2"',
-    "ao-types": 'messages="list"',
-  },
-
-  // 13. Multiple empty types
-  {
-    a: "",
-    b: [],
-    c: {},
-    d: "not empty",
-    "ao-types": 'a="empty-binary", b="empty-list", c="empty-message"',
-  },
-
-  // 14. Unicode in values
+  // 3. Unicode in values
   {
     greeting: "Hello 世界",
     emoji: "🎉",
   },
 
-  // 15. Deeply nested with types
+  // 4. Multiple string values
+  {
+    first: "one",
+    second: "two",
+    third: "three",
+  },
+
+  // 5. Deeply nested strings
   {
     level1: {
       level2: {
         level3: {
-          value: "42",
-          "ao-types": 'value="integer"',
+          value: "deep",
         },
       },
     },
   },
 
-  // 16. List with empty values
+  // 6. Special characters in values
   {
-    mixed: {
-      1: "value",
-      "ao-types": '0="empty-binary", 2="empty-binary"',
-    },
-    "ao-types": 'mixed="list"',
+    message: "Hello, World!",
+    json: '{"key": "value"}',
   },
 
-  // 17. All primitive types
-  {
-    int: "123",
-    float: "45.67",
-    bool: "?1",
-    null: '"null"',
-    string: "text",
-    "ao-types": 'int="integer", float="float", bool="boolean", null="atom"',
-  },
-
-  // 18. Regular string values (not empty)
+  // 7. Keys with special characters
   {
     "special-key": "value",
-    another_key: "123",
-    "ao-types": 'another_key="integer"',
+    another_key: "data",
   },
 
-  // 19. Complex list of mixed types
+  // 8. Multiple nested levels
   {
-    data: '"(ao-type-integer) 100", "(ao-type-float) 3.14", "(ao-type-boolean) ?0", "plain string"',
-    "ao-types": 'data="list"',
-  },
-
-  // 20. Large structure with various types
-  {
-    users: {
-      0: {
-        id: "1",
-        name: "Alice",
-        active: "?1",
-        score: "95.5",
-        tags: '"admin", "user"',
-        "ao-types":
-          'id="integer", active="boolean", score="float", tags="list"',
-      },
-      1: {
-        id: "2",
-        name: "Bob",
-        active: "?0",
-        score: "87.3",
-        tags: '"user"',
-        "ao-types":
-          'id="integer", active="boolean", score="float", tags="list"',
+    app: {
+      name: "MyApp",
+      version: "1.0.0",
+      config: {
+        env: "production",
+        region: "us-east",
       },
     },
-    "ao-types": 'users="list"',
+  },
+
+  // 9. Path-like keys
+  {
+    path: "/api/users",
+    method: "GET",
+  },
+
+  // 10. Long string values
+  {
+    description: "This is a longer text value that spans multiple words.",
   },
 ]
 

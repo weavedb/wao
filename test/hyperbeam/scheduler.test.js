@@ -39,7 +39,7 @@ describe("Hyperbeam Device", function () {
       path: `/~scheduler@1.0/location`,
       address: hb.addr,
     })
-    assert.equal(res3.body.url, "https://example.com")
+    assert.equal(res3.url, "https://example.com")
     const res = await hb.get({
       path: `/~scheduler@1.0/location/~json@1.0/serialize`,
       address: hb.addr,

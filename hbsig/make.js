@@ -9,6 +9,17 @@ delete json.type
 delete json.scripts
 json.main = "cjs/index.js"
 json.module = "esm/index.js"
+// Fix exports paths for dist package (remove dist/ prefix)
+json.exports = {
+  ".": {
+    "require": "./cjs/index.js",
+    "import": "./esm/index.js"
+  },
+  "./nocrypto": {
+    "require": "./cjs/nocrypto.js",
+    "import": "./esm/nocrypto.js"
+  }
+}
 json.bin = {
   wao: "./cjs/cli.js",
   "wao-esm": "./esm/cli.js",
