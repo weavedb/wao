@@ -34,7 +34,7 @@ Now you can execute the functions using the WAO `HB` class.
 ```js
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM } from "wao"
+import { HyperBEAM } from "wao/test"
 
 const cwd = "../HyperBEAM" // HyperBEAM directory
 
@@ -46,7 +46,7 @@ describe("Hyperbeam Legacynet", function () {
   beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 
-  it("should query a custome device", async () => {
+  it("should query a custom device", async () => {
     const { version } = await hb.g("/~foo@1.0/info")
 	assert.equal("1.0", version)
   })
@@ -82,6 +82,7 @@ Now you can spawn a process by specifying `execution-device`.
 ```js
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
+import { HyperBEAM } from "wao/test"
 
 const cwd = "../HyperBEAM" // HyperBEAM directory
 
@@ -94,7 +95,7 @@ describe("Hyperbeam Legacynet", function () {
   after(async () => hbeam.kill())
 
   it("should query a custom device", async () => {
-    const { pid } = await hb.spawn({"excecution-device": "foo@1.0"})
+    const { pid } = await hb.spawn({"execution-device": "foo@1.0"})
     const { slot, res } = await hb.message({ pid })
   })
 })
