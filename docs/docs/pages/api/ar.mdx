@@ -59,10 +59,26 @@ const addr = await ar.toAddr(jwk)
 
 ### mine
 
-Mine pending blocks (only for arlocal).
+Mine pending blocks (ArLocal only).
 
 ```js
 await ar.mine()
+```
+
+### mint
+
+Mint AR on ArLocal. Returns the new balance string.
+
+```js
+const balance = await ar.mint(addr, amount) // amount defaults to "1.0"
+```
+
+### isArConnect
+
+Returns `true` if the wallet is an ArConnect browser wallet.
+
+```js
+const isWallet = ar.isArConnect()
 ```
 
 ### balance | toAR | toWinston
@@ -81,13 +97,13 @@ const balance_AR3 = await ar.balance(addr) // specify wallet address
 Transfer AR token. `amount` is in AR, not in winston for simplicity.
 
 ```js
-const { id } = await ar.transfer(amount, to)
+const { res, err, id } = await ar.transfer(amount, to)
 ```
 
 You can set a jwk to the 3rd parameter as a sender. Otherwise, the sender is `ar.jwk`.
 
 ```js
-const { id } = await ar.transfer(amount, to, jwk)
+const { res, err, id } = await ar.transfer(amount, to, jwk)
 ```
 
 For most write functions, `jwk` can be specified as the last parameter or a field like `{ data, tags, jwk }`.
@@ -150,13 +166,21 @@ const data = await ar.data(txid, true) // true if string
 Bundle ANS-104 dataitems.
 
 ```js
-const { err, id } = await ar.bundle(dataitems)
+const { err, items, tx, id } = await ar.bundle(dataitems)
 ```
 `dataitems` are `[ [ data, tags ], [ data, tags ], [ data, tags ] ]`.
 ```js
-const { err, id } = await ar.bundle([
+const { err, items, tx, id } = await ar.bundle([
   [ "this is text", { "Content-Type": "text/plain" }],
   [ "# this is markdown", { "Content-Type": "text/markdown" }],
   [ png_image, { "Content-Type": "image/png" }]
 ])
+```
+
+### postTx
+
+Sign and post a pre-built transaction. Returns `{ res, err, id }`.
+
+```js
+const { res, err, id } = await ar.postTx(tx, jwk)
 ```
