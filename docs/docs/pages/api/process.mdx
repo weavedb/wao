@@ -26,7 +26,7 @@ const { mid, res, out, err } = await p.msg(
 )
 ```
 
-The default third argument is `{ get: false }` to return the text `Data`.
+When no `get` is specified (defaults to `{ get: false }`), `out` in the return is the raw `Data` field as text (not JSON-parsed).
 
 ```js
 const { mid, out } = await p.msg("Action", { Tag1: "value1", Tag2: "value2" })
@@ -41,13 +41,13 @@ const { mid, out } = await p.msg("Action", { Tag1: "value1" }, "TagA")
 is equivalent to
 
 ```js
-const { mid, out } = await p.msg("Action", { Tag1: "value1" }, "TagA") 
+const { mid, out } = await p.msg("Action", { Tag1: "value1" }, { get: "TagA" })
 ```
 
 You can omit the second argument if there is no tag to pass to.
 
 ```js
-const { mid, out } = await p.msg("Action", { check: "success!" }}
+const { mid, out } = await p.msg("Action", { check: "success!" })
 ```
 
 ## m
@@ -105,4 +105,12 @@ To disable the auto JSON conversion and enable pretty print, use the 2nd and the
 
 ```js
 const table = await p.v("Table", false, true)
+```
+
+## load
+
+Load and eval a Lua source script on the process.
+
+```js
+const { err, res, mid } = await p.load({ src, fills })
 ```

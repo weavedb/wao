@@ -45,13 +45,15 @@ hbeam.kill()
 | Name | Default | Description |
 |------|---------|-------------|
 | `port` | `10001` | Port number for the HyperBEAM node |
-| `cwd` | `../HyperBEAM` | node directory relative to current working directory |
+| `cu_port` | `6363` | Genesis-wasm CU server port |
+| `cwd` | `"./HyperBEAM"` (or `CWD` env var) | node directory relative to current working directory |
 | `wallet` | `.wallet.json` | node operator jwk location relative to cwd |
 | `reset` | `false` | clear storage to start fresh |
 | `bundler` | - | bundler service port |
 | `gateway` | - | gateway service port |
 | `logs` | `true` | set `false` to disable HyperBEAM logs |
 | `shell` | `true` | `false` to not auto-start `rebar3 shell` |
+| `rebar3` | `true` | use `rebar3 shell` (`true`) or direct `erl` (`false`) |
 | `as` | `[]` | `rocksdb`, `genesis_wasm`, `http3` |
 | `devices` | - | array of preloaded devices, `undefined` to load everything |
 | `faff` | - | array of addresses (likely for funding/faucet) |
@@ -59,6 +61,13 @@ hbeam.kill()
 | `simple_pay_price` | - | base price for transactions |
 | `p4_lua` | - | `{ processor: pid, client: cid }` |
 | `operator` | - | payment operator address |
+| `genesis_wasm` | `false` | start a genesis-wasm CU alongside HyperBEAM |
+| `arweave_gateway` | - | custom Arweave gateway URL (e.g. Cloudflare proxy) |
+| `store_prefix` | - | custom store prefix (randomized if set) |
+| `bundler_ans104` | - | ANS-104 bundler port |
+| `bundler_httpsig` | - | HTTPSig bundler URL |
+| `c` | - | GCC version for compilation (sets CC/CXX) |
+| `cmake` | - | CMAKE_POLICY_VERSION_MINIMUM value |
 
 ## Environment Variables
 
@@ -81,6 +90,7 @@ CMAKE_POLICY_VERSION_MINIMUM=3.5
 | `flat` | `flat@1.0` | `dev_codec_flat` |
 | `httpsig` | `httpsig@1.0` | `dev_codec_httpsig` |
 | `structured` | `structured@1.0` | `dev_codec_structured` |
+| `hbsig` | `hbsig@1.0` | `dev_hbsig` |
 | `process` | `process@1.0` | `dev_process` |
 | `message` | `message@1.0` | `dev_message` |
 | `scheduler` | `scheduler@1.0` | `dev_scheduler` |
@@ -160,9 +170,8 @@ import HyperBEAM from "../../src/hyperbeam.js"
 describe("Hyperbeam Eunit", function () {
   let hbeam
   before(async () => {
-    hbeam = new HyperBEAM({ reset: true, shell: false }))
+    hbeam = new HyperBEAM({ reset: true, shell: false })
   })
-  beforeEach(async () => (hb = hbeam.hb))
   
   it("should run a single module test", async () => {
 	await hbeam.eunit("dev_message")
@@ -180,7 +189,7 @@ describe("Hyperbeam Eunit", function () {
 	await hbeam.eunit([
 	  "dev_message:verify_test", 
 	  "dev_process:persistent_process_test"
-    )
+    ])
   })
 })
 ```
