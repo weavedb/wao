@@ -132,16 +132,66 @@ const address = toAddr(jwk.n) // toAddr(jwk) works too
 ```
 
 
+## Additional Exports
+
+### result
+
+Process an HTTP response to extract the decoded message.
+
+```js
+import { result } from "hbsig"
+
+const decoded = await result(response)
+```
+
+### extractPubKey
+
+Extract the public key from signed message headers.
+
+```js
+import { extractPubKey } from "hbsig"
+
+const pubKey = extractPubKey(signed)
+```
+
+### decodeSigInput
+
+Decode the `signature-input` header into components and params.
+
+```js
+import { decodeSigInput } from "hbsig"
+
+const { components, params } = decodeSigInput(signatureInput)
+```
+
+### signer
+
+Lower-level signer factory.
+
+```js
+import { signer } from "hbsig"
+
+const sign = signer({ jwk, url, signPath })
+```
+
+## Browser / No-Crypto Export
+
+`hbsig` also exports a `nocrypto` subpath for browser environments, providing a subset without crypto-heavy dependencies.
+
+```js
+import { id, hashpath, rsaid, hmacid, extractPubKey, structured_to, httpsig_from } from "hbsig/nocrypto"
+```
+
 ## Codecs
 
 `hbsig` internally handles many different representations of the same object using multiple codecs from HyperBEAM (`flat` `structured` `httpsig`) and 2 added codecs to achieve seamless data exchange between JS and Erlang (`erljson` `erlstr`).
 
 ### hbsig@1.0 Device
 
-`hbsig` comes with an accompanying device ([hbsig@1.0](https://github.com/weavedb/HyperBEAM/blob/d1201e9a3b32627a84dcbb64f3647d57aa54d33f/src/dev_hbsig.erl)) on HyperBEAM to validate various encoding strategies.
+`hbsig` comes with an accompanying device (`hbsig@1.0` / `dev_hbsig`) on HyperBEAM to validate various encoding strategies.
 
 ```bash
-git clone https://github.com/weavedb/wao.git && cd wao
+git clone https://github.com/ArweaveOasis/wao.git && cd wao
 git submodule update --init --recursive
 ```
 
@@ -194,7 +244,7 @@ import { httpsig_from, httpsig_to } from "hbsig"
 
 ### Example Test
 
-You can find comprehensive encoding tests [here](https://github.com/weavedb/wao/tree/master/hbsig/test).
+You can find comprehensive encoding tests [here](https://github.com/ArweaveOasis/wao/tree/master/hbsig/test).
 
 ```js
 import { structured_from, structured_to } from "../src/structured.js"
@@ -226,7 +276,7 @@ describe(desc, function () {
 })
 ```
 
-To run all tests, you need to clone [wao](https://github.com/weavedb/HyperBEAM/tree/wao) branch of HyperBEAM, [compile it](https://hyperbeam.ar.io/run/running-a-hyperbeam-node.html), add `.wallet.json`, and set [CWD](/api/hyperbeam#environment-variables) in `.env.hyperbeam`.
+To run all tests, you need to install [HyperBEAM](https://hyperbeam.ar.io/run/running-a-hyperbeam-node.html), compile it, add `.wallet.json`, and set [CWD](/api/hyperbeam#environment-variables) in `.env.hyperbeam`.
 
 ```bash
 yarn test-all
