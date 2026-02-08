@@ -14,20 +14,21 @@ WAO also ships the **WAO SDK** — an extension of `aoconnect` with syntactic su
 
 ## Start Building
 
-### Tutorials
-Step-by-step guides to get up and running.
+### AOS
 - [Legacynet AOS →](https://docs.wao.eco/tutorials/legacynet)
+- [Legacynet AOS on HyperBEAM →](https://docs.wao.eco/tutorials/legacynet-aos)
+- [Mainnet AOS →](https://docs.wao.eco/tutorials/mainnet-aos)
+- HyperAOS — Coming soon
+
+### HyperBEAM
 - [HyperBEAM →](https://docs.wao.eco/tutorials/hb)
 - [Custom Devices (Erlang / Rust / C++) →](https://docs.wao.eco/tutorials/creating-devices)
-
-### The HyperBEAM Book
-Comprehensive guide from zero to building custom devices — covers Erlang, the full codebase, and hands-on tutorials.
-- [Read the book →](https://docs.wao.eco/book)
+- [The HyperBEAM Book →](https://docs.wao.eco/book) — From zero to building custom devices
+- [Decoding HyperBEAM →](https://docs.wao.eco/hyperbeam/decoding-from-scratch) — Deep-dive series into internals
 
 ### Reference
 - [WAO SDK API →](https://docs.wao.eco/api/overview)
 - [HyperBEAM API (139 modules) →](https://docs.wao.eco/hyperbeam)
-- [Decoding HyperBEAM →](https://docs.wao.eco/hyperbeam/decoding-from-scratch) — Deep-dive series into HyperBEAM internals
 
 ---
 
