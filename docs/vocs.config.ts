@@ -154,8 +154,7 @@ export default defineConfig({
   topNav: [
     { text: "Get Started", link: "/getting-started" },
     { text: "HyperBEAM", link: "/book" },
-    { text: "Mobile", link: "/mobile" },
-    { text: "SDK", link: "/api/ao" },
+    { text: "SDK", link: "/api/overview" },
   ],
   socials: [
     {
@@ -442,6 +441,10 @@ export default defineConfig({
       text: "WAO SDK",
       collapsed: true,
       items: [
+        {
+          text: "Overview",
+          link: "/api/overview",
+        },
         {
           text: "AO",
           link: "/api/ao",
