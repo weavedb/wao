@@ -19,7 +19,6 @@ Step-by-step guides to get up and running.
 - [Legacynet AOS →](https://docs.wao.eco/tutorials/legacynet)
 - [HyperBEAM →](https://docs.wao.eco/tutorials/hb)
 - [Custom Devices (Erlang / Rust / C++) →](https://docs.wao.eco/tutorials/creating-devices)
-- [Running LLMs on AOS →](https://docs.wao.eco/tutorials/running-llms)
 
 ### The HyperBEAM Book
 Comprehensive guide from zero to building custom devices — covers Erlang, the full codebase, and hands-on tutorials.
@@ -36,3 +35,4 @@ Comprehensive guide from zero to building custom devices — covers Erlang, the 
 Active experiments from the lab — usable but still evolving.
 - [AO in the Browser →](https://docs.wao.eco/web) — Full AO units running in your browser at [preview.wao.eco](https://preview.wao.eco)
 - [HyperBEAM on Mobile →](https://docs.wao.eco/mobile) — Run a HyperBEAM node on Android / iOS
+- [Running LLMs on AOS →](https://docs.wao.eco/tutorials/running-llms) — Run AI models on AO processes
