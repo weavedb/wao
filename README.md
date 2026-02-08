@@ -17,8 +17,8 @@ WAO also ships the **WAO SDK** — an extension of `aoconnect` with syntactic su
 ### AOS
 - [Legacynet AOS →](https://docs.wao.eco/tutorials/legacynet)
 - [Legacynet AOS on HyperBEAM →](https://docs.wao.eco/tutorials/legacynet-aos)
-- [Mainnet AOS →](https://docs.wao.eco/tutorials/mainnet-aos)
-- HyperAOS — Coming soon
+- [Mainnet AOS (WASM Device) →](https://docs.wao.eco/tutorials/mainnet-aos)
+- HyperAOS (Lua Device) — Coming soon
 
 ### HyperBEAM
 - [HyperBEAM →](https://docs.wao.eco/tutorials/hb)
