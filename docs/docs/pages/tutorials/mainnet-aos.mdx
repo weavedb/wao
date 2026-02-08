@@ -3,7 +3,7 @@
 To test mainnet aos processes with WAO, you currently need the WAO HyperBEAM fork.
 
 ```js
-git clone --branch wao https://github.com/weavedb/HyperBEAM.git
+git clone https://github.com/ArweaveOasis/wao.git
 ```
 
 Mainnet AOS requires `stack@1.0` device with `wasi@1.0`, `json-iface@1.0`, `wasm-64@1.0`, and `multipass@1.0`. The required http header tags look like the following.
@@ -46,11 +46,11 @@ Dryruns are disabled on mainnet AOS processes.
 ```js
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM } from "wao"
+import { HyperBEAM } from "wao/test"
 
 const cwd = "../HyperBEAM" // HyperBEAM directory
 
-const data = `
+const src_data = `
 local count = 0
 Handlers.add("Add", "Add", function (msg)
   count = count + tonumber(msg.Plus)
@@ -60,7 +60,7 @@ Handlers.add("Get", "Get", function (msg)
   msg.reply({ Data = tostring(count) })
 end)`
 
-describe("Hyperbeam Legacynet", function () {
+describe("Hyperbeam Mainnet", function () {
   let hbeam, hb
   before(async () => {
     hbeam = await new HyperBEAM({ cwd, reset: true }).ready()

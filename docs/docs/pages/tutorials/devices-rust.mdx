@@ -133,7 +133,7 @@ Test the device with WAO:
 
 ```js
 it("should test add@1.0", async () => {
-  const res = await hb.send({ path: "/~add@1.0/add", a: 2, b: 3 })
-  assert.equal(res.headers.get("sum"), "5")
+  const res = await hb.post({ path: "/~add@1.0/add", a: 2, b: 3 })
+  assert.equal(res.out.sum, "5")
 })
 ```
