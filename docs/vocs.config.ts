@@ -177,14 +177,6 @@ export default defineConfig({
       link: "/getting-started",
     },
     {
-      text: "Legacynet AOS",
-      link: "/legacynet",
-    },
-    {
-      text: "HyperBEAM",
-      link: "/hb",
-    },
-    {
       text: "Decoding HyperBEAM",
       collapsed: true,
       items: [
@@ -427,28 +419,22 @@ export default defineConfig({
       collapsed: true,
       items: [
         {
-          text: "Legacynet AOS on HyperBEAM",
-          link: "/tutorials/legacynet-aos",
+          text: "AOS",
+          items: [
+            { text: "Legacynet AOS", link: "/tutorials/legacynet" },
+            { text: "Legacynet on HyperBEAM", link: "/tutorials/legacynet-aos" },
+            { text: "Mainnet AOS", link: "/tutorials/mainnet-aos" },
+            { text: "Running LLMs on AOS", link: "/tutorials/running-llms" },
+          ],
         },
         {
-          text: "Mainnet AOS",
-          link: "/tutorials/mainnet-aos",
-        },
-        {
-          text: "Running LLMs on AOS",
-          link: "/tutorials/running-llms",
-        },
-        {
-          text: "Custom Devices in Erlang",
-          link: "/tutorials/creating-devices",
-        },
-        {
-          text: "Custom Devices in Rust",
-          link: "/tutorials/devices-rust",
-        },
-        {
-          text: "Custom Devices in C++",
-          link: "/tutorials/devices-cpp",
+          text: "HyperBEAM Devices",
+          items: [
+            { text: "HyperBEAM", link: "/tutorials/hb" },
+            { text: "Custom Devices in Erlang", link: "/tutorials/creating-devices" },
+            { text: "Custom Devices in Rust", link: "/tutorials/devices-rust" },
+            { text: "Custom Devices in C++", link: "/tutorials/devices-cpp" },
+          ],
         },
       ],
     },
