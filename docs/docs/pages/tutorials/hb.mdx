@@ -10,7 +10,7 @@ In addition to the WAO SDK, you will need to [install HyperBEAM](https://permawe
 If you want to test Mainnet AOS modules, you need to install the WAO fork of HyperBEAM, which includes a custom helper device for testing.
 
 ```bash
-git clone --branch wao https://github.com/weavedb/HyperBEAM.git
+git clone https://github.com/ArweaveOasis/wao.git
 ```
 
 Make sure you compiled it and are able to run `rebar3 shell`, but you don't need to have it running yet. You might need to add environment variables depending on how you installed it on your system. WAO SDK handles that too.
@@ -207,18 +207,14 @@ You can create your own custom devices in Erlang, Rust, and C++.
 Create your device under `/HyperBEAM/src`.
 
 ```erlang [/HyperBEAM/src/dev_foo.erl]
-const data = `
-local count = 0
-Handlers.add("Inc", "Inc", function (msg)
-  count = count + 1
-  msg.reply({ Data = "Count: "..tostring(count) })
-end)
+-module(dev_foo).
+-export([ info/3 ]).
+-include_lib("eunit/include/eunit.hrl").
+-include("include/hb.hrl").
 
-Handlers.add("Get", "Get", function (msg)
-  msg.reply({ Data = "Count: "..tostring(count) })
-end)`
-``
-`
+info(Msg, _, Opts) ->
+    {ok, hb_ao:set(Msg, #{ <<"version">> => <<"1.0">> }, Opts)}.
+```
 Define it in `preloaded_devices` in `/HyperBEAM/src/hb_opts.erl`
 
 ```erlang [/HyperBEAM/src/hb_opts.erl]
@@ -235,7 +231,7 @@ Test the device with WAO.
 ```js
 import assert from "assert"
 import { describe, it, before, after, beforeEach } from "node:test"
-import { HyperBEAM } from "wao"
+import { HyperBEAM } from "wao/test"
 
 const cwd = "../HyperBEAM" // HyperBEAM directory
 

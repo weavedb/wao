@@ -186,7 +186,7 @@ Test the device with WAO:
 
 ```js
 it("should test mul@1.0", async () => {
-  const res = await hb.send({ path: "/~mul@1.0/mul", a: 4, b: 5 })
-  assert.equal(res.headers.get("product"), "20")
+  const res = await hb.post({ path: "/~mul@1.0/mul", a: 4, b: 5 })
+  assert.equal(res.out.product, "20")
 })
 ```

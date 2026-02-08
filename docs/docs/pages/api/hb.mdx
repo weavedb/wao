@@ -6,7 +6,24 @@
 
 ```js
 import { HB } from "wao"
-const hb = await new HB({ url: "http://localhost:10000" }).init(jwk)
+const hb = await new HB({ url: "http://localhost:10001" }).init(jwk)
+```
+
+### Constructor Parameters
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `url` | `"http://localhost:10001"` | HyperBEAM URL |
+| `cu` | `"http://localhost:6363"` | Compute Unit URL |
+| `jwk` | - | Wallet JWK (can also set via `init`) |
+| `format` | `"httpsig"` | `"httpsig"` or `"ans104"` |
+
+```js
+const hb = await new HB({
+  url: "http://localhost:10001",
+  cu: "http://localhost:6363",
+  format: "httpsig"
+}).init(jwk)
 ```
 
 ## HTTP Requests
@@ -20,7 +37,7 @@ Send a GET request without a signed http message. You can get the decoded data i
 ```js
 const { out, headers, body } = await hb.get({ path, ...params})
 ```
- 
+
 ### post
 
 Send a POST request with a signed http message. `data` will be set to http body with auto-generated `content-digest` and `inline-body-key` in the header.
@@ -43,6 +60,22 @@ A shortcut for `post`.
 
 ```js
 const out = await hb.p( path, params )
+```
+
+### getJSON
+
+GET with automatic JSON parsing.
+
+```js
+const data = await hb.getJSON({ path, ...params })
+```
+
+### postJSON
+
+POST with automatic JSON parsing.
+
+```js
+const data = await hb.postJSON({ path, ...params })
 ```
 
 ## Processes
@@ -87,22 +120,74 @@ Compute up to the latest slot.
 const res = await hb.now({ pid })
 ```
 
+### slot
+
+Get the current slot number/state at a path.
+
+```js
+const state = await hb.slot({ pid, path })
+```
+
 ### messages
 
-Get messages on a process. You can get next messages by `message.next`. 
+Get messages on a process. You can get next messages by `msgs.next`.
 
 ```js
 const msgs = await hb.messages({ pid, from, to })
 for(const item of msgs.edges){
   const { cursor: slot, node: { assignment, message } } = item
 }
-if(msgs.next) const msgs2 = await msg.next()
+if(msgs.next) const msgs2 = await msgs.next()
 ```
 
 - `pid` : a process id
-- `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawed the process. `to` is inclusive. Both are optional. 
+- `from` | `to` : the slot numbers. Messages are marked by integer on HB, not by txid. `0` is the `Type=Process` message that spawned the process. `to` is inclusive. Both are optional.
 
-## Utilities
+### results
+
+Get multiple results from the Compute Unit. `sort` defaults to `"DESC"`.
+
+```js
+const res = await hb.results({ process, limit, sort, from, to })
+```
+
+## Caching
+
+### cacheBinary
+
+Cache binary data (WASM, images) to the HyperBEAM node. Returns the cache ID.
+
+```js
+const cacheId = await hb.cacheBinary(data, type)
+```
+
+### cacheScript
+
+Cache a Lua script. Returns the message ID.
+
+```js
+const msgId = await hb.cacheScript(data, type)
+```
+
+`type` defaults to `"application/lua"`.
+
+### getImage
+
+Fetch and cache the AOS WASM image. Returns the image ID.
+
+```js
+const imageId = await hb.getImage()
+```
+
+### getLua
+
+Fetch and cache the Lua module. Returns the module ID.
+
+```js
+const luaId = await hb.getLua()
+```
+
+## Signing & Sending
 
 ### sign
 
@@ -110,6 +195,14 @@ Sign a message without sending it.
 
 ```js
 const signed_msg = await hb.sign(msg)
+```
+
+### signEncoded
+
+Sign a pre-encoded message object.
+
+```js
+const signed = await hb.signEncoded(encoded)
 ```
 
 ### send
@@ -126,6 +219,25 @@ Sign a message with commitments.
 
 ```js
 const committed_msg = await hb.commit(msg)
+```
+
+## Info
+
+### setInfo
+
+Fetch the operator address and populate `this.operator`, `this.image`, and `this.lua`.
+
+```js
+await hb.setInfo()
+console.log(hb.operator) // operator address
+```
+
+### isArConnect
+
+Check if the wallet is an ArConnect browser wallet.
+
+```js
+const isWallet = hb.isArConnect()
 ```
 
 ## Legacynet AOS
@@ -155,6 +267,14 @@ const res = await hb.computeLegacy({ pid, slot })
 const { Messages, Spawns, Assignments, Output } = res
 ```
 
+### messageLegacy
+
+`messageLegacy` = `scheduleLegacy` + `computeLegacy`. Returns `{ slot, res }`.
+
+```js
+const { slot, res } = await hb.messageLegacy({ tags, data, pid, action })
+```
+
 ### dryrun
 
 `dryrun` is only for legacynet AOS. Mainnet AOS disabled this feature for a performance reason.
@@ -173,7 +293,7 @@ AOS with Lua VM (`lua@5.3a`) instead of Wasm.
 The AOS module is fetched from the Arweave mainnet.
 
 ```js
-const { pid } = await hb.spanw("8DvyaxF8xpHMgPdmpMnhcb1mjY-M8qr2kGxnCpGMb60")
+const { pid } = await hb.spawnLua()
 ```
 
 ### scheduleLua
@@ -202,14 +322,58 @@ const { pid } = await hb.spawnAOS()
 
 ### messageAOS
 
-`messageAOS` = `schedule` + `computeAOS`.
+`messageAOS` = `scheduleAOS` + `computeAOS`. Returns `{ slot, outbox }`.
 
 ```js
-const result = await hb.messageAOS({ pid, action, tags, data })
+const { slot, outbox } = await hb.messageAOS({ pid, action, tags, data })
 ```
 
 ### computeAOS
 
 ```js
 const result = await hb.computeAOS({ pid, slot })
+```
+
+### scheduleAOS
+
+Schedule for mainnet AOS. An alias that sets the `Action` tag.
+
+```js
+const { slot } = await hb.scheduleAOS({ pid, action, tags, data })
+```
+
+## Format-Specific Scheduling
+
+### scheduleFlat
+
+Schedule with the flat codec.
+
+```js
+const { slot, res, pid } = await hb.scheduleFlat({ pid, tags, data })
+```
+
+### scheduleNP
+
+Schedule for the node-process device.
+
+```js
+const { slot, res, pid } = await hb.scheduleNP({ pid, tags, data })
+```
+
+## ANS-104
+
+### post104
+
+POST in ANS-104 bundle format.
+
+```js
+const res = await hb.post104({ path, tags, data, target })
+```
+
+### send104
+
+Send a pre-built ANS-104 item.
+
+```js
+const res = await hb.send104({ path, item })
 ```
