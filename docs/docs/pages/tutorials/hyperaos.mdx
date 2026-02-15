@@ -1,0 +1,343 @@
+# HyperAOS (Lua Device)
+
+HyperAOS runs AOS processes using the `lua@5.3a` execution device on HyperBEAM. Unlike Mainnet AOS which uses WASM, HyperAOS executes Lua directly in an Erlang-native VM (Luerl), making it lightweight and fast.
+
+You write the same Lua handlers as regular AOS — `Handlers.add`, `msg.reply`, `ao.send` all work.
+
+## Install WAO & HyperBEAM
+
+```bash
+yarn add wao
+```
+
+You will also need the WAO HyperBEAM fork:
+
+```bash
+git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git
+cd HyperBEAM && rebar3 compile
+```
+
+## Create a Project
+
+```bash
+npx wao create myapp && cd myapp
+```
+
+Or manually:
+
+```bash
+mkdir myapp && cd myapp && yarn init && yarn add wao
+mkdir test && touch test/hyperaos.test.js
+```
+
+Make sure your `package.json` has the right test config:
+
+```json
+{
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1"
+  }
+}
+```
+
+## Using HB Methods
+
+`spawnLua`, `scheduleLua`, and `computeLua` manage HyperAOS processes at the low level.
+
+```js
+import assert from "assert"
+import { describe, it, before, after, beforeEach } from "node:test"
+import { HyperBEAM } from "wao/test"
+
+const data = `
+local count = 0
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)`
+
+describe("HyperAOS", function () {
+  let hbeam, hb
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+  })
+  beforeEach(async () => (hb = hbeam.hb))
+  after(async () => hbeam.kill())
+
+  it("should run HyperAOS with Lua handlers", async () => {
+    const { pid } = await hb.spawnLua()
+    await hb.scheduleLua({ pid, action: "Eval", data })
+    await hb.scheduleLua({ pid, action: "Inc" })
+    const { slot } = await hb.scheduleLua({ pid, action: "Get" })
+    const { outbox } = await hb.computeLua({ pid, slot })
+    assert.equal(outbox[0].data, "Count: 1")
+
+    await hb.scheduleLua({ pid, action: "Inc" })
+    const { slot: slot2 } = await hb.scheduleLua({ pid, action: "Get" })
+    const { outbox: outbox2 } = await hb.computeLua({ pid, slot: slot2 })
+    assert.equal(outbox2[0].data, "Count: 2")
+  })
+})
+```
+
+## Using WAO SDK
+
+The `AO` class with `mode: "lua"` gives you the full WAO SDK experience — `deploy`, `p.m()`, `p.d()`, and all the syntactic sugar.
+
+```js
+import assert from "assert"
+import { describe, it, before, after } from "node:test"
+import { HyperBEAM } from "wao/test"
+import AO from "wao/ao"
+
+const src_data = `
+local count = 0
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = tostring(count) })
+end)
+
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)`
+
+describe("HyperAOS with WAO SDK", function () {
+  let hbeam, ao
+
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    ao = await new AO({ hb: hbeam.url, mode: "lua" }).init(hbeam.jwk)
+  })
+
+  after(async () => {
+    if (hbeam) hbeam.kill()
+  })
+
+  it("should deploy and interact with counter", async () => {
+    const { p, pid, err } = await ao.deploy({ src_data })
+    assert.ok(!err, `deploy failed: ${err}`)
+    await p.m("Inc")
+    assert.equal(await p.m("Get", false), "1")
+  })
+})
+```
+
+## Token with Mint, Transfer, and Balance
+
+A more complete example — a token contract with state, cross-message tags, and `ao.send`:
+
+```lua
+local balances = {}
+
+Handlers.add("Mint", "Mint", function(msg)
+  local qty = tonumber(msg.Tags.Quantity or msg.Quantity)
+  local from = msg.From
+  balances[from] = (balances[from] or 0) + qty
+  msg.reply({ Data = "Minted" })
+end)
+
+Handlers.add("Transfer", "Transfer", function(msg)
+  local qty = tonumber(msg.Tags.Quantity or msg.Quantity)
+  local from = msg.From
+  if (balances[from] or 0) < qty then
+    msg.reply({ Data = "Insufficient" })
+    return
+  end
+  balances[from] = balances[from] - qty
+  local recipient = msg.Tags.Recipient or msg.Recipient
+  balances[recipient] = (balances[recipient] or 0) + qty
+  ao.send({
+    Target = recipient,
+    Action = "Credit-Notice",
+    Quantity = tostring(qty),
+    Sender = from
+  })
+  msg.reply({ Data = "Transferred" })
+end)
+
+Handlers.add("Balance", "Balance", function(msg)
+  local from = msg.From
+  msg.reply({ Data = tostring(balances[from] or 0) })
+end)
+```
+
+```js
+it("should handle token operations", async () => {
+  const { p, err } = await ao.deploy({ src_data: tokenSrc })
+  assert.ok(!err)
+
+  await p.m("Mint", { Quantity: "100" })
+  assert.equal(await p.m("Balance", false), "100")
+
+  await p.m("Transfer", { Recipient: "some-address", Quantity: "30" })
+  assert.equal(await p.m("Balance", false), "70")
+})
+```
+
+## HB Methods Reference
+
+| Method | Description |
+|---|---|
+| `hb.spawnLua()` | Spawn a HyperAOS process with lua@5.3a |
+| `hb.scheduleLua({ pid, action, data, tags })` | Schedule a message |
+| `hb.computeLua({ pid, slot })` | Compute result at a slot |
+
+### spawnLua
+
+Spawns a new process with the hyper-aos boot module. The boot module provides the full AOS framework: `Handlers`, `msg.reply`, `ao.send`, `ao.id`, etc.
+
+Tags set automatically:
+```
+execution-device: lua@5.3a
+push-device: push@1.0
+patch-from: /results/outbox
+variant: ao.TN.1
+module: <cached hyper-aos boot>
+```
+
+### scheduleLua
+
+Schedules a message to the process. Default action is `"Eval"`.
+
+```js
+// Load Lua source
+await hb.scheduleLua({ pid, action: "Eval", data: luaSource })
+
+// Send a message with action
+await hb.scheduleLua({ pid, action: "Inc" })
+
+// Send with extra tags
+await hb.scheduleLua({ pid, action: "Transfer", tags: { Quantity: "30" } })
+```
+
+### computeLua
+
+Computes the result at a specific slot. Returns an object with `outbox` (array of messages).
+
+```js
+const { outbox } = await hb.computeLua({ pid, slot })
+console.log(outbox[0].data) // message data
+```
+
+The result path is `/{pid}/compute/results` (different from Mainnet AOS which uses `/{pid}/compute/results/outbox`).
+
+## AO SDK with mode: "lua"
+
+Using `AO({ hb: url, mode: "lua" })` routes all operations through HyperAOS automatically:
+
+| AO Method | Routes to |
+|---|---|
+| `ao.deploy()` | `hb.spawnLua()` + `hb.scheduleLua(Eval)` |
+| `ao.msg()` / `p.m()` | `hb.scheduleLua()` + `hb.computeLua()` |
+| `ao.spwn()` | `hb.spawnLua()` |
+
+```js
+const ao = await new AO({ hb: hbeam.url, mode: "lua" }).init(hbeam.jwk)
+const { p } = await ao.deploy({ src_data })
+await p.m("Inc")
+const count = await p.m("Get", false)
+```
+
+## Cross-Process Messaging
+
+HyperAOS supports cross-process messaging via `ao.send` and `push@1.0`. Messages are delivered asynchronously.
+
+For push-delivered messages to be accepted, each process must trust the sender's address. Use `__AddAuthority` to add trust:
+
+```js
+// Deploy two processes
+const { p: tokenP, pid: tokenPid } = await ao.deploy({ src_data: tokenSrc })
+const { p: receiverP, pid: receiverPid } = await ao.deploy({ src_data: receiverSrc })
+
+// Cross-trust so push-delivered messages are accepted
+await receiverP.m("__AddAuthority", { Addr: tokenPid })
+await tokenP.m("__AddAuthority", { Addr: receiverPid })
+
+// Now transfers with ao.send() will be delivered via push
+await tokenP.m("Mint", { Quantity: "100" })
+await tokenP.m("Transfer", { Recipient: receiverPid, Quantity: "30" })
+```
+
+## Comparison with Other Modes
+
+| | Legacynet AOS | Mainnet AOS | HyperAOS |
+|---|---|---|---|
+| **Execution** | WASM (CU) | WASM64 (WAMR) | Lua (Luerl) |
+| **Device** | genesis-wasm@1.0 | stack@1.0 | lua@5.3a |
+| **Device Stack** | External CU | wasi, json-iface, wasm-64, patch, multipass | None (direct) |
+| **Variant** | ao.TN.1 | ao.TN.1 | ao.TN.1 |
+| **Dryruns** | Yes | No | No |
+| **receive()** | Yes | Yes (multipass) | Not implemented |
+| **Config** | `new AO()` | `AO({ hb, mode: "aos" })` | `AO({ hb, mode: "lua" })` |
+| **HB Methods** | spawnLegacy / scheduleLegacy / computeLegacy | spawnAOS / scheduleAOS / computeAOS | spawnLua / scheduleLua / computeLua |
+
+## Remote Deployment
+
+Deploy to remote push nodes for production. The Lua boot module is automatically fetched from Arweave when `wao@1.0` is unavailable:
+
+```js
+import { AO } from "wao"
+import fs from "fs"
+
+const jwk = JSON.parse(fs.readFileSync(".wallet.json", "utf8"))
+const ao = await new AO({
+  hb: "https://push-1.forward.computer",
+  mode: "lua"
+}).init(jwk)
+
+const { p, pid } = await ao.deploy({ src_data })
+console.log("Process ID:", pid)
+
+await p.m("Inc")
+const count = await p.m("Get", false)
+console.log(count) // "1"
+```
+
+:::tip
+Generate a wallet with `npx wao keygen`. Use `push-1` through `push-10` for full compute. The primary `push.forward.computer` is push-only (no compute).
+:::
+
+## Limitations
+
+- **No `receive()`** — `lua@5.3a` lacks multipass in the device stack, so `Send().receive()` returns `"not implemented"`. Use `ao.send()` + `msg.reply()` pattern instead.
+- **No dryruns** — Use `computeLua` at the latest slot instead.
+- **Cross-process is async** — `push@1.0` delivers messages asynchronously. Results may not be immediate.
+- **No `authority` tag in spawn** — Conflicts with HTTP Signatures RFC 9421 `@authority`. The hyper-aos boot module defaults `ao.authorities = {}` to work around this.
+
+## Tag Access in Handlers
+
+In HyperAOS, message tags can appear in different locations depending on how the message was signed. Use a helper to check multiple paths:
+
+```lua
+local function T(msg, name)
+  if msg.Tags and msg.Tags[name] then return msg.Tags[name] end
+  if msg[name] then return msg[name] end
+  if msg.body then
+    local lower = string.lower(name)
+    if msg.body[lower] then return msg.body[lower] end
+    if msg.body[name] then return msg.body[name] end
+  end
+  return nil
+end
+```
+
+Similarly, `msg.From` may not always be set for push-delivered messages. Extract from commitments:
+
+```lua
+local function getFrom(msg)
+  if msg.From then return msg.From end
+  if msg.body and msg.body.commitments then
+    for _, c in pairs(msg.body.commitments) do
+      if type(c) == "table" and c.committer then
+        return c.committer
+      end
+    end
+  end
+  return nil
+end
+```

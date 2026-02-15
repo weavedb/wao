@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wao-dashboard": {
+      "command": "node",
+      "args": [".claude/mcp/dashboard/server.js"]
+    }
+  }
+}

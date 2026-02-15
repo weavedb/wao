@@ -37,7 +37,7 @@ function toANS104Request(fields) {
       .concat([
         { name: "Data-Protocol", value: "ao" },
         { name: "Type", value: fields.Type ?? "Message" },
-        { name: "Variant", value: fields.Variant ?? "ao.N.1" },
+        { name: "Variant", value: fields.Variant ?? "ao.TN.1" },
       ]),
     data: fields?.data || "",
   }

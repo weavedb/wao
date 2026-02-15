@@ -1,0 +1,469 @@
+# Custom WASM64 Modules in Rust
+
+Build a custom WASM64 execution module in Rust and deploy it to HyperBEAM's `wasm-64@1.0` device. This lets you replace the default AOS Lua runtime with your own logic compiled to WASM64.
+
+## Prerequisites
+
+- [Rust nightly](https://rustup.rs/) with `wasm64-unknown-unknown` target
+- WAO HyperBEAM fork (`git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git`)
+- Node.js 22+
+
+Install the nightly toolchain:
+
+```bash
+rustup toolchain install nightly
+```
+
+## How It Works
+
+HyperBEAM's `wasm-64@1.0` device runs WASM modules using [WAMR](https://github.com/aspect-build/aspect/wiki/WAMR) (WebAssembly Micro Runtime). The `json-iface@1.0` device wraps it, passing JSON-encoded messages as C strings to your `handle` function.
+
+Your WASM module must export three functions:
+
+```
+malloc(size) → ptr      -- allocate memory
+free(ptr)    → 0        -- free memory (can be no-op)
+handle(msg_ptr, proc_ptr) → result_ptr  -- process a message
+```
+
+All pointers are 64-bit (`i64`) because this is a **memory64** WASM module.
+
+### The JSON Protocol
+
+`json-iface@1.0` calls `handle` with two null-terminated JSON strings:
+
+- `msg_ptr` — the incoming message (contains `Tags` array with `name`/`value` pairs)
+- `proc_ptr` — the process state
+
+Your `handle` must return a pointer to a null-terminated JSON response:
+
+```json
+{
+  "ok": true,
+  "response": {
+    "Output": { "data": "" },
+    "Messages": [{ "Data": "your output here" }]
+  }
+}
+```
+
+Output data goes in the `Messages` array — this is what gets routed to the outbox and returned by `computeAOS`.
+
+## The Rust Module
+
+Create a new project:
+
+```bash
+cargo new custom-wasm --lib && cd custom-wasm
+```
+
+### Cargo.toml
+
+```toml
+[package]
+name = "custom-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+```
+
+### src/lib.rs
+
+WAMR does **not** support `memory.copy` (the bulk-memory proposal), so you must use `#![no_std]` and implement byte operations manually.
+
+```rust
+#![no_std]
+#![no_main]
+
+use core::panic::PanicInfo;
+
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {}
+}
+
+// Bump allocator
+static mut BUMP: usize = 4096;
+static mut COUNTER: i32 = 0;
+
+#[no_mangle]
+pub extern "C" fn malloc(size: usize) -> usize {
+    unsafe {
+        let ptr = BUMP;
+        BUMP += size;
+        ptr
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn free(_ptr: usize) -> usize {
+    0
+}
+
+// Manual byte-by-byte copy (avoids memory.copy)
+unsafe fn copy_bytes(dst: *mut u8, src: *const u8, len: usize) {
+    let mut i = 0;
+    while i < len {
+        *dst.add(i) = *src.add(i);
+        i += 1;
+    }
+}
+
+// Write integer as decimal string, return number of bytes written
+unsafe fn itoa(val: i32, dst: *mut u8) -> usize {
+    if val == 0 {
+        *dst = b'0';
+        return 1;
+    }
+    let mut tmp = val;
+    let mut digits = 0usize;
+    while tmp > 0 {
+        tmp /= 10;
+        digits += 1;
+    }
+    tmp = val;
+    let mut i = digits;
+    while i > 0 {
+        i -= 1;
+        *dst.add(i) = b'0' + (tmp % 10) as u8;
+        tmp /= 10;
+    }
+    digits
+}
+
+// Substring search
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i + needle.len() <= haystack.len() {
+        let mut j = 0;
+        let mut matched = true;
+        while j < needle.len() {
+            if haystack[i + j] != needle[j] {
+                matched = false;
+                break;
+            }
+            j += 1;
+        }
+        if matched {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+// Null-terminated string length
+unsafe fn strlen(ptr: *const u8) -> usize {
+    let mut len = 0;
+    while *ptr.add(len) != 0 {
+        len += 1;
+    }
+    len
+}
+
+// JSON response template pieces
+const PREFIX: &[u8] =
+    b"{\"ok\":true,\"response\":{\"Output\":{\"data\":\"\"},\"Messages\":[{\"Data\":\"";
+const SUFFIX: &[u8] = b"\"}]}}";
+
+// Tag patterns to match in incoming messages
+const INC_PAT: &[u8] = b"\"name\":\"Action\",\"value\":\"Inc\"";
+const GET_PAT: &[u8] = b"\"name\":\"Action\",\"value\":\"Get\"";
+
+#[no_mangle]
+pub extern "C" fn handle(msg_ptr: usize, _proc_ptr: usize) -> usize {
+    unsafe {
+        let msg_len = strlen(msg_ptr as *const u8);
+        let msg = core::slice::from_raw_parts(msg_ptr as *const u8, msg_len);
+
+        if contains(msg, INC_PAT) {
+            COUNTER += 1;
+        }
+
+        // Allocate output buffer
+        let buf_ptr = malloc(256);
+        let dst = buf_ptr as *mut u8;
+        let mut pos = 0usize;
+
+        // Write JSON prefix
+        copy_bytes(dst, PREFIX.as_ptr(), PREFIX.len());
+        pos += PREFIX.len();
+
+        // Write counter value
+        let num_len = itoa(COUNTER, dst.add(pos));
+        pos += num_len;
+
+        // Write JSON suffix
+        copy_bytes(dst.add(pos), SUFFIX.as_ptr(), SUFFIX.len());
+        pos += SUFFIX.len();
+
+        // Null terminate
+        *dst.add(pos) = 0;
+
+        buf_ptr
+    }
+}
+```
+
+This implements a counter: `Inc` increments, any other action (including `Get`) returns the current count.
+
+## Build
+
+Compile for `wasm64-unknown-unknown` using nightly with `-Zbuild-std`:
+
+```bash
+cargo +nightly build \
+  --target wasm64-unknown-unknown \
+  --release \
+  -Zbuild-std=core,panic_abort \
+  -Zbuild-std-features=panic_immediate_abort
+```
+
+The output is at `target/wasm64-unknown-unknown/release/custom_wasm.wasm` (~768 bytes).
+
+Verify it's a valid WASM64 module:
+
+```bash
+wasm-tools dump target/wasm64-unknown-unknown/release/custom_wasm.wasm | head -5
+# Should show: (memory i64 1)
+```
+
+:::tip[Why no_std?]
+WAMR rejects any module containing `memory.copy` instructions (from the bulk-memory WebAssembly proposal). Rust's standard library uses these internally, so `#![no_std]` is required. All byte operations must be implemented with manual loops.
+:::
+
+## Test Locally
+
+Start a local HyperBEAM node, cache the WASM binary, spawn a process, and send messages.
+
+```js
+import { describe, it, before, after } from "node:test"
+import assert from "node:assert"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { HyperBEAM } from "wao/test"
+import HB from "wao/hb"
+
+const wasmPath = resolve(import.meta.dirname, "../custom-wasm/target/wasm64-unknown-unknown/release/custom_wasm.wasm")
+
+describe("Custom WASM64 on Local HB", function () {
+  let hbeam, hb
+
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    hb = new HB({ url: hbeam.url })
+    await hb.init(hbeam.jwk)
+  })
+
+  after(async () => {
+    if (hbeam) hbeam.kill()
+  })
+
+  it("cache + spawn custom WASM", async () => {
+    const wasm = readFileSync(wasmPath)
+    const imageId = await hb.cacheBinary(wasm, "application/wasm")
+    console.log(`  Cached image: ${imageId}`)
+
+    const { pid, slot } = await hb.spawnAOS({ image: imageId })
+    console.log(`  pid: ${pid}, spawn slot: ${slot}`)
+    assert.ok(pid, "should get process ID")
+  })
+
+  it("counter: Inc + Get", async () => {
+    const wasm = readFileSync(wasmPath)
+    const imageId = await hb.cacheBinary(wasm, "application/wasm")
+    const { pid } = await hb.spawnAOS({ image: imageId })
+
+    // Increment
+    const inc = await hb.scheduleAOS({ pid, action: "Inc", tags: {} })
+    await hb.computeAOS({ pid, slot: inc.slot })
+
+    // Get current count
+    const get = await hb.scheduleAOS({ pid, action: "Get", tags: {} })
+    const result = await hb.computeAOS({ pid, slot: get.slot })
+
+    const resultStr = JSON.stringify(result)
+    assert.ok(
+      resultStr.includes('"1"') || resultStr.includes('"data":"1"'),
+      `counter should be 1, got: ${resultStr.slice(0, 300)}`
+    )
+  })
+
+  it("counter: multiple Inc → correct count", async () => {
+    const wasm = readFileSync(wasmPath)
+    const imageId = await hb.cacheBinary(wasm, "application/wasm")
+    const { pid } = await hb.spawnAOS({ image: imageId })
+
+    for (let i = 1; i <= 3; i++) {
+      const { slot } = await hb.scheduleAOS({ pid, action: "Inc", tags: {} })
+      await hb.computeAOS({ pid, slot })
+    }
+
+    const { slot } = await hb.scheduleAOS({ pid, action: "Get", tags: {} })
+    const result = await hb.computeAOS({ pid, slot })
+
+    const resultStr = JSON.stringify(result)
+    assert.ok(
+      resultStr.includes('"3"') || resultStr.includes('"data":"3"'),
+      `counter should be 3, got: ${resultStr.slice(0, 300)}`
+    )
+  })
+})
+```
+
+Run with:
+
+```bash
+node --experimental-wasm-memory64 --test test/custom-wasm.test.js
+```
+
+## Deploy to Arweave
+
+For remote HyperBEAM nodes, the WASM binary must be on Arweave. Files under 100KB can be uploaded free via [Turbo](https://ardrive.io/).
+
+```js
+import { createData, ArweaveSigner } from "arbundles"
+import { readFileSync } from "node:fs"
+
+const jwk = JSON.parse(readFileSync(".wallet.json", "utf8"))
+
+async function uploadToArweave(wasm) {
+  const signer = new ArweaveSigner(jwk)
+  const dataItem = createData(wasm, signer, {
+    tags: [{ name: "Content-Type", value: "application/wasm" }],
+  })
+  await dataItem.sign(signer)
+  const res = await fetch("https://upload.ardrive.io/v1/tx", {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: dataItem.getRaw(),
+  })
+  if (res.status !== 200) throw new Error(`Upload failed: ${res.status}`)
+  const json = await res.json()
+  return json.id // Arweave TX ID
+}
+
+const wasm = readFileSync("target/wasm64-unknown-unknown/release/custom_wasm.wasm")
+const txId = await uploadToArweave(wasm)
+console.log(`Arweave TX: ${txId}`)
+```
+
+Then deploy to a remote node using the TX ID as the module image:
+
+**Using WAO SDK:**
+
+```js
+import { AO } from "wao"
+import fs from "fs"
+
+const jwk = JSON.parse(fs.readFileSync(".wallet.json", "utf8"))
+const ao = await new AO({
+  hb: "https://push-1.forward.computer",
+  mode: "aos",
+  module: txId  // your uploaded WASM module
+}).init(jwk)
+
+const { p, pid } = await ao.deploy({})
+console.log("Process ID:", pid)
+
+await p.m("Inc")
+const { out } = await p.msg("Get")
+console.log(out) // "1"
+```
+
+**Using HB methods:**
+
+```js
+import HB from "wao/hb"
+
+const hb = new HB({ url: "https://push-1.forward.computer" })
+await hb.init(jwk)
+
+const { pid } = await hb.spawnAOS({ image: txId, sign: "ans104" })
+console.log(`Process: ${pid}`)
+
+await hb.scheduleAOS({ pid, action: "Inc", tags: {} })
+await hb.scheduleAOS({ pid, action: "Get", tags: {} })
+```
+
+:::tip
+Generate a wallet with `npx wao keygen`. Use `push-1` through `push-10` for full compute. The primary `push.forward.computer` is push-only (no compute).
+:::
+
+## WAT Alternative
+
+For maximum control, you can write WASM64 directly in WAT (WebAssembly Text Format). Here's the same counter:
+
+```wat
+(module
+  (memory (export "memory") i64 1)
+  (global $bump (mut i64) (i64.const 4096))
+  (global $counter (mut i32) (i32.const 0))
+
+  ;; JSON response prefix (65 bytes at offset 0)
+  (data (i64.const 0)
+    "{\"ok\":true,\"response\":{\"Output\":{\"data\":\"\"},\"Messages\":[{\"Data\":\"")
+  ;; JSON response suffix (5 bytes at offset 80)
+  (data (i64.const 80) "\"}]}}")
+  ;; Action patterns
+  (data (i64.const 128) "\"name\":\"Action\",\"value\":\"Inc\"")
+  (data (i64.const 192) "\"name\":\"Action\",\"value\":\"Get\"")
+
+  (func $malloc (export "malloc") (param $size i64) (result i64)
+    (local $ptr i64)
+    (local.set $ptr (global.get $bump))
+    (global.set $bump (i64.add (global.get $bump) (local.get $size)))
+    (local.get $ptr))
+
+  (func $free (export "free") (param $ptr i64) (result i64) (i64.const 0))
+
+  ;; ... itoa, memcpy, strstr, strlen helpers ...
+
+  (func $handle (export "handle") (param $msg_ptr i64) (param $proc_ptr i64) (result i64)
+    ;; Check for Inc action → increment counter
+    ;; Build JSON response: prefix + itoa(counter) + suffix
+    ;; Return pointer to null-terminated response
+    ...)
+)
+```
+
+Assemble with [wasm-tools](https://github.com/bytecodealliance/wasm-tools):
+
+```bash
+wasm-tools parse counter64.wat -o counter64.wasm
+```
+
+## Key Constraints
+
+| Constraint | Reason |
+|---|---|
+| `#![no_std]` required | WAMR rejects `memory.copy` (bulk-memory) emitted by std |
+| `(memory i64 1)` | Must be memory64 for `wasm-64@1.0` device |
+| All pointers `i64` / `usize` | Memory64 uses 64-bit addressing |
+| No `memory.copy` / `memory.fill` | WAMR limitation — use manual byte loops |
+| Response in `Messages` array | `computeAOS` reads from `results/outbox`, which maps from `Messages` |
+| Null-terminated strings | `json-iface@1.0` passes C-style strings |
+
+## Device Stack
+
+When you call `hb.spawnAOS({ image: imageId })`, it creates a process with this device stack:
+
+```
+wasi@1.0 → json-iface@1.0 → wasm-64@1.0 → patch@1.0 → multipass@1.0
+```
+
+- **wasi@1.0** — WASI syscall stubs
+- **json-iface@1.0** — Converts HB messages to JSON, calls your `handle`, parses the response
+- **wasm-64@1.0** — Runs your WASM64 module in WAMR
+- **patch@1.0** — Applies outbox patches from results
+- **multipass@1.0** — Multi-pass execution (2 passes: init + compute)
