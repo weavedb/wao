@@ -1,0 +1,201 @@
+# Custom Devices in Elixir
+
+Elixir compiles to BEAM bytecode and runs on the same Erlang VM as HyperBEAM, so you can write devices in Elixir with zero FFI overhead.
+
+## Prerequisites
+
+- [Elixir](https://elixir-lang.org/install.html) installed
+- WAO HyperBEAM fork (`git clone https://github.com/aspect-build/HyperBEAM.git`)
+- Node.js 22+
+
+## How It Works
+
+HyperBEAM devices are Erlang modules that export callback functions like `info/3`, `init/3`, `compute/3`, etc. Since Elixir modules compile to `.beam` files, they're directly loadable by the Erlang VM.
+
+An Elixir module `DevElixirCounter` compiles to atom `'Elixir.DevElixirCounter'` — that's the module name you register in `hb_opts.erl`.
+
+## Step 1: Write the Elixir Module
+
+Create `HyperBEAM/src/dev_elixir_counter.ex`:
+
+```elixir
+defmodule DevElixirCounter do
+  def info(msg, _msg2, opts) do
+    {:ok, :hb_ao.set(msg, %{<<"version">> => <<"1.0">>}, opts)}
+  end
+
+  def init(msg, _msg2, opts) do
+    {:ok, :hb_ao.set(msg, %{<<"num">> => 0}, opts)}
+  end
+
+  def inc(msg1, _msg2, opts) do
+    num = :maps.get(<<"num">>, msg1, 0)
+    {:ok, :hb_ao.set(msg1, %{<<"num">> => num + 1}, opts)}
+  end
+
+  def add(msg1, msg2, opts) do
+    num = :maps.get(<<"num">>, msg1, 0)
+    plus = :maps.get(<<"plus">>, msg2, 0)
+    {:ok, :hb_ao.set(msg1, %{<<"num">> => num + plus}, opts)}
+  end
+
+  def get(msg1, _msg2, _opts) do
+    {:ok, msg1}
+  end
+
+  def compute(msg1, _msg2, _opts) do
+    {:ok, msg1}
+  end
+
+  def snapshot(msg, _msg2, _opts), do: {:ok, msg}
+
+  def normalize(msg, _msg2, _opts), do: {:ok, msg}
+end
+```
+
+Each public function is a device endpoint. The HyperBEAM resolution engine maps URL paths directly to function names — `/~elixir-counter@1.0/inc` calls `inc/3`.
+
+Key patterns:
+
+- **Erlang interop**: Call Erlang modules with `:module.function()` syntax
+- **Binary strings**: Use `<<"text">>` for Erlang binaries (HyperBEAM's string format)
+- **Return format**: Always return <code>{"{:ok, result_map}"}</code>
+- **`hb_ao.set/3`**: Merges key-value pairs into the message state
+
+## Step 2: Compile to BEAM
+
+```bash
+cd HyperBEAM
+elixirc src/dev_elixir_counter.ex -o _build/default/lib/hb/ebin/
+```
+
+This produces `_build/default/lib/hb/ebin/Elixir.DevElixirCounter.beam`. The warnings about `:hb_ao` being undefined are expected — it resolves at runtime.
+
+## Step 3: Register the Device
+
+Add the device to the `preloaded_devices` list in `HyperBEAM/src/hb_opts.erl`:
+
+```erlang
+preloaded_devices => [
+  ...
+  #{<<"name">> => <<"elixir-counter@1.0">>, <<"module">> => 'Elixir.DevElixirCounter'}
+],
+```
+
+Note the quoted atom `'Elixir.DevElixirCounter'` — Elixir modules use this naming convention on the BEAM.
+
+## Step 4: Write Unit Tests
+
+Create `HyperBEAM/src/dev_elixir_counter_test.erl`:
+
+```erlang
+-module(dev_elixir_counter_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    M1 = #{ <<"device">> => <<"elixir-counter@1.0">> },
+    M2 = #{ <<"path">> => <<"info">> },
+    {ok, R} = hb_ao:resolve(M1, M2, #{}),
+    ?assertEqual(<<"1.0">>, maps:get(<<"version">>, R)).
+
+inc_test() ->
+    M1 = #{ <<"device">> => <<"elixir-counter@1.0">>, <<"num">> => 0 },
+    M2 = #{ <<"path">> => <<"inc">> },
+    {ok, R} = hb_ao:resolve(M1, M2, #{}),
+    ?assertEqual(1, maps:get(<<"num">>, R)).
+
+add_test() ->
+    M1 = #{ <<"device">> => <<"elixir-counter@1.0">>, <<"num">> => 0 },
+    M2 = #{ <<"path">> => <<"add">>, <<"plus">> => 5 },
+    {ok, R} = hb_ao:resolve(M1, M2, #{}),
+    ?assertEqual(5, maps:get(<<"num">>, R)).
+
+resolve_chain_test() ->
+    M1 = #{ <<"device">> => <<"elixir-counter@1.0">>, <<"num">> => 0 },
+    M2Inc = #{ <<"path">> => <<"inc">> },
+    {ok, R1} = hb_ao:resolve(M1, M2Inc, #{}),
+    ?assertEqual(1, maps:get(<<"num">>, R1)),
+    {ok, R2} = hb_ao:resolve(R1, M2Inc, #{}),
+    ?assertEqual(2, maps:get(<<"num">>, R2)),
+    M2Add = #{ <<"path">> => <<"add">>, <<"plus">> => 10 },
+    {ok, R3} = hb_ao:resolve(R2, M2Add, #{}),
+    ?assertEqual(12, maps:get(<<"num">>, R3)).
+```
+
+The Erlang test calls the Elixir module through `hb_ao:resolve/3`, the same resolution engine HyperBEAM uses at runtime.
+
+## Step 5: Build and Test
+
+Compile HyperBEAM and run the tests:
+
+```bash
+cd HyperBEAM
+rebar3 compile
+erlc -I include -o _build/default/lib/hb/ebin src/dev_elixir_counter_test.erl
+erl -pa _build/default/lib/*/ebin -noshell \
+  -eval 'eunit:test(dev_elixir_counter_test, [verbose]).' \
+  -s init stop
+```
+
+Expected output:
+
+```
+======================== EUnit ========================
+module 'dev_elixir_counter_test'
+  dev_elixir_counter_test: info_test...ok
+  dev_elixir_counter_test: inc_test...ok
+  dev_elixir_counter_test: add_test...ok
+  dev_elixir_counter_test: resolve_chain_test...ok
+  [done in 0.065 s]
+=======================================================
+  All 4 tests passed.
+```
+
+## Step 6: Test with WAO JS
+
+```js
+import { describe, it, before, after } from "node:test"
+import assert from "node:assert"
+import { HyperBEAM } from "wao/test"
+import HB from "wao/hb"
+
+describe("Elixir Counter Device", function () {
+  let hbeam, hb
+
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    hb = new HB({ url: hbeam.url })
+    await hb.init(hbeam.jwk)
+  })
+
+  after(async () => hbeam.kill())
+
+  it("should get version", async () => {
+    const res = await hb.g("/~elixir-counter@1.0/info")
+    assert.equal(res.version, "1.0")
+  })
+
+  it("should increment", async () => {
+    const res = await hb.post({ path: "/~elixir-counter@1.0/inc", num: 0 })
+    assert.equal(res.out.num, "1")
+  })
+
+  it("should add", async () => {
+    const res = await hb.post({ path: "/~elixir-counter@1.0/add", num: 0, plus: 5 })
+    assert.equal(res.out.num, "5")
+  })
+})
+```
+
+## Why Elixir?
+
+Elixir runs on the same BEAM VM as HyperBEAM with zero overhead — no FFI, no serialization, no IPC. Your Elixir code calls Erlang functions directly (`:hb_ao.set/3`, `:maps.get/2`) and returns the same tuples Erlang expects.
+
+Compared to Rust/C++ NIF devices, Elixir devices:
+
+- **No compilation toolchain**: No `cargo`, `gcc`, or `rebar3 pc` plugin needed
+- **No NIF boilerplate**: No wrapper modules, no `load_nif`, no segfault risk
+- **Pattern matching**: Elixir's pattern matching maps cleanly to device dispatch
+- **Hot reloading**: Recompile and reload without restarting the node
+
+The tradeoff is that NIFs are better for CPU-intensive work (cryptography, WASM execution). For most device logic — routing, state management, protocol handling — Elixir is a natural fit.

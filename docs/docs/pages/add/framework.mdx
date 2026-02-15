@@ -1,0 +1,587 @@
+# Framework Spec
+
+The HyperADD framework is a scaffolded knowledge system that turns AI coding agents into a team of AOS/HyperBEAM experts — **Team HyperWizards**. When you run `npx wao create myapp`, you get a project where every wizard agent already knows the WAO SDK, AOS Lua patterns, HyperBEAM devices, and common failure modes — without you teaching it anything.
+
+This page explains the technical architecture behind that, and how it maps to [Claude Code's extension system](https://code.claude.com/docs/en/features-overview).
+
+---
+
+## Architecture Overview
+
+The framework uses eight extension points:
+
+| Extension | Claude Code Feature | What it does |
+|-----------|-------------------|--------------|
+| `CLAUDE.md` | [Memory](https://code.claude.com/docs/en/memory) | Always-loaded project context — stack, commands, constraints |
+| `.claude/rules/` | [Path-specific rules](https://code.claude.com/docs/en/memory#path-specific-rules) | Auto-injected patterns when editing matching files |
+| `docs/` | On-demand reference | Full API references wizards read when needed |
+| `.claude/skills/` | [Skills](https://code.claude.com/docs/en/skills) | Slash commands for repeatable workflows |
+| `.claude/agents/` | [Subagents](https://code.claude.com/docs/en/sub-agents) | Wizard Agents with isolated context and roles |
+| `.claude/settings.json` | [Agent teams](https://code.claude.com/docs/en/agent-teams) | Team HyperWizards — parallel development with shared tasks |
+| `dashboard/` | Live dashboard | HTTP server with SSE + Vite React app for real-time build progress |
+| `.mcp.json` | [MCP servers](https://code.claude.com/docs/en/mcp) | Auto-discovered `get_progress` and `open_dashboard` tools for Claude Code |
+
+Plus [hooks](https://code.claude.com/docs/en/hooks-guide) for safety guards, quality gates, and context recovery, and [permissions](https://code.claude.com/docs/en/permissions) that pre-approve common commands.
+
+---
+
+## Context Engineering
+
+The framework applies [context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) principles throughout — managing context as a finite resource with diminishing returns.
+
+### Three-Tier Knowledge
+
+Claude Code loads [memory](https://code.claude.com/docs/en/memory) in layers. The framework organizes WAO knowledge across all three, following the "right altitude" principle: specific enough to guide behavior, flexible enough to avoid brittleness.
+
+| Loading | Location | Content |
+|---------|----------|---------|
+| Always loaded | `CLAUDE.md` | Project overview, commands, constraints |
+| Auto-injected | `.claude/rules/` | Concise patterns for the file type being edited |
+| On-demand | `docs/` | Full API references, device catalog, debug guide |
+
+This maps to the [just-in-time retrieval](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) strategy — maintain lightweight pointers (in `CLAUDE.md`), load full references on demand (from `docs/`), and auto-inject relevant patterns (via `rules/`). No wizard ever loads all 2,500 lines of reference docs at once.
+
+### Tier 1: CLAUDE.md (Always Loaded)
+
+Claude reads `CLAUDE.md` at the start of every conversation. It contains the project overview, stack layout, commands, key imports, and pointers to deeper docs — enough that a wizard can handle simple tasks without reading anything else.
+
+The scaffold also generates `CLAUDE.local.md` for personal preferences (sandbox URLs, test overrides). This file is [auto-gitignored](https://code.claude.com/docs/en/memory#determine-memory-type) — it never gets committed.
+
+### Tier 2: Rules (Auto-Injected by File Path)
+
+[Path-specific rules](https://code.claude.com/docs/en/memory#path-specific-rules) in `.claude/rules/` get injected automatically when a wizard edits a matching file. Each rule has YAML frontmatter with path globs:
+
+```yaml
+# .claude/rules/lua.md
+---
+paths:
+  - "src/**/*.lua"
+---
+```
+
+When a wizard opens `src/token.lua`, it automatically gets the Lua rules — handler patterns, `msg.reply()` syntax, the `Send().receive()` warning, `bint` for token math, JSON require patterns. When it opens `test/aos.test.js`, it gets the testing rules — `p.m()` shorthand, `get`/`check` patterns, multi-user memory sharing, HyperBEAM spawn variants.
+
+Five rule files cover the full stack:
+
+| Rule | Triggers on | Content |
+|------|-------------|---------|
+| `lua.md` | `src/**/*.lua` | Handler patterns, msg object, state, bint, JSON, Action case |
+| `testing.md` | `test/**/*.js` | Process handle shorthand, get/check, spawn variants, payment testing |
+| `hyperbeam.md` | `HyperBEAM/**/*.erl` | Device protocol, state management, compilation, eunit |
+| `deploy.md` | `scripts/**/*.js` | Deploy patterns, wallet security |
+| `frontend.md` | `frontend/**/*.{jsx,tsx,js}` | Browser SDK imports, ArConnect patterns, Vite commands |
+
+Rules are deliberately concise (50-260 lines each). They contain patterns and gotchas, not full API references — that's what `docs/` is for.
+
+### Tier 3: docs/ (On-Demand Reference)
+
+Five reference documents totaling ~2,500 lines. Wizards read these when they need deep knowledge for a specific task:
+
+| Document | Lines | When a wizard reads it |
+|----------|-------|------------------------|
+| `wao-sdk.md` | ~710 | Writing JS code — AO, HB, AR, GQL, Process handle APIs |
+| `aos-lua.md` | ~430 | Writing Lua handlers — msg object, blueprints, patterns |
+| `hyperbeam-devices.md` | ~570 | Working with HyperBEAM — device catalog, endpoints, config |
+| `hyperbeam-dev.md` | ~600 | Building Erlang devices — protocol, templates, state management |
+| `debug.md` | ~225 | Troubleshooting — known issues, error table, fixes |
+
+No wizard loads all five at once. `CLAUDE.md` tells it which doc to read for which task. When building a token handler, it reads `aos-lua.md`. When debugging a HyperBEAM timeout, it reads `debug.md`. This keeps context focused — the [most important resource to manage](https://code.claude.com/docs/en/best-practices).
+
+### Context Survival: Compaction Hook
+
+When the context window fills up, Claude Code [compacts](https://code.claude.com/docs/en/hooks-guide#re-inject-context-after-compaction) by summarizing the conversation. Critical constraints can be lost. The framework uses a `SessionStart` hook with a `compact` matcher to re-inject key WAO knowledge after every compaction:
+
+```json
+{
+  "SessionStart": [{
+    "matcher": "compact",
+    "hooks": [{
+      "type": "command",
+      "command": "echo 'WAO context restored: Send().receive() does NOT work... Action tags uppercase... Dashboard: yarn start. MCP: get_progress / open_dashboard. Read docs/ for references.' && if [ -f tasks.json ]; then echo \"BUILD STATE: $(jq -r '.feature' tasks.json) — step $(jq -r '.current_step' tasks.json), $(jq '[.tasks[] | select(.status != \"done\")] | length' tasks.json) tasks remaining.\"; fi"
+    }]
+  }]
+}
+```
+
+This ensures wizards never forget the critical constraints, even in long sessions. When a build is active, the hook also re-injects the current build state (feature name, step, remaining tasks) from `tasks.json`.
+
+---
+
+## Skills (Slash Commands)
+
+Twenty [skills](https://code.claude.com/docs/en/skills) in `.claude/skills/` give wizards pre-built workflows. Each has YAML frontmatter following the [official skill format](https://code.claude.com/docs/en/skills#frontmatter-reference):
+
+```yaml
+---
+name: test
+description: Run in-memory AOS tests...
+argument-hint: "[test-file]"
+disable-model-invocation: true
+allowed-tools: Bash, Read, Grep
+---
+```
+
+| Command | What it does |
+|---------|-------------|
+| `/build {feature}` | Full build workflow — plan, build, test, validate, README. Orchestrates all steps with resume support |
+| `/plan {feature}` | Plans a feature before building — lists handlers, edge cases, tests, gets user approval |
+| `/build-aos {task-id}` | Builds AOS scripts + in-memory tests, iterates until 100% pass |
+| `/build-module {task-id}` | Builds custom WASM64 or Lua modules + HyperBEAM integration tests |
+| `/build-device {task-id}` | Builds Erlang device + eunit tests, iterates until compilation and tests pass |
+| `/build-frontend {task-id}` | Builds Vite + React components + vitest tests, 100% pass required |
+| `/test [file]` | Kills stale ports, runs `yarn test` on in-memory AOS tests, reports pass/fail |
+| `/test-hb [file]` | Checks Erlang is installed, kills `beam.smp`, runs HyperBEAM integration tests |
+| `/test-device {task-id}` | WAO SDK integration tests for Erlang devices via HTTP |
+| `/test-e2e {task-id}` | Playwright E2E tests with live HyperBEAM backend |
+| `/validate [file]` | Post-build validation — runs tests, checks Lua pitfalls, verifies handler coverage |
+| `/deploy [file]` | Pre-deploy validation (tests + wallet + Lua check), then deploys to AO mainnet |
+| `/create-aos {name}` | Scaffolds `src/{name}.lua` + `test/{name}.test.js` with working boilerplate |
+| `/create-module {name}` | Scaffolds a custom module (WASM64 or Lua) + HyperBEAM test |
+| `/create-device {name}` | Scaffolds `HyperBEAM/src/dev_{name}.erl` + JS test, compiles, runs test |
+| `/report` | Shows progress — task status, test pass/fail counts, blockers |
+| `/readme` | Generates comprehensive README.md from plan, code, and tests |
+| `/debug [issue]` | Reads `debug.md`, checks ports/processes/wallet, diagnoses the issue |
+| `/team {workflow}` | Assembles Team HyperWizards for parallel development (build, research, debug, device, module) |
+| `/dev` | Starts Vite dev server for frontend development |
+
+All skills use `disable-model-invocation: true` — they're [action skills with side effects](https://code.claude.com/docs/en/skills#control-who-invokes-a-skill) that you trigger manually, not something a wizard runs on its own. They accept arguments via `$ARGUMENTS` (e.g., `/test test/token.test.js`).
+
+Skills with `allowed-tools` restrict what tools a wizard can use during that workflow — `/test` only needs `Bash`, `Read`, and `Grep`, not `Edit` or `Write`.
+
+---
+
+## Team HyperWizards
+
+:::warning
+Team HyperWizards uses agent teams, an experimental feature that requires the `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` flag. The framework sets this automatically in `settings.json`, but the feature may change or break.
+:::
+
+Team HyperWizards is a team of [Wizard Agents](https://code.claude.com/docs/en/sub-agents) — AI agents pre-loaded with the complete AO and HyperBEAM knowledge base. Each wizard has a specific role, its own tools, and persistent memory that accumulates across sessions.
+
+You direct the team. The wizards plan, build, test, iterate, and deploy.
+
+### The Wizards
+
+```yaml
+# .claude/agents/builder.md
+---
+name: builder
+description: General-purpose builder for WAO applications...
+tools: Read, Edit, Write, Bash, Grep, Glob
+skills:
+  - create-aos
+memory: project
+---
+```
+
+**Builder Wizard** — The primary builder. Reads `plan.md` and `tasks.json`, picks up the first pending task, reads the relevant docs, builds features end-to-end (Lua handlers + custom modules + tests + iterate), and updates task status as it works. Has the `create-aos` skill [preloaded](https://code.claude.com/docs/en/sub-agents#preload-skills-into-subagents). Never builds without a plan — runs `/plan` first if none exists.
+
+**Tester Wizard** — The quality enforcer. Knows port cleanup procedures, common failure patterns, how to read test output and cross-reference with `debug.md`. Handles device stack testing, payment testing, and multi-instance HyperBEAM. Systematically debugs: identify first failure → check error table → determine if Lua or test code → fix root cause → re-run.
+
+**Device Wizard** — The Erlang specialist. Knows the device protocol (`info/3`, `compute/3`), compilation flow (`rebar3 as genesis_wasm compile`), device registration, and eunit testing. Has the `create-device` skill preloaded. Runs a tight compilation loop: write → compile → read errors → fix → repeat.
+
+All wizards use `memory: project` for [persistent memory](https://code.claude.com/docs/en/sub-agents#enable-persistent-memory) — they accumulate knowledge about your codebase across sessions (patterns discovered, common failures, architectural decisions). This memory is stored in `~/.claude/projects/<project>/memory/MEMORY.md` (per-machine, not committed).
+
+### Solo vs. Full Team
+
+Wizards can work in two modes. Based on Anthropic's [building effective agents](https://www.anthropic.com/engineering/building-effective-agents) guidance:
+
+| | Solo (subagent) | Full Team |
+|---|---|---|
+| **Context** | Own window; results return to caller | Own window; fully independent |
+| **Communication** | Reports back to lead wizard only | Wizards message each other directly |
+| **Coordination** | Lead wizard manages all work | Shared task list with self-coordination |
+| **Best for** | Focused tasks (read a doc, run a test) | Complex work requiring collaboration |
+
+Use solo wizards for quick, focused tasks. Use `/team` to assemble the full Team HyperWizards when wizards need to share findings, challenge each other, and coordinate on their own.
+
+### Team Configurations
+
+The `/team` skill provides pre-structured Team HyperWizards configurations via [agent teams](https://code.claude.com/docs/en/agent-teams):
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "teammateMode": "in-process",
+  "teammatePermissionMode": "dangerously-skip-permissions"
+}
+```
+
+`teammatePermissionMode` lets wizards run autonomously. The `permissions.deny` rules still apply — no wizard can modify `.wallet.json` or run `rm -rf`.
+
+**Parallel feature build** — each wizard owns separate files (one on Lua handlers, one on JS tests, one on deploy config) and builds in parallel without stepping on each other.
+
+**Research and build** — one wizard explores the relevant docs and reports findings, another implements based on those findings. This is the [orchestrator-worker pattern](https://www.anthropic.com/engineering/building-effective-agents) applied to WAO.
+
+**Debug investigation** — wizards test different theories simultaneously and challenge each other's findings. Based on [Anthropic's multi-agent research](https://www.anthropic.com/engineering/multi-agent-research-system) architecture, this prevents anchoring bias where a single wizard finds one explanation and stops looking.
+
+**Cross-layer development** — one wizard on Erlang devices, one on Lua handlers, one on JS integration tests. Each layer requires different domain knowledge.
+
+**Custom module development** — one wizard writes the module source (Rust WASM64 or standalone Lua), another writes HyperBEAM integration tests, a third handles compilation and process management.
+
+### Quality Gates
+
+Hooks enforce quality standards across all wizards:
+
+- **`TaskCompleted`** (enforcing): Runs the full test pipeline when completing build tasks. If any tests fail, the completion is **blocked** (exit code 2) — the wizard must fix tests before marking done.
+- **`TeammateIdle`**: Reminds wizards to verify all tasks are done and tests pass before going idle.
+- **`Stop`**: Reminds to check task completion and test status before ending a session.
+
+The `TaskCompleted` hook is enforcing — it actually blocks completion, not just advises. No wizard can declare success with failing tests.
+
+---
+
+## Hooks and Permissions
+
+### Hooks
+
+`.claude/settings.json` defines [hooks](https://code.claude.com/docs/en/hooks-guide) that run at key lifecycle points:
+
+| Hook | Event | What it does |
+|------|-------|-------------|
+| Block destructive commands | `PreToolUse` (Bash) | Blocks `rm -rf src/` with [exit code 2](https://code.claude.com/docs/en/hooks-guide#hook-output) |
+| Test reminder | `PostToolUse` (Edit\|Write) | Reminds to run tests when `.lua` or `.js` files are modified |
+| Context recovery | `SessionStart` (compact) | [Re-injects](https://code.claude.com/docs/en/hooks-guide#re-inject-context-after-compaction) critical WAO constraints after compaction |
+| Task verification | `TaskCompleted` | **Enforcing**: runs `yarn test` on build tasks, blocks completion if tests fail (exit 2) |
+| Session exit check | `Stop` | Reminds to verify all tasks completed and tests passing |
+| Notification echo | `Notification` | Echoes notification messages for visibility |
+| Teammate quality | `TeammateIdle` | Ensures teammates verify work before going idle |
+
+All hooks read [stdin JSON](https://code.claude.com/docs/en/hooks-guide#hook-input) and use `jq` for parsing. Exit code 0 allows the action, exit code 2 blocks it.
+
+### Permissions
+
+Pre-approved [permission rules](https://code.claude.com/docs/en/permissions#permission-rule-syntax) so wizards don't interrupt you for routine commands:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(yarn test *)",
+      "Bash(yarn deploy *)",
+      "Bash(cd HyperBEAM && rebar3 compile)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Edit(.wallet.json)",
+      "Edit(.env*)"
+    ]
+  }
+}
+```
+
+The deny rules prevent wizards from modifying secrets (`.wallet.json`, `.env*`) or running destructive commands. The allow rules let routine commands (`yarn test`, `yarn deploy`, `rebar3 compile`) run without approval prompts.
+
+---
+
+## Live Dashboard
+
+The framework includes a live dashboard at `dashboard/` — a Vite + React app backed by a zero-dep HTTP server that watches `tasks.json` and `plan.md` and pushes updates via Server-Sent Events (SSE).
+
+```bash
+yarn start          # API server (:3333) + Vite dev server (:5174)
+yarn start:api      # API server only (:3333)
+```
+
+The HTTP server (`dashboard/server.js`) provides:
+- `GET /api/progress` — returns `tasks.json` content as JSON
+- `GET /api/events` — SSE endpoint that pushes `event: progress` when files change (150ms debounce)
+
+The Vite dev server proxies `/api` requests to port 3333 automatically.
+
+The dashboard shows six tabs:
+- **Tasks** — GitHub Issues-style task list with status icons and segmented progress bar
+- **Plan** — Rendered markdown of `plan.md` with syntax-highlighted code blocks
+- **Code** — File browser with inline code viewer and markdown preview
+- **Commands** — Quick-reference for test, deploy, and development commands
+- **Skills** — Table of all available slash commands with descriptions
+- **Deploy** — Step-by-step deployment workflow: keygen, test, deploy, verify with explorers
+
+When a wizard marks a task `done` in `tasks.json`, the dashboard updates in real-time via SSE. Falls back to 3s polling if SSE is unavailable.
+
+An MCP server at `.claude/mcp/dashboard/server.js` provides `get_progress` and `open_dashboard` tools. Claude Code auto-discovers it via `.mcp.json`.
+
+---
+
+## Testing Architecture
+
+The framework provides two testing modes that share the same API but run on completely different infrastructure:
+
+### In-Memory AOS
+
+```js
+import { AO, acc } from "wao/test"
+const ao = await new AO().init(acc[0])
+const { p } = await ao.deploy({ src_data })
+await p.m("Inc", false)  // -> "Incremented!"
+```
+
+This runs the full AOS WASM binary directly in Node.js using `wao/test`'s built-in legacynet units. No server, no Erlang, no network. A test takes ~700ms. The `acc` array provides three pre-generated Arweave wallets for multi-user testing.
+
+Key patterns:
+- **Deploy**: `ao.deploy({ src_data })` loads Lua source into a fresh process
+- **Message**: `p.m("Action", { Tag: "val" }, false)` sends a message, returns Data string
+- **Dry-run**: `p.d("Action", false)` reads state without mutation
+- **Multi-user**: `new AO({ mem: ao.mem }).init(acc[1])` shares memory between instances
+- **Template fills**: `ao.deploy({ src_data, fills: { OWNER: addr } })` replaces `<OWNER>` in Lua
+
+### HyperBEAM AOS
+
+```js
+import { HyperBEAM } from "wao/test"
+const hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true }).ready()
+const ao = await new AO({ hb: hbeam.url }).init(hbeam.jwk)
+const { p } = await ao.deploy({ src_data })
+```
+
+This starts a real Erlang HyperBEAM node, routes AOS through it via the `genesis-wasm` device, and runs messages over HTTP with slot-based scheduling. Tests take longer (~5s startup + ~1s per message) but exercise the full production stack.
+
+### Raw HyperBEAM
+
+```js
+const hb = hbeam.hb  // HB HTTP client
+await hb.post({ path: "/~meta@1.0/info", key: "value" })
+const { out } = await hb.get({ path: "/~meta@1.0/info" })
+```
+
+For testing HyperBEAM devices directly (not through AOS), the `HB` class provides HTTP get/post methods that talk to device endpoints at `/~device@version/method`.
+
+---
+
+## Frontend Support
+
+The framework includes optional frontend scaffolding for building browser applications that interact with AOS processes.
+
+### Scaffolding
+
+During `npx wao create`, users can choose to include a frontend:
+
+```
+Frontend:
+  1. Skip             (backend only)
+  2. Vite + wao/web   (React SPA with ArConnect)
+```
+
+Choosing option 2 creates a `frontend/` directory with:
+
+- **Vite + React** — fast dev server with HMR
+- **wao/web** — browser SDK for AO (NOT `wao/test`, which is Node.js only)
+- **ArConnect** — Arweave wallet integration
+- **Vitest** — component unit tests
+- **Playwright** — end-to-end browser tests
+
+### Key Distinction: wao/web vs wao/test
+
+| Import | Environment | Use case |
+|--------|-------------|----------|
+| `wao/test` | Node.js | In-memory AOS testing, HyperBEAM tests |
+| `wao/web` | Browser | Frontend apps with ArConnect wallet |
+| `wao` | Both | Production SDK (AO, AR, GQL, HB) |
+
+The `frontend.md` rule auto-injects when editing `frontend/**/*.{jsx,tsx,js}`, reminding the wizard to use `wao/web` and providing ArConnect patterns.
+
+### Frontend Skills
+
+- `/dev` — Start the Vite dev server (`cd frontend && npm run dev`)
+- Frontend tests: `cd frontend && npm run test:unit` (Vitest) or `cd frontend && npm run test:e2e` (Playwright)
+
+---
+
+## How `npx wao create` Works
+
+The `create.js` scaffolder does six things:
+
+1. **Copies the workspace template** — all of `src/workspace/` becomes the new project, including `CLAUDE.md`, `docs/`, `.claude/`, example handlers, and tests
+
+2. **Sets up Team HyperWizards** — rules, skills (with proper YAML frontmatter), wizard agents (with tools/skills/memory config), `settings.json` (hooks + permissions + team config), and `CLAUDE.local.md` for personal preferences
+
+3. **Generates an admin wallet** — creates `.wallet.json` with a fresh Arweave JWK for deploy and signing
+
+4. **Installs dependencies** — `yarn install` for `wao` and `hbsig`
+
+5. **Optionally sets up HyperBEAM** — clones from GitHub (specific tag), symlinks to a local copy, or skips entirely. If cloning/linking, it detects system dependencies (Erlang, rebar3, gcc, cmake) and generates `.env.hyperbeam`
+
+6. **Auto memory kicks in** — as you work, Claude [automatically saves](https://code.claude.com/docs/en/memory#auto-memory) learnings to `~/.claude/projects/<project>/memory/MEMORY.md` (per-machine, not committed). Project patterns, debugging insights, and architecture notes accumulate across sessions.
+
+After scaffolding, the project is ready for `npx wao build` — no additional setup required. Team HyperWizards is enabled out of the box.
+
+---
+
+## The HyperADD Workflow
+
+HyperADD is a persistent, file-based workflow. Two files — `plan.md` and `tasks.json` — track the entire build. Any Wizard Agent in any session can read these files and pick up exactly where the last wizard left off.
+
+### 1. Setup
+
+```bash
+npx wao create myapp
+cd myapp
+yarn start            # start the live dashboard (API :3333 + Vite :5174)
+npx wao build
+```
+`npx wao create` scaffolds the project — dependencies, HyperBEAM (compiled with genesis-wasm), test harness, and full wizard agent context. `yarn start` launches the live dashboard so you can track progress from the start. `npx wao build` launches Team HyperWizards with permissions enabled.
+
+### 2. Plan
+
+Tell a wizard what to build. `/plan` writes two files:
+
+- **`plan.md`** — architecture, handlers, devices, edge cases, test scenarios
+- **`tasks.json`** — ordered build tasks with status tracking and completion criteria
+
+Tasks follow a strict build order based on what components are included:
+
+| Component | Build | Unit Test | Integration Test |
+|-----------|-------|-----------|-----------------:|
+| **AOS** | Lua handlers | in-memory AOS | HyperBEAM + genesis-wasm / wasm device |
+| **Custom Modules** | WASM64 (Rust) or standalone Lua | sandboxed HyperBEAM | HyperBEAM + cacheBinary/cacheScript |
+| **Device** | Erlang module | eunit | HyperBEAM + WAO SDK |
+| **Frontend** | Vite + wao/web | vitest | Playwright E2E |
+
+A project can include any combination. The wizard only creates tasks for the components being built.
+
+### 3. Build
+
+The wizard executes tasks in order from `tasks.json`. For each task:
+
+1. Pick the next pending task, mark it `in_progress`
+2. Read the relevant docs for the task type
+3. Write the code
+4. Write the tests
+5. Iterate until tests pass
+6. Mark the task `done` in `tasks.json`
+7. Move to the next task
+
+Quality gates block task completion — the wizard cannot skip failing tests. The `TaskCompleted` hook runs the full test pipeline and blocks with exit code 2 if anything fails.
+
+`/report` is available at any time during build to see progress — task status, test pass/fail counts, and blockers.
+
+### 4. Validate
+
+`/validate` runs all quality gates: unit tests pass, integration tests pass, frontend tests pass, no common Lua pitfalls, every handler has at least one test. The `TaskCompleted` hook enforces this automatically — no wizard can mark a task done with failing tests.
+
+### 5. Deploy
+
+Once all tasks pass including final validation:
+```bash
+yarn deploy src/app.lua --wallet .wallet.json
+```
+`/deploy` runs pre-deploy validation (tests + wallet + Lua check) before deploying to AO mainnet.
+
+:::tip[Session Continuity]
+If a session ends mid-build, the next wizard reads `plan.md` and `tasks.json` and resumes from the first pending task. No context is lost. This is what makes HyperADD different from vibe coding — the workflow survives across sessions, agents, and teams.
+:::
+
+## Why HyperADD Is Effective
+
+Most AI coding fails for three reasons: the agent doesn't know the domain, the feedback loop is too slow, and the workflow doesn't survive across sessions. HyperADD solves all three.
+
+### Pre-Loaded Domain Knowledge
+
+The wizard doesn't discover WAO patterns by trial and error. It reads them from docs, applies them from rules, and follows workflows from skills. The three-tier context architecture (CLAUDE.md → rules → docs) means it always has the right amount of context — not too much (which wastes tokens and confuses), not too little (which causes hallucination). This follows [Anthropic's context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) principle: "find the smallest possible set of high-signal tokens that maximize the likelihood of the desired outcome."
+
+### Sub-Second Feedback Loops
+
+In-memory AOS tests run in ~700ms. The wizard can iterate dozens of times in the time it would take to deploy once. This tight loop — write code, run test, read failure, fix, re-run — is what makes autonomous building reliable. When the feedback is instant, the wizard converges on correct code instead of guessing.
+
+### File-Based Persistence
+
+Two files — `plan.md` and `tasks.json` — track the entire build state. Any wizard in any session reads these files and picks up exactly where the last wizard left off. No database, no shared memory — just files on disk. The dashboard server watches these files and pushes updates via SSE, but the files themselves are the source of truth. The workflow survives across sessions, agents, and teams. This is what separates HyperADD from vibe coding — vibe coding dies when the session ends.
+
+### Enforcing Quality Gates
+
+The `TaskCompleted` hook runs the full test pipeline and blocks task completion with exit code 2 if anything fails. No wizard can skip failing tests. No wizard can declare success without proof. This makes the build reliable even when running unattended — the quality floor is guaranteed by the system, not by the user watching.
+
+### Team Parallelization
+
+For complex features, `/team build` parallelizes across Team HyperWizards — each wizard owns separate files and builds in parallel without stepping on each other. For debugging, `/team debug` runs competing hypotheses simultaneously, preventing anchoring bias. The file-based protocol (`tasks.json`) is what makes coordination possible — every wizard reads and writes the same task list.
+
+---
+
+## File Map
+
+```
+myapp/
+├── CLAUDE.md                          <- Always loaded: project context
+├── CLAUDE.local.md                    <- Personal preferences (auto-gitignored)
+├── docs/
+│   ├── wao-sdk.md                     <- On-demand: SDK API reference (+ wao/web browser section)
+│   ├── aos-lua.md                     <- On-demand: Lua handler reference
+│   ├── hyperbeam-devices.md           <- On-demand: Device catalog
+│   ├── hyperbeam-dev.md               <- On-demand: Building devices
+│   └── debug.md                       <- On-demand: Troubleshooting
+├── .claude/
+│   ├── settings.json                  <- Hooks (enforcing) + permissions + agent teams
+│   ├── rules/
+│   │   ├── lua.md                     <- Auto: when editing src/*.lua
+│   │   ├── testing.md                 <- Auto: when editing test/*.js
+│   │   ├── hyperbeam.md              <- Auto: when editing HyperBEAM/*.erl
+│   │   ├── deploy.md                 <- Auto: when editing scripts/*.js
+│   │   └── frontend.md              <- Auto: when editing frontend/*.{jsx,tsx,js}
+│   ├── skills/
+│   │   ├── build/SKILL.md            <- /build (full orchestrator)
+│   │   ├── plan/SKILL.md             <- /plan (pre-build planning)
+│   │   ├── build-aos/SKILL.md        <- /build-aos (AOS scripts + tests)
+│   │   ├── build-module/SKILL.md     <- /build-module (WASM64/Lua modules)
+│   │   ├── build-device/SKILL.md     <- /build-device (Erlang devices)
+│   │   ├── build-frontend/SKILL.md   <- /build-frontend (Vite + React)
+│   │   ├── test/SKILL.md             <- /test (in-memory AOS)
+│   │   ├── test-hb/SKILL.md          <- /test-hb (HyperBEAM integration)
+│   │   ├── test-device/SKILL.md      <- /test-device (device integration)
+│   │   ├── test-e2e/SKILL.md         <- /test-e2e (Playwright E2E)
+│   │   ├── validate/SKILL.md         <- /validate (post-build validation)
+│   │   ├── deploy/SKILL.md           <- /deploy (with pre-deploy validation)
+│   │   ├── create-aos/SKILL.md       <- /create-aos (scaffold handler)
+│   │   ├── create-module/SKILL.md    <- /create-module (scaffold module)
+│   │   ├── create-device/SKILL.md    <- /create-device (scaffold device)
+│   │   ├── report/SKILL.md           <- /report (progress dashboard)
+│   │   ├── readme/SKILL.md           <- /readme (generate docs)
+│   │   ├── debug/SKILL.md            <- /debug (troubleshooting)
+│   │   ├── team/SKILL.md             <- /team (Team HyperWizards)
+│   │   └── dev/SKILL.md              <- /dev (Vite dev server)
+│   ├── agents/
+│   │   ├── builder.md                 <- Builder Wizard (memory: project)
+│   │   ├── tester.md                  <- Tester Wizard (memory: project)
+│   │   └── device-builder.md          <- Device Wizard (memory: project)
+│   └── mcp/
+│       └── dashboard/server.js        <- MCP server (get_progress, open_dashboard)
+├── .mcp.json                          <- MCP auto-discovery (wao-dashboard server)
+├── src/
+│   ├── counter.lua                    <- Example: basic counter
+│   ├── token.lua                      <- Example: AO token (with input validation)
+│   └── registry.lua                   <- Example: CRUD registry (with input validation)
+├── custom-lua/                         <- Optional: standalone Lua modules
+│   └── counter.lua                    <- Example: custom Lua counter
+├── custom-wasm/                        <- Optional: WASM64 Rust modules
+│   ├── Cargo.toml                     <- Rust project config
+│   └── src/lib.rs                     <- Example: WASM64 counter
+├── test/
+│   ├── aos.test.js                    <- In-memory AOS tests (5 tests)
+│   ├── token.test.js                  <- Token tests (12 tests)
+│   ├── registry.test.js              <- Registry tests (10 tests)
+│   └── hyperbeam.test.js             <- HyperBEAM integration tests (6 tests)
+├── frontend/                           <- Optional: Vite + React + wao/web
+│   ├── index.html                     <- HTML shell
+│   ├── src/main.jsx                   <- React entry
+│   ├── src/App.jsx                    <- Example component (counter + token)
+│   ├── src/wao.js                     <- WAO browser client wrapper
+│   ├── vite.config.js                 <- Vite config
+│   ├── vitest.config.js               <- Vitest config
+│   ├── test/app.test.jsx              <- Component unit tests
+│   ├── e2e/app.spec.js                <- Playwright E2E tests
+│   ├── playwright.config.js           <- Playwright config
+│   └── package.json                   <- Frontend dependencies
+├── dashboard/                          <- Live build progress dashboard
+│   ├── server.js                      <- HTTP server: /api/progress + /api/events (SSE)
+│   ├── src/App.jsx                    <- Vite + React: SSE client with polling fallback
+│   ├── vite.config.js                 <- Proxy /api to :3333
+│   └── package.json                   <- Dashboard dependencies
+├── scripts/
+│   └── deploy.js                      <- Mainnet deploy script
+├── .wallet.json                       <- Auto-generated (gitignored)
+├── .env.hyperbeam                     <- Auto-generated (gitignored)
+└── HyperBEAM/                         <- Cloned/linked (optional)
+```
+
+~60 files, ~6,500 lines of framework knowledge. Every wizard gets all of it for free on `npx wao create`.
