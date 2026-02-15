@@ -429,3 +429,63 @@ aos \
   --tag-name Authority \
   --tag-value eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg
 ```
+
+## Deploying to HyperBEAM
+
+Once your process works in the in-memory emulator, you can deploy it to HyperBEAM for persistent execution.
+
+### Local HyperBEAM
+
+Run a local HyperBEAM node with `genesis-wasm@1.0` for full legacynet compatibility:
+
+```bash
+git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git
+cd HyperBEAM && rebar3 compile
+```
+
+```js
+import { describe, it, before, after } from "node:test"
+import assert from "assert"
+import { HyperBEAM } from "wao/test"
+import { AO } from "wao"
+
+const src_data = `
+Handlers.add("Hello", "Hello", function (msg)
+  msg.reply({ Data = "Hello, World!" })
+end)`
+
+describe("Deploy to Local HyperBEAM", () => {
+  let hbeam, ao
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true }).ready()
+    ao = await new AO({ hb: hbeam.url }).init(hbeam.jwk)
+  })
+  after(async () => hbeam.kill())
+
+  it("should deploy and interact", async () => {
+    const { p } = await ao.deploy({ src_data })
+    assert.equal(await p.d("Hello"), "Hello, World!")
+  })
+})
+```
+
+### Remote HyperBEAM
+
+Deploy to remote push nodes for production use. Use `push-1` through `push-10` for full compute support:
+
+```js
+import { AO } from "wao"
+import fs from "fs"
+
+const jwk = JSON.parse(fs.readFileSync(".wallet.json", "utf8"))
+const ao = await new AO({ hb: "https://push-1.forward.computer" }).init(jwk)
+
+const { p, pid } = await ao.deploy({ src_data })
+console.log("Process ID:", pid)
+const { out } = await p.msg("Hello")
+console.log(out) // "Hello, World!"
+```
+
+:::tip
+Generate a wallet with `npx wao keygen`. The primary `push.forward.computer` node is push-only (no compute) — use `push-1` through `push-10` for full spawn + schedule + compute.
+:::

@@ -1,0 +1,109 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(yarn test *)",
+      "Bash(yarn deploy *)",
+      "Bash(node *)",
+      "Bash(pkill -f beam.smp *)",
+      "Bash(lsof *)",
+      "Bash(cd HyperBEAM && rebar3 compile)",
+      "Bash(cd HyperBEAM && rebar3 as genesis_wasm compile)",
+      "Bash(cd HyperBEAM && rebar3 eunit *)",
+      "Bash(cd frontend && npm *)",
+      "Bash(cd frontend && npx playwright *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Edit(.wallet.json)",
+      "Edit(.env*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); CMD=$(echo \"$INPUT\" | jq -r '.tool_input.command // empty'); if echo \"$CMD\" | grep -qE 'rm\\s+-rf\\s+src/'; then echo 'Blocked: destructive command on src/' >&2; exit 2; fi; exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // empty'); if echo \"$FILE\" | grep -qE '\\.(lua|js)$'; then echo \"File modified: $FILE — run yarn test to verify\" >&2; fi; exit 0"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "MSG='WAO context restored after compaction: Send().receive() does NOT work on genesis-wasm — use fire-and-forget + separate AOS scripts. Action tags must be uppercase. Always kill stale beam.smp before HyperBEAM tests. Always call hbeam.kill() in after(). Read docs/ for full API references: wao-sdk.md (JS), aos-lua.md (Lua), hyperbeam-devices.md (devices), hyperbeam-dev.md (Erlang), debug.md (troubleshooting). Dashboard: yarn start (API :3333 + Vite :5174). MCP: get_progress / open_dashboard.'; if [ -f tasks.json ]; then FEATURE=$(cat tasks.json | jq -r '.feature // \"unknown\"'); STEP=$(cat tasks.json | jq -r '.current_step // 0'); PENDING=$(cat tasks.json | jq '[.tasks[] | select(.status != \"done\")] | length'); MSG=\"$MSG BUILD STATE: \\\"$FEATURE\\\" — step $STEP, $PENDING tasks remaining.\"; fi; echo \"$MSG\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f tasks.json ] && [ -f plan.md ]; then STEP=$(cat tasks.json | jq -r '.current_step // 0'); PENDING=$(cat tasks.json | jq '[.tasks[] | select(.status != \"done\")] | length'); FEATURE=$(cat tasks.json | jq -r '.feature // \"unknown\"'); echo \"BUILD RESUME: \\\"$FEATURE\\\" has $PENDING remaining tasks (current_step: $STEP). Read tasks.json and resume /build from the first pending task.\"; else echo 'NO ACTIVE BUILD: Run /build <feature> to start a new build workflow.'; fi"
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); TASK=$(echo \"$INPUT\" | jq -r '.task.subject // empty'); if echo \"$TASK\" | grep -qiE '(build|implement|add|create|fix|update)'; then echo '=== Unit tests ===' >&2; cd \"$(pwd)\" && yarn test 2>&1 | tail -5; R1=$?; R2=0; R3=0; if command -v erl >/dev/null 2>&1 && ls test/*.test.js >/dev/null 2>&1; then echo '=== HyperBEAM integration ===' >&2; yarn test 2>&1 | tail -5; R2=$?; fi; if [ -d frontend ]; then echo '=== Frontend tests ===' >&2; cd frontend && npm run test:unit 2>&1 | tail -5; R3=$?; cd ..; fi; if [ $R1 -ne 0 ] || [ $R2 -ne 0 ] || [ $R3 -ne 0 ]; then echo 'BLOCKED: Tests are failing. Fix before marking complete.' >&2; exit 2; fi; fi; exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); REASON=$(echo \"$INPUT\" | jq -r '.reason // empty'); if [ \"$REASON\" = \"user\" ]; then exit 0; fi; echo 'Check: are all tasks completed and tests passing?' >&2; exit 0"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); MSG=$(echo \"$INPUT\" | jq -r '.message // empty'); echo \"$MSG\" >&2; exit 0"
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); echo 'Before going idle: verify all assigned tasks are done, tests pass, and no stale beam.smp processes are running.' >&2; exit 0"
+          }
+        ]
+      }
+    ]
+  },
+  "teammateMode": "in-process",
+  "teammatePermissionMode": "dangerously-skip-permissions"
+}

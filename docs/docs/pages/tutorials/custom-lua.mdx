@@ -1,0 +1,348 @@
+# Custom Lua Modules
+
+Build a custom Lua execution module and deploy it to HyperBEAM's `lua@5.3a` device. This lets you replace the default AOS boot code (Handlers framework) with your own standalone Lua logic.
+
+## Prerequisites
+
+- WAO HyperBEAM fork (`git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git`)
+- Node.js 22+
+
+## How It Works
+
+HyperBEAM's `lua@5.3a` device runs Lua code using [Luerl](https://github.com/rvirding/luerl) (an Erlang-native Lua 5.3 VM). When a message is scheduled, the device calls your `compute` function with three arguments.
+
+Your Lua module must define:
+
+```lua
+function compute(base, req, opts)
+  -- base: process state (table)
+  -- req:  incoming message (table)
+  -- opts: empty table
+  -- Must return base with base.results set
+  return base
+end
+```
+
+### Message Structure
+
+The `req` parameter contains the full message. Action tags from `scheduleLua()` are inside `req.body`:
+
+```lua
+req.body.action  -- "Inc", "Get", "Eval", etc. (lowercase)
+req.body.target  -- process ID
+req.body.type    -- "Message" or "Process" (for spawn)
+```
+
+:::tip[Lowercase action]
+HTTP signatures lowercase header names, so `Action` becomes `action` in `req.body`. Always check both: `req.body.Action or req.body.action`.
+:::
+
+### Response Format
+
+Set `base.results` with an `outbox` table (string-keyed) and an `output` string:
+
+```lua
+base.results = {
+  outbox = {
+    ["1"] = { data = "your output here" }
+  },
+  output = ""
+}
+return base
+```
+
+The outbox entries are what `computeLua()` returns. Each entry is a message with at least a `data` field.
+
+### State Persistence
+
+Module-level variables persist between compute calls. The Lua VM state (including all globals, locals, and closures) is automatically saved by the device after each compute and restored for the next one.
+
+```lua
+local counter = 0  -- persists across computes
+
+function compute(base, req, opts)
+  counter = counter + 1  -- increments each call
+  ...
+end
+```
+
+## The Lua Module
+
+Create `custom-lua/counter.lua`:
+
+```lua
+-- counter.lua - Custom Lua module for lua@5.3a device
+-- Standalone: no AOS boot code, no Handlers framework.
+-- Implements a counter with Inc / Get actions.
+
+local counter = 0
+
+local function intstr(n)
+  if n == math.floor(n) then return string.format("%d", n) end
+  return tostring(n)
+end
+
+function compute(base, req, opts)
+  -- Action is inside req.body (the scheduled message)
+  local action = nil
+  if type(req) == "table" then
+    if type(req.body) == "table" then
+      action = req.body.Action or req.body.action
+    end
+    if not action then
+      action = req.Action or req.action
+    end
+  end
+
+  if action == "Inc" then
+    counter = counter + 1
+  end
+
+  base.results = {
+    outbox = {
+      ["1"] = { data = intstr(counter) }
+    },
+    output = ""
+  }
+  return base
+end
+```
+
+That's it — 35 lines of Lua. No build step required.
+
+## Test Locally
+
+Cache the Lua source on a local HyperBEAM node, spawn a process with it, and send messages.
+
+```js
+import { describe, it, before, after } from "node:test"
+import assert from "node:assert"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { HyperBEAM } from "wao/test"
+import HB from "wao/hb"
+
+const luaPath = resolve(import.meta.dirname, "../custom-lua/counter.lua")
+
+// Spawn a process with custom Lua module (bypassing hyper-aos boot)
+async function spawnCustomLua(hb, moduleId) {
+  return hb.spawn({
+    "data-protocol": "ao",
+    variant: "ao.TN.1",
+    module: moduleId,
+    "execution-device": "lua@5.3a",
+    "push-device": "push@1.0",
+    "patch-from": "/results/outbox",
+  })
+}
+
+describe("Custom Lua on Local HB", function () {
+  let hbeam, hb, moduleId
+
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    hb = new HB({ url: hbeam.url })
+    await hb.init(hbeam.jwk)
+
+    // Cache custom Lua module
+    const luaSrc = readFileSync(luaPath, "utf-8")
+    moduleId = await hb.cacheScript(luaSrc, "application/lua")
+    console.log(`  Cached Lua module: ${moduleId}`)
+  })
+
+  after(async () => {
+    if (hbeam) hbeam.kill()
+  })
+
+  it("cache + spawn", async () => {
+    const { pid } = await spawnCustomLua(hb, moduleId)
+    console.log(`  pid: ${pid}`)
+    assert.ok(pid, "should get process ID")
+  })
+
+  it("counter: Inc + Get", async () => {
+    const { pid } = await spawnCustomLua(hb, moduleId)
+
+    // Increment
+    const inc = await hb.scheduleLua({ pid, action: "Inc" })
+    await hb.computeLua({ pid, slot: inc.slot })
+
+    // Get current count
+    const get = await hb.scheduleLua({ pid, action: "Get" })
+    const result = await hb.computeLua({ pid, slot: get.slot })
+
+    assert.ok(
+      JSON.stringify(result).includes('"data":"1"'),
+      `counter should be 1`
+    )
+  })
+
+  it("counter: 3x Inc → 3", async () => {
+    const { pid } = await spawnCustomLua(hb, moduleId)
+
+    for (let i = 1; i <= 3; i++) {
+      const { slot } = await hb.scheduleLua({ pid, action: "Inc" })
+      await hb.computeLua({ pid, slot })
+    }
+
+    const { slot } = await hb.scheduleLua({ pid, action: "Get" })
+    const result = await hb.computeLua({ pid, slot })
+
+    assert.ok(
+      JSON.stringify(result).includes('"data":"3"'),
+      `counter should be 3`
+    )
+  })
+})
+```
+
+Run with:
+
+```bash
+node --experimental-wasm-memory64 --test test/custom-lua.test.js
+```
+
+## Deploy to Arweave
+
+For remote HyperBEAM nodes, the Lua source must be on Arweave. Files under 100KB can be uploaded free via [Turbo](https://ardrive.io/).
+
+```js
+import { createData, ArweaveSigner } from "arbundles"
+import { readFileSync } from "node:fs"
+
+const jwk = JSON.parse(readFileSync(".wallet.json", "utf8"))
+
+async function uploadToArweave(luaSrc) {
+  const signer = new ArweaveSigner(jwk)
+  const dataItem = createData(Buffer.from(luaSrc), signer, {
+    tags: [{ name: "Content-Type", value: "application/lua" }],
+  })
+  await dataItem.sign(signer)
+  const res = await fetch("https://upload.ardrive.io/v1/tx", {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: dataItem.getRaw(),
+  })
+  if (res.status !== 200) throw new Error(`Upload failed: ${res.status}`)
+  const json = await res.json()
+  return json.id // Arweave TX ID
+}
+
+const luaSrc = readFileSync("custom-lua/counter.lua", "utf-8")
+const txId = await uploadToArweave(luaSrc)
+console.log(`Arweave TX: ${txId}`)
+```
+
+Then deploy to a remote node using the TX ID as the module:
+
+**Using HB methods:**
+
+```js
+import HB from "wao/hb"
+import fs from "fs"
+
+const jwk = JSON.parse(fs.readFileSync(".wallet.json", "utf8"))
+const hb = new HB({ url: "https://push-1.forward.computer" })
+await hb.init(jwk)
+
+const { pid } = await hb.spawn({
+  "data-protocol": "ao",
+  variant: "ao.TN.1",
+  module: txId,
+  "execution-device": "lua@5.3a",
+  "push-device": "push@1.0",
+  "patch-from": "/results/outbox",
+})
+console.log(`Process: ${pid}`)
+
+// Schedule messages
+await hb.scheduleLua({ pid, action: "Inc" })
+await hb.scheduleLua({ pid, action: "Get" })
+```
+
+:::tip
+Generate a wallet with `npx wao keygen`. Use `push-1` through `push-10` for full compute. The primary `push.forward.computer` is push-only (no compute).
+:::
+
+## Comparison: Custom Lua vs AOS Handlers
+
+| | Custom Lua | AOS (hyper-aos boot) |
+|---|---|---|
+| **Entry point** | `compute(base, req, opts)` | `Handlers.add(name, pattern, fn)` |
+| **Boot code** | None — your module IS the runtime | ~2600 lines of AOS framework |
+| **Action dispatch** | Manual (`req.body.action`) | Automatic pattern matching |
+| **Message replies** | Set `base.results.outbox` directly | `msg.reply({ Data = "..." })` |
+| **Cross-process** | Manual outbox entries with `target` | `ao.send({ Target = pid, ... })` |
+| **State** | Module-level variables | Module-level variables + Handlers state |
+| **Module size** | ~35 lines (counter example) | ~2600 lines + your handlers |
+| **Use case** | Lightweight, deterministic logic | Full AOS application framework |
+
+## Caching Methods
+
+Two ways to cache Lua source on a local node:
+
+| Method | Function | How it works |
+|---|---|---|
+| **cacheScript** | `hb.cacheScript(src, "application/lua")` | Schedules source as a message, returns message ID |
+| **cacheBinary** | `hb.cacheBinary(src, "application/lua")` | Uses `wao@1.0` device to cache module |
+
+`cacheScript` is more reliable — it uses the standard scheduler path and doesn't depend on `wao@1.0`.
+
+## Spawn Tags
+
+When spawning a custom Lua process, these tags are required:
+
+```js
+{
+  "data-protocol": "ao",       // AO protocol marker
+  variant: "ao.TN.1",           // Network variant
+  module: moduleId,            // Cached Lua source ID or Arweave TX
+  "execution-device": "lua@5.3a",  // Lua 5.3 VM
+  "push-device": "push@1.0",  // Message delivery device
+  "patch-from": "/results/outbox", // Where to extract outgoing messages
+}
+```
+
+These are the same tags that `hb.spawnLua()` uses internally, except `module` points to your custom source instead of the hyper-aos boot code.
+
+## Adding More Actions
+
+Extend the counter with data parsing, multiple outbox messages, or cross-process sends:
+
+```lua
+local counter = 0
+local log = {}
+
+local function intstr(n)
+  if n == math.floor(n) then return string.format("%d", n) end
+  return tostring(n)
+end
+
+function compute(base, req, opts)
+  local action = nil
+  local data = nil
+  if type(req) == "table" and type(req.body) == "table" then
+    action = req.body.Action or req.body.action
+    data = req.body.data
+  end
+
+  if action == "Inc" then
+    local amount = tonumber(data) or 1
+    counter = counter + amount
+    log[#log + 1] = "+" .. intstr(amount)
+  elseif action == "Reset" then
+    counter = 0
+    log = {}
+  end
+
+  -- Multiple outbox messages
+  base.results = {
+    outbox = {
+      ["1"] = { data = intstr(counter) },
+      ["2"] = { data = table.concat(log, ",") }
+    },
+    output = ""
+  }
+  return base
+end
+```

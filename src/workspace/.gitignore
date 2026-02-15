@@ -1,6 +1,14 @@
-.env.hyperbeam 
+.env.hyperbeam
 .wallet.json
 .db/
+
+# Claude Code local settings
+.claude/settings.local.json
+.claude/memory/
+
+# HyperBEAM build artifacts
+HyperBEAM/_build/
+HyperBEAM/_checkouts/
 
 # Logs
 logs

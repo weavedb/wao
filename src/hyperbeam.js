@@ -35,6 +35,7 @@ export default class HyperBEAM {
     devices,
     genesis_wasm = false,
     arweave_gateway,
+    force_signed = false,
     rebar3, // Use rebar3 shell (true) or direct erl (false). Defaults to HB_REBAR3 env or true
   } = {}) {
     // Determine rebar3 mode: option > env var > default (true)
@@ -47,6 +48,7 @@ export default class HyperBEAM {
       this.rebar3 = true // default to rebar3 mode
     }
     this.genesis_wasm = genesis_wasm
+    this.force_signed = force_signed
     this.cu_port = cu_port
     this.arweave_gateway = arweave_gateway || process.env.ARWEAVE_GATEWAY
     this.devices = devices
@@ -141,6 +143,7 @@ export default class HyperBEAM {
       this._shell = spawn(
         "erl",
         [
+          "+A", "4",  // Async threads for WAMR linked-in driver (see hb_beamr.erl)
           ...paArgs,
           "-sname", `hb_${this.port}`,  // Unique node name to allow multiple instances
           "-eval", evalCmd,
@@ -333,6 +336,11 @@ export default class HyperBEAM {
       _env.CXX = `g++-${this.c}`
     }
     if (this.cmake) _env.CMAKE_POLICY_VERSION_MINIMUM = this.cmake
+    // Ensure enough async threads for WAMR linked-in driver + HTTP client
+    // See hb_beamr.erl: "configure BEAM to have enough async worker threads (see erl +A N)"
+    const asyncThreads = "+A 4"
+    if (!_env.ERL_ZFLAGS) _env.ERL_ZFLAGS = asyncThreads
+    else if (!_env.ERL_ZFLAGS.includes("+A")) _env.ERL_ZFLAGS += ` ${asyncThreads}`
     return _env
   }
 
@@ -362,9 +370,12 @@ export default class HyperBEAM {
         ? `, gateway => <<"http://localhost:${gateway}">>`
         : ""
 
-    // Store config: use "name" key (not "prefix") as expected by hb_store_fs
+    // Store config: use single hb_store_fs matching HyperBEAM eunit test pattern.
+    // Multi-store with hb_store_gateway wrappers caused snapshot discovery failures
+    // because list_numbered/resolve interactions across stores break symlink following.
+    // The wao@1.0 device handles Arweave TX resolution independently via HTTP.
     const _store = this.store_prefix
-      ? `, store => [#{ <<"store-module">> => hb_store_fs, <<"name">> => <<"${this.store_prefix}">> }, #{ <<"store-module">> => hb_store_gateway, <<"subindex">> => [#{ <<"name">> => <<"Data-Protocol">>, <<"value">> => <<"ao">> }], <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"name">> => <<"${this.store_prefix}">> }] }, #{ <<"store-module">> => hb_store_gateway, <<"store">> => [#{ <<"store-module">> => hb_store_fs, <<"name">> => <<"${this.store_prefix}">> }] }]`
+      ? `, store => #{ <<"store-module">> => hb_store_fs, <<"name">> => <<"${this.store_prefix}">> }`
       : ""
     let _bundler = this.bundler
       ? `, bundler_httpsig => <<"${this.bundler}">>`
@@ -392,6 +403,7 @@ export default class HyperBEAM {
       : ""
     const _spp = this.spp ? `, simple_pay_price => ${this.spp}` : ""
     const _genesis_wasm_port = this.genesis_wasm ? `, genesis_wasm_port => ${this.cu_port}` : ""
+    const _force_signed = this.force_signed ? `, force_signed_requests => true, force_signed => true` : ""
 
     // Helper to format module(s) for Erlang - supports ID string, inline object, or array
     const formatModule = (mod) => {
@@ -489,14 +501,29 @@ export default class HyperBEAM {
     // ensure they are running before calling start_mainnet.
     const ensureInit = `(fun() -> try hb:init() catch _:_ -> ok end, case whereis(hb_sup) of undefined -> catch hb_sup:start_link(); _ -> ok end, catch dev_scheduler_registry:start(), catch ar_timestamp:start() end)(), `
 
-    // node_processes definitions include an 'authority' field (set by augment_definition)
-    // which conflicts with HTTP Signatures' @authority derived component (RFC 9421).
     // The HTTPSig codec transforms 'authority' to '@authority' in signature params but
-    // not in component lines, causing internal message verification to fail.
-    // Disable verification for node_processes configs until upstream fixes this.
-    const _verify_assignments = this.p4_lua ? `, verify_assignments => false` : ""
+    // not in component lines, causing internal message verification to fail (RFC 9421).
+    // This affects both node_processes definitions (which include 'authority' via
+    // augment_definition) and push device re-scheduling (which signs outbox messages
+    // with httpsig). Disable verification until upstream fixes the codec.
+    const _verify_assignments = (this.p4_lua || this.genesis_wasm) ? `, verify_assignments => false` : ""
 
-    const start = `${clearProxy}${initPrometheus}${preRegisterAtoms}${loadHbsig}${ensureInit}hb:start_mainnet(#{ ${_port}${_gateway}${_wallet}${_faff}${_bundler}${_bundler_ans104}${_on}${_p4_non_chargable}${_operator}${_spp}${_genesis_wasm_port}${_devices}${_node_processes}${_cache_writers}${_relay_http_client}${_routes}${_store}${_verify_assignments}, prometheus => false, linkify_mode => false}).`
+    // Use hb_http_server:start_node directly instead of hb:start_mainnet.
+    // start_mainnet always overwrites the store config with a single hb_store_fs,
+    // which prevents hb_store_gateway from resolving Arweave TX IDs.
+    // start_node preserves user-provided store via set_default_opts.
+    const _priv_wallet = `, priv_wallet => hb:wallet(<<"${wallet}">>)`
+    // cache_control => <<"always">> ensures compute results/snapshots are cached.
+    // process_snapshot_slots => 1 takes a snapshot every slot (not just every 60s).
+    // process_async_cache => false writes snapshots synchronously before returning
+    // the HTTP response, preventing race conditions where the next compute call
+    // arrives before the snapshot is written.
+    // Without these, hb_cache:write strips uncommitted keys (like device-stack)
+    // from the cached process state, and subsequent computes fail with
+    // {error, no_valid_device_stack} when loading from the corrupted cache.
+    const _cache_control = `, cache_control => <<"always">>, process_snapshot_slots => 1, process_async_cache => false`
+
+    const start = `${clearProxy}${initPrometheus}${preRegisterAtoms}${loadHbsig}${ensureInit}hb_http_server:start_node(#{ ${_port}${_gateway}${_priv_wallet}${_faff}${_bundler}${_bundler_ans104}${_on}${_p4_non_chargable}${_operator}${_spp}${_genesis_wasm_port}${_force_signed}${_devices}${_node_processes}${_cache_writers}${_relay_http_client}${_routes}${_store}${_verify_assignments}${_cache_control}, prometheus => false, linkify_mode => false}).`
 
     return start
   }
