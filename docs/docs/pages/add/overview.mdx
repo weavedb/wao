@@ -1,0 +1,112 @@
+# HyperADD (Research Preview)
+
+![](/images/hyperadd.png)
+
+:::warning[Research Preview]
+HyperADD is a research preview. Do not use it for anything serious in production.
+:::
+
+Vibe engineering is more than vibe coding.
+
+**Vibe coding** is prompting an AI and hoping the output works. No tests, no validation, no feedback loop. Fragile code that breaks the moment you change something.
+
+**HyperADD** (Agent Driven Development) is directing a team of wizard agents — **Team HyperWizards** — through a rigorous dev loop: plan, build, test, iterate, validate, deploy. The wizards don't guess. They follow a structured workflow, write their own tests, and cannot mark a task as done until every test passes.
+
+### Why WAO
+
+WAO gives wizard agents everything they need to build on AO and HyperBEAM: in-memory AOS for fast unit testing, sandboxed HyperBEAM for integration testing, and deploy tools for mainnet. The agents don't need to set up infrastructure — WAO handles it.
+
+### What HyperADD Provides
+
+- **Knowledge base** — Complete AO and HyperBEAM knowledge so wizards don't rediscover what's already documented.
+- **Persistent workflow** — The plan and task list survive across sessions. Any wizard can pick up where the last one left off.
+- **Enforcing quality gates** — Task completion is blocked until all tests pass.
+- **Fast feedback** — In-memory AOS runs tests in seconds, not minutes. Wizards iterate dozens of times in the time it would take to deploy once.
+- **Live dashboard** — Real-time build progress via SSE, plus MCP tools for checking progress directly in Claude Code.
+
+```
+                              ┌──────────────┐
+                              │     You      │
+                              │ architecture │
+                              │   + intent   │
+                              └───────┬──────┘
+                                      │
+                                      ▼
+                         ┌────────────────────────┐
+                         │   Team HyperWizards    │
+                         │ code · test · iterate  │
+                         └────────────┬───────────┘
+                                      │
+             ┌────────────────────────┼────────────────────────┐
+             │                        │                        │
+             ▼                        ▼                        ▼
+ ┌──────────────────────┐ ┌──────────────────────┐ ┌──────────────────────┐
+ │       WizardAO       │ │       WAO SDK        │ │  HyperADD Framework  │
+ │                      │ │                      │ │                      │
+ │  AO docs             │ │  in-memory AOS       │ │  /plan -> build      │
+ │  HB protocols        │ │  sandboxed HyperBEAM │ │  /test -> /validate  │
+ │  Lua patterns        │ │  fast testing        │ │  enforcing gates     │
+ │  failure modes       │ │  deploy tools        │ │  live dashboard+MCP  │
+ └──────────────────────┘ └──────────────────────┘ └──────────────────────┘
+     knowledge base                speed                 discipline
+```
+
+The stack spans Lua, JavaScript, Erlang, and Rust — you don't need to know any of them. Your job is the architecture and the intent.
+
+## Build Tracks
+
+A project mixes any combination of four build tracks. During planning, the wizard prompts you to choose which tracks to include — most projects combine AOS with a frontend, or mix several tracks.
+
+| Track | What you build | Tested with |
+|-------|---------------|-------------|
+| **AOS** | Lua handlers | In-memory AOS, sandboxed HyperBEAM |
+| **Custom Modules** | WASM64 (Rust) or standalone Lua modules | sandboxed HyperBEAM |
+| **Device** | Erlang device modules | eunit, sandboxed HyperBEAM |
+| **Frontend** | React components | vitest, Playwright |
+
+## The HyperADD Workflow
+
+### 1. Setup
+Scaffold the project with WAO and start the live dashboard. Run `yarn start` to launch the dashboard — it watches `tasks.json` and `plan.md` via SSE and updates in real-time as wizards work. An MCP server provides `get_progress` and `open_dashboard` tools directly in Claude Code.
+
+### 2. Plan
+Describe what you want to build. The wizard researches patterns and edge cases, prompts you to choose tracks, and writes an architecture plan with an ordered task list.
+
+### 3. Build
+Team HyperWizards executes tasks. For each task, a wizard writes the code, writes the tests, and iterates until tests pass. Quality gates block task completion — no wizard can skip failing tests. Track progress on the dashboard or with `/report`.
+
+### 4. Validate
+All quality gates run automatically. No wizard can mark a task done with failing tests.
+
+### 5. Deploy
+Once all tasks pass, the wizard validates and deploys to AO mainnet.
+
+## Team HyperWizards
+
+Ten roles, each backed by skills and knowledge. The framework decides how many agents to run — roles that don't depend on each other run in parallel.
+
+| Role | What it does | Parallelism |
+|------|-------------|-------------|
+| **Planner** | Researches patterns, prompts you to choose tracks, writes plan and task list | Runs first |
+| **AOS Builder** | Writes Lua handlers and tests, iterates until passing | Parallel with others |
+| **Module Builder** | Writes custom WASM64 (Rust) or standalone Lua modules and tests | Parallel with others |
+| **Device Builder** | Writes Erlang device modules and tests | Parallel with AOS Builder |
+| **Frontend Builder** | Writes React components and tests | After AOS — frontend calls AOS processes |
+| **Tester** | Debugs test failures across all tracks | Parallel with builders |
+| **Validator** | Runs all quality gates | After build |
+| **Reporter** | Shows progress, test results, blockers | Anytime |
+| **Debugger** | Troubleshoots when builds stall | Anytime |
+| **Deployer** | Validates and deploys to mainnet | Runs last |
+
+Wizards coordinate through the task list. Agent memory persists across sessions.
+
+## Next
+
+- [Vibe Engineering](/add/build) — Step-by-step: setup, plan, build, validate, deploy
+- [HyperADD Framework](/add/framework) — Technical architecture under the hood
+
+## Claude Code Only
+
+- Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Anthropic's CLI agent)
+- Node.js 20+
+- No prior experience with Lua, Erlang, or WAO required

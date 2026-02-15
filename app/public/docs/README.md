@@ -17,7 +17,7 @@ For the most productive development workflow, write tests locally and hook them 
 #### 1. Create an APP
 
 ```bash
-npx wao create waoapp && cd waoapp
+npx wao create myapp && cd myapp
 ```
 
 #### 2. Run WAO Proxy

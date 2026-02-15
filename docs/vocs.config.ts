@@ -154,6 +154,7 @@ export default defineConfig({
   topNav: [
     { text: "Get Started", link: "/getting-started" },
     { text: "HyperBEAM", link: "/book" },
+    { text: "ADD", link: "/add/overview" },
     { text: "SDK", link: "/api/overview" },
   ],
   socials: [
@@ -174,64 +175,6 @@ export default defineConfig({
     {
       text: "Getting Started",
       link: "/getting-started",
-    },
-    {
-      text: "Decoding HyperBEAM",
-      collapsed: true,
-      items: [
-        {
-          text: "Overview",
-          link: "/hyperbeam/decoding-from-scratch",
-        },
-        {
-          text: "Installing HB and WAO",
-          link: "/hyperbeam/installing-hb-wao",
-        },
-        {
-          text: "Devices and Pathing",
-          link: "/hyperbeam/devices-pathing",
-        },
-        {
-          text: "Custom Devices and Codecs",
-          link: "/hyperbeam/custom-devices-codecs",
-        },
-        {
-          text: "Flat Codec",
-          link: "/hyperbeam/codec-flat",
-        },
-        {
-          text: "Structured Codec",
-          link: "/hyperbeam/codec-structured",
-        },
-        {
-          text: "Httpsig Codec",
-          link: "/hyperbeam/codec-httpsig",
-        },
-        {
-          text: "Http Message Signatures",
-          link: "/hyperbeam/http-message-signatures",
-        },
-        {
-          text: "Hashpaths",
-          link: "/hyperbeam/hashpaths",
-        },
-        {
-          text: "Device Composition",
-          link: "/hyperbeam/device-composition",
-        },
-        {
-          text: "Processes and Scheduler",
-          link: "/hyperbeam/processes-scheduler",
-        },
-        {
-          text: "Legacynet Compatible AOS",
-          link: "/hyperbeam/legacynet-aos",
-        },
-        {
-          text: "Payment System",
-          link: "/hyperbeam/payment-system",
-        },
-      ],
     },
     {
       text: "Building Devices",
@@ -382,35 +325,12 @@ export default defineConfig({
       ],
     },
     {
-      text: "HyperBEAM on Mobile",
+      text: "Agent Driven Development",
       collapsed: true,
       items: [
-        {
-          text: "Overview",
-          link: "/mobile",
-        },
-        {
-          text: "Android",
-          link: "/mobile/android",
-        },
-        {
-          text: "iOS",
-          link: "/mobile/ios",
-        },
-      ],
-    },
-    {
-      text: "AO The Web",
-      collapsed: true,
-      items: [
-        {
-          text: "Overview",
-          link: "/web",
-        },
-        {
-          text: "WAO Hub",
-          link: "/hub",
-        },
+        { text: "Overview", link: "/add/overview" },
+        { text: "Vibe Engineering", link: "/add/build" },
+        { text: "Framework Spec", link: "/add/framework" },
       ],
     },
     {
@@ -422,8 +342,16 @@ export default defineConfig({
           items: [
             { text: "Legacynet AOS", link: "/tutorials/legacynet" },
             { text: "Legacynet on HyperBEAM", link: "/tutorials/legacynet-aos" },
-            { text: "Mainnet AOS", link: "/tutorials/mainnet-aos" },
+            { text: "Mainnet AOS (WASM)", link: "/tutorials/mainnet-aos" },
+            { text: "HyperAOS", link: "/tutorials/hyperaos" },
             { text: "Running LLMs on AOS", link: "/tutorials/running-llms" },
+          ],
+        },
+        {
+          text: "Custom Modules",
+          items: [
+            { text: "Custom WASM64 in Rust", link: "/tutorials/rust-wasm64" },
+            { text: "Custom Lua Modules", link: "/tutorials/custom-lua" },
           ],
         },
         {
@@ -433,6 +361,8 @@ export default defineConfig({
             { text: "Custom Devices in Erlang", link: "/tutorials/creating-devices" },
             { text: "Custom Devices in Rust", link: "/tutorials/devices-rust" },
             { text: "Custom Devices in C++", link: "/tutorials/devices-cpp" },
+            { text: "Custom Devices in Elixir", link: "/tutorials/devices-elixir" },
+            { text: "Custom Devices in Gleam", link: "/tutorials/devices-gleam" },
           ],
         },
       ],
@@ -505,6 +435,85 @@ export default defineConfig({
           text: "Devices",
           collapsed: true,
           items: [...dev.map(v => ({ text: v, link: `/src/${v}` }))],
+        },
+      ],
+    },
+    {
+      text: "Decoding HyperBEAM",
+      collapsed: true,
+      items: [
+        {
+          text: "Overview",
+          link: "/hyperbeam/decoding-from-scratch",
+        },
+        {
+          text: "Installing HB and WAO",
+          link: "/hyperbeam/installing-hb-wao",
+        },
+        {
+          text: "Devices and Pathing",
+          link: "/hyperbeam/devices-pathing",
+        },
+        {
+          text: "Custom Devices and Codecs",
+          link: "/hyperbeam/custom-devices-codecs",
+        },
+        {
+          text: "Flat Codec",
+          link: "/hyperbeam/codec-flat",
+        },
+        {
+          text: "Structured Codec",
+          link: "/hyperbeam/codec-structured",
+        },
+        {
+          text: "Httpsig Codec",
+          link: "/hyperbeam/codec-httpsig",
+        },
+        {
+          text: "Http Message Signatures",
+          link: "/hyperbeam/http-message-signatures",
+        },
+        {
+          text: "Hashpaths",
+          link: "/hyperbeam/hashpaths",
+        },
+        {
+          text: "Device Composition",
+          link: "/hyperbeam/device-composition",
+        },
+        {
+          text: "Processes and Scheduler",
+          link: "/hyperbeam/processes-scheduler",
+        },
+        {
+          text: "Legacynet Compatible AOS",
+          link: "/hyperbeam/legacynet-aos",
+        },
+        {
+          text: "Payment System",
+          link: "/hyperbeam/payment-system",
+        },
+      ],
+    },
+    {
+      text: "Experimental",
+      collapsed: true,
+      items: [
+        {
+          text: "HyperBEAM on Mobile",
+          items: [
+            { text: "Overview", link: "/mobile" },
+            { text: "Android", link: "/mobile/android" },
+            { text: "iOS", link: "/mobile/ios" },
+          ],
+        },
+        {
+          text: "AO The Web",
+          items: [
+            { text: "Overview", link: "/web" },
+            { text: "WAO Hub", link: "/hub" },
+          ],
         },
       ],
     },

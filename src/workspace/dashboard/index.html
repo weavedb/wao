@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" data-color-mode="light" data-light-theme="light" data-dark-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HyperADD Dashboard</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@primer/css@21/dist/primer.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css" id="hljs-light">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" id="hljs-dark" disabled>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/erlang.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/lua.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/rust.min.js"></script>
+    <style>
+      /* Only custom CSS for things Primer doesn't provide */
+      @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+      .anim-spin { animation: spin 1s linear infinite; }
+      .anim-spin-slow { animation: spin 1.5s linear infinite; }
+      [data-color-mode="dark"] .logo-invert { filter: invert(1); }
+
+      /* Dark toggle — GitHub-style icon button */
+      .dark-toggle {
+        display: flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px; border-radius: 6px;
+        border: 1px solid var(--color-border-default, #d0d7de);
+        background: var(--color-canvas-default, #fff); cursor: pointer;
+        color: var(--color-fg-muted, #656d76);
+        transition: background 0.15s, border-color 0.15s; appearance: none; padding: 0;
+      }
+      .dark-toggle:hover { background-color: var(--color-canvas-subtle, #f6f8fa); color: var(--color-fg-default); border-color: var(--color-border-default, #d0d7de); }
+      .dark-toggle:focus { outline: 2px solid var(--color-accent-fg); outline-offset: -2px; }
+      /* Override Primer Header to match modern GitHub (light gray, not black) */
+      .Header { background-color: var(--color-canvas-subtle, #f6f8fa) !important; color: var(--color-fg-default) !important; border-bottom: 1px solid var(--color-border-muted, #d0d7de); }
+      .Header .Header-link { color: var(--color-fg-default) !important; }
+      [data-color-mode="dark"] .Header { background-color: var(--color-canvas-subtle, #161b22) !important; border-bottom-color: var(--color-border-default, #30363d); }
+      /* Dark toggle inside Header */
+      .Header .dark-toggle { background: transparent; border-color: var(--color-border-default, #d0d7de); }
+      .Header .dark-toggle:hover { background-color: var(--color-neutral-muted); }
+
+      /* UnderlineNav button — Primer needs this for <button> elements */
+      button.UnderlineNav-item {
+        background: transparent; border: 0;
+        border-bottom: 2px solid transparent; border-radius: 0;
+        appearance: none; cursor: pointer;
+        padding: 8px 16px; font-size: 14px; line-height: 30px;
+        color: var(--color-fg-default);
+        margin-bottom: -1px;
+      }
+      button.UnderlineNav-item:hover {
+        border-bottom-color: var(--color-neutral-muted);
+        text-decoration: none;
+      }
+      button.UnderlineNav-item[aria-selected="true"] {
+        font-weight: 600;
+        border-bottom-color: var(--color-accent-fg);
+        color: var(--color-fg-default);
+      }
+
+      /* Progress bar override — ensure correct height and color */
+      .Progress { height: 8px; }
+      .Progress-item { background-color: var(--color-success-emphasis, #1f883d) !important; }
+
+      /* Status icon circles */
+      .icon-circle { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .icon-circle-success { background-color: var(--color-success-emphasis, #1f883d); }
+      .icon-circle-attention { background-color: var(--color-attention-emphasis, #bf8700); }
+      .icon-circle-empty { border: 2px solid var(--color-border-default, #d0d7de); }
+
+      /* Clickable file rows */
+      .file-row { cursor: pointer; transition: background 0.1s; }
+      .file-row:hover { background-color: var(--color-neutral-subtle) !important; }
+
+      /* Code viewer — GitHub blob-style */
+      .code-view { overflow-x: auto; }
+      .code-view table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 20px; tab-size: 4; }
+      .code-view td { padding: 0; vertical-align: top; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+      .code-view .ln { width: 1px; min-width: 50px; padding: 0 10px; text-align: right; user-select: none; white-space: nowrap; color: var(--color-fg-subtle); }
+      .code-view .lc { padding: 0 16px 0 10px; white-space: pre; }
+      .code-view tr:hover { background: var(--color-neutral-subtle); }
+      .code-view .hljs { background: transparent !important; }
+
+      /* Back button */
+      .back-btn {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 4px 12px 4px 8px; border: 1px solid var(--color-border-default);
+        border-radius: 6px; background: transparent; cursor: pointer;
+        font-size: 12px; color: var(--color-fg-muted); font-family: inherit;
+      }
+      .back-btn:hover { background: var(--color-neutral-subtle); color: var(--color-fg-default); }
+
+      /* Skill badge — Primer Label doesn't have filled-color style */
+      .skill-badge {
+        display: inline-block; padding: 0 6px; font-size: 11px; font-weight: 600; line-height: 18px;
+        border-radius: 4px; color: #fff; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      }
+
+      /* Markdown body — explicit light/dark overrides (github-markdown-css ignores data-color-mode) */
+      .markdown-body { background-color: transparent !important; color: inherit !important; }
+      .markdown-body pre { background-color: #f6f8fa !important; }
+      .markdown-body code { background-color: rgba(175,184,193,0.2) !important; }
+      .markdown-body pre code { background-color: transparent !important; }
+      .markdown-body table { border-color: #d0d7de !important; }
+      .markdown-body table th, .markdown-body table td { border-color: #d0d7de !important; }
+      .markdown-body table tr { background-color: transparent !important; }
+      .markdown-body table tr:nth-child(2n) { background-color: #f6f8fa !important; }
+      .markdown-body hr { background-color: #d0d7de !important; }
+      [data-color-mode="dark"] .markdown-body pre { background-color: #161b22 !important; }
+      [data-color-mode="dark"] .markdown-body code { background-color: rgba(110,118,129,0.4) !important; }
+      [data-color-mode="dark"] .markdown-body pre code { background-color: transparent !important; }
+      [data-color-mode="dark"] .markdown-body table { border-color: #30363d !important; }
+      [data-color-mode="dark"] .markdown-body table th, [data-color-mode="dark"] .markdown-body table td { border-color: #30363d !important; }
+      [data-color-mode="dark"] .markdown-body table tr:nth-child(2n) { background-color: #161b22 !important; }
+      [data-color-mode="dark"] .markdown-body hr { background-color: #30363d !important; }
+
+      /* Compact markdown */
+      .markdown-compact { font-size: 14px; }
+      .markdown-compact h1 { font-size: 20px; margin: 16px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border-muted); }
+      .markdown-compact h2 { font-size: 16px; margin: 14px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--color-border-muted); }
+      .markdown-compact h3 { font-size: 14px; font-weight: 600; margin: 10px 0 4px; }
+      .markdown-compact p { margin: 4px 0; }
+      .markdown-compact li { margin: 2px 0; }
+      .markdown-compact pre {
+        margin: 8px 0; padding: 16px; font-size: 12px; line-height: 1.45;
+        overflow: auto; border-radius: 6px;
+        background-color: #f6f8fa !important;
+      }
+      [data-color-mode="dark"] .markdown-compact pre { background-color: #161b22 !important; }
+      .markdown-compact code {
+        font-size: 85%; padding: 0.2em 0.4em; border-radius: 6px;
+        background-color: rgba(175,184,193,0.2);
+      }
+      [data-color-mode="dark"] .markdown-compact code { background-color: rgba(110,118,129,0.4); }
+      .markdown-compact pre code {
+        padding: 0; background: none !important; font-size: 100%;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      }
+      .markdown-compact .hljs,
+      .markdown-compact pre code.hljs { background: transparent !important; }
+      .markdown-compact ul, .markdown-compact ol { padding-left: 24px; margin: 4px 0; }
+
+      /* Code block copy button */
+      .code-block-wrap { position: relative; }
+      .code-copy-btn {
+        position: absolute; top: 8px; right: 8px; z-index: 1;
+        display: flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px; border-radius: 6px;
+        border: 1px solid var(--color-border-default, #d0d7de);
+        background: var(--color-canvas-default, #fff); color: var(--color-fg-muted, #656d76);
+        cursor: pointer; opacity: 0; transition: opacity 0.15s;
+      }
+      .code-block-wrap:hover .code-copy-btn { opacity: 1; }
+      .code-copy-btn:hover { background: var(--color-canvas-subtle, #f6f8fa); color: var(--color-fg-default, #1f2328); }
+      [data-color-mode="dark"] .code-copy-btn { background: #161b22; border-color: #30363d; color: #8b949e; }
+      [data-color-mode="dark"] .code-copy-btn:hover { background: #30363d; color: #e6edf3; }
+    </style>
+  </head>
+  <body class="color-bg-default color-fg-default">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
