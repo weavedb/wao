@@ -6,10 +6,13 @@
     "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
     "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
     "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js",
+    "start": "trap 'kill $(jobs -p)' EXIT; node dashboard/server.js & cd dashboard && npx vite",
+    "start:api": "node dashboard/server.js",
+    "keygen": "node scripts/keygen.js",
     "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
-    "hbsig": "^0.2.5",
-    "wao": "^0.37.7"
+    "hbsig": "0.3.0",
+    "wao": "0.40.1"
   }
 }

@@ -1,0 +1,265 @@
+# Custom Devices in Gleam
+
+Gleam compiles to Erlang source then BEAM bytecode, so it runs on the same VM as HyperBEAM with zero FFI overhead — just like Elixir. The key difference: Gleam is statically typed, catching errors at compile time instead of runtime.
+
+## Prerequisites
+
+- [Gleam](https://gleam.run/getting-started/installing/) installed
+- WAO HyperBEAM fork (`git clone https://github.com/aspect-build/HyperBEAM.git`)
+- Node.js 22+
+
+## How It Works
+
+HyperBEAM devices are Erlang modules that export callback functions like `info/3`, `init/3`, `compute/3`, etc. Since Gleam compiles to `.beam` files, they're directly loadable by the Erlang VM.
+
+A Gleam module `dev_gleam_counter` compiles to the plain atom `dev_gleam_counter` — no prefix needed (unlike Elixir's `'Elixir.DevElixirCounter'`). And Gleam's `Ok(value)` maps directly to Erlang's <code>{"{ok, Value}"}</code> tuple — exactly what HyperBEAM expects.
+
+The main challenge is bridging Gleam's static type system with HyperBEAM's dynamically typed Erlang maps. We solve this with an opaque `ErlTerm` type and a small Erlang FFI helper file.
+
+## Step 1: Create a Gleam Project
+
+Gleam requires a project structure (unlike single-file Elixir):
+
+```bash
+gleam new dev_gleam_counter
+cd dev_gleam_counter
+```
+
+## Step 2: Write the Gleam Module
+
+Replace `src/dev_gleam_counter.gleam`:
+
+```gleam
+//// A HyperBEAM counter device implemented in Gleam.
+//// Device name: gleam-counter@1.0
+
+/// Opaque type for dynamically-typed Erlang terms.
+/// Gleam is statically typed but HyperBEAM passes dynamic Erlang maps,
+/// so we bridge the gap with this type and FFI helpers.
+pub type ErlTerm
+
+/// Erlang FFI — called at runtime on the same BEAM VM
+@external(erlang, "hb_ao", "set")
+fn hb_ao_set(msg: ErlTerm, data: ErlTerm, opts: ErlTerm) -> ErlTerm
+
+@external(erlang, "maps", "get")
+fn maps_get(key: ErlTerm, map: ErlTerm, default: ErlTerm) -> ErlTerm
+
+@external(erlang, "maps", "from_list")
+fn make_map(pairs: List(#(String, ErlTerm))) -> ErlTerm
+
+/// FFI helpers from companion .erl file for dynamic type bridging
+@external(erlang, "dev_gleam_counter_ffi", "coerce")
+fn coerce(value: a) -> ErlTerm
+
+@external(erlang, "dev_gleam_counter_ffi", "add_one")
+fn add_one(n: ErlTerm) -> ErlTerm
+
+@external(erlang, "dev_gleam_counter_ffi", "add_nums")
+fn add_nums(a: ErlTerm, b: ErlTerm) -> ErlTerm
+
+pub fn info(msg: ErlTerm, _msg2: ErlTerm, opts: ErlTerm) -> Result(ErlTerm, Nil) {
+  let data = make_map([#("version", coerce("1.0"))])
+  Ok(hb_ao_set(msg, data, opts))
+}
+
+pub fn init(msg: ErlTerm, _msg2: ErlTerm, opts: ErlTerm) -> Result(ErlTerm, Nil) {
+  let data = make_map([#("num", coerce(0))])
+  Ok(hb_ao_set(msg, data, opts))
+}
+
+pub fn inc(msg1: ErlTerm, _msg2: ErlTerm, opts: ErlTerm) -> Result(ErlTerm, Nil) {
+  let num = maps_get(coerce("num"), msg1, coerce(0))
+  let data = make_map([#("num", add_one(num))])
+  Ok(hb_ao_set(msg1, data, opts))
+}
+
+pub fn add(msg1: ErlTerm, msg2: ErlTerm, opts: ErlTerm) -> Result(ErlTerm, Nil) {
+  let num = maps_get(coerce("num"), msg1, coerce(0))
+  let plus = maps_get(coerce("plus"), msg2, coerce(0))
+  let data = make_map([#("num", add_nums(num, plus))])
+  Ok(hb_ao_set(msg1, data, opts))
+}
+
+pub fn get(msg1: ErlTerm, _msg2: ErlTerm, _opts: ErlTerm) -> Result(ErlTerm, Nil) {
+  Ok(msg1)
+}
+
+pub fn compute(msg1: ErlTerm, _msg2: ErlTerm, _opts: ErlTerm) -> Result(ErlTerm, Nil) {
+  Ok(msg1)
+}
+
+pub fn snapshot(msg: ErlTerm, _msg2: ErlTerm, _opts: ErlTerm) -> Result(ErlTerm, Nil) {
+  Ok(msg)
+}
+
+pub fn normalize(msg: ErlTerm, _msg2: ErlTerm, _opts: ErlTerm) -> Result(ErlTerm, Nil) {
+  Ok(msg)
+}
+```
+
+Key patterns:
+
+- **`ErlTerm`**: Opaque type with no constructors — represents any Erlang term. Gleam can't inspect it, but can pass it through FFI functions.
+- **`@external`**: Declares Erlang functions callable from Gleam. `hb_ao:set/3` and `maps:get/3` are called directly on the BEAM at runtime.
+- **`Ok(value)`**: Compiles to <code>{"{ok, Value}"}</code> — exactly what HyperBEAM expects as a return tuple.
+- **`coerce(x)`**: Identity function that bridges Gleam's type system — converts any Gleam value to `ErlTerm`.
+- **`make_map`**: Wraps `maps:from_list/1` — Gleam strings are Erlang binaries, so `#("num", coerce(0))` becomes <code>{'{<<"num">>, 0}'}</code>.
+
+## Step 3: Write the FFI Helper
+
+Create `src/dev_gleam_counter_ffi.erl` — a small Erlang file that bridges Gleam's static types with Erlang's dynamic world:
+
+```erlang
+-module(dev_gleam_counter_ffi).
+-export([coerce/1, add_one/1, add_nums/2]).
+
+coerce(X) -> X.
+add_one(N) -> N + 1.
+add_nums(A, B) -> A + B.
+```
+
+This is necessary because Gleam can't perform arithmetic on `ErlTerm` values (it doesn't know they're integers). The FFI helpers do the dynamic operations that Gleam's type system can't express.
+
+## Step 4: Build and Deploy
+
+```bash
+# Build the Gleam project
+gleam build
+
+# Copy BEAM files to HyperBEAM
+cp build/dev/erlang/dev_gleam_counter/ebin/dev_gleam_counter.beam \
+   build/dev/erlang/dev_gleam_counter/ebin/dev_gleam_counter_ffi.beam \
+   HyperBEAM/_build/default/lib/hb/ebin/
+```
+
+Note: unlike Elixir (single file compilation), Gleam requires a project structure with `gleam.toml`. The tradeoff is proper dependency management and type checking.
+
+## Step 5: Register the Device
+
+Add the device to the `preloaded_devices` list in `HyperBEAM/src/hb_opts.erl`:
+
+```erlang
+preloaded_devices => [
+  ...
+  #{<<"name">> => <<"gleam-counter@1.0">>, <<"module">> => dev_gleam_counter}
+],
+```
+
+Note the plain atom `dev_gleam_counter` — no quotes needed. Unlike Elixir modules (`'Elixir.DevElixirCounter'`), Gleam modules compile to standard lowercase Erlang module names.
+
+## Step 6: Write Unit Tests
+
+Create `HyperBEAM/src/dev_gleam_counter_test.erl`:
+
+```erlang
+-module(dev_gleam_counter_test).
+-include_lib("eunit/include/eunit.hrl").
+
+info_test() ->
+    M1 = #{ <<"device">> => <<"gleam-counter@1.0">> },
+    M2 = #{ <<"path">> => <<"info">> },
+    {ok, R} = hb_ao:resolve(M1, M2, #{}),
+    ?assertEqual(<<"1.0">>, maps:get(<<"version">>, R)).
+
+inc_test() ->
+    M1 = #{ <<"device">> => <<"gleam-counter@1.0">>, <<"num">> => 0 },
+    M2 = #{ <<"path">> => <<"inc">> },
+    {ok, R} = hb_ao:resolve(M1, M2, #{}),
+    ?assertEqual(1, maps:get(<<"num">>, R)).
+
+add_test() ->
+    M1 = #{ <<"device">> => <<"gleam-counter@1.0">>, <<"num">> => 0 },
+    M2 = #{ <<"path">> => <<"add">>, <<"plus">> => 5 },
+    {ok, R} = hb_ao:resolve(M1, M2, #{}),
+    ?assertEqual(5, maps:get(<<"num">>, R)).
+
+resolve_chain_test() ->
+    M1 = #{ <<"device">> => <<"gleam-counter@1.0">>, <<"num">> => 0 },
+    M2Inc = #{ <<"path">> => <<"inc">> },
+    {ok, R1} = hb_ao:resolve(M1, M2Inc, #{}),
+    ?assertEqual(1, maps:get(<<"num">>, R1)),
+    {ok, R2} = hb_ao:resolve(R1, M2Inc, #{}),
+    ?assertEqual(2, maps:get(<<"num">>, R2)),
+    M2Add = #{ <<"path">> => <<"add">>, <<"plus">> => 10 },
+    {ok, R3} = hb_ao:resolve(R2, M2Add, #{}),
+    ?assertEqual(12, maps:get(<<"num">>, R3)).
+```
+
+## Step 7: Build and Test
+
+```bash
+cd HyperBEAM
+rebar3 compile
+erlc -I include -o _build/default/lib/hb/ebin src/dev_gleam_counter_test.erl
+erl -pa _build/default/lib/*/ebin -noshell \
+  -eval 'eunit:test(dev_gleam_counter_test, [verbose]).' \
+  -s init stop
+```
+
+Expected output:
+
+```
+======================== EUnit ========================
+module 'dev_gleam_counter_test'
+  dev_gleam_counter_test: info_test...ok
+  dev_gleam_counter_test: inc_test...ok
+  dev_gleam_counter_test: add_test...ok
+  dev_gleam_counter_test: resolve_chain_test...ok
+  [done in 0.075 s]
+=======================================================
+  All 4 tests passed.
+```
+
+## Step 8: Test with WAO JS
+
+```js
+import { describe, it, before, after } from "node:test"
+import assert from "node:assert"
+import { HyperBEAM } from "wao/test"
+import HB from "wao/hb"
+
+describe("Gleam Counter Device", function () {
+  let hbeam, hb
+
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    hb = new HB({ url: hbeam.url })
+    await hb.init(hbeam.jwk)
+  })
+
+  after(async () => hbeam.kill())
+
+  it("should get version", async () => {
+    const res = await hb.g("/~gleam-counter@1.0/info")
+    assert.equal(res.version, "1.0")
+  })
+
+  it("should increment", async () => {
+    const res = await hb.post({ path: "/~gleam-counter@1.0/inc", num: 0 })
+    assert.equal(res.out.num, "1")
+  })
+
+  it("should add", async () => {
+    const res = await hb.post({ path: "/~gleam-counter@1.0/add", num: 0, plus: 5 })
+    assert.equal(res.out.num, "5")
+  })
+})
+```
+
+## Gleam vs Elixir for Devices
+
+Both Gleam and Elixir run on the BEAM with zero overhead, but they make different tradeoffs:
+
+| Aspect | Elixir | Gleam |
+|--------|--------|-------|
+| Type system | Dynamic | Static |
+| Module atom | `'Elixir.DevElixirCounter'` (quoted) | `dev_gleam_counter` (plain) |
+| Erlang FFI | `:module.function()` inline | `@external` decorator |
+| Compilation | `elixirc file.ex` (single file) | `gleam build` (project required) |
+| FFI helpers | None needed | `.erl` file for type bridging |
+| Error detection | Runtime | Compile time |
+
+Gleam's static types catch bugs earlier but require a small Erlang FFI file to bridge the type boundary with HyperBEAM's dynamic maps. Elixir's dynamic typing lets you call Erlang functions inline with no ceremony.
+
+For most device logic — routing, state management, protocol handling — either language works well. Choose based on your team's preference for type safety vs. dynamic flexibility.

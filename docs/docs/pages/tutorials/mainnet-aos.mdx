@@ -1,9 +1,14 @@
-# Mainnet AOS
+# Mainnet AOS (WASM)
 
-To test mainnet aos processes with WAO, you currently need the WAO HyperBEAM fork.
+:::warning
+Mainnet AOS with `wasm-64@1.0` is **not production ready**. For production use, deploy with [Legacynet AOS on HyperBEAM](/tutorials/legacynet-aos) (`genesis_wasm`) instead.
+:::
 
-```js
-git clone https://github.com/ArweaveOasis/wao.git
+To test mainnet AOS processes with WAO, you currently need the WAO HyperBEAM fork.
+
+```bash
+git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git
+cd HyperBEAM && rebar3 compile
 ```
 
 Mainnet AOS requires `stack@1.0` device with `wasi@1.0`, `json-iface@1.0`, `wasm-64@1.0`, and `multipass@1.0`. The required http header tags look like the following.
@@ -16,7 +21,7 @@ const headers = {
   path: "/schedule",
   scheduler,
   "Data-Protocol": "ao",
-  Variant: "ao.N.1",
+  Variant: "ao.TN.1",
   "scheduler-location": scheduler,
   Authority: scheduler,
   "random-seed": seed(16),
@@ -81,3 +86,67 @@ describe("Hyperbeam Mainnet", function () {
 })
 ```
 
+## Using WAO SDK
+
+The `AO` class with `mode: "aos"` wraps all the low-level HB methods:
+
+```js
+import assert from "assert"
+import { describe, it, before, after } from "node:test"
+import { HyperBEAM } from "wao/test"
+import { AO } from "wao"
+
+const src_data = `
+local count = 0
+Handlers.add("Add", "Add", function (msg)
+  count = count + tonumber(msg.Plus)
+end)
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = tostring(count) })
+end)`
+
+describe("Mainnet AOS with WAO SDK", function () {
+  let hbeam, ao
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true }).ready()
+    ao = await new AO({ hb: hbeam.url, mode: "aos" }).init(hbeam.jwk)
+  })
+  after(async () => hbeam.kill())
+
+  it("should deploy and interact", async () => {
+    const { p } = await ao.deploy({ src_data })
+    await p.m("Add", { Plus: "3" })
+    assert.equal(await p.m("Get", false), "3")
+  })
+})
+```
+
+## Remote Deployment
+
+:::warning
+Mainnet AOS (WASM) is experimental on remote nodes. For production deployments, use [Legacynet AOS on HyperBEAM](/tutorials/legacynet-aos) with `genesis_wasm` instead.
+:::
+
+Deploy to remote push nodes for testing. The SDK auto-detects remote URLs and switches to ANS-104 encoding:
+
+```js
+import { AO } from "wao"
+import fs from "fs"
+
+const jwk = JSON.parse(fs.readFileSync(".wallet.json", "utf8"))
+const ao = await new AO({
+  hb: "https://push-1.forward.computer",
+  mode: "aos"
+}).init(jwk)
+
+const { p, pid } = await ao.deploy({ src_data })
+console.log("Process ID:", pid)
+
+await p.m("Add", { Plus: "3" })
+const { out } = await p.msg("Get")
+console.log(out) // "3"
+```
+
+:::tip
+Generate a wallet with `npx wao keygen`. Use `push-1` through `push-10` for full compute. The primary `push.forward.computer` is push-only (no compute). Remote nodes don't have `wao@1.0`, but the default AOS WASM image is already on Arweave.
+:::

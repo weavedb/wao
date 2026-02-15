@@ -4,27 +4,71 @@
 
 ## What is WizardAO?
 
-WizardAO is the one-stop lab for engineers building on Arweave and AO. It ships tutorials, deep-dive guides, a full HyperBEAM book, and complete HyperBEAM references — everything you need to go from zero to production.
+**WizardAO** is the one-stop lab for engineers building on Arweave and AO. It ships tutorials, deep-dive guides, a full HyperBEAM book, and complete HyperBEAM references — everything you need to go from zero to production.
 
 At its core is **WAO**, a lightning-fast testing framework for AOS, [HyperBEAM](https://permaweb.github.io/HyperBEAM/), and AI. Test Lua scripts 1000x faster than mainnet by emulating AO units in memory, launch HyperBEAM nodes from JS test code, build custom devices in Erlang, Rust, and C++, or spin up standalone local units with a single `npx wao`.
 
 WAO also ships the **WAO SDK** — an extension of `aoconnect` with syntactic sugar, seamless message piping, and async message result validation to drastically reduce code size.
 
+This combination — a complete knowledge base plus fast in-memory testing — makes WizardAO the ideal stack for Agent Driven Development on AO and HyperBEAM. AI agents build reliably when they have domain knowledge to avoid hallucinating patterns and a fast feedback loop to iterate autonomously. The [HyperADD Framework](/add/overview) ties both together.
+
 ---
 
 ## Start Building
 
-### AOS
+```
+  ┌─────────────────────┬─────────────────────┐
+  │                     │  Lua Scripts (AOS)  │  ← smart contracts
+  │   Custom Modules    ├─────────────────────┤
+  │     (WASM/Lua)      │         AOS         │  ← execution environments
+  ├─────────────────────┴─────────────────────┤
+  │             HyperBEAM Devices             │  ← composable infrastructure
+  ├───────────────────────────────────────────┤
+  │                  Arweave                  │  ← permanent storage
+  └───────────────────────────────────────────┘
+```
+
+WAO provides four test environments — from instant in-memory emulation to production networks:
+
+```
+  fast ◀───────────────────────────────────────────▶ realistic
+
+  In-Memory AOS  Local AO Units  Local HyperBEAM  Remote HyperBEAM
+   emulation       npx wao          sandboxed        production
+```
+
+| Environment | Description |
+|-------------|------------|
+| **In-memory AOS** | AOS WASM in Node.js — no server, instant unit tests |
+| **Local AO Units** | Standalone units via `npx wao` — local dev |
+| **Local HyperBEAM** | Sandboxed Erlang node — full stack integration |
+| **Remote HyperBEAM** | Production nodes — mainnet |
+
+### AOS — Lua Smart Contracts
+Build decentralized processes with Lua handlers running on AO.
 - [Legacynet AOS →](/tutorials/legacynet)
 - [Legacynet AOS on HyperBEAM →](/tutorials/legacynet-aos)
 - [Mainnet AOS (WASM Device) →](/tutorials/mainnet-aos)
-- HyperAOS (Lua Device) — Coming soon
+- [HyperAOS (Lua Device) →](/tutorials/hyperaos)
 
-### HyperBEAM
+### Custom Modules — WASM/Lua Execution Modules
+Build custom WASM64 or Lua execution modules that run alongside AOS on HyperBEAM.
+- [Custom WASM64 in Rust →](/tutorials/rust-wasm64) — Custom WASM64 binary composable with AOS
+- [Custom Lua Modules →](/tutorials/custom-lua) — Standalone Lua modules on HyperBEAM's lua@5.3a device
+
+### HyperBEAM Devices — Composable Infrastructure
+Build composable devices that extend HyperBEAM's core capabilities — each device is a building block that can be composed with others.
 - [HyperBEAM →](/tutorials/hb)
-- [Custom Devices (Erlang / Rust / C++) →](/tutorials/creating-devices)
+- [Custom Devices in Erlang →](/tutorials/creating-devices)
+- Custom Devices (Advanced) — [Rust](/tutorials/devices-rust) · [C++](/tutorials/devices-cpp) · [Elixir](/tutorials/devices-elixir) · [Gleam](/tutorials/devices-gleam)
 - [The HyperBEAM Book →](/book) — From zero to building custom devices
 - [Decoding HyperBEAM →](/hyperbeam/decoding-from-scratch) — Deep-dive series into internals
+
+### Agent Driven Development
+Build WAO projects using the HyperADD (Agent Driven Development) Framework.
+- [Overview →](/add/overview)
+- [Vibe Engineering →](/add/build)
+- [HyperADD Framework →](/add/framework)
 
 ### Reference
 - [WAO SDK API →](/api/overview)

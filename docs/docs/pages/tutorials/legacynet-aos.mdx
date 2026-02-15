@@ -66,3 +66,62 @@ describe("Hyperbeam Legacynet", function () {
   })
 })
 ```
+
+## Using WAO SDK
+
+The `AO` class wraps the low-level HB methods with the same API you use for in-memory testing:
+
+```js
+import assert from "assert"
+import { describe, it, before, after } from "node:test"
+import { HyperBEAM } from "wao/test"
+import { AO } from "wao"
+
+const src_data = `
+local count = 0
+Handlers.add("Inc", "Inc", function (msg)
+  count = count + 1
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)
+Handlers.add("Get", "Get", function (msg)
+  msg.reply({ Data = "Count: "..tostring(count) })
+end)`
+
+describe("Legacynet AOS with WAO SDK", function () {
+  let hbeam, ao
+  before(async () => {
+    hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true }).ready()
+    ao = await new AO({ hb: hbeam.url }).init(hbeam.jwk)
+  })
+  after(async () => hbeam.kill())
+
+  it("should deploy and interact", async () => {
+    const { p } = await ao.deploy({ src_data })
+    await p.m("Inc")
+    assert.equal(await p.d("Get"), "Count: 1")
+  })
+})
+```
+
+## Remote Deployment
+
+Deploy to remote push nodes for production. Use `push-1` through `push-10` for full compute support:
+
+```js
+import { AO } from "wao"
+import fs from "fs"
+
+const jwk = JSON.parse(fs.readFileSync(".wallet.json", "utf8"))
+const ao = await new AO({ hb: "https://push-1.forward.computer" }).init(jwk)
+
+const { p, pid } = await ao.deploy({ src_data })
+console.log("Process ID:", pid)
+
+await p.m("Inc")
+const { out } = await p.msg("Get")
+console.log(out) // "Count: 1"
+```
+
+:::tip
+Generate a wallet with `npx wao keygen`. The primary `push.forward.computer` node is push-only (no compute) — use `push-1` through `push-10` for full spawn + schedule + compute.
+:::
