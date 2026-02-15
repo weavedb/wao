@@ -239,6 +239,8 @@ const srcs = {
   module_aos2: "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM",
   scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
   authority: "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY",
+  module_wasi: "AZ6EXxyOaw3ZjK6htaKA6qZaIh_AbJoJnskGtj7FKZ0",
+  module_lua: "hvFDChSaTrpDZWDcEJSRHNXmWOg_hx0Ro1EH3vIrSOM",
   module_wao: "WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g",
   scheduler_wao: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
   authority_wao: "eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg",
@@ -684,7 +686,7 @@ function toANS104Request(fields) {
       .concat([
         { name: "Data-Protocol", value: "ao" },
         { name: "Type", value: fields.Type ?? "Message" },
-        { name: "Variant", value: fields.Variant ?? "ao.N.1" },
+        { name: "Variant", value: fields.Variant ?? "ao.TN.1" },
       ]),
     data: fields?.data || "",
   }

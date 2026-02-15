@@ -45,7 +45,7 @@ describe("WAO Upload Device Tests", function () {
       device: "process@1.0",
       "execution-device": "wao@1.0",
       "Data-Protocol": "ao",
-      Variant: "ao.N.1",
+      Variant: "ao.TN.1",
       "codec-device": "ans104@1.0",
       signingFormat: "ANS-104",
       "Scheduler-Location": hb.addr,
@@ -70,7 +70,7 @@ describe("WAO Upload Device Tests", function () {
     const fields2 = {
       Type: "Message",
       "Data-Protocol": "ao",
-      Variant: "ao.N.1",
+      Variant: "ao.TN.1",
       signingFormat: "ANS-104",
     }
     const di2 = createData("1984", signer, { tags: toTags(fields2) })

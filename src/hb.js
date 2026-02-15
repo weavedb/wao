@@ -1,6 +1,6 @@
 import { createSigner } from "@permaweb/aoconnect"
 import { isEmpty, last, isNotNil, mergeLeft, clone } from "ramda"
-import { toAddr, buildTags, seed } from "./utils.js"
+import { toAddr, buildTags, seed, srcs } from "./utils.js"
 import {
   httpsig_from,
   structured_to,
@@ -106,6 +106,125 @@ class HB {
     return { slot, outbox: await this.computeAOS({ pid, slot }) }
   }
 
+  // JS-side push for AOS (wasm-64/stack@1.0) processes.
+  // The HyperBEAM push@1.0 device has a bug where subresolve's deep-merge
+  // modifies the process key, causing a ProcID mismatch and cache miss.
+  // This method implements the same logic using direct HTTP calls that work.
+  // Handles full cross-process round-trips: A→B→A for receive() resolution.
+  async pushAOS({ pid, slot, outbox: initialOutbox, maxDepth = 10 }) {
+    let currentSlot = Number(slot)
+    let lastOutbox = null
+
+    for (let depth = 0; depth < maxDepth; depth++) {
+      let outbox
+      if (depth === 0 && initialOutbox && typeof initialOutbox === "object") {
+        outbox = initialOutbox
+      } else {
+        try {
+          outbox = await this.computeAOS({ pid, slot: currentSlot })
+        } catch (_e) {
+          break
+        }
+      }
+      lastOutbox = outbox
+      if (!outbox || typeof outbox !== "object") break
+
+      const msgs = this._extractOutboxMsgs(outbox)
+      if (msgs.length === 0) break
+
+      let hasSelfMsg = false
+      let nextSlot = currentSlot
+
+      for (const msg of msgs) {
+        const target = msg.target ?? msg.Target
+        if (!target) continue
+
+        const tags = {}
+        for (const [key, val] of Object.entries(msg)) {
+          const lk = key.toLowerCase()
+          if (lk === "data" || lk === "target" || lk === "anchor") continue
+          if (typeof val === "string" || typeof val === "number") {
+            tags[key] = String(val)
+          }
+        }
+        tags["from-process"] = pid
+
+        const data = msg.data ?? msg.Data ?? ""
+        const action = tags.Action ?? tags.action ?? null
+        delete tags.Action
+        delete tags.action
+
+        try {
+          const { slot: newSlot } = await this.scheduleAOS({
+            pid: target,
+            action,
+            data,
+            tags,
+          })
+          if (target === pid) {
+            nextSlot = Math.max(nextSlot, Number(newSlot))
+            hasSelfMsg = true
+          } else {
+            // Cross-process: compute target, deliver any replies back to pid
+            try {
+              const targetOutbox = await this.computeAOS({
+                pid: target,
+                slot: newSlot,
+              })
+              if (targetOutbox && typeof targetOutbox === "object") {
+                const replies = this._extractOutboxMsgs(targetOutbox)
+                for (const reply of replies) {
+                  const replyTarget = reply.target ?? reply.Target
+                  if (!replyTarget) continue
+                  const rTags = {}
+                  for (const [rk, rv] of Object.entries(reply)) {
+                    const rl = rk.toLowerCase()
+                    if (rl === "data" || rl === "target" || rl === "anchor")
+                      continue
+                    if (typeof rv === "string" || typeof rv === "number") {
+                      rTags[rk] = String(rv)
+                    }
+                  }
+                  rTags["from-process"] = target
+                  const rData = reply.data ?? reply.Data ?? ""
+                  const rAction = rTags.Action ?? rTags.action ?? null
+                  delete rTags.Action
+                  delete rTags.action
+                  try {
+                    const { slot: replySlot } = await this.scheduleAOS({
+                      pid: replyTarget,
+                      action: rAction,
+                      data: rData,
+                      tags: rTags,
+                    })
+                    if (replyTarget === pid) {
+                      nextSlot = Math.max(nextSlot, Number(replySlot))
+                      hasSelfMsg = true
+                    }
+                  } catch (_e) {}
+                }
+              }
+            } catch (_e) {}
+          }
+        } catch (_e) {}
+      }
+
+      if (!hasSelfMsg) break
+      currentSlot = nextSlot
+    }
+
+    return { slot: currentSlot, outbox: lastOutbox }
+  }
+
+  // Extract outbox messages from a compute result (numbered keys).
+  _extractOutboxMsgs(outbox) {
+    return Object.keys(outbox)
+      .filter(k => /^\d+$/.test(k))
+      .sort((a, b) => Number(a) - Number(b))
+      .map(k => outbox[k])
+      .filter(m => m && typeof m === "object")
+  }
+
   async messageLegacy(args) {
     const { slot, pid } = await this.scheduleLegacy(args)
     return { slot, res: await this.computeLegacy({ pid, slot }) }
@@ -138,6 +257,12 @@ class HB {
     // Fallback: try compute/results/json/body structure
     if (json?.["compute/results/json"]?.body) {
       return JSON.parse(json["compute/results/json"].body)
+    }
+    // Remote nodes return results.raw with CU format directly
+    if (json?.results?.raw) {
+      const raw = typeof json.results.raw === "string"
+        ? JSON.parse(json.results.raw) : json.results.raw
+      if (raw?.Messages || raw?.Output) return raw
     }
     // Another fallback: check if it's the raw CU format
     if (json?.Messages || json?.Output) {
@@ -268,10 +393,19 @@ class HB {
 
   async spawnLua(lua) {
     await this.setInfo()
+    // Try local wao@1.0 cache first, fall back to Arweave TX ID for remote
+    let module = this.lua
+    if (!module) {
+      try {
+        module = await this.getLua()
+      } catch (_e) {
+        module = srcs.module_lua
+      }
+    }
     const tags = {
       "data-protocol": "ao",
-      variant: "ao.N.1",
-      module: this.lua ?? (await this.getLua()),
+      variant: "ao.TN.1",
+      module,
       "execution-device": "lua@5.3a",
       "push-device": "push@1.0",
       "patch-from": "/results/outbox",
@@ -352,8 +486,9 @@ class HB {
 
   async spawnLegacy({ module, tags = {}, data } = {}) {
     await this.setInfo()
-    // Use genesis-wasm directly as execution-device for legacynet AOS
-    // Note: 'authority' excluded - conflicts with HTTP Message Signatures '@authority' derived component
+    // Use ANS-104 format to include 'authority' and 'push-device' tags.
+    // httpsig format can't include 'authority' — it conflicts with HTTP Signatures'
+    // @authority derived component (RFC 9421), causing signature verification failure.
     const legacyTags = {
       "Data-Protocol": "ao",
       Variant: "ao.TN.1",
@@ -361,22 +496,40 @@ class HB {
       Module: module ?? "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s",
       device: "process@1.0",
       "execution-device": "genesis-wasm@1.0",
+      "push-device": "push@1.0",
+      authority: this.addr,
       "random-seed": seed(16),
       Type: "Process",
     }
     const t = mergeLeft(tags, legacyTags)
-    if (data) t.data = data
 
-    // Use httpsig-signed multipart POST (beta3-compatible approach)
-    const res = await this.post({
+    // Prepend self-trust + authority management to boot data.
+    // Push device re-schedules outbox messages with from-process = process_id.
+    // AOS getOwner() returns from-process when present, so trust is based on the
+    // sender's process ID, not the signer. We add ao.id for self-trust and provide
+    // an AddAuthority handler for cross-process trust.
+    let bootData = data ?? "1984"
+    if (t["On-Boot"] === "Data" && typeof bootData === "string") {
+      const trustPreamble = [
+        "table.insert(ao.authorities, ao.id)",
+        'Handlers.add("__AddAuthority", "__AddAuthority", function(msg)',
+        "  table.insert(ao.authorities, msg.Addr)",
+        '  msg.reply({ Data = "ok" })',
+        "end)",
+      ].join("\n")
+      bootData = trustPreamble + "\n" + bootData
+    }
+
+    const res = await this.post104({
       path: "/~scheduler@1.0/schedule",
-      ...t,
+      tags: t,
+      data: bootData,
     })
 
     return {
-      pid: res.headers?.process || res.out?.process,
-      slot: parseInt(res.headers?.slot ?? res.out?.slot),
-      res: { status: res.status },
+      pid: res.out?.process,
+      slot: parseInt(res.out?.slot ?? "0"),
+      res: { status: 200 },
     }
   }
 
@@ -615,24 +768,33 @@ class HB {
     const res = await this.get(args, opt)
     return res.out
   }
-  async spawnAOS(image) {
+  async spawnAOS({ image, module, sign } = {}) {
     await this.setInfo()
-    image ??= this.image ?? (await this.getImage())
-    // Use JSON POST with commitment signatures (beta3-compatible approach)
-    // Note: 'authority' excluded - conflicts with HTTP Message Signatures '@authority'
-    const tags = {
+    const isLocal =
+      sign === "httpsig" ? true
+      : sign === "ans104" ? false
+      : this.url.includes("localhost") || this.url.includes("127.0.0.1")
+
+    // Default: use Arweave WASI WASM module (works on all nodes)
+    // Local: wao@1.0 cache with bundled binary (faster, no network fetch)
+    if (!image && !this.image) {
+      module ??= srcs.module_wasi
+      try {
+        // Try local wao@1.0 cache first (fast path for local HB)
+        await this.getImage()
+      } catch (_e) {
+        // Use Arweave TX ID directly — node resolves via hb_store_gateway
+        image = module
+      }
+    }
+    image ??= this.image
+
+    const baseTags = {
       "data-protocol": "ao",
-      variant: "ao.N.1",
+      variant: "ao.TN.1",
       image,
       "execution-device": "stack@1.0",
       "push-device": "push@1.0",
-      "device-stack": [
-        "wasi@1.0",
-        "json-iface@1.0",
-        "wasm-64@1.0",
-        "patch@1.0",
-        "multipass@1.0",
-      ],
       "output-prefix": "wasm",
       "patch-from": "/results/outbox",
       "patch-mode": "patches",
@@ -643,14 +805,77 @@ class HB {
       scheduler: this.operator ?? this.addr,
     }
 
-    // Use httpsig-signed multipart POST (beta3-compatible approach)
-    const res = await this.post({
-      path: "/~scheduler@1.0/schedule",
-      ...tags,
-    })
+    let res
+    if (isLocal) {
+      // Local: Use httpsig encoding so device-stack is committed as a typed
+      // list. ANS-104 encodes device-stack as flat device-stack/N tags which
+      // get aggregated into an uncommitted map by structured@1.0, then stripped
+      // by with_only_committed during cache write/read — breaking second compute
+      // with {error, no_valid_device_stack}. httpsig signature covers HTTP
+      // header string values; ao-types transforms happen before verification
+      // with re-encoding for checking, so the committed list survives cache.
+      // Note: 'authority' excluded — conflicts with HTTP Signatures '@authority'
+      // derived component (RFC 9421). Self-trust is injected via Lua eval below.
+      res = await this.post({
+        path: "/~scheduler@1.0/schedule",
+        ...baseTags,
+        "device-stack": [
+          "wasi@1.0",
+          "json-iface@1.0",
+          "wasm-64@1.0",
+          "patch@1.0",
+          "multipass@1.0",
+        ],
+      })
+    } else {
+      // Remote: Use ANS-104 because push.forward.computer nodes don't accept
+      // httpsig multipart. ANS-104 flat tags are fine for push-only nodes
+      // (no compute, so no cache round-trip stripping issue).
+      const tags = { ...baseTags, authority: this.addr }
+      tags["device-stack/1"] = "wasi@1.0"
+      tags["device-stack/2"] = "json-iface@1.0"
+      tags["device-stack/3"] = "wasm-64@1.0"
+      tags["device-stack/4"] = "patch@1.0"
+      tags["device-stack/5"] = "multipass@1.0"
+      tags["ao-types"] = 'passes="integer"'
+      res = await this.post104({
+        path: "/~scheduler@1.0/schedule",
+        tags,
+      })
+    }
+
+    const pid = res.headers?.process || res.out?.process
+
+    if (isLocal) {
+      // Compute slot 0 (the spawn itself) to initialize the process in the
+      // scheduler registry. Without this, immediate scheduleAOS calls fail
+      // with process_not_available because the scheduler hasn't processed
+      // the spawn yet.
+      try {
+        await this.computeAOS({ pid, slot: 0 })
+      } catch (_e) {}
+
+      // Schedule self-trust eval so push-delivered messages from this process
+      // are accepted. The 'authority' tag can't be used in httpsig spawn
+      // (conflicts with HTTP Signatures @authority), so inject via Lua eval.
+      try {
+        await this.scheduleAOS({
+          pid,
+          action: "Eval",
+          data: [
+            "table.insert(ao.authorities, ao.id)",
+            'Handlers.add("__AddAuthority", "__AddAuthority", function(msg)',
+            "  table.insert(ao.authorities, msg.Addr)",
+            '  msg.reply({ Data = "ok" })',
+            "end)",
+          ].join("\n"),
+          tags: {},
+        })
+      } catch (_e) {}
+    }
 
     return {
-      pid: res.headers?.process || res.out?.process,
+      pid,
       slot: parseInt(res.headers?.slot ?? res.out?.slot),
       res: { status: res.status },
     }

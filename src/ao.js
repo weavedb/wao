@@ -86,6 +86,7 @@ class AO {
     }
     let {
       hb: _hb,
+      mode,
       authority = srcs.authority,
       module,
       module_type = "aos2",
@@ -97,7 +98,10 @@ class AO {
     } = opt
     if (_hb) {
       this.format = _hb === "ans104" ? _hb : "httpsig"
-      this.hb = new HB({ format: this.format })
+      const _hbOpt = { format: this.format }
+      if (typeof _hb === "string" && _hb !== "ans104") _hbOpt.url = _hb
+      this.hb = new HB(_hbOpt)
+      this.mode = mode ?? "legacy"
     }
     if (!_port && port) _port = port
     if (!aoconnect && _port) aoconnect = optAO(_port)
@@ -390,8 +394,20 @@ class AO {
       if (boot) tags["On-Boot"] = boot
       if (auth) tags.Authority = auth
       if (this.hb) {
-        ;({ pid } = await this.hb.spawnLegacy({ module, tags, data }))
-        await this.hb.computeLegacy({ pid, slot: 0 })
+        switch (this.mode) {
+          case "aos":
+          case "wasm":
+            ;({ pid } = await this.hb.spawnAOS({ module }))
+            break
+          case "lua":
+            ;({ pid } = await this.hb.spawnLua())
+            break
+          default:
+            ;({ pid } = await this.hb.spawnLegacy({ module, tags, data }))
+            try {
+              await this.hb.computeLegacy({ pid, slot: 0 })
+            } catch (_e) {}
+        }
       } else {
         module ??= this.module
         if (!tags.Authority && this.authority) tags.Authority = this.authority
@@ -447,8 +463,8 @@ class AO {
           }
         }
       } else {
-        const { out } = await this.ress({ pid, limit })
-        for (let v of reverse(out)) {
+        const _ress = await this.ress({ pid, limit })
+        for (let v of reverse(_ress?.out ?? [])) {
           const hash2 = getHash(v)
           if (!exists) {
             if (hash2 === hash) exists = true
@@ -483,8 +499,50 @@ class AO {
       if (!is(Array, check)) check = [check]
       let _txs = [{ id: mid, from: await this.ar.toAddr(jwk) }]
       if (this.hb) {
-        res = await this.hb.computeLegacy({ pid, slot: mid })
-        await this.hb.get({ path: `/${pid}/push`, slot: mid })
+        try {
+          switch (this.mode) {
+            case "aos":
+            case "wasm":
+              res = await this.hb.computeAOS({ pid, slot: mid })
+              try {
+                const { slot: pushSlot, outbox: pushOutbox } =
+                  await this.hb.pushAOS({ pid, slot: mid, outbox: res })
+                if (pushSlot > Number(mid) && pushOutbox) {
+                  res = pushOutbox
+                }
+              } catch (_e2) {}
+              break
+            case "lua":
+              res = await this.hb.computeLua({ pid, slot: mid })
+              try {
+                await this.hb.get({ path: `/${pid}/push`, slot: mid })
+              } catch (_e2) {}
+              break
+            default:
+              res = await this.hb.computeLegacy({ pid, slot: mid })
+              try {
+                await this.hb.get({ path: `/${pid}/push`, slot: mid })
+              } catch (_e2) {}
+              const _callerAddr = this.hb.addr
+              const _hasCallerReply = res?.Messages?.some(
+                m =>
+                  m?.Data != null &&
+                  m?.Data !== "" &&
+                  m?.Target === _callerAddr,
+              )
+              if (!_hasCallerReply) {
+                try {
+                  const raw = await this.hb.getJSON({
+                    path: `/${pid}/now/results/json/body`,
+                  })
+                  const parsed =
+                    typeof raw === "string" ? JSON.parse(raw) : raw
+                  if (parsed?.Messages || parsed?.Output) res = parsed
+                } catch (_e2) {}
+              }
+          }
+          if (res) res = this._normalizeHBResult(res)
+        } catch (_e) {}
       } else {
         res = await this.result({ process: pid, message: mid })
       }
@@ -492,37 +550,79 @@ class AO {
       let _txmap = { [mid]: { checked: false, res } }
       results.push({ mid, res })
       let checked = false
-      do {
-        for (let v of _txs) {
-          if (!_txmap[v.id].checked) {
-            _txmap[v.id].checked = true
-            if (isNil(_txmap[v.id].res)) {
-              const _res = await this.result({ process: pid, message: v.id })
-              _txmap[v.id].res = _res
-            }
-            if (!isNil(check) && check.length > 0) {
-              checked = allChecked(check, _txmap[v.id].res, v.from)
+      if (this.hb && !isNil(check) && check.length > 0) {
+        // HB mode: push device handles recursive coroutine resolution.
+        // After push resolves, poll now/results for the final result.
+        const nowPath =
+          this.mode === "aos" || this.mode === "wasm"
+            ? `/${pid}/now/results/outbox`
+            : this.mode === "lua"
+              ? `/${pid}/now/results`
+              : `/${pid}/now/results/json/body`
+        checked = res ? allChecked(check, res) : false
+        while (!checked && Date.now() - start < timeout) {
+          try {
+            let parsed
+            if (this.mode === "legacy" || !this.mode) {
+              const raw = await this.hb.getJSON({ path: nowPath })
+              parsed = typeof raw === "string" ? JSON.parse(raw) : raw
             } else {
-              checked = true
+              const nowRes = await this.hb.get({ path: nowPath })
+              parsed = this._parseHBOutbox(nowRes)
             }
-            if (checked) break
-          }
+            if (parsed) {
+              const nextRes = this._normalizeHBResult(parsed)
+              if (nextRes) {
+                res = nextRes
+                results.push({ mid: "now", res: nextRes })
+                checked = allChecked(check, nextRes)
+              }
+            }
+          } catch (_e) {}
+          if (!checked) await wait(1000)
         }
-        if (checked) break
-        await wait(1000)
-        await getNewTxs(pid, _txs, _txmap)
-      } while (Date.now() - start < timeout)
-
-      if (!checked) {
-        err = "something went wrong!"
+        if (checked && !isNil(get)) out = getTagVal(get, res)
+        if (!checked) err = "something went wrong!"
       } else {
-        out = mergeOut(out, await checkOut(get, _txs, _txmap, out), get)
-        if (!isOutComplete(out, get) && !isNil(get)) {
-          while (Date.now() - start < timeout) {
+        do {
+          for (let v of _txs) {
+            if (!_txmap[v.id].checked) {
+              _txmap[v.id].checked = true
+              if (isNil(_txmap[v.id].res)) {
+                try {
+                  const _res = await this.result({
+                    process: pid,
+                    message: v.id,
+                  })
+                  _txmap[v.id].res = _res
+                } catch (_e) {}
+              }
+              if (!isNil(check) && check.length > 0) {
+                checked = allChecked(check, _txmap[v.id].res, v.from)
+              } else {
+                checked = true
+              }
+              if (checked) break
+            }
+          }
+          if (checked) break
+          await wait(1000)
+          try {
             await getNewTxs(pid, _txs, _txmap)
-            out = mergeOut(out, await checkOut(get, _txs, _txmap, out), get)
-            if (isOutComplete(out, get)) break
-            await wait(1000)
+          } catch (_e) {}
+        } while (Date.now() - start < timeout)
+
+        if (!checked) {
+          err = "something went wrong!"
+        } else {
+          out = mergeOut(out, await checkOut(get, _txs, _txmap, out), get)
+          if (!isOutComplete(out, get) && !isNil(get)) {
+            while (Date.now() - start < timeout) {
+              await getNewTxs(pid, _txs, _txmap)
+              out = mergeOut(out, await checkOut(get, _txs, _txmap, out), get)
+              if (isOutComplete(out, get)) break
+              await wait(1000)
+            }
           }
         }
       }
@@ -548,22 +648,71 @@ class AO {
     ;({ jwk, err } = await this.ar.checkWallet({ jwk }))
     if (err) return { err }
     if (this.hb) {
-      const { slot: mid } = await this.hb.scheduleLegacy({
-        pid,
-        tags: tags ?? {},
-        action: act,
-        data,
-      })
-      return await this.res({
-        pid,
-        mid,
-        jwk,
-        check,
-        get,
-        timeout,
-        mode,
-        limit,
-      })
+      let mid, res = null
+      const schedArgs = { pid, tags: tags ?? {}, action: act, data }
+      switch (this.mode) {
+        case "aos":
+        case "wasm":
+          mid = (await this.hb.scheduleAOS(schedArgs)).slot
+          try {
+            res = await this.hb.computeAOS({ pid, slot: mid })
+            try {
+              const { slot: pushSlot, outbox: pushOutbox } =
+                await this.hb.pushAOS({ pid, slot: mid, outbox: res })
+              if (pushSlot > Number(mid) && pushOutbox) {
+                res = pushOutbox
+                mid = pushSlot
+              }
+            } catch (_e2) {}
+          } catch (_e) {}
+          break
+        case "lua":
+          mid = (await this.hb.scheduleLua(schedArgs)).slot
+          try {
+            res = await this.hb.computeLua({ pid, slot: mid })
+            try {
+              await this.hb.get({ path: `/${pid}/push`, slot: mid })
+            } catch (_e2) {}
+          } catch (_e) {}
+          break
+        default:
+          mid = (await this.hb.scheduleLegacy(schedArgs)).slot
+          try {
+            res = await this.hb.computeLegacy({ pid, slot: mid })
+            try {
+              await this.hb.get({ path: `/${pid}/push`, slot: mid })
+            } catch (_e2) {}
+            // Push updates now/ to its recursive resolution result, which may
+            // include errors from other processes (cross-process trust errors).
+            // Only use now/results when the compute result has no reply to the
+            // caller — i.e. the handler used Send().receive() and the reply is
+            // deferred until push resolves the coroutine.
+            const callerAddr = this.hb.addr
+            const hasCallerReply = res?.Messages?.some(
+              m =>
+                m?.Data != null &&
+                m?.Data !== "" &&
+                m?.Target === callerAddr,
+            )
+            if (!hasCallerReply) {
+              try {
+                const raw = await this.hb.getJSON({
+                  path: `/${pid}/now/results/json/body`,
+                })
+                const parsed =
+                  typeof raw === "string" ? JSON.parse(raw) : raw
+                if (parsed?.Messages || parsed?.Output) res = parsed
+              } catch (_e2) {}
+            }
+          } catch (_e) {}
+      }
+      if (res) res = this._normalizeHBResult(res)
+      if (!isNil(check) && is(Array, check) ? check.length > 0 : true) {
+        return await this.res({ pid, mid, jwk, check, get, timeout, mode, limit })
+      }
+      let out = null
+      if (res && !isNil(get)) out = getTagVal(get, res)
+      return { mid, res, err: null, out, results: [{ mid, res }] }
     } else {
       let _tags = buildTags(act, tags)
       const mid = await this.message({
@@ -679,6 +828,7 @@ class AO {
       {
         args: { pid, data, act: "Eval" },
         err: ({ res }) => {
+          if (this.hb) return false
           return (
             typeof res?.Output?.data !== "object" &&
             !(
@@ -724,6 +874,7 @@ class AO {
   }
 
   async wait({ pid, attempts = 10 }) {
+    if (this.hb) return { err: null, pid }
     let exist = false
     let err = null
     while (attempts > 0) {
@@ -772,7 +923,9 @@ class AO {
     data,
   } = {}) {
     let [fns, isBoot] = [[], false]
-    if (boot === true && !data) {
+    // AOS/Lua HB modes don't support On-Boot in spawn, so always load via eval
+    const hbNonLegacy = this.hb && this.mode && this.mode !== "legacy"
+    if (boot === true && !data && !hbNonLegacy) {
       isBoot = true
       fns = [
         {
@@ -832,6 +985,101 @@ class AO {
       return pretty ? _var : strip(_var)
     }
   }
+  // Find the deepest slot from a push response's nested resulted-in structure.
+  // Push resolves coroutines by scheduling responses to progressively deeper slots.
+  _findDeepestSlot(pushOut, initial) {
+    let max = initial
+    const search = obj => {
+      if (!obj || typeof obj !== "object") return
+      if (obj.slot != null && Number(obj.slot) > max) max = Number(obj.slot)
+      if (obj["resulted-in"]) search(obj["resulted-in"])
+      for (const k of Object.keys(obj)) {
+        if (/^\d+$/.test(k)) search(obj[k])
+      }
+    }
+    search(pushOut)
+    return max
+  }
+
+  // Parse HB outbox from either a structured object or raw multipart response.
+  // Returns a numbered-key outbox object compatible with _normalizeHBResult,
+  // or null if parsing fails.
+  _parseHBOutbox(hbRes) {
+    if (!hbRes) return null
+    const out = hbRes.out
+    // Already a structured object with numbered keys
+    if (out && typeof out === "object" && !Array.isArray(out)) {
+      const numKeys = Object.keys(out).filter(k => /^\d+$/.test(k))
+      if (numKeys.length > 0) return out
+    }
+    // Raw multipart string — extract messages from part headers
+    const raw = typeof out === "string" ? out : hbRes.body
+    if (!raw || typeof raw !== "string") return null
+    const messages = {}
+    // Split on multipart boundary
+    const parts = raw.split(/--[A-Za-z0-9_-]+/)
+    for (const part of parts) {
+      if (!part?.trim()) continue
+      // Match parts named "body/N", "body/outbox/N", or just "N"
+      const nameMatch = part.match(
+        /content-disposition:\s*(?:form-data|inline)\s*;?\s*name="?(?:body\/)?(?:outbox\/)?(\d+)"?/i,
+      )
+      if (!nameMatch) continue
+      const idx = nameMatch[1]
+      if (messages[idx]) continue // skip sub-parts like Tags
+      // Extract Data from header line
+      const dataMatch = part.match(/[\r\n]Data:\s*(.*?)(?:\r?\n|$)/i)
+      if (dataMatch) {
+        messages[idx] = {
+          data: dataMatch[1].trim(),
+          Tags: [],
+        }
+      }
+    }
+    if (Object.keys(messages).length > 0) return messages
+    return null
+  }
+
+  _normalizeHBResult(res) {
+    if (!res || this.mode === "legacy" || !this.mode) return res
+    // After push, compute results may come back as raw multipart strings.
+    // Parse them into numbered-key objects before extracting messages.
+    if (typeof res === "string") {
+      const parsed = this._parseHBOutbox({ out: res, body: res })
+      if (parsed) res = parsed
+      else return { Messages: [], Output: { data: "" }, Spawns: [] }
+    }
+    let messages = []
+    if (this.mode === "aos" || this.mode === "wasm") {
+      const keys = Object.keys(res)
+        .filter(k => /^\d+$/.test(k))
+        .sort((a, b) => Number(a) - Number(b))
+      messages = keys.map(k => {
+        const m = res[k]
+        return { Data: m?.data ?? m?.Data ?? "", Tags: [] }
+      })
+    } else if (this.mode === "lua") {
+      // Handle both array format (from computeLua) and numbered-key format
+      // (from _parseHBOutbox after push resolution).
+      const numKeys = Object.keys(res)
+        .filter(k => /^\d+$/.test(k))
+        .sort((a, b) => Number(a) - Number(b))
+      if (numKeys.length > 0) {
+        messages = numKeys.map(k => {
+          const m = res[k]
+          return { Data: m?.data ?? m?.Data ?? "", Tags: [] }
+        })
+      } else {
+        const outbox = Array.isArray(res) ? res : res?.outbox ?? []
+        messages = (Array.isArray(outbox) ? outbox : []).map(m => ({
+          Data: m?.data ?? m?.Data ?? "",
+          Tags: [],
+        }))
+      }
+    }
+    return { Messages: messages, Output: { data: "" }, Spawns: [] }
+  }
+
   p(pid) {
     return new Process(pid, this)
   }
