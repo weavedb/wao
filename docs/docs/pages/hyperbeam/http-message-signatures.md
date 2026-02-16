@@ -162,10 +162,10 @@ Your `signature` is in the `commitments`. And there are 2 entries with different
 - `Fg0kC92eBhUH3t894aH0IHMBiGIlLU80gt5Zjyip_bU` : `rsa-pss-sha512`
 - `RivrHRmpfYVEIH45TxQdW99NR34IgEcStLm467eea38` : `hmac-sha256`
 
-These commitment IDs are important for HyperBEAM to verify the message. The former is the sha-256 hash of the signature bytes, and the latter is the hmac-sha256 hash of the signed content with `ao` as the key. You can generate each ID with `rsaid` and `hmacid` methods from `wao/utils`. You can execute node internal scripts by manually creating commitments. We'll discuss this in a later chapter.
+These commitment IDs are important for HyperBEAM to verify the message. The former is the sha-256 hash of the signature bytes, and the latter is the hmac-sha256 hash of the signed content with `ao` as the key. You can generate each ID with `rsaid` and `hmacid` methods from `hbsig`. You can execute node internal scripts by manually creating commitments. We'll discuss this in a later chapter.
 
 ```js [/test/http-message-signatures.test.js]
-import { rsaid, hmacid } from "wao/utils"
+import { rsaid, hmacid } from "hbsig"
 const rsa_id = rsaid(signed.headers)
 const hmac_id = hmacid(signed.headers)
 assert.deepEqual(

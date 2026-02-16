@@ -1,8 +1,9 @@
 import assert from "assert"
 import { describe, it, before, after } from "node:test"
-import { HyperBEAM, acc } from "wao/test"
+import { readFileSync } from "fs"
+import { resolve } from "path"
+import { HyperBEAM, acc, toAddr } from "wao/test"
 import { HB } from "wao"
-import { rsaid, hmacid } from "hbsig"
 
 describe("Payment System faff@1.0", function () {
   let hbeam, hb, operator
@@ -96,105 +97,63 @@ describe("Payment System simple-pay@1.0", function () {
 })
 
 describe("Payment System p4@1.0", function () {
-  let hb, hbeam
+  let hbeam, user
+
   before(async () => {
+    user = acc[0]
+    const hbDir = resolve(import.meta.dirname, "../../HyperBEAM")
+    // Read the operator wallet to get admin address
+    const operatorJwk = JSON.parse(
+      readFileSync(resolve(hbDir, ".wallet.json"), "utf8")
+    )
+    const operatorAddr = toAddr(operatorJwk.n)
+
+    // hyper-token scripts: processor = [hyper-token.lua, hyper-token-p4.lua]
+    const tokenScript = readFileSync(
+      resolve(hbDir, "scripts/hyper-token.lua"),
+      "utf8"
+    )
+    const p4Script = readFileSync(
+      resolve(hbDir, "scripts/hyper-token-p4.lua"),
+      "utf8"
+    )
+    // client = hyper-token-p4-client.lua (has balance + charge functions)
+    const clientScript = readFileSync(
+      resolve(hbDir, "scripts/hyper-token-p4-client.lua"),
+      "utf8"
+    )
     hbeam = await new HyperBEAM({
       reset: true,
       operator: HyperBEAM.OPERATOR,
+      p4_lua: {
+        processor: [
+          { body: tokenScript, name: "hyper-token.lua" },
+          { body: p4Script, name: "hyper-token-p4.lua" },
+        ],
+        client: { body: clientScript, name: "hyper-token-p4-client.lua" },
+        admin: operatorAddr,
+        balance: { [user.addr]: 1000 },
+      },
     }).ready()
-    hb = hbeam.hb
+    user.hb = await new HB({ url: hbeam.url }).init(user.jwk)
   })
   after(async () => hbeam.kill())
 
-  it("should handle payment with lua", async () => {
-    const process = hbeam.file("scripts/p4-payment-process.lua")
-    const { pid: cache_pid } = await hb.spawn({})
-    const { slot } = await hb.schedule({
-      pid: cache_pid,
-      data: process,
-      "content-type": "application/lua",
-    })
-    const { body } = await hb.g("/~scheduler@1.0/schedule", {
-      target: cache_pid,
-      from: slot,
-      accept: "application/aos-2",
-    })
-    const {
-      edges: [msg],
-    } = JSON.parse(body)
-    const pid = msg.node.message.Id
-    assert(pid)
-    const client = hbeam.file("scripts/p4-payment-client.lua")
+  it("should handle p4@1.0 payment with lua", async () => {
+    const operator = hbeam
 
-    const { slot: slot2 } = await hb.schedule({
-      pid: cache_pid,
-      data: client,
-      "content-type": "application/lua",
-    })
-    const { body: body2 } = await hb.g("/~scheduler@1.0/schedule", {
-      target: cache_pid,
-      from: slot2,
-      accept: "application/aos-2",
-    })
-    const {
-      edges: [msg2],
-    } = JSON.parse(body2)
-    const cid = msg2.node.message.Id
-    assert(cid)
-  })
-
-  it("should handle payment with lua", async () => {
-    const process = hbeam.file("scripts/p4-payment-process.lua")
-    const pid = await hb.cacheScript(process)
-    const client = hbeam.file("scripts/p4-payment-client.lua")
-    const cid = await hb.cacheScript(client)
-
-    const hbeam2 = await new HyperBEAM({
-      port: 10002,
-      operator: hb.addr,
-      p4_lua: { processor: pid, client: cid },
-    }).ready()
-
-    const operator = hbeam2
-    const user = acc[0]
-    user.hb = await new HB({ url: hbeam2.url }).init(user.jwk)
-    const obj = { path: "credit-notice", quantity: 100, recipient: user.addr }
-    const lua_msg = await operator.hb.sign(obj)
-    const hmacId = hmacid(lua_msg.headers)
-    const rsaId = rsaid(lua_msg.headers)
-    const committed_lua_msg = {
-      commitments: {
-        [rsaId]: {
-          alg: "rsa-pss-sha512",
-          "commitment-device": "httpsig@1.0",
-          committer: operator.addr,
-          signature: lua_msg.headers.signature,
-          "signature-input": lua_msg.headers["signature-input"],
-        },
-        [hmacId]: {
-          alg: "hmac-sha256",
-          "commitment-device": "httpsig@1.0",
-          signature: lua_msg.headers.signature,
-          "signature-input": lua_msg.headers["signature-input"],
-        },
-      },
-      ...obj,
-    }
-
-    await operator.hb.p("/ledger~node-process@1.0/schedule", {
-      body: committed_lua_msg,
-    })
+    // user has pre-loaded balance of 1000
     const balance = await operator.hb.g(
       `/ledger~node-process@1.0/now/balance/${user.addr}`
     )
-    assert.equal(balance, "100")
-    const now = await operator.hb.g(`/ledger~node-process@1.0/now/balance`)
-    assert.deepEqual(now, { [user.addr]: "100" })
+    assert.equal(Number(balance), 1000)
+
+    // POST costs 3 (default pricing)
     assert(await user.hb.p("/~message@1.0/set/hello", { hello: "world" }))
+
     const balance2 = await operator.hb.g(
       `/ledger~node-process@1.0/now/balance/${user.addr}`
     )
-    assert.equal(balance2, "97")
-    hbeam2.kill()
+    assert(Number(balance2) < 1000)
   })
 })

@@ -19,7 +19,7 @@ ID = hb_message:id(Msg)
 Or you can use `id` from `hbsig`.
 
 ```js
-import { id } from "hbisg"
+import { id } from "hbsig"
 const msg_id = id(msg)
 ```
 

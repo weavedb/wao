@@ -2,28 +2,19 @@ import assert from "assert"
 import { describe, it, before, after } from "node:test"
 import { HyperBEAM } from "wao/test"
 
-const devices = [
-  "json",
-  "structured",
-  "httpsig",
-  "flat",
-  "meta",
-  "stack",
-  { name: "mydev@1.0", module: "dev_mydev" },
-]
-
 describe("Device Composition", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ devices, reset: true }).ready()
+    hbeam = await new HyperBEAM({ reset: true }).ready()
     hb = hbeam.hb
   })
   after(async () => hbeam.kill())
 
   it("should chain methods from an existing message", async () => {
-    const out = await hb.p("/~mydev@1.0/resolve3")
-    const { num } = await hb.g(
-      `/${out.hashpath_7}/~mydev@1.0/inc/~mydev@1.0/double/~mydev@1.0/square`
+    // Chain: calc(6) → inc → double → square = ((6+1)*2)^2 = 196
+    const { num } = await hb.p(
+      "/~mydev@1.0/calc/~mydev@1.0/inc/~mydev@1.0/double/~mydev@1.0/square",
+      { init_num: 6 }
     )
     assert.equal(num, 196)
   })
