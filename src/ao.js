@@ -793,7 +793,7 @@ class AO {
     return { res, err, out }
   }
 
-  async ress({ pid, limit, asc, cursor }) {
+  async ress({ pid, limit, asc, from }) {
     let err = null
     let msgs = null
     let next = null
@@ -801,9 +801,9 @@ class AO {
     try {
       let sort = asc ? "ASC" : "DESC"
       if (this.hb) {
-        res = await this.hb.results({ process: pid, limit, sort, from: cursor })
+        res = await this.hb.results({ process: pid, limit, sort, from })
       } else {
-        res = await this.results({ process: pid, limit, sort, from: cursor })
+        res = await this.results({ process: pid, limit, sort, from })
       }
       if (!res.edges) return null
       msgs = map(v => ({ cursor: v.cursor, ...v.node }))(res.edges)
