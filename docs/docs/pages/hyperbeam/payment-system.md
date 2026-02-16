@@ -10,7 +10,7 @@ The node operator can update `faff_allow_list` via `/~meta@1.0/info` to manage t
 import assert from "assert"
 import { describe, it, before, after } from "node:test"
 import { HyperBEAM, acc } from "wao/test"
-import HB from "wao"
+import { HB } from "wao"
 import { rsaid, hmacid } from "hbsig"
 
 describe("Payment System faff@1.0", function () {
@@ -128,135 +128,146 @@ describe("Payment System simple-pay@1.0", function () {
 
 ## p4@1.0
 
-`p4@1.0` allows you to use Lua scripts with `node-process@1.0` to manage node access.
-
-`p4@1.0` requires a complex setup with a few hacks to test externally with JS code, so we'll go over it step by step.
+`p4@1.0` allows you to use Lua scripts with `node-process@1.0` to manage node access. The current beta3 release uses the `hyper-token` script family, which provides a full token ledger with admin `charge` support for collecting fees.
 
 ### Required Configurations
 
-`p4@1.0` requires a handful of configurations when starting up a HyperBEAM node with `hb:start_mainnet`.
+`p4@1.0` requires the following when starting a HyperBEAM node:
 
-- `on` : defines hooks
-- `p4_non_chargable_routes` : defines free-of-charge endpoints
-- `node_processes` : defines Lua scripts to be executed with hooks
+- `operator` : the operator address who controls the node
+- `p4_lua` : inline Lua scripts and configuration passed to the payment device
 
-Basically, we need to create 2 Lua scripts, one for the processor and the other for the clients, store them on Arweave or a local store to get the message IDs, then pass the IDs to the `on` settings of the hook device.
+With the inline approach, you pass `p4_lua` an object containing:
 
-### Caching Lua Scripts
+- `processor` : an array of `{ body, name }` objects (the Lua scripts that run the ledger)
+- `client` : a single `{ body, name }` object (the Lua script that marshals balance/charge requests)
+- `admin` : the admin address authorized to charge accounts
+- `balance` : a pre-loaded balance map of `{ [address]: amount }`
 
-There are 3 ways to cache Lua scripts to use with `node-process@1.0`:
+This eliminates the need to cache scripts on Arweave or spawn a separate process. The scripts are loaded inline when the node starts.
 
-- upload to the production Arweave storage
-- create a custom device method to internally cache with `hb_cache` on HyperBEAM
-- create a process and upload with a message
+### Lua Scripts
 
-We don't want to upload our test scripts to Arweave. So we're going with the 3rd hack since it produces the least conflict and the most flexibility without creating a custom HyperBEAM device. This only works with text-based scripts like Lua due to how messages are processed internally, but won't work for binary scripts like Wasm. For wasm modules for AOS processes, we need to go with the 2nd hack.
+`p4@1.0` uses 3 Lua scripts from the HyperBEAM repo. The processor is composed of 2 scripts loaded in order, and the client is a single script.
 
-We need 2 Lua scripts (processor and client) for `p4@1.0` to work. For now, we can use the test Lua scripts HyperBEAM uses in their GitHub repo.
+#### Processor Script 1: hyper-token.lua
 
-- [p4-payment-process.lua](https://github.com/permaweb/HyperBEAM/blob/main/scripts/p4-payment-process.lua)
+- [hyper-token.lua](https://github.com/permaweb/HyperBEAM/blob/main/scripts/hyper-token.lua)
+
+This is the main token ledger script. It implements a full AO token standard with support for sub-ledger networks. The key entry point is `compute()`, which routes actions like `transfer`, `credit-notice`, and `register` to the appropriate handlers.
 
 ```lua
---- A ledger that allows account balances to be debited and credited by a
---- specified address.
+--- ## HyperTokens: Networks of fungible, parallel ledgers.
+--- An AO token standard implementation, with support for sub-ledger networks,
+--- executed with the `~lua@5.3` device.
 
--- Check if the request is a valid debit/credit request by checking if one of
--- the committers is the operator.
-local function is_valid_request(base, assignment)
-    -- First, validate that the assignment is signed by the scheduler.
-    local scheduler = base.scheduler
-    local status, res = ao.resolve(assignment, "committers")
-    ao.event({
-        "assignment committers resp:",
-        { status = status, res = res, scheduler = scheduler }
-    })
-    
-    if status ~= "ok" then
-        return false
-    end
-
-    local valid = false
-    for _, committer in ipairs(res) do
-        if committer == scheduler then
-            valid = true
-        end
-    end
-
-    if not valid then
-        return false
-    end
-
-    -- Next, validate that the request is signed by the operator.
-    local operator = base.operator
-    status, res = ao.resolve(assignment.body, "committers")
-    ao.event({
-        "request committers resp:",
-        { status = status, res = res, operator = operator }
-    })
-
-    if status ~= "ok" then
-        return false
-    end
-
-    for _, committer in ipairs(res) do
-        if committer == operator then
-            return true
-        end
-    end
-
-    return false
-end
-
--- Debit the specified account by the given amount.
-function debit(base, assignment)
-    ao.event({ "process debit starting", { assignment = assignment } })
-    if not is_valid_request(base, assignment) then
-        base.result = { status = "error", error = "Operator signature required." }
-        ao.event({ "debit error", base.result })
-        return "ok", base
-    end
-    ao.event({ "process debit valid", { assignment = assignment } })
-    base.balance = base.balance or {}
-    base.balance[assignment.body.account] =
-        (base.balance[assignment.body.account] or 0) - assignment.body.quantity
-    
-    ao.event({ "process debit success", { balances = base.balance } })
-    return "ok", base
-end
-
--- Credit the specified account by the given amount.
-_G["credit-notice"] = function (base, assignment)
-    ao.event({ "credit-notice", { assignment = assignment }, { balances = base.balance } })
-    if not is_valid_request(base, assignment) then
-        base.result = { status = "error", error = "Operator signature required." }
-        return "ok", base
-    end
-    ao.event({ "is valid", { req = assignment.body } })
-    base.balance = base.balance or {}
-    base.balance[assignment.body.recipient] =
-        (base.balance[assignment.body.recipient] or 0) + assignment.body.quantity
-    ao.event({ "credit", { ["new balances"] = base.balance } })
-    return "ok", base
-end
+-- (utility functions: send, log_result, normalize_int, count_common, etc.)
+-- (security functions: satisfies_list_constraints, is_trusted_compute, etc.)
+-- (ledger functions: transfer, credit-notice, register, etc.)
 
 --- Index function, called by the `~process@1.0` device for scheduled messages.
---- We route each to the appropriate function based on the request path.
-function compute(base, assignment, opts)
-    ao.event({ "compute", { assignment = assignment }, { balances = base.balance } })
-    if assignment.body.path == "debit" then
-        return debit(base, assignment.body)
-    elseif assignment.body.path == "credit-notice" then
-        return _G["credit-notice"](base, assignment.body)
-    elseif assignment.body.path == "balance" then
-        return balance(base, assignment.body)
-    elseif assignment.slot == 0 then
-        base.balance = base.balance or {}
+--- We route any `action' to the appropriate function based on the request path.
+function compute(base, assignment)
+    ao.event({ "compute called",
+        { balance = base.balance, ledgers = base.ledgers } })
+
+    assignment.body.action = string.lower(assignment.body.action or "")
+
+    if assignment.body.action == "credit-notice" then
+        return _G["credit-notice"](base, assignment)
+    elseif assignment.body.action == "transfer" then
+        return transfer(base, assignment)
+    elseif assignment.body.action == "register" then
+        return register(base, assignment)
+    elseif assignment.body.action == "register-remote" then
+        return _G["register-remote"](base, assignment)
+    else
+        -- Handle unknown `action' values.
+        _, base = ensure_initialized(base, assignment)
+        base.results = {
+            status = "ok"
+        }
+        ao.event({ "Process initialized.", { slot = assignment.slot } })
         return "ok", base
     end
 end
 ```
 
-- [p4-payment-client.lua](https://github.com/permaweb/HyperBEAM/blob/main/scripts/p4-payment-client.lua)
+#### Processor Script 2: hyper-token-p4.lua
+
+- [hyper-token-p4.lua](https://github.com/permaweb/HyperBEAM/blob/main/scripts/hyper-token-p4.lua)
+
+This extends `hyper-token.lua` by adding a `charge` function that allows an `admin` account to debit a user and credit a recipient. This is how the node operator collects fees.
+
+```lua
+--- An extension to the `hyper-token.lua` script, for execution with the
+--- `lua@5.3a` device. This script adds the ability for an `admin' account to
+--- charge a user's account. This is useful for allowing a node operator to
+--- collect fees from users, if they are running in a trusted execution
+--- environment.
+---
+--- This script must be added as after the `hyper-token.lua` script in the
+--- `process-definition`s `script` field.
+
+-- Process an `admin' charge request:
+-- 1. Verify the sender's identity.
+-- 2. Ensure that the quantity and account are present in the request.
+-- 3. Debit the source account.
+-- 4. Increment the balance of the recipient account.
+function charge(base, assignment)
+    ao.event("debug_charge", { "Charge received: ", { assignment = assignment } })
+    local admin = base.admin
+    local status, res, request = validate_request(base, assignment)
+    if status ~= "ok" then
+        return status, res
+    end
+
+    -- Verify that the request is signed by the admin.
+    local committers = ao.get("committers", {"as", "message@1.0", assignment.body})
+    ao.event("debug_charge", { "Validating request: ", {
+        committers = committers,
+        admin = admin
+    } })
+    if count_common(committers, admin) ~= 1 then
+        return "error", base
+    end
+
+    -- Ensure that the quantity and account are present in the request.
+    if not request.quantity or not request.account then
+        ao.event({ "Failure: Quantity or account not found in request.",
+            { request = request } })
+        base.result = {
+            status = "error",
+            error = "Quantity or account not found in request."
+        }
+        return "ok", base
+    end
+
+    -- Debit the source. Note: We do not check the source balance here, because
+    -- the node is capable of debiting the source at-will -- even it puts the
+    -- source into debt. This is important because the node may estimate the
+    -- cost of an execution at lower than its actual cost. Subsequently, the
+    -- ledger should at least debit the source, even if the source may not
+    -- deposit to restore this balance.
+    ao.event({ "Debit request validated: ", { assignment = assignment } })
+    base.balance = base.balance or {}
+    base.balance[request.account] =
+        (base.balance[request.account] or 0) - request.quantity
+
+    -- Increment the balance of the recipient account.
+    base.balance[request.recipient] =
+        (base.balance[request.recipient] or 0) + request.quantity
+
+    ao.event("debug_charge", { "Charge processed: ", { balances = base.balance } })
+    return "ok", base
+end
+```
+
+#### Client Script: hyper-token-p4-client.lua
+
+- [hyper-token-p4-client.lua](https://github.com/permaweb/HyperBEAM/blob/main/scripts/hyper-token-p4-client.lua)
+
+The client script marshals `balance` and `charge` requests from `p4@1.0` to the local `node-process@1.0` ledger. Note that this client uses `charge` (not `debit`) to match the `hyper-token-p4.lua` processor.
 
 ```lua
 --- A simple script that can be used as a `~p4@1.0` ledger device, marshalling
@@ -270,7 +281,7 @@ function balance(base, request)
             .. "/now/balance/"
             .. request["target"]
     })
-    ao.event({ "client received balance response", 
+    ao.event({ "client received balance response",
         { status = status, res = res, target = request["target"] } }
     )
     -- If the balance request fails (most likely because the user has no balance),
@@ -283,259 +294,103 @@ function balance(base, request)
     return "ok", res
 end
 
--- Debit the user's balance in the current ledger state.
-function debit(base, request)
-    ao.event({ "client starting debit", { request = request, base = base } })
+-- Charge the user's balance in the current ledger state.
+function charge(base, request)
+    ao.event("debug_charge", {
+        "client starting charge",
+        { request = request, base = base }
+    })
     local status, res = ao.resolve({
-        path = "(" .. base["ledger-path"] .. ")/schedule",
+        path = "(" .. base["ledger-path"] .. ")/push",
         method = "POST",
         body = request
     })
-    ao.event({ "client received schedule response", { status = status, res = res } })
-    status, res = ao.resolve({
-        path = base["ledger-path"] .. "/compute/balance/" .. request["account"],
-        slot = res.slot
+    ao.event("debug_charge", {
+        "client received charge response",
+        { status = status, res = res }
     })
-    ao.event({ "confirmed balance", { status = status, res = res } })
-    return "ok"
-end
-
---- Poll an external ledger for credit events. If new credit noticess have been
---- sent by the external ledger, push them to the local ledger.
-function poll(base, req)
-    local status, local_last_credit = ao.resolve({
-        path = base["ledger-path"] .. "/now/last-credit"
-    })
-    if status ~= "ok" then
-        ao.event(
-            { "error getting local last credit",
-                { status = status, res = local_last_credit } }
-        )
-        return "error", base
-    end
-
-    local status, external_last_credit = ao.resolve({
-        path = base["external-ledger"] .. "/now/last-credit"
-    })
-    if status ~= "ok" then
-        ao.event({ "error getting external last credit",
-            { status = status, res = external_last_credit } })
-        return "error", base
-    end
-
-    ao.event({ "Retreived sync data. Last credit info:",
-        {
-            local_last_credit = local_last_credit,
-            external_last_credit = external_last_credit }
-        }
-    )
-    while local_last_credit < external_last_credit do
-        status, res = ao.resolve({
-            path = base["external-ledger"] .. "/push",
-            slot = local_last_credit + 1
-        })
-        if status ~= "ok" then
-            ao.event({ "error pushing slot", { status = status, res = res } })
-            return "error", base
-        end
-        local_last_credit = local_last_credit + 1
-    end
-
-    return "ok", base
+    return "ok", res
 end
 ```
 
-You can spawn a process and upload these 2 scripts as messages.
+### Starting a Node with p4@1.0
 
-`schedule` only returns `slot` and not the message ID. You can get message IDs via `/~scheduler@1.0/schedule`, which returns a list of scheduled messages for the `target` process and contains IDs.
-
-```js [/test/payment-system.test.js]
-const process = hbeam.file("scripts/p4-payment-process.lua")
-const { pid: cache_pid } = await hb.spawn({})
-const { slot } = await hb.schedule({
-  pid: cache_pid,
-  data: process,
-  "content-type": "application/lua",
-})
-const { body } = await hb.g("/~scheduler@1.0/schedule", {
-  target: cache_pid,
-  from: slot,
-  accept: "application/aos-2",
-})
-const {
-  edges: [msg],
-} = JSON.parse(body)
-const pid = msg.node.message.Id
-assert(pid)
-const client = hbeam.file("scripts/p4-payment-client.lua")
-const { slot: slot2 } = await hb.schedule({
-  pid: cache_pid,
-  data: client,
-  "content-type": "application/lua",
-})
-const { body: body2 } = await hb.g("/~scheduler@1.0/schedule", {
-  target: cache_pid,
-  from: slot2,
-  accept: "application/aos-2",
-})
-const {
-  edges: [msg2],
-} = JSON.parse(body2)
-const cid = msg2.node.message.Id
-assert(cid)
-```
-
-`HB` has a convenient method for `/~scheduler@1.0/schedule`.
+With the inline approach, you read the 3 Lua scripts, compute the operator address from the HyperBEAM wallet, and start a single HyperBEAM node with everything configured via `p4_lua`.
 
 ```js [/test/payment-system.test.js]
-const msgs = await this.messages({ pid, from: slot, to: slot })
-const pid = msgs.edges[0].node.message.Id
+import { readFileSync } from "fs"
+import { resolve } from "path"
+import { HyperBEAM, acc, toAddr } from "wao/test"
+import { HB } from "wao"
 
-const msgs2 = await this.messages({ pid, from: slot2, to: slot2 })
-const cid = msgs2.edges[0].node.message.Id
-```
-
-Indeed, it has a convenient method to cache scripts.
-
-```js [/test/payment-system.test.js]
-const process = readFileSync(`${hb_dir}/scripts/p4-payment-process.lua`)
-const pid = await hb.cacheScript(process)
-
-const client = readFileSync(`${hb_dir}/scripts/p4-payment-client.lua`)
-const cid = await hb.cacheScript(client)
-```
-
-### Starting Another Node with p4@1.0
-
-Once you get script IDs, you need to start another HyperBEAM node with the same store configurations. We can do this by simply instantiating another `HyperBEAM` with a different `port`, and without clearing the cache storage.
-
-For `p4@1.0` to work, we need to pass the payment `operator` address and `p4_lua`, and the complex settings will be handled for you.
-
-```js [/test/payment-system.test.js]
-// comment out reset to use the same store where we cached Lua scripts
-const hbeam2 = await new HyperBEAM({
-  //reset: true,	
-  port: 10002,
-  operator: addr,
-  p4_lua: { processor: pid, client: cid },
-}).ready()
-```
-
-Now we have a new HyperBEAM node with the `p4@1.0` Lua scripts running at `http://localhost:10002`.
-
-Let's set up 2 new HyperBEAM clients for the operator and a new user for the new node.
-
-```js [/test/payment-system.test.js]
-const operator = hbeam2
 const user = acc[0]
-user.hb = await new HB({ url: hbeam2.url }).init(user.jwk)
+const hbDir = resolve(import.meta.dirname, "../../HyperBEAM")
+
+// Read the operator wallet to get admin address
+const operatorJwk = JSON.parse(
+  readFileSync(resolve(hbDir, ".wallet.json"), "utf8")
+)
+const operatorAddr = toAddr(operatorJwk.n)
+
+// Read the 3 Lua scripts
+const tokenScript = readFileSync(
+  resolve(hbDir, "scripts/hyper-token.lua"), "utf8"
+)
+const p4Script = readFileSync(
+  resolve(hbDir, "scripts/hyper-token-p4.lua"), "utf8"
+)
+const clientScript = readFileSync(
+  resolve(hbDir, "scripts/hyper-token-p4-client.lua"), "utf8"
+)
+
+// Start a SINGLE HyperBEAM node with inline p4_lua config
+const hbeam = await new HyperBEAM({
+  reset: true,
+  operator: HyperBEAM.OPERATOR,
+  p4_lua: {
+    processor: [
+      { body: tokenScript, name: "hyper-token.lua" },
+      { body: p4Script, name: "hyper-token-p4.lua" },
+    ],
+    client: { body: clientScript, name: "hyper-token-p4-client.lua" },
+    admin: operatorAddr,
+    balance: { [user.addr]: 1000 },
+  },
+}).ready()
+
+user.hb = await new HB({ url: hbeam.url }).init(user.jwk)
 ```
 
-Now to topup the user account, we need to send `credit-notice` to the Lua script with the operator account. But this gets extra tricky since HyperBEAM first verifies the whole message sent to the node, then the Lua script extracts and verifies a nested message placed in `body`. So we need to somehow create a signed message with the correct commitment format internally used in HyperBEAM, then wrap that message in `body` and sign the parent message again. This is indeed extra complex, and the crux of this tutorial series where you need to put everything you learned so far together.
+The `processor` is an array of 2 script objects loaded in order: first `hyper-token.lua` (the base token ledger), then `hyper-token-p4.lua` (the charge extension). The `client` is a single script object. The `admin` address is derived from the HyperBEAM wallet and authorizes charge operations. The `balance` map pre-loads the user with 1000 tokens.
 
-### Create Commitments
+### Checking Balance and Executing Requests
 
-If you recall from the previous chapter, HyperBEAM internally signs and creates 2 commitments with sha256 hash of the signature and hmac-sha256 hash of the signed content. We can first construct this internal message to be passed to the Lua script.
+Let's check the pre-loaded balance of the user via the ledger process.
 
 ```js [/test/payment-system.test.js]
-const obj = {
-  path: "credit-notice",
-  quantity: 100,
-  recipient: user.addr,
-}
-const lua_msg = await operator.hb.sign(obj)
+const operator = hbeam
+const balance = await operator.hb.g(
+  `/ledger~node-process@1.0/now/balance/${user.addr}`
+)
+assert.equal(Number(balance), 1000)
 ```
 
-Now we got a signed message with `path` included in `signature-input`.
-
-```js
-{
-  url: 'http://localhost:10002/credit-notice',
-  method: 'POST',
-  headers: {
-    quantity: '100',
-    recipient: 'Rix7e0HB-8OAaimcoYkxTZB-dStgTOHWUik1DvKD5vM',
-    'ao-types': 'quantity="integer"',
-    path: 'credit-notice',
-    signature: 'http-sig-bba7e22451416f77=:VhScT4geZWQi3JxJLUsMoH6qZlDgHjWiymRCu8aMZNgoDxodL3EiAdBUx9+8d6M45/gWejHIeRVjZCG414Xr9zEMsAIY1JUt6GIDB/frsxzK5arUAZ3BPJfmfMgZJ9a5MyWJ3OTtdcMoLgqSPlXOo+pDkFGVn0zyxqAkilgHVpAcFfnOcN+VPibWU0caSk5nt7iWYruAPRtcQVdG9xYqf8sj2ghlAQhoSZlhfkO8wNTA49EmzdPoYWcz7oTYXvqld64zIQLH0DlDPqcOXjFq4xFH9LWHvuglNQ2MNUBgDx0fUor4PXrBvXtR0uJDfhq5Y8gPwOmDf2wunA2mhRPKd8bVAJDkazIor5L2aXoE9SZxjOAb4VlmXEowRON5h4sm0+l1ARPjnWUbfrNZYweOp6YfvjnYE75QmO2MFBCrm6e9sbRf+/cdd+1SD533dkzEdQdGQ+eg6RRV5MGCBDMrZpfusws4C9M8/jxlExeQiI8CVLpQDFNWOJW7shwk4/KTuftgE023gKpEXDQL/b+RrIqeIAgevnrbmteb9htx8lFle9pv7g5UEACcLaY5os4Ocs9ZwsBSo52wLSXNAmtn5xQmxLlgOnsHZNMsar2jepLJHfKiS6VuTIj3k5KVBYaBjkQajcJWUttuJjHIxyfMr0mURHl4hcqXwfBFI00kerU=:',
-    'signature-input': 'http-sig-bba7e22451416f77=("quantity" "recipient" "ao-types" "path");alg="rsa-pss-sha512";keyid="o1kvTqZQ0wbS_WkdwX70TFCk7UF76ldnJ85l8iRV7t6mSlzkXBYCecb-8RXsNEQQmO0KergtHOvhuBJmB6YXaYe_UftI_gendojfIa6jlTgw-qmH6g4_oErI8djDRbQSm-5nCfGVRuYxsNZLYDeqw4gFb9K3b1h7tuMoLd6-d5pkaLfTMUNcvs2OqpkLo0i_av746FieaURdWozwFqO0APtdA7pLHDqQZDMNdTmsUBJFszL6SOa1bKe5cUWnrq4uaW4NAN3JAQniILKGsKZENeKtfXwiKVaFJtriWWsbhOaNT0JLcuBAwXQAP59RXzcr8bRY6XFn8zBmEmZBGszOD9c9ssDENRFDa5uyVhk8XgIgQjErAWYd9T6edrYcIp3R78jhNK_nLiIBBz8_Oz3bLjL5i_aiV2gpfIbd44DCHihuuxSWRAPJxhEy9TS0_QbVOIWhcDTIeEJE3aRPTwSTMt1_Fec7i9HJWN0mvMbAAJw8k6HxjA3pFZiCowZJw7FBwMAeYgEwIeB82f-S2-PtFLwR9i0tExo36hEBHqaS4Y-O3NGgQ8mKnhT7Z1EfxEbA2BpR9oL8rJFEnPIrHHu7B88OHDDfnfRD3D79fKktnisC7XOuwbHG3TQo0_j4_mElH7xj_7IyAbmCUHDd-eRa482wOYXBB01DGnad901qaHU"'
-  }
-}
-```
-
-We can get the 2 hashes required to construct `commitments`.
+Now try executing a POST request as the user. Each request costs tokens (default pricing).
 
 ```js [/test/payment-system.test.js]
-import { rsaid, hmacid } from "wao/utils"
+// POST as user - this will be charged
+assert(await user.hb.p("/~message@1.0/set/hello", { hello: "world" }))
 
-const hmacId = hmacid(lua_msg.headers)
-const rsaId = rsaid(lua_msg.headers)
+// Check that balance decreased
+const balance2 = await operator.hb.g(
+  `/ledger~node-process@1.0/now/balance/${user.addr}`
+)
+assert(Number(balance2) < 1000)
 ```
 
-Now, we can construct `commitments` and the wrapped message.
+The user's balance decreased after the POST request. The `p4@1.0` device automatically called the `charge` function in the client script, which forwarded the charge to the processor, debiting the user's account.
 
-```js [/test/payment-system.test.js]
-const committed_lua_msg = {
-	commitments: {
-	  [ rsaId ]: {
-        alg: "rsa-pss-sha512",
-		"commitment-device": "httpsig@1.0",
-		committer: operator.addr,
-		signature: lua_msg.headers.signature,
-		"signature-input": lua_msg.headers["signature-input"]
-	  },
-	  [ hmacId ]: {
-        alg: "hmac-sha256",
-		"commitment-device": "httpsig@1.0",
-        signature: lua_msg.headers.signature,
-		"signature-input": lua_msg.headers["signature-input"]
-	  }
-	},
-	...obj
-}
-```
-
-WAO has, of course, a convenient method to create commitment.
-
-```js
-const committed_lua_msg = await operator.hb.commit(obj, { path: true })
-```
-
-Finally, we can send it to `/ledger~node-process@1.0/schedule`.
-
-```js [/test/payment-system.test.js]
-await operator.hb.post({
-  path: "/ledger~node-process@1.0/schedule",
-  body: committed_lua_msg,
-})
-```
-
-Let's check the balance of the user.
-
-```js [/test/payment-system.test.js]
-const { out: balance } = await operator.hb.get({
-    path: `/ledger~node-process@1.0/now/balance/${user.addr}`,
-})
-assert.equal(balance, 100)
-```	
-
-Now try executing some messages with the user.
-
-```js [/test/payment-system.test.js]
-// this costs 3
-const hello = { path: "/~message@1.0/set/hello", hello: "world" }
-assert(await user.hb.post(hello))
-
-const { out: balance2 } = await operator.hb.get({
-    path: `/ledger~node-process@1.0/now/balance/${user.addr}`,
-})
-assert.equal(balance2, 97)
-
-```
-It works!!
-
-Congratulations on having come this far!
-The `p4@1.0` payment system with internal Lua scripts using `node-processes@1.0` is one of the most advanced usages of HyperBEAM to be tested externally. If you got this to work, most other things are less complex, so you should be ready to build anything on top of HyperBEAM now.
+Congratulations on having come this far! The `p4@1.0` payment system with inline Lua scripts using `node-process@1.0` is one of the most advanced usages of HyperBEAM. With the inline approach in beta3, the setup is significantly simpler -- no need to cache scripts or start a second node. If you got this to work, most other things are less complex, so you should be ready to build anything on top of HyperBEAM now.
 
 ## Running Tests
 

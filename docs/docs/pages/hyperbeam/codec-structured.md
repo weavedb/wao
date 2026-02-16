@@ -45,11 +45,11 @@ const cases = [
   { empty_list: [], empty_binary: "", empty_message: {} },
 ]
 for (const v of cases) {
-  const { out } = await hb.post({
+  const { body } = await hb.post({
     path: "/~mydev@1.0/structured_from",
     body: JSON.stringify(v),
   })
-  console.log(JSON.parse(out))
+  console.log(JSON.parse(body))
 }
 ```
 
@@ -130,11 +130,11 @@ const cases = [
   }
 ]
 for (const v of cases) {
-  const { out } = await hb.post({
+  const { body } = await hb.post({
     path: "/~mydev@1.0/structured_to",
     body: JSON.stringify(v),
   })
-  console.log(JSON.parse(out))
+  console.log(JSON.parse(body))
 }
 ```
 
