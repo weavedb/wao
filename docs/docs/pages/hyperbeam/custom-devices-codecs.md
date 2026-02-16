@@ -280,15 +280,15 @@ We can strip the metadata down to these minimum differences.
 Things will be clearer when we send complex data with `POST`.
 
 ```js [/test/custom-devices-codecs.test.js]
-const { out } = await hb.post({
-  path: "/~wao@1.0/forward",
+const { body } = await hb.post({
+  path: "/~mydev@1.0/forward",
   key: "abc",
   list: [1, 2, 3],
   map: { abc: "123" },
   bool: true,
   body: "test_body",
 })
-console.log(JSON.parse(out))
+console.log(JSON.parse(body))
 ```
 
 And this is the response.
@@ -356,7 +356,7 @@ We'll explain the commitments later, but now, if you strip down the 2 msgs:
  "msg1": {
     "body": "test_body",
     "bool": "\"true\"",
-    "device": "wao@1.0",
+    "device": "mydev@1.0",
     "key": "abc",
     "list": "\"(ao-type-integer) 1\", \"(ao-type-integer) 2\", \"(ao-type-integer) 3\"",
     "map": { "abc": "123" },
@@ -383,7 +383,7 @@ The `msg1` object type is called `TABM (Type Annotated Binary Message)` and this
 
 So a client encodes a message with `httpsig@1.0`, then `structured@1.0` into `TABM`, then signs it with `http-message-signatures`, then sends it to a HyperBEAM node.
 
-1. `DATA = { path: "/~wao@1.0/forward", key: "abc" }`
+1. `DATA = { path: "/~mydev@1.0/forward", key: "abc" }`
 2. `TABM = encode_by_structured(DATA)`
 3. `HTTP_MSG = encode_by_httpsig(TABM) = Headers + Body`
 4. `SIGNED_HTTP_MSG = sign(HTTP_MSG)`
