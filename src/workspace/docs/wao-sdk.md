@@ -100,7 +100,7 @@ const { mid, res, err, out } = await ao.res({
 Paginated results for a process.
 
 ```js
-const { err, out, res, next } = await ao.ress({ pid, limit: 10, asc: true, cursor: null })
+const { err, out, res, next } = await ao.ress({ pid, limit: 10, asc: true, from: null })
 const page2 = next ? await next() : null
 ```
 

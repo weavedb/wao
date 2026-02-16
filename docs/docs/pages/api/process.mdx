@@ -58,7 +58,7 @@ You can only get `out` with `m`. This is the most extreme form.
 const out = await p.m("Action", { Tag1: "value1", Tag2: "value2" })
 ```
 
-This is a quite common pattern during testing. Doing the same with `aoconnect` requires an enormous amount of code, especially if it involves async/await `receive()`.
+This is a quite common pattern during testing. Doing the same with Wander (`aoconnect`) requires an enormous amount of code, especially if it involves async/await `receive()`.
 
 ```js
 const { p } = await ao.deploy({ tags, src_data, fills })
