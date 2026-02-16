@@ -92,9 +92,14 @@ describe("Processes and Scheduler", function () {
     })
     await hb.schedule({ pid })
     await hb.schedule({ pid })
-    const square = (await hb.now({ pid, path: "/cache/square" })).body
-    const double = (await hb.now({ pid, path: "/cache/double" })).body
-    assert.equal(square, 9)
-    assert.equal(double, 6)
+    const squareRes = await hb.now({ pid, path: "/cache/square" })
+    const doubleRes = await hb.now({ pid, path: "/cache/double" })
+    console.log("square response:", squareRes)
+    console.log("double response:", doubleRes)
+    // The value may be in body (as buffer), out, or as the response itself
+    const square = squareRes.out ?? squareRes.body?.toString?.() ?? squareRes
+    const double = doubleRes.out ?? doubleRes.body?.toString?.() ?? doubleRes
+    assert.equal(Number(square), 9)
+    assert.equal(Number(double), 6)
   })
 })

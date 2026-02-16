@@ -32,8 +32,8 @@ Edit `package.json` to enable ESM and test commands with the `--experimental-was
     "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js"
   },
   "dependencies": {
-	"hbsig": "^0.0.7",
-    "wao": "^0.33.3"
+	"hbsig": "^0.3.0",
+    "wao": "^0.40.0"
   }
 }
 ```

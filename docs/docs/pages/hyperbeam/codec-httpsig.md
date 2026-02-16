@@ -17,7 +17,7 @@ httpsig_to(Msg1, Msg2, Opts) ->
 httpsig_from(Msg1, Msg2, Opts) ->
     Body = maps:get(<<"body">>, Msg1),
     HTTPSIG = dev_codec_json:from(Body),
-    TABM = dev_codec_httpsig:from(HTPSIHG),
+    TABM = dev_codec_httpsig:from(HTTPSIG),
     JSON = dev_codec_json:to(TABM),
     {ok, JSON}.
 ```
