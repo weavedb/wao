@@ -1,6 +1,6 @@
 # Creating Custom HyperBEAM Devices
 
-You can create your own HyperBEAM devices with Erlang, Rust or C++, and test them using WAO JS SDK.
+You can create your own HyperBEAM devices with Erlang, Rust, C++, Elixir, or Gleam, and test them using WAO JS SDK.
 
 You should write unit tests in device's own language such as Erlang with `eunit`.
 
@@ -18,7 +18,7 @@ info(Msg, _, Opts) ->
     {ok, hb_ao:set(Msg, #{ <<"version">> => <<"1.0">> }, Opts)}.
 ```
 
-Then add your device to the `preloaded_devices` list in `HyperBEAM/src/hb_ops`.
+Then add your device to the `preloaded_devices` list in `HyperBEAM/src/hb_opts.erl`.
 
 ```erlang
 preloaded_devices => [

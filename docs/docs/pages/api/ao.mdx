@@ -28,9 +28,9 @@ The `AO` constructor accepts the following options. You can also pass a port num
 | `scheduler` | `string` | built-in default | Scheduler address |
 | `authority` | `string` | built-in default | Authority address |
 | `ar` | `AR` \| `object` | - | AR instance or config like `{ port: 4000 }` |
-| `aoconnect` | `object` | - | AOConnect config `{ MU_URL, SU_URL, CU_URL, GATEWAY_URL }` |
+| `aoconnect` | `object` | - | Wander (aoconnect) config `{ MU_URL, SU_URL, CU_URL, GATEWAY_URL }` |
 | `in_memory` | `boolean` | `false` | Use in-memory ArMem mode |
-| `port` | `number` | - | Shortcut: sets aoconnect URLs + AR port |
+| `port` | `number` | - | Shortcut: sets Wander URLs + AR port |
 | `wao` | `boolean` | auto | Force WAO variant |
 | `variant` | `string` | - | `"ao.TN.1"` or `"ao.N.1"` |
 
@@ -112,7 +112,7 @@ const { err, mid, res, out } = await ao.msg({
 
 `check` determins if the message call is successful by checking through `Tags` in `Messages` in `res`.
 
-When using `from` either in `check` or `get`, `mode` needs to be set `gql`. `mode` defaults to `aoconnect` which uses the `aoconnect.results` function to track down results, which cannot tell where results come from. `gql` mode doesn't sometimes catch all results if used with AO/Arweave mainnet since there are lags due to the block finality time. `limit` specifies how many transactions or results to fetch for the `check`.
+When using `from` either in `check` or `get`, `mode` needs to be set `gql`. `mode` defaults to `aoconnect` which uses the Wander `results` function to track down results, which cannot tell where results come from. `gql` mode doesn't sometimes catch all results if used with AO/Arweave mainnet since there are lags due to the block finality time. `limit` specifies how many transactions or results to fetch for the `check`.
 
 ```js
 const check = { Status : "Success" } // succeeds if Status tag is "Success"
@@ -167,7 +167,7 @@ Handlers.add("Hello", "Hello", function (msg)
 end)
 ```
 
-you can only get the first `Hello, World!`, but not the second `"Hello, " .. name .. "!"` from the aoconnect `result` function.
+you can only get the first `Hello, World!`, but not the second `"Hello, " .. name .. "!"` from the Wander (`aoconnect`) `result` function.
 
 ### dry
 
@@ -236,9 +236,9 @@ Spawn a process. `module` and `scheduler` are auto-set if omitted.
 const { err, pid, p } = await ao.spwn({ module, scheduler, tags, data, boot, auth, memory })
 ```
 
-## aoconnect Functions
+## Wander (aoconnect) Functions
 
-The original aoconnect functions `message` | `spawn` | `result` | `assign` | `dryrun`  are also available.  
+The original Wander (aoconnect) functions `message` | `spawn` | `result` | `assign` | `dryrun` | `monitor` | `unmonitor`  are also available.
 `createDataItemSigner` is available as `toSigner`.
 
 ```js
