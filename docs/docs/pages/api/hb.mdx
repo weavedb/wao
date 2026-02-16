@@ -328,6 +328,17 @@ const { pid } = await hb.spawnAOS()
 const { slot, outbox } = await hb.messageAOS({ pid, action, tags, data })
 ```
 
+### pushAOS
+
+JS-side push for AOS processes. Resolves cross-process round-trips (A→B→A) for `receive()` resolution.
+
+```js
+const { slot, outbox } = await hb.pushAOS({ pid, slot, outbox, maxDepth })
+```
+
+- `outbox` : optional initial outbox from a prior `computeAOS` call
+- `maxDepth` : max resolution depth (default `10`)
+
 ### computeAOS
 
 ```js
