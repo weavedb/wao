@@ -1,5 +1,9 @@
 import { createDataItemSigner } from "@permaweb/aoconnect-69"
 import { ArweaveSigner } from "arbundles"
+import { readFileSync } from "fs"
+import { fileURLToPath } from "url"
+import { dirname as pathDirname, resolve } from "path"
+import { toAddr } from "./utils.js"
 const acc = [
   {
     jwk: {
@@ -89,6 +93,29 @@ let mu = {
   },
   addr: "eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg",
 }
+
+try {
+  const __fn = fileURLToPath(import.meta.url)
+  const __dir = pathDirname(__fn)
+  const walletsDir = resolve(__dir, "../devnet/.wallets")
+  const tryLoadJWK = name => {
+    try {
+      return JSON.parse(readFileSync(resolve(walletsDir, `${name}.json`), "utf-8"))
+    } catch {
+      return null
+    }
+  }
+  for (let i = 0; i < 3; i++) {
+    const jwk = tryLoadJWK(`acc${i}`)
+    if (jwk) acc[i] = { jwk, addr: toAddr(jwk.n) }
+  }
+  const suJwk = tryLoadJWK("su")
+  if (suJwk) su = { jwk: suJwk, addr: toAddr(suJwk.n) }
+  const cuJwk = tryLoadJWK("cu")
+  if (cuJwk) cu = { jwk: cuJwk, addr: toAddr(cuJwk.n) }
+  const muJwk = tryLoadJWK("mu")
+  if (muJwk) mu = { jwk: muJwk, addr: toAddr(muJwk.n) }
+} catch {}
 
 for (const v of acc) v.signer = createDataItemSigner(v.jwk)
 mu.signer = createDataItemSigner(mu.jwk)

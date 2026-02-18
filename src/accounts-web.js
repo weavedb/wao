@@ -1,6 +1,7 @@
 import * as WarpArBundles from "warp-arbundles"
 const pkg = WarpArBundles.default ?? WarpArBundles
 const { createData, ArweaveSigner } = pkg
+import { toAddr } from "./utils.js"
 
 function createDataItemSigner(wallet) {
   const signer = async ({ data, tags, target, anchor }) => {
@@ -105,6 +106,19 @@ let mu = {
     qi: "0Fg91oiiD94elAhcMshiMnzy8Q5tq-WoAQOpPBnYR7HyE4DsjWAWjP9EdopOpsKMM6QbC-bxJKUy0OTvluWUi8m7iR7SPHbgnglyjS8KyIZkckmQdnvOZNZuRrbXDBEzhQrTfdxi24d9QodVYAa-48Gm_PBV-mzBM8doxO5UXKP3cNfxNnJpo2dxbynTNgGQolxvd30jeMzgktpsShGGsiDeCkHJdfIJiI2SX90AnlJhRZlaCZpwUoiSODRqdIpdbgogJUh8-8w_CpfUmoe5MAcgOQxh3pdKSqJpoMAC32NeCFJ8iix31BsbtvxaZMo3OSTYeOgjStb9wX9NDQgJeg",
   },
   addr: "eNaLJLsMiWCSWvQKNbk_YT-9ydeWl9lrWwXxLVp9kcg",
+}
+
+if (globalThis.__WAO_WALLETS__) {
+  const w = globalThis.__WAO_WALLETS__
+  for (let i = 0; i < 3; i++) {
+    if (w[`acc${i}`]) {
+      const jwk = w[`acc${i}`]
+      acc[i] = { jwk, addr: toAddr(jwk.n) }
+    }
+  }
+  if (w.su) su = { jwk: w.su, addr: toAddr(w.su.n) }
+  if (w.cu) cu = { jwk: w.cu, addr: toAddr(w.cu.n) }
+  if (w.mu) mu = { jwk: w.mu, addr: toAddr(w.mu.n) }
 }
 
 for (const v of acc) v.signer = createDataItemSigner(v.jwk)

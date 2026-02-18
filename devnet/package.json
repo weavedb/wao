@@ -1,0 +1,26 @@
+{
+  "name": "wao-devnet-cf",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "keygen": "node ../src/keygen.js",
+    "publish-scheduler": "node scripts/publish-scheduler.js",
+    "transfer-scheduler": "node scripts/transfer-scheduler.js",
+    "test": "vitest run",
+    "test:e2e": "npx playwright test",
+    "test:all": "vitest run && npx playwright test"
+  },
+  "dependencies": {
+    "hono": "^4.4.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.0.0",
+    "wrangler": "^3.60.0",
+    "vitest": "^2.1.0",
+    "@playwright/test": "^1.48.0"
+  }
+}

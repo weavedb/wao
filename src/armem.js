@@ -6,12 +6,17 @@ import { readFileSync } from "fs"
 import { resolve } from "path"
 import Base from "./armem-base.js"
 import { Waosm } from "./waosm-node.js"
+import dodb from "./dodb.js"
 
 export default class ArMem extends Base {
   constructor(args = {}) {
-    const { cache } = args
+    const { cache, storage } = args
     super({ ...args, Waosm })
-    if (cache) this.db = open({ path: cache, compression: true })
+    if (storage) {
+      this.db = dodb(storage)
+    } else if (cache) {
+      this.db = open({ path: cache, compression: true })
+    }
     this.initSync()
   }
   async _getWasm(file) {
