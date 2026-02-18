@@ -1,0 +1,124 @@
+.section {
+  padding: var(--section-padding);
+}
+
+.header {
+  text-align: center;
+  max-width: 640px;
+  margin: 0 auto 64px;
+}
+
+.inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+/* Spectrum bar */
+.spectrum {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 0 8px;
+}
+
+.specLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+}
+
+.specBar {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #34d399, #60a5fa, #a78bfa, #f43f5e, #f59e0b);
+  margin-bottom: 32px;
+  opacity: 0.4;
+  position: relative;
+  overflow: hidden;
+}
+
+.specBar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  animation: specGlow 3s ease-in-out infinite;
+}
+
+@keyframes specGlow {
+  0%, 100% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+}
+
+/* Staircase cards row */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--card-color, var(--accent));
+  border-radius: 14px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.card:hover {
+  border-color: var(--card-color, var(--accent));
+  transform: translateY(-4px);
+}
+
+.cardNum {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: var(--card-color, var(--accent));
+  opacity: 0.6;
+}
+
+.cardTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.cardSpeed {
+  font-size: 0.8rem;
+  color: var(--text-3);
+  margin-top: auto;
+}
+
+@media (max-width: 900px) {
+  .cards {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .card {
+    transform: none;
+  }
+
+  .card:hover {
+    transform: translateY(-4px);
+  }
+}
+
+@media (max-width: 400px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,122 @@
+.section {
+  padding: var(--section-padding);
+  position: relative;
+}
+
+.btnRow {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  flex-wrap: wrap;
+}
+
+/* Full-width gradient separator */
+.separator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 64px;
+  align-items: center;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+}
+
+.features {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 0.95rem;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.featureDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: 7px;
+}
+
+/* Code column with perspective tilt */
+.codeCol {
+  position: relative;
+}
+
+.linesPill {
+  display: inline-flex;
+  padding: 6px 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 100px;
+  background: rgba(168, 85, 247, 0.1);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  color: var(--accent-light);
+  margin-bottom: 16px;
+}
+
+.codeWrap {
+  perspective: 1000px;
+}
+
+.codeWrap > * {
+  transform: rotateY(-2deg);
+  transition: transform 0.4s ease;
+  position: relative;
+}
+
+.codeWrap > *:hover {
+  transform: rotateY(0deg);
+}
+
+/* Animated gradient border */
+.codeWrap > *::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 17px;
+  background: conic-gradient(from var(--angle, 0deg), var(--accent), #3b82f6, #22d3ee, var(--accent));
+  z-index: -1;
+  opacity: 0.4;
+  animation: spinBorder 4s linear infinite;
+}
+
+@keyframes spinBorder {
+  to { --angle: 360deg; }
+}
+
+@media (max-width: 768px) {
+  .inner {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+
+  .codeWrap > * {
+    transform: none;
+  }
+
+  .codeWrap > *:hover {
+    transform: none;
+  }
+}
