@@ -1,0 +1,32 @@
+name = "wao-cu"
+main = "src/cu-worker.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+UNITS = "CU"
+AR_URL = "https://your-main-ar.workers.dev"
+
+[[durable_objects.bindings]]
+name = "CU"
+class_name = "CuDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["CuDO"]
+
+# Optional: D1 database for the satellite CU
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "wao-cu-db"
+# database_id = ""
+
+# Optional: R2 bucket for WASM / memory storage
+# [[r2_buckets]]
+# binding = "BUCKET"
+# bucket_name = "wao-cu-blobs"
+
+# Optional: KV for caching
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = ""

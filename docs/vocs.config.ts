@@ -153,6 +153,7 @@ export default defineConfig({
     "https://vocs.dev/api/og?logo=%logo&title=%title&description=%description",
   topNav: [
     { text: "Get Started", link: "/getting-started" },
+    { text: "DEVNET", link: "/devnet/overview" },
     { text: "HyperBEAM", link: "/book" },
     { text: "ADD", link: "/add/overview" },
     { text: "SDK", link: "/api/overview" },
@@ -175,6 +176,16 @@ export default defineConfig({
     {
       text: "Getting Started",
       link: "/getting-started",
+    },
+    {
+      text: "WAO Devnet",
+      collapsed: true,
+      items: [
+        { text: "Overview", link: "/devnet/overview" },
+        { text: "Running a Node", link: "/devnet/node" },
+        { text: "WAO Scan", link: "/devnet/scan" },
+        { text: "API Endpoints", link: "/devnet/api" },
+      ],
     },
     {
       text: "Building Devices",

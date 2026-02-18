@@ -1,0 +1,38 @@
+name = "wao-devnet"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[build]
+command = "npx vite build"
+watch_dir = "app"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+[durable_objects]
+bindings = [
+  { name = "DEVNET", class_name = "DevnetDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["DevnetDO"]
+
+[vars]
+UNITS = "AR,CU,MU,SU"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wao-devnet-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "wao-devnet-blobs"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "00000000000000000000000000000000"
