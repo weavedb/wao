@@ -12,7 +12,8 @@
     "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
     "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
     "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js",
-    "server": "node cli-esm.js"
+    "server": "node cli-esm.js",
+    "keygen": "node src/keygen.js"
   },
   "exports": {
     ".": {
@@ -30,6 +31,10 @@
     "./web": {
       "require": "./cjs/web.js",
       "import": "./esm/web.js"
+    },
+    "./cf": {
+      "require": "./cjs/cf.js",
+      "import": "./esm/cf.js"
     },
     "./signer": {
       "require": "./cjs/signer.js",

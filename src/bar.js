@@ -27,6 +27,10 @@ class AR extends MAR {
     this.mem = opt.mem ?? new opt.ArMem()
     this.gql = new GQL({ mem: this.mem })
     this.arweave = this.mem.arweave
+    // Block batching (DB path only)
+    this._pendingBatch = []
+    this._flushTimer = null
+    this._batchWindow = opt.batchWindow ?? 0 // ms, 0 = disabled
   }
   isHttpMsg(item) {
     if (typeof item === "object" && item !== null) {
@@ -77,6 +81,21 @@ class AR extends MAR {
   }
 
   async postItems(items, jwk) {
+    // Remote mode: forward bundle to main AR via HTTP
+    if (this.mem._remote) {
+      let err = null
+      ;({ err, jwk } = await this.checkWallet({ jwk }))
+      if (err) return { err }
+      if (!is(Array, items)) items = [items]
+      const bundle = await bundleAndSignData(items, new ArweaveSigner(jwk))
+      const tx = await this.mem.arweave.createTransaction(
+        { data: bundle.binary },
+        jwk
+      )
+      tx.addTag("Bundle-Format", "binary")
+      tx.addTag("Bundle-Version", "2.0.0")
+      return await this.postTx(tx, jwk, items.map(i => ({ id: i.id })))
+    }
     let err = null
     ;({ err, jwk } = await this.checkWallet({ jwk }))
     if (err) return { err }
@@ -90,6 +109,10 @@ class AR extends MAR {
         if (t.name === "Content-Type") data_type = t.value
       const owner = await this.owner(di)
       await this.mem.set({ key: di.owner, address: owner }, "addrmap", owner)
+      // D1: write addrmap
+      if (this.mem.db?.d1WriteAddrmap) {
+        try { await this.mem.db.d1WriteAddrmap(owner, { key: di.owner, address: owner }) } catch (e) {}
+      }
       let _item = {
         _data: { size: data_size, type: data_type },
         anchor: di.anchor,
@@ -100,6 +123,12 @@ class AR extends MAR {
         owner,
         tags: di.tags,
         data: di.data,
+      }
+      // Extract raw data to R2
+      if (_item.data && this.mem.db?.r2PutTxData) {
+        await this.mem.db.r2PutTxData(_item.id, _item.data)
+        _item._r2_data = true
+        _item.data = ""
       }
       await this.mem.set(_item, "txs", await di.id)
       _items.push(_item)
@@ -115,19 +144,41 @@ class AR extends MAR {
   }
 
   async postTx(tx, jwk, items = []) {
+    // Remote mode: sign locally, POST to main AR
+    if (this.mem._remote) {
+      let err = null
+      ;({ err, jwk } = await this.checkWallet({ jwk }))
+      if (err) return { err }
+      if (!tx.id) await this.mem.arweave.transactions.sign(tx, jwk)
+      const res = await this.mem._remote.postTx(tx)
+      return { res: { id: tx.id, status: 200 }, err: null, id: tx.id }
+    }
     let err = null
     ;({ err, jwk } = await this.checkWallet({ jwk }))
     if (err) return { err }
 
     let res = null
     if (!tx.id) await this.mem.arweave.transactions.sign(tx, jwk)
-    let height = (await this.mem.get("height")) + 1
-    await this.mem.set(height, "height")
+    let height
+    if (this.mem._d1Ready) {
+      // D1 ready: increment in-memory, flush every 10 txs
+      this.mem.height = (this.mem.height ?? 0) + 1
+      height = this.mem.height
+      if (height % 10 === 0) {
+        await this.mem.set(height, "height")
+      }
+    } else {
+      height = (await this.mem.get("height")) + 1
+      await this.mem.set(height, "height")
+    }
+    let previous = this.mem._d1Ready
+      ? (this.mem.lastBlockId || "")
+      : (last(await this.mem.get("blocks")) ?? "")
     let block = {
       id: tx.id,
       timestamp: Date.now(),
       height,
-      previous: last(await this.mem.get("blocks")) ?? "",
+      previous,
       txs: [],
     }
     let msg = null
@@ -144,6 +195,7 @@ class AR extends MAR {
             "Process",
             "Module",
             "Scheduler-Location",
+            "Scheduler-Transfer",
             "Attestation",
             "Available",
           ])
@@ -157,7 +209,12 @@ class AR extends MAR {
         }
         block.txs.push(item.id)
         _txs.block = block.id
-        await this.mem.set({ bundle: tx.id }, "txs", item.id)
+        // Re-store item with parent/bundledIn/block, but drop the raw
+        // DataItem binary (item.item) to save space — data is in R2 or
+        // can be reconstructed from the wrapper bundle tx.
+        const slim = { ..._txs, bundle: tx.id }
+        delete slim.item
+        await this.mem.set(slim, "txs", item.id)
       }
     }
     let _tags = []
@@ -180,19 +237,64 @@ class AR extends MAR {
     }
     tx.tags = _tags
     tx.owner = await this.arweave.wallets.jwkToAddress({ n: tx.owner })
+    tx.recipient = tx.target || ""
     let _txs = tx
     block.txs.push(tx.id)
     _txs.block = block.id
+    // Extract raw data to R2
+    if (_txs.data && this.mem.db?.r2PutTxData) {
+      await this.mem.db.r2PutTxData(tx.id, _txs.data)
+      _txs._r2_data = true
+      _txs.data = ""
+    }
     await this.mem.set(_txs, "txs", tx.id)
-    let blocks = await this.mem.get("blocks")
-    blocks.push(block.id)
-    await this.mem.set(blocks, "blocks")
+    // Update block tracking — always maintain blocks array + blockmap
+    // so the O(n) scan fallback in tgql.js works even if D1 is stale
+    if (this.mem._d1Ready) {
+      await this.mem.set(block.id, "lastBlockId")
+      this.mem.lastBlockId = block.id
+    }
+    this.mem.blocks ??= []
+    this.mem.blocks.push(block.id)
+    await this.mem.set(this.mem.blocks, "blocks")
     await this.mem.set(block, "blockmap", block.id)
 
     if (jwk) {
       const owner = await this.arweave.wallets.jwkToAddress(jwk)
       await this.mem.set({ address: owner, key: jwk.n }, "addrmap", owner)
+      // D1: write addrmap
+      if (this.mem.db?.d1WriteAddrmap) {
+        try { await this.mem.db.d1WriteAddrmap(owner, { address: owner, key: jwk.n }) } catch (e) {}
+      }
     }
+
+    // D1 write: block + txs + tags (only when D1 schema is verified ready)
+    if (this.mem._d1Ready && this.mem.db?.d1WriteBlock) {
+      const mainTx = {
+        id: tx.id,
+        owner: tx.owner,
+        recipient: tx.recipient || "",
+        anchor: tx.anchor || "",
+        signature: tx.signature || "",
+        tags: _tags,
+        _data: tx._data || { size: tx.data ? String(tx.data.length) : "0", type: "" },
+        bundledIn: tx.bundledIn,
+        parent: tx.parent,
+      }
+      if (this._batchWindow > 0) {
+        this._pendingBatch.push({ block, mainTx, items: [...items] })
+        if (!this._flushTimer) {
+          this._flushTimer = setTimeout(() => this._flushBatch(), this._batchWindow)
+        }
+      } else {
+        await this.mem.db.d1WriteBlock(block)
+        await this.mem.db.d1WriteTx(mainTx, block.id, block.height)
+        for (const item of items) {
+          await this.mem.db.d1WriteTx(item, block.id, block.height)
+        }
+      }
+    }
+
     res = { id: tx.id, status: 200, statusText: "200" }
     if (this.log) {
       if (msg) {
@@ -204,6 +306,21 @@ class AR extends MAR {
       }
     }
     return { res, err, id: tx.id }
+  }
+
+  async _flushBatch() {
+    this._flushTimer = null
+    if (!this._pendingBatch.length) return
+    const batch = this._pendingBatch.splice(0)
+    for (const { block, mainTx, items } of batch) {
+      await this.mem.db.d1WriteBlock(block)
+      await this.mem.db.d1WriteTx(mainTx, block.id, block.height)
+      for (const item of items) {
+        await this.mem.db.d1WriteTx(item, block.id, block.height)
+      }
+    }
+    // Flush height to DO after batch
+    await this.mem.set(this.mem.height, "height")
   }
 
   async tx(id) {
@@ -219,15 +336,8 @@ class AR extends MAR {
     }
     let tx = await this.mem.getTx(id)
     let _data = tx?.data ?? null
-    if (tx?.format === 2 && _data) {
-      _data = Buffer.from(_data, "base64")
-    } else if (_data) {
-      // need to check production
-      if (tx._data.type === "") {
-        _data = tobuff(_data)
-      } else {
-        _data = Buffer.from(base64url.decode(_data))
-      }
+    if (_data && is(String, _data)) {
+      _data = tobuff(_data)
     }
     let isBuf = is(Uint8Array, _data) || is(ArrayBuffer, _data)
     let isStr = is(String, _data)

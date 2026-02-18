@@ -1,3 +1,4 @@
+import D1GQL from "./tgql-d1.js"
 import { reverse, includes, map, is, isNil, last, clone, pick } from "ramda"
 
 const subs = {
@@ -48,10 +49,20 @@ const field_blocks = (key, val = true) => {
 }
 
 export default class GQL {
-  constructor({ mem }) {
+  constructor({ mem, d1 }) {
     this.mem = mem
+    this.d1 = d1 || null
+    if (this.d1) {
+      this._d1gql = new D1GQL({ d1: this.d1, mem: this.mem })
+    }
   }
   async txs(opt = {}) {
+    if (this._d1gql) {
+      try { return await this._d1gql.txs(opt) } catch (e) {
+        // Fall through to O(n) scan only if D1 schema is missing
+        if (!e?.message?.includes("no such table")) throw e
+      }
+    }
     let block_max = null
     let block_min = null
     let _block = {}
@@ -91,7 +102,7 @@ export default class GQL {
     let count = 0
     let after = false
     for (const v of blocks) {
-      const block = clone(this.mem.blockmap[v])
+      const block = clone(await this.mem.get("blockmap", v))
       if (!isNil(_block.min) && block.height < _block.min) continue
       if (!isNil(_block.max) && block.height > _block.max) continue
       let txs = block.txs
@@ -103,6 +114,7 @@ export default class GQL {
         }
         if (!isNil(opt.after) && count === 0 && !after) continue
         let tx = await this.mem.getTx(v2)
+        if (!tx) continue
         if (!isNil(ids) && ids.length > 0) {
           if (!includes(tx.id, ids)) continue
         }
@@ -113,10 +125,13 @@ export default class GQL {
         if (!isNil(recipients) && recipients.length > 0) {
           if (!includes(tx.recipient, recipients)) continue
         }
+        if (!isNil(opt.bundledIn) && opt.bundledIn.length > 0) {
+          if (!tx.bundledIn?.id || !includes(tx.bundledIn.id, opt.bundledIn)) continue
+        }
         let tag_unmatch = false
         for (const v of tags) {
           let ex = false
-          for (const v2 of tx.tags) {
+          for (const v2 of (tx.tags || [])) {
             if (v2.name === v.name && includes(v2.value, v.values)) {
               ex = true
               break
@@ -132,17 +147,16 @@ export default class GQL {
           cursor: tx.id,
           id: tx.id,
           recipient: tx.recipient ?? "",
-          data: tx._data,
-          tags: tx.tags,
+          tags: tx.tags || [],
           parent: tx.parent ?? { id: "" },
           bundledIn: tx.bundledIn ?? { id: "" },
           block: pick(["id", "timestamp", "height", "previous"], block),
           anchor: tx.anchor ?? "",
           signature: tx.signature ?? "",
-          owner: { address: tx.owner, key: this.mem.addrmap[tx.owner] },
+          owner: { address: tx.owner, key: await this.mem.get("addrmap", tx.owner) },
           fee: { ar: "0.000000000000", winston: "0" },
           quantity: { ar: "0.000000000000", winston: "0" },
-          data: { size: "0", type: "" },
+          data: tx._data?.type ? tx._data : { size: tx._data?.size || tx.data_size || (tx.data ? String(tx.data.length) : "0"), type: (tx.tags || []).find(t => t.name === "Content-Type")?.value || "" },
         }
         if (!isNil(opt.fields)) {
           let _tx2 = { cursor: tx.id }
@@ -173,7 +187,7 @@ export default class GQL {
               _tx2[f.key] = {}
               if (is(Array, _tx[f.key])) {
                 _tx2[f.key] = map(pick(f.subs))(_tx[f.key])
-              } else {
+              } else if (_tx[f.key] != null) {
                 for (const f2 of f.subs) {
                   _tx2[f.key][f2] = _tx[f.key][f2] ?? ""
                 }
@@ -204,6 +218,11 @@ export default class GQL {
     }
   }
   async blocks(opt = {}) {
+    if (this._d1gql) {
+      try { return await this._d1gql.blocks(opt) } catch (e) {
+        if (!e?.message?.includes("no such table")) throw e
+      }
+    }
     let block_max = null
     let block_min = null
     let _block = {}
@@ -226,7 +245,7 @@ export default class GQL {
     let count = 0
     let after = false
     for (const v of blocks) {
-      let block = clone({ ...this.mem.blockmap[v], cursor: v })
+      let block = clone({ ...(await this.mem.get("blockmap", v)), cursor: v })
       delete block.txs
       if (!isNil(_block.min) && block.height < _block.min) continue
       if (!isNil(_block.max) && block.height > _block.max) continue
@@ -260,7 +279,7 @@ export default class GQL {
             block2[f.key] = {}
             if (is(Array, block[f.key])) {
               block2[f.key] = map(pick(f.subs))(block[f.key])
-            } else {
+            } else if (block[f.key] != null) {
               for (const f2 of f.subs) {
                 block2[f.key][f2] = block[f.key][f2] ?? ""
               }

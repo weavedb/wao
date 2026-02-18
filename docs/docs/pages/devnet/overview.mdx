@@ -1,0 +1,128 @@
+# WAO Devnet Alpha
+
+![WAO Devnet](/images/devnet.png)
+
+:::warning[Alpha]
+WAO Devnet is in alpha. APIs and behavior may change without notice.
+:::
+
+## What is WAO Devnet
+
+AO is a decentralized compute network built on Arweave. In production, it runs as five independent unit types — each operated by different parties across the network:
+
+| Unit | Role |
+|------|------|
+| **AR** | Arweave gateway — stores transactions and provides GraphQL queries |
+| **SU** | Scheduler — orders messages into a deterministic sequence per process |
+| **MU** | Messenger — accepts signed messages, forwards them to the scheduler, and triggers computation |
+| **CU** | Compute — evaluates process state by replaying messages through WASM modules |
+| **BD** | Bundler — batches transactions into bundles and posts them to Arweave |
+
+**WAO Devnet collapses all five units into a single Cloudflare Worker.** It runs the full AO protocol — scheduling, computation, storage, GraphQL — and your code talks to the same APIs. Developing against the live network means slow round-trips, no local visibility, and costly on-chain mistakes. Devnet gives you the real protocol with none of that.
+
+## Not Permanent
+
+AO's mainnet and testnet both write to Arweave — every transaction is permanently stored on-chain. WAO Devnet does **not** write to Arweave. The AR unit emulates the Arweave gateway API, but all state lives on Cloudflare infrastructure. There are no block confirmations, no storage costs, and no permanent footprint.
+
+To reset your local devnet, delete the `.wrangler/` directory and restart:
+
+```bash
+rm -rf .wrangler
+npx wrangler dev --port 8788
+```
+
+For custom storage paths, delete whichever `--persist-to` directory you specified.
+
+## Preloaded WASM Modules
+
+Cloudflare Workers cannot dynamically load WASM at runtime — all modules must be bundled at build time. Because of this limitation, devnet ships with AOS WASM modules **preloaded into the Worker bundle**:
+
+| Module ID | Binary | Format |
+|-----------|--------|--------|
+| `ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s` | AOS 2.0.6 | wasm64 |
+| `JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g` | AOS 2.0.3 | wasm64 |
+| `Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM` | AOS 2.0.1 | wasm64 |
+| `WASM32-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g` | AOS 2.0.4 | wasm32 |
+| `ghSkge2sIUD_F00ym5sEimC63BDBuBrq4b5OcwxOjiw` | SQLite | wasm64 |
+
+
+## Network Identity: `ao.DN.1`
+
+Every AO network has an identity tag. Mainnet uses `ao.N.1`. WAO Devnet identifies itself as **`ao.DN.1`** (DevNet 1). This tag appears in the network info returned by `GET /ar`:
+
+```json
+{ "network": "ao.DN.1", "height": 42 }
+```
+
+You can deploy your own devnet with a custom identity tag (e.g. `ao.MYAPP.1`) — the last segment is the version number.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│             Cloudflare Worker               │
+│                                             │
+│   Hono Router                               │
+│   ├── /ar/*    → Arweave Gateway (AR)       │
+│   ├── /bd/*    → Bundler (BD)               │
+│   ├── /mu/*    → Messenger Unit (MU)        │
+│   ├── /su/*    → Scheduler Unit (SU)        │
+│   ├── /cu/*    → Compute Unit (CU)          │
+│   ├── /ws      → WebSocket (live updates)   │
+│   └── /        → WAO Scan (explorer UI)     │
+│                                             │
+│   ┌─────────────────────────────────────┐   │
+│   │       DevnetDO  (Singleton)         │   │
+│   │                                     │   │
+│   │   WAO Adaptor                       │   │
+│   │   ├── Arweave emulation (ArMem)     │   │
+│   │   ├── GraphQL engine                │   │
+│   │   ├── AOS WASM execution (wasm64)   │   │
+│   │   └── Transaction & block storage   │   │
+│   │                                     │   │
+│   │   WebSocket broadcaster             │   │
+│   └─────────────────────────────────────┘   │
+│                                             │
+│   Storage: Durable Objects · D1 · R2 · KV   │
+└─────────────────────────────────────────────┘
+```
+
+The Hono router maps requests to the correct unit by path prefix and forwards them to the `DevnetDO` singleton. The Durable Object runs the WAO Adaptor and routes requests through it. POST mutations broadcast over WebSocket so WAO Scan updates in real time.
+
+## Why Cloudflare
+
+AO units need to handle HTTP requests, execute WASM, manage persistent state, and coordinate in real time. Cloudflare's edge platform provides all of this — no servers to manage, no infrastructure to provision, and a generous free tier.
+
+| Service | Role in Devnet |
+|---------|---------------|
+| [**Workers**](https://developers.cloudflare.com/workers/) | Runs the Hono router and all AO unit logic. V8 isolates with sub-5ms cold starts. |
+| [**Durable Objects**](https://developers.cloudflare.com/durable-objects/) | The `DevnetDO` singleton — strong consistency, in-memory caching, and WebSocket support in one actor. |
+| [**D1**](https://developers.cloudflare.com/d1/) | SQLite for transaction metadata and GraphQL queries. Indexed lookups by owner, recipient, tags, and block height. |
+| [**R2**](https://developers.cloudflare.com/r2/) | Object storage for WASM modules, transaction data, and process memory snapshots. Zero egress fees. |
+| [**KV**](https://developers.cloudflare.com/kv/) | Global key-value cache for module lookups and address mappings. |
+
+All five services are accessible within a single Worker — a message that enters through the MU, gets scheduled by the SU, evaluated by the CU, and stored by the AR never leaves the edge. The entire pipeline runs in-process. And everything above fits within Cloudflare's [free tier](https://developers.cloudflare.com/workers/platform/pricing/) — Workers (100k requests/day), D1 (5 GB), R2 (10 GB), KV (100k reads/day), Durable Objects (included with Workers Paid, or minimal cost). A full devnet deployment costs nothing for typical development workloads.
+
+Locally, `wrangler dev` emulates all of these services on your machine. The same code runs in both environments.
+
+## Scalability
+
+Each devnet is a self-contained Worker deployment. You can run as many as you need:
+
+- **Per-developer** — each team member deploys their own isolated devnet
+- **Per-environment** — separate devnets for development, staging, CI, and demos
+- **Per-project** — different applications get different networks with different state
+
+```toml
+name = "wao-devnet-alice"   # personal devnet
+name = "wao-devnet-ci"      # CI pipeline
+name = "wao-devnet-demo"    # demo environment
+```
+
+You can also split units across Workers using the `UNITS` configuration — run a compute-heavy CU on a dedicated Worker while the MU/SU/AR share another. See [Running a Devnet Node](/devnet/node) for details.
+
+## Next Steps
+
+- [Running a Devnet Node](/devnet/node) — Run locally or deploy to Cloudflare
+- [WAO Scan](/devnet/scan) — Built-in block explorer
+- [API Endpoints](/devnet/api) — Full reference for all unit endpoints

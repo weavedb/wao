@@ -24000,7 +24000,7 @@ var require_wasm64_emscripten = __commonJS({
         _emscripten_get_now = () => deterministicNow()
         var growMemory = size => {
           var b = wasmMemory.buffer
-          var pages = (size - b.byteLength + 65535) / 65536
+          var pages = BigInt(Math.ceil((size - b.byteLength) / 65536))
           try {
             wasmMemory.grow(pages)
             updateMemoryViews()

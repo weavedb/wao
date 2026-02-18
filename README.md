@@ -28,13 +28,13 @@ This combination — a complete knowledge base plus sub-second testing — makes
   └───────────────────────────────────────────┘
 ```
 
-WAO provides four test environments — from instant in-memory emulation to production networks:
+WAO provides five environments — from instant in-memory emulation to production networks:
 
 ```
-  fast ◀───────────────────────────────────────────▶ realistic
+  fast ◀────────────────────────────────────────────▶ realistic
 
-  In-Memory AOS  Local AO Units  Local HyperBEAM  Remote HyperBEAM
-   emulation       npx wao          sandboxed        production
+  In-Memory AOS   Local AO   Local HB   WAO Devnet   Remote HB
+    emulation      npx wao   sandboxed   Cloudflare   production
 ```
 
 | Environment | Description |
@@ -42,6 +42,7 @@ WAO provides four test environments — from instant in-memory emulation to prod
 | **In-memory AOS** | AOS WASM in Node.js — no server, instant unit tests |
 | **Local AO Units** | Standalone units via `npx wao` — local dev |
 | **Local HyperBEAM** | Sandboxed Erlang node — full stack integration |
+| **WAO Devnet** | Full AO stack on Cloudflare Workers — staging with WAO Scan explorer |
 | **Remote HyperBEAM** | Production nodes — mainnet |
 
 ### AOS — Lua Smart Contracts
@@ -69,6 +70,12 @@ Build WAO projects using the HyperADD (Agent Driven Development) Framework.
 - [Overview →](https://docs.wao.eco/add/overview)
 - [Vibe Engineering →](https://docs.wao.eco/add/build)
 - [HyperADD Framework →](https://docs.wao.eco/add/framework)
+
+### WAO Devnet — Edge AO Network for Development
+A lightweight edge implementation of the full AO network (AR, SU, MU, CU, BD) on Cloudflare Workers — horizontally and vertically scalable, with WAO Scan block explorer.
+- [Overview →](https://docs.wao.eco/devnet/overview) — What is WAO Devnet and why you need it
+- [Running a Node →](https://docs.wao.eco/devnet/node) — Run locally or deploy to Cloudflare
+- [API Endpoints →](https://docs.wao.eco/devnet/api) — Full reference for all unit endpoints
 
 ### Reference
 - [WAO SDK API →](https://docs.wao.eco/api/overview)

@@ -1,0 +1,349 @@
+# API Endpoints
+
+WAO Devnet exposes the standard AO protocol endpoints under path prefixes. Each prefix corresponds to an AO unit type. All endpoints accept and return JSON unless otherwise noted.
+
+**Base URL (local):** `http://localhost:8788`
+
+## Arweave Gateway (`/ar`)
+
+The AR unit emulates an Arweave gateway — transaction storage, data retrieval, and GraphQL queries.
+
+### `GET /ar`
+
+Network info. Returns the current block height, network name, and node address.
+
+```bash
+curl http://localhost:8788/ar
+```
+
+```json
+{
+  "network": "ao.DN.1",
+  "height": 42,
+  "current": "abc123...",
+  "blocks": 42,
+  "node_address": "eNaLJL...Vp9kcg"
+}
+```
+
+### `GET /ar/:id`
+
+Fetch raw transaction data by ID. Returns the binary data payload of the transaction.
+
+```bash
+curl http://localhost:8788/ar/zu2vm4M_xooORPqu2HX6-Q53BWv2RpILIXf8wG4AWoA
+```
+
+### `POST /ar/graphql`
+
+Arweave-compatible GraphQL endpoint. Supports `transactions` and `blocks` queries with tag filters, owner/recipient filters, pagination, and sorting.
+
+```bash
+curl -X POST http://localhost:8788/ar/graphql \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "{ transactions(first: 5, tags: [{name: \"Type\", values: [\"Process\"]}]) { edges { node { id tags { name value } } } } }"
+  }'
+```
+
+### `POST /ar/:id`
+
+Submit a transaction or data chunk. Used internally by Arweave client libraries.
+
+### `GET /ar/tx/:id/offset`
+
+Transaction offset info. Used by Arweave clients for chunked uploads.
+
+### `GET /ar/tx_anchor`
+
+Returns the current transaction anchor (latest block hash).
+
+```bash
+curl http://localhost:8788/ar/tx_anchor
+```
+
+### `GET /ar/mine`
+
+Mine a new block. Forces block creation without waiting for the automatic interval.
+
+```bash
+curl http://localhost:8788/ar/mine
+```
+
+### `GET /ar/wallet/:id/balance`
+
+Get wallet balance for an address.
+
+```bash
+curl http://localhost:8788/ar/wallet/eNaLJL...Vp9kcg/balance
+```
+
+### `GET /ar/mint/:id/:amount`
+
+Mint tokens to an address. Devnet-only — does not exist on mainnet.
+
+```bash
+curl http://localhost:8788/ar/mint/eNaLJL...Vp9kcg/1000000000000
+```
+
+### `GET /ar/price/:id`
+
+Transaction price estimation. Always returns `"0"` on devnet.
+
+---
+
+## Messenger Unit (`/mu`)
+
+The MU accepts signed messages and spawns, forwards them to the Scheduler, and triggers compute evaluation.
+
+### `GET /mu`
+
+Health check. Returns MU status.
+
+```bash
+curl http://localhost:8788/mu
+```
+
+### `POST /mu`
+
+Send a signed message or spawn request. This is the primary write endpoint for AO — it accepts an ANS-104 DataItem as the request body.
+
+```bash
+# Typically called via WAO SDK or aoconnect, not curl:
+const { mid } = await ao.message({
+  process: "FDDE_p5x...",
+  data: "Hello",
+  tags: [{ name: "Action", value: "Greet" }],
+})
+```
+
+The MU:
+1. Validates the signed DataItem
+2. Forwards it to the SU for scheduling
+3. Triggers CU evaluation
+4. Routes any outbound messages (from `ao.send()` in handlers) back through the pipeline
+
+### `POST /mu/monitor/:pid`
+
+Start monitoring a process. The MU will automatically trigger compute for new messages to this process.
+
+```bash
+curl -X POST http://localhost:8788/mu/monitor/FDDE_p5x...
+```
+
+### `DELETE /mu/monitor/:pid`
+
+Stop monitoring a process.
+
+```bash
+curl -X DELETE http://localhost:8788/mu/monitor/FDDE_p5x...
+```
+
+---
+
+## Scheduler Unit (`/su`)
+
+The SU assigns slot numbers to messages, maintaining a deterministic order per process.
+
+### `GET /su`
+
+Scheduler info. Returns the network name and address.
+
+```bash
+curl http://localhost:8788/su
+```
+
+### `GET /su/timestamp`
+
+Current scheduler timestamp and block height.
+
+```bash
+curl http://localhost:8788/su/timestamp
+```
+
+```json
+{
+  "timestamp": 1700000000000,
+  "block_height": 42
+}
+```
+
+### `GET /su/:pid`
+
+Get all scheduled assignments for a process. Returns the ordered sequence of messages assigned to the process.
+
+```bash
+curl http://localhost:8788/su/FDDE_p5x...
+```
+
+```json
+{
+  "page_info": { "has_next_page": false },
+  "edges": [
+    {
+      "cursor": "0",
+      "node": {
+        "message": { "id": "abc123...", "tags": [...] },
+        "assignment": { "processes": ["FDDE_p5x..."] }
+      }
+    }
+  ]
+}
+```
+
+Query parameters:
+- `from` — Start from this cursor/slot
+- `to` — End at this cursor/slot
+
+---
+
+## Compute Unit (`/cu`)
+
+The CU evaluates process state by replaying messages through WASM modules. It returns compute results including output, spawned messages, and errors.
+
+### `GET /cu`
+
+CU info. Returns timestamp and address.
+
+```bash
+curl http://localhost:8788/cu
+```
+
+### `GET /cu/result/:mid`
+
+Get the compute result for a specific message. This is the most commonly used CU endpoint — it returns what happened when the process evaluated this message.
+
+```bash
+curl "http://localhost:8788/cu/result/U3DaDUN8...?process-id=FDDE_p5x..."
+```
+
+```json
+{
+  "Output": {
+    "data": "Pong",
+    "prompt": "aos> ",
+    "print": true
+  },
+  "Messages": [
+    {
+      "Target": "Y4P53TzF...",
+      "Tags": [
+        { "name": "Action", "value": "Pong" }
+      ]
+    }
+  ],
+  "Spawns": [],
+  "Error": ""
+}
+```
+
+Query parameters:
+- `process-id` — **(required)** The process that received this message
+
+### `POST /cu/result/:mid`
+
+Same as GET but accepts parameters in the request body. Used by HyperBEAM.
+
+### `GET /cu/results/:pid`
+
+Get all compute results for a process, in slot order.
+
+```bash
+curl "http://localhost:8788/cu/results/FDDE_p5x..."
+```
+
+Query parameters:
+- `from` — Start from this cursor/slot
+- `to` — End at this cursor/slot
+- `sort` — `ASC` or `DESC`
+- `limit` — Max results to return
+
+### `GET /cu/state/:pid`
+
+Get the current WASM memory state of a process. Returns the raw memory buffer.
+
+```bash
+curl http://localhost:8788/cu/state/FDDE_p5x...
+```
+
+### `POST /cu/dry-run`
+
+Execute a message against a process without persisting it. Useful for read-only queries.
+
+```bash
+curl -X POST http://localhost:8788/cu/dry-run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Target": "FDDE_p5x...",
+    "Tags": [{"name": "Action", "value": "Info"}]
+  }'
+```
+
+### `POST /cu/evaluate`
+
+Force evaluation of pending messages for a process.
+
+---
+
+## Bundler (`/bd`)
+
+The BD unit accepts transaction bundles. It is automatically enabled when the AR unit is enabled.
+
+### `POST /bd/tx`
+
+Submit a transaction bundle (ANS-104 format). Used internally by the MU when routing messages through the Arweave write path.
+
+---
+
+## WebSocket (`/ws`)
+
+Live transaction notifications. WAO Scan uses this to update in real time.
+
+### `GET /ws` (Upgrade: websocket)
+
+Connect a WebSocket client. The server broadcasts a JSON message for every new transaction:
+
+```json
+{
+  "type": "tx",
+  "id": "abc123...",
+  "device": "mu",
+  "timestamp": 1700000000000
+}
+```
+
+Example client:
+
+```js
+const ws = new WebSocket("ws://localhost:8788/ws")
+ws.onmessage = (e) => {
+  const { type, id, device } = JSON.parse(e.data)
+  console.log(`New ${type} from ${device}: ${id}`)
+}
+```
+
+---
+
+## WAO Scan (`/`)
+
+### `GET /`
+
+Serves WAO Scan, the single-page block explorer. Open in a browser to inspect the devnet visually.
+
+---
+
+## Error Responses
+
+All endpoints return errors in a consistent format:
+
+```json
+{
+  "error": "TransactionNotFound: Process abc123 was not found on gateway"
+}
+```
+
+HTTP status codes:
+- `200` — Success
+- `400` — Bad request (malformed input)
+- `404` — Resource not found
+- `500` — Internal server error
