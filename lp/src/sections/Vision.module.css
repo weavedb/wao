@@ -1,0 +1,147 @@
+.section {
+  padding: 140px 24px;
+  position: relative;
+}
+
+.inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 80px;
+}
+
+.title {
+  font-size: clamp(2.2rem, 5vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.12;
+  margin-bottom: 20px;
+}
+
+.titleGradient {
+  background: linear-gradient(135deg, #a855f7, #3b82f6, #22c55e);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Journey path */
+.path {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 24px;
+  align-items: start;
+  padding: 28px 16px;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 16px;
+  transition: background 0.25s;
+}
+
+.step:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Left column: number + vertical line */
+.stepLeft {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding-top: 4px;
+}
+
+.stepNum {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: var(--step-color);
+  border: 2px solid var(--step-color);
+  background: rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+  transition: background 0.25s, box-shadow 0.25s;
+}
+
+.step:hover .stepNum {
+  background: color-mix(in srgb, var(--step-color) 15%, transparent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--step-color) 30%, transparent);
+}
+
+.stepLine {
+  width: 2px;
+  flex: 1;
+  min-height: 40px;
+  background: linear-gradient(180deg, var(--step-color), rgba(107, 90, 138, 0.2));
+}
+
+.step:last-child .stepLine {
+  display: none;
+}
+
+/* Content column */
+.stepContent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.stepLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--step-color);
+}
+
+.stepTitle {
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.stepDesc {
+  font-size: 0.9rem;
+  color: var(--text-2);
+  line-height: 1.6;
+  max-width: 420px;
+}
+
+@media (max-width: 768px) {
+  .step {
+    grid-template-columns: 40px 1fr;
+    gap: 16px;
+  }
+
+  .stepNum {
+    width: 36px;
+    height: 36px;
+    font-size: 0.7rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .section {
+    padding: 100px 20px;
+  }
+
+  .header {
+    margin-bottom: 56px;
+  }
+}

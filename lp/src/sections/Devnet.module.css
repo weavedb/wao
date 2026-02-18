@@ -1,0 +1,136 @@
+.section {
+  --section-accent: #22c55e;
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Full-bleed background */
+.bgImage {
+  position: absolute;
+  inset: 0;
+  background: url('/images/devnet.png') center/cover no-repeat;
+  z-index: 0;
+}
+
+.bgOverlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, var(--bg-primary) 0%, rgba(10, 5, 21, 0.7) 30%, rgba(10, 5, 21, 0.8) 70%, var(--bg-primary) 100%);
+  z-index: 1;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 2;
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 48px;
+  align-items: center;
+  padding: 120px 24px;
+}
+
+.textCol {
+  display: flex;
+  flex-direction: column;
+}
+
+.eyebrow {
+  color: #22c55e;
+}
+
+.title {
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-2);
+  line-height: 1.7;
+  max-width: 500px;
+  margin-bottom: 24px;
+}
+
+.features {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 32px;
+}
+
+.feature {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.featureDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+  margin-top: 6px;
+}
+
+.featureTitle {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.featureDesc {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.ctaBtn {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  width: fit-content;
+  margin-top: 8px;
+}
+
+.ctaBtn:hover {
+  box-shadow: 0 8px 32px rgba(34, 197, 94, 0.35);
+}
+
+/* Screenshot */
+.screenshot {
+  width: 100%;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 900px) {
+  .heroContent {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    padding: 100px 24px 60px;
+  }
+}
+
+@media (max-width: 480px) {
+  .heroContent {
+    padding: 80px 16px 48px;
+    gap: 32px;
+  }
+
+  .subtitle {
+    font-size: 0.95rem;
+  }
+
+  .featureTitle {
+    font-size: 0.85rem;
+  }
+
+  .featureDesc {
+    font-size: 0.78rem;
+  }
+}
+
