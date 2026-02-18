@@ -14,13 +14,30 @@ class Adaptor {
     aoconnect,
     log = false,
     db,
+    storage,
     connect,
     GQL,
     cu,
     su,
     mu,
+    d1,
+    r2,
+    kv,
+    network = "ao.DN.1",
   }) {
+    this.network = network
     this.data = {}
+    this._dataTimestamps = {}
+    // Clean up abandoned chunk uploads every 60 seconds
+    this._chunkCleanupInterval = setInterval(() => {
+      const now = Date.now()
+      for (const key of Object.keys(this._dataTimestamps)) {
+        if (now - this._dataTimestamps[key] > 5 * 60 * 1000) { // 5 min timeout
+          delete this.data[key]
+          delete this._dataTimestamps[key]
+        }
+      }
+    }, 60 * 1000)
     let hb = null
     if (hb_url) hb = new HB({ url: hb_url })
     const {
@@ -34,13 +51,15 @@ class Adaptor {
       monitor,
       unmonitor,
       recover,
-    } = connect(aoconnect, { log, cache: db, hb })
+      evaluate,
+    } = connect(aoconnect, { log, cache: db, storage, hb, d1, r2, kv })
     this.su_signer = su
     this.cu_signer = cu
     this.mu_signer = mu
     this.recover = recover
     this.monitor = monitor
     this.unmonitor = unmonitor
+    this.evaluate = evaluate
     this.spawn = spawn
     this._ar = _ar
     this.message = message
@@ -48,10 +67,10 @@ class Adaptor {
     this.result = result
     this.results = results
     this.mem = mem
-    this.gql = new GQL({ mem })
+    this.gql = new GQL({ mem, d1: d1 || null })
   }
   async get(req, res) {
-    res(await this[req.device](req))
+    return res(await this[req.device](req))
   }
   async bd(req) {
     return await this[`bd_${req.method.toLowerCase()}`](req)
@@ -189,6 +208,8 @@ class Adaptor {
         return await this.cu_post_result(req)
       case "/dry-run": // not in the AO spec
         return await this.cu_post_dryrun(req)
+      case "/evaluate":
+        return await this.cu_post_evaluate(req)
       default:
         return await this.bad()
     }
@@ -271,7 +292,8 @@ class Adaptor {
 
   async cu_get_state({ query, params, body, headers, method }) {
     const pid = params.pid
-    const memory = this.mem.env[pid]?.memory ?? null
+    const p = await this.mem.get("env", pid)
+    const memory = p?.memory ?? null
     if (!memory) {
       return {
         status: 404,
@@ -293,7 +315,8 @@ class Adaptor {
   async cu_get_results({ query, params, body, headers, method }) {
     const pid = params.pid
     const { from = null, to = null, sort = "ASC", limit = 25 } = query
-    let results = this.mem.env[pid]?.results ?? []
+    const p = await this.mem.get("env", pid)
+    let results = p?.results ?? []
     if (sort === "DESC") results = reverse(results)
     let _res = []
     let i = 1
@@ -301,7 +324,8 @@ class Adaptor {
     let started = isNil(from)
     for (let v of results) {
       if (started) {
-        _res.push({ cursor: v, node: this.mem.msgs[v]?.res })
+        const msg = await this.mem.get("msgs", v)
+        _res.push({ cursor: v, node: msg?.res })
         count++
         if (!isNil(to) && v === to) break
         if (limit <= count) break
@@ -316,20 +340,23 @@ class Adaptor {
     let message = params.mid
     const process = query["process-id"]
     // check if recovery is ongoing and
-    if (isNil(this.mem.env[process])) {
+    let p = await this.mem.get("env", process)
+    if (isNil(p)) {
       const { success } = await this.recover(process)
       if (!success) {
         console.log("process not found:", query["process-id"])
         return { status: 404, error: "not Found" }
       }
+      p = await this.mem.get("env", process)
     }
     const slot = message
     if (!/^[0-9a-zA-Z_-]{43,44}$/.test(message)) {
-      message = this.mem.env[process]?.results?.[slot]
+      message = p?.results?.[slot]
     }
     if (isNil(message)) {
       await this.recover(process)
-      message = this.mem.env[process]?.results?.[slot]
+      p = await this.mem.get("env", process)
+      message = p?.results?.[slot]
       if (isNil(message)) return { status: 404, error: "not Found" }
     }
     const res2 = await this.result({ message, process })
@@ -338,34 +365,57 @@ class Adaptor {
   async cu_post_result(...args) {
     return await this.cu_get_result(...args)
   }
+  async cu_post_evaluate({ query, params, body, headers, method }) {
+    const { message, process, data, tags: msgTags, from, is_spawn } = body
+    if (!process) return { status: 400, json: { error: "process required" } }
+    try {
+      const res = await this.evaluate({
+        message,
+        process,
+        data: data || "",
+        tags: msgTags,
+        from,
+        is_spawn,
+        module: body.module || (msgTags && tags(msgTags)?.Module),
+        scheduler: body.scheduler || (msgTags && tags(msgTags)?.Scheduler),
+      })
+      return { json: res || {} }
+    } catch (e) {
+      console.log("cu_post_evaluate error:", e)
+      return { status: 500, json: { error: e.message } }
+    }
+  }
   async su_get_root({ query, params, body, headers, method }) {
     return {
       json: {
         Unit: "Scheduler",
         Timestamp: Date.now(),
         Address: this.su_signer.addr,
-        Processes: keys(this.mem.env),
+        Processes: await this.mem.getFieldKeys("env"),
       },
     }
   }
 
   async su_get_timestamp({ query, params, body, headers, method }) {
-    return { json: { timestamp: Date.now(), block_height: this.mem.height } }
+    return { json: { timestamp: Date.now(), block_height: await this.mem.get("height") } }
   }
   async su_get_pid({ query, params, body, headers, method }) {
     const pid = params.pid
+    const p = await this.mem.get("env", pid)
     const edges = map(async v => {
       const tx = await this.mem.getTx(v)
       const _tags = tags(v.tags)
       const mid = _tags.Message
       const mtx = await this.mem.getTx(mid)
+      const mtxOwner = await this.mem.get("addrmap", mtx.owner)
+      const txOwner = await this.mem.get("addrmap", tx.owner)
       return {
         cursor: v,
         node: {
           message: {
             id: mtx.id,
             tags: mtx.tags,
-            owner: this.mem.addrmap[mtx.owner],
+            owner: mtxOwner,
             anchor: mtx.anchor ?? null,
             target: pid,
             signature: mtx.signature,
@@ -374,14 +424,14 @@ class Adaptor {
           assignment: {
             id: tx.id,
             tags: tx.tags,
-            owner: this.mem.addrmap[tx.owner],
+            owner: txOwner,
             anchor: tx.anchor ?? null,
             target: null,
             signature: tx.signature,
           },
         },
       }
-    })(reverse(this.mem.env[pid]?.results ?? [])) // need mod
+    })(reverse(p?.results ?? [])) // need mod
     return { json: { page_info: { has_next_page: false }, edges } }
   }
 
@@ -398,23 +448,44 @@ class Adaptor {
     try {
       valid = await DataItem.verify(body)
     } catch (e) {
-      console.log(e)
+      // verification may fail for cross-env items (node→browser); proceed anyway
     }
     let type = null
     let item = null
     if (valid || true) item = new DataItem(body)
     await item.setSignature(item.rawSignature)
     const _tags = tags(item.tags)
+    if (_tags.Variant && _tags.Variant !== this.network) {
+      return { status: 400, json: { error: `Variant mismatch: expected ${this.network}, got ${_tags.Variant}` } }
+    }
     let err = null
     if (_tags.Type === "Process") {
-      const res = await this.spawn({
-        item,
-        module: _tags.Module,
-        scheduler: _tags.Scheduler,
-      })
-      if (!res) err = "bad requrest"
+      try {
+        const res = await this.spawn({
+          item,
+          module: _tags.Module,
+          scheduler: _tags.Scheduler,
+          _cu_url: _tags["CU-URL"] || undefined,
+        })
+        if (!res) err = "bad requrest"
+      } catch (e) {
+        console.error("MU spawn error:", e.message, e.stack)
+        return { status: 500, json: { error: e.message, stack: (e.stack || "").split("\n").slice(0, 8) } }
+      }
     } else if (_tags.Type === "Message") {
-      await this.message({ item, process: item.target })
+      try {
+        await this.message({ item, process: item.target })
+      } catch (e) {
+        console.error("MU message error:", e.message, e.stack)
+        err = e.message
+      }
+    } else if (_tags.Type === "Scheduler-Location" || _tags.Type === "Scheduler-Transfer") {
+      try {
+        await this._ar.postItems(item, this.su_signer.jwk)
+      } catch (e) {
+        console.error(`MU ${_tags.Type} error:`, e.message, e.stack)
+        err = e.message
+      }
     } else err = true
 
     if (err) return { status: 400, error: err }
@@ -435,8 +506,8 @@ class Adaptor {
       json: {
         version: 1,
         timestamp: Date.now(),
-        height: this.mem.height,
-        network: "wao.LN.1",
+        height: await this.mem.get("height"),
+        network: this.network,
         current: this.mem.getAnchor(),
       },
     }
@@ -459,7 +530,20 @@ class Adaptor {
   async ar_get_id({ query, params, body, headers, method }) {
     const _data = await this._ar.data(params.id)
     if (!_data) return { status: 404, send: null }
-    else return { send: Buffer.from(_data, "base64") }
+    const tx = await this.mem.getTx(params.id)
+    let contentType = tx?._data?.type || ""
+    if (!contentType && tx?.tags) {
+      const ctTag = tx.tags.find(t => t.name === "Content-Type")
+      if (ctTag) contentType = ctTag.value
+    }
+    if (!contentType) contentType = "application/octet-stream"
+    const send = Buffer.isBuffer(_data) || _data instanceof Uint8Array
+      ? _data
+      : Buffer.from(String(_data), "base64")
+    return {
+      send,
+      headers: { "Content-Type": contentType },
+    }
   }
   async ar_get_price({ query, params, body, headers, method }) {
     return { send: "0" }
@@ -468,16 +552,16 @@ class Adaptor {
     try {
       const { query, variables } = body
       const { tar, args } = toGraphObj({ query, variables })
+      const first = args.first ?? 10
       let res2 = null
-      if (tar === "transactions") {
-        res2 = await this.gql.txs({ ...args })
-      } else if (tar === "blocks") {
-        res2 = await this.gql.blocks({ ...args })
-      }
+      const fn = tar === "blocks" ? "blocks" : "txs"
+      res2 = await this.gql[fn]({ ...args, first: first + 1 })
+      const hasNextPage = res2.length > first
+      if (hasNextPage) res2 = res2.slice(0, first)
       const edges = map(v => ({ node: v, cursor: v.cursor }), res2)
       return {
         json: {
-          data: { [tar]: { pageInfo: { hasNextPage: true }, edges } },
+          data: { [tar]: { pageInfo: { hasNextPage }, edges } },
         },
       }
     } catch (e) {
@@ -489,6 +573,7 @@ class Adaptor {
     // id = "tx" | "chunk"
     if (body.chunk) {
       if (this.data[body.data_root]) {
+        this._dataTimestamps[body.data_root] = Date.now()
         this.data[body.data_root].data += body.chunk
         const buf = Buffer.from(body.chunk, "base64")
         if (!this.data[body.data_root].chunks) {
@@ -508,12 +593,14 @@ class Adaptor {
             this.data[body.data_root].chunks.toString("base64")
           await this._ar.postTx(this.data[body.data_root])
           delete this.data[body.data_root]
+          delete this._dataTimestamps[body.data_root]
         }
       }
       return { json: { id: body.id } }
     } else {
       if (body.data_root && body.data === "") {
         this.data[body.data_root] = body
+        this._dataTimestamps[body.data_root] = Date.now()
       } else {
         await this._ar.postTx(body)
       }

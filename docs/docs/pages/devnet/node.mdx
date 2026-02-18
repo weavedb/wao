@@ -1,0 +1,336 @@
+# Running a Devnet Node
+
+This guide covers running WAO Devnet locally for development and deploying it to Cloudflare Workers for shared or persistent environments.
+
+## Local Development
+
+### Prerequisites
+
+- Node.js 20+
+- npm
+- Git
+
+### Setup
+
+```bash
+git clone https://github.com/ArweaveOasis/wao.git
+cd wao/devnet
+npm install
+```
+
+### Generate Wallets
+
+Generate RSA wallets for the scheduler (SU), compute unit (CU), messenger unit (MU), and test accounts:
+
+```bash
+npm run keygen
+```
+
+This creates JWK files in `.wallets/` — `su.json`, `cu.json`, `mu.json`, `acc0.json`, `acc1.json`, `acc2.json`. Existing wallets are preserved unless you pass `--force`.
+
+### Start the Node
+
+```bash
+npx wrangler dev --port 8788
+```
+
+This starts a local Cloudflare Workers environment with:
+- WAO Scan (block explorer) at [http://localhost:8788](http://localhost:8788)
+- All AO unit endpoints at `/ar`, `/mu`, `/su`, `/cu`, `/bd`
+- WebSocket for live updates at `/ws`
+
+Wrangler watches the `app/` directory and rebuilds WAO Scan automatically when you edit source files.
+
+A fresh devnet starts empty — no blocks, no transactions, no processes. As you spawn processes and send messages through the WAO SDK or aoconnect, WAO Scan will populate in real time.
+
+### Local Storage Behavior
+
+When running locally with `wrangler dev`, Durable Object state is persisted in the `.wrangler/` directory. **Data survives restarts** — your processes, messages, and transactions are still there when you start wrangler again.
+
+Use `--persist-to` to specify a custom storage location:
+
+```bash
+npx wrangler dev --port 8788 --persist-to ./state-a
+```
+
+This is required when running **multiple devnet instances in parallel** — each instance needs its own storage directory and inspector port:
+
+```bash
+# Terminal 1
+npx wrangler dev --port 8788 --inspector-port 9229 --persist-to ./state-a
+
+# Terminal 2
+npx wrangler dev --port 8789 --inspector-port 9230 --persist-to ./state-b
+```
+
+Each instance is fully isolated — processes spawned on one instance don't appear on the other.
+
+To start fresh, stop Wrangler and delete the storage directory:
+
+```bash
+rm -rf .wrangler    # default location
+rm -rf ./state-a    # custom location
+```
+
+On deployed Cloudflare Workers, state persists via Durable Objects, D1, R2, and KV.
+
+## Deploying to Cloudflare
+
+Deploying to Cloudflare Workers gives you a persistent, publicly accessible devnet. This is useful for:
+
+- Shared development environments (team members can use the same devnet)
+- CI/CD pipelines that run against a remote endpoint
+- Demo environments with stable URLs
+
+### Prerequisites
+
+- A [Cloudflare account](https://dash.cloudflare.com/sign-up)
+- Wrangler authenticated: `npx wrangler login`
+
+### Configure `wrangler.toml`
+
+The default configuration:
+
+```toml
+name = "wao-devnet"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[build]
+command = "npx vite build"
+watch_dir = "app"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+[durable_objects]
+bindings = [
+  { name = "DEVNET", class_name = "DevnetDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["DevnetDO"]
+```
+
+### Optional: Persistent Storage Bindings
+
+On Cloudflare, Durable Object storage persists across requests. For larger datasets, SQL queries, and blob storage, you can add D1, R2, and KV bindings:
+
+```toml
+# SQL database for transaction metadata and GraphQL queries
+[[d1_databases]]
+binding = "DB"
+database_name = "wao-devnet-db"
+database_id = "your-d1-database-id"
+
+# Object storage for large blobs (WASM modules, transaction data)
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "wao-devnet-blobs"
+
+# Key-value cache for frequently accessed data
+[[kv_namespaces]]
+binding = "CACHE"
+id = "your-kv-namespace-id"
+```
+
+Create these resources before deploying:
+
+```bash
+# Create D1 database
+npx wrangler d1 create wao-devnet-db
+
+# Create R2 bucket
+npx wrangler r2 bucket create wao-devnet-blobs
+
+# Create KV namespace
+npx wrangler kv namespace create CACHE
+```
+
+Copy the IDs from the output into your `wrangler.toml`.
+
+### Deploy
+
+```bash
+npx wrangler deploy
+```
+
+Wrangler builds WAO Scan, bundles the Worker, and deploys it. The output will show your deployment URL:
+
+```
+Published wao-devnet (1.2s)
+  https://wao-devnet.<your-subdomain>.workers.dev
+```
+
+### Verify
+
+Open your deployment URL in a browser to see WAO Scan. The AO unit endpoints are available at the same path prefixes:
+
+```
+https://wao-devnet.your-subdomain.workers.dev/ar
+https://wao-devnet.your-subdomain.workers.dev/mu
+https://wao-devnet.your-subdomain.workers.dev/su
+https://wao-devnet.your-subdomain.workers.dev/cu
+```
+
+## Configuration
+
+### Unit Selection
+
+The `UNITS` environment variable controls which AO units are enabled:
+
+```toml
+[vars]
+UNITS = "AR,CU,MU,SU"
+```
+
+Common patterns:
+
+| Value | Use Case |
+|-------|----------|
+| *(unset)* or `"AR,CU,MU,SU"` | **Full node** — self-contained devnet with all units (BD auto-enabled with AR) |
+| `"CU,MU,SU"` | **Without AR** — connect to an existing AR gateway via `AR_URL` |
+| `"CU"` | **Compute only** — pair with an external AR/MU/SU via `AR_URL` |
+
+When running without AR, set `AR_URL` to point at an existing gateway:
+
+```toml
+[vars]
+UNITS = "CU,MU,SU"
+AR_URL = "https://your-devnet.workers.dev/ar"
+```
+
+### Network Identity
+
+The `NETWORK` environment variable sets the network identity tag (default: `ao.DN.1`):
+
+```toml
+[vars]
+NETWORK = "ao.MYAPP.1"
+```
+
+The format is `ao.<NAME>.<VERSION>`. Each distinct network tag creates a completely separate AO network — its own processes, state, and scheduler.
+
+### Custom Wallets
+
+Set the `WAO_WALLETS` environment variable to inject custom JWK wallets:
+
+```toml
+[vars]
+WAO_WALLETS = '[{"kty":"RSA",...}]'
+```
+
+This is useful when you need deterministic wallet addresses across deployments.
+
+### Scheduler URL
+
+The SU URL is auto-detected from the first incoming request. To override it (e.g., when behind a reverse proxy):
+
+```toml
+[vars]
+SU_URL = "https://your-custom-domain.com/su"
+```
+
+### Publish Scheduler
+
+Before processes can be spawned, the scheduler's URL must be registered via a `Scheduler-Location` transaction. The devnet auto-publishes this on first boot, but you can also publish it manually:
+
+```bash
+# Publish to local devnet (default port 8788)
+npm run publish-scheduler
+
+# Publish with a custom SU URL
+npm run publish-scheduler -- --url https://your-devnet.workers.dev/su
+
+# Publish to a different port
+npm run publish-scheduler -- --port 8789
+```
+
+This posts a `Scheduler-Location` transaction signed by the SU wallet, registering the scheduler address and URL so that aoconnect and the WAO SDK can locate it.
+
+### Transfer Scheduler
+
+Transfer scheduler ownership to a new address:
+
+```bash
+npm run transfer-scheduler -- --to <NEW_ADDRESS>
+```
+
+This posts a `Scheduler-Transfer` transaction signed by the current SU wallet, transferring scheduling authority to the specified address.
+
+## Using with WAO SDK
+
+Point your WAO SDK at the devnet endpoints — no other changes needed:
+
+```js
+import { AO } from "wao"
+
+// Local devnet
+const ao = await new AO({
+  ar: "http://localhost:8788/ar",
+  mu: "http://localhost:8788/mu",
+  su: "http://localhost:8788/su",
+  cu: "http://localhost:8788/cu",
+}).init()
+
+// Or remote devnet
+const ao = await new AO({
+  ar: "https://wao-devnet.your-subdomain.workers.dev/ar",
+  mu: "https://wao-devnet.your-subdomain.workers.dev/mu",
+  su: "https://wao-devnet.your-subdomain.workers.dev/su",
+  cu: "https://wao-devnet.your-subdomain.workers.dev/cu",
+}).init()
+
+// Spawn, send, read — same API as mainnet
+const { pid } = await ao.spawn()
+const { mid } = await ao.message({ process: pid, data: "1 + 1" })
+const result = await ao.result({ process: pid, message: mid })
+console.log(result.Output?.data) // "2"
+```
+
+## Connecting aoconnect
+
+If you're using aoconnect directly instead of the WAO SDK:
+
+```js
+import { createDataItemSigner, connect } from "@permaweb/aoconnect"
+
+const { spawn, message, result } = connect({
+  GATEWAY_URL: "http://localhost:8788/ar",
+  MU_URL: "http://localhost:8788/mu",
+  CU_URL: "http://localhost:8788/cu",
+})
+```
+
+## Troubleshooting
+
+### Port already in use
+
+```bash
+# Find and kill the process using port 8788
+lsof -i :8788
+kill -9 <PID>
+
+# Or use a different port
+npx wrangler dev --port 8789
+```
+
+### "No modules found" in WAO Scan
+
+The devnet starts with no modules. Spawn a process to populate the modules list. WAO Scan also discovers built-in modules (like the default AOS module) from process tags.
+
+### Reset local state
+
+Local state is stored in the `.wrangler/` directory. To start fresh, stop wrangler and delete it:
+
+```bash
+rm -rf .wrangler
+```
+
+### Compute result shows "Loading..."
+
+Compute results are only available for messages sent to a process (messages with a target). Data transactions and process spawn transactions don't have compute results.

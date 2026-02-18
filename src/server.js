@@ -16,8 +16,10 @@ class Server {
     aoconnect,
     log = false,
     db,
+    storage,
     port,
     adaptor,
+    units,
   } = {}) {
     if (port) {
       ar = port
@@ -27,18 +29,25 @@ class Server {
       cu = port + 4
       aoconnect = optAO(5000)
     }
+    // Parse enabled units (default: all)
+    const enabled = units
+      ? new Set(units.map(u => u.toLowerCase()))
+      : new Set(["ar", "bd", "mu", "su", "cu"])
+    if (enabled.has("ar")) enabled.add("bd")
+    this._enabledUnits = enabled
+
     if (!aoconnect) {
-      const { mem } = connect(aoconnect, { log, cache: db })
+      const { mem } = connect(aoconnect, { log, cache: db, storage })
       aoconnect = mem
     }
-    this.adaptor = adaptor ?? new Adaptor({ hb_url, aoconnect, log, db })
+    this.adaptor = adaptor ?? new Adaptor({ hb_url, aoconnect, log, db, storage })
     this.ports = { ar, mu, su, cu, bd }
     this.servers = []
-    this.ar()
-    this.bd()
-    this.mu()
-    this.su()
-    this.cu()
+    if (enabled.has("ar")) this.ar()
+    if (enabled.has("bd")) this.bd()
+    if (enabled.has("mu")) this.mu()
+    if (enabled.has("su")) this.su()
+    if (enabled.has("cu")) this.cu()
   }
 
   ar() {
@@ -93,6 +102,9 @@ class Server {
   res(res) {
     return data => {
       if (data.status) res.status(data.status)
+      if (data.headers) {
+        for (const [k, v] of Object.entries(data.headers)) res.set(k, v)
+      }
       if (data.error) {
         res.json({ error: data.error })
       } else if (data.json) {
@@ -137,11 +149,12 @@ class Server {
 
   end() {
     return new Promise(res => {
+      if (this.servers.length === 0) return res()
       let count = 0
       for (const v of this.servers)
         v.close(() => {
           count += 1
-          if (count >= 4) {
+          if (count >= this.servers.length) {
             console.log("servers closed!")
             res()
           }
