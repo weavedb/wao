@@ -1,0 +1,113 @@
+.section {
+  --section-accent: #3b82f6;
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Full-bleed background */
+.bgImage {
+  position: absolute;
+  inset: 0;
+  background: url('/images/hyperadd.png') center/cover no-repeat;
+  z-index: 0;
+}
+
+.bgOverlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, var(--bg-primary) 0%, rgba(10, 5, 21, 0.7) 30%, rgba(10, 5, 21, 0.75) 70%, var(--bg-primary) 100%);
+  z-index: 1;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 2;
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 48px;
+  align-items: center;
+  padding: 120px 24px;
+}
+
+.textCol {
+  display: flex;
+  flex-direction: column;
+}
+
+.eyebrow {
+  color: #3b82f6;
+}
+
+.title {
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-2);
+  line-height: 1.7;
+  max-width: 500px;
+  margin-bottom: 32px;
+}
+
+/* Feature pills */
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pill {
+  padding: 8px 16px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  border-radius: 100px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.pill:hover {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.ctaBtn {
+  margin-top: 28px;
+  width: fit-content;
+}
+
+/* Screenshot */
+.screenshot {
+  width: 100%;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 900px) {
+  .heroContent {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    padding: 100px 24px;
+  }
+}
+
+@media (max-width: 480px) {
+  .heroContent {
+    padding: 80px 20px;
+  }
+
+  .pills {
+    gap: 8px;
+  }
+
+  .pill {
+    font-size: 0.78rem;
+    padding: 6px 12px;
+  }
+}
