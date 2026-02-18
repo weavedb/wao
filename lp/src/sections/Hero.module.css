@@ -1,0 +1,202 @@
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 140px 24px 80px;
+  overflow: hidden;
+}
+
+/* Background image with mask */
+.meshBg {
+  position: absolute;
+  inset: 0;
+  background: url('/images/hero-bg.png') center/cover no-repeat;
+  pointer-events: none;
+  mask-image:
+    radial-gradient(ellipse 60% 50% at 75% 60%, black 0%, transparent 70%),
+    radial-gradient(ellipse 35% 45% at 15% 45%, rgba(0,0,0,0.5) 0%, transparent 60%);
+  -webkit-mask-image:
+    radial-gradient(ellipse 60% 50% at 75% 60%, black 0%, transparent 70%),
+    radial-gradient(ellipse 35% 45% at 15% 45%, rgba(0,0,0,0.5) 0%, transparent 60%);
+  mask-composite: add;
+  -webkit-mask-composite: source-over;
+  opacity: 0.7;
+  animation: heroBgPulse 8s ease-in-out infinite alternate;
+}
+
+@keyframes heroBgPulse {
+  0% { opacity: 0.6; }
+  100% { opacity: 0.8; }
+}
+
+/* Colored glow accents */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle 400px at 70% 65%, rgba(59, 130, 246, 0.12) 0%, transparent 70%),
+    radial-gradient(circle 300px at 25% 75%, rgba(168, 85, 247, 0.08) 0%, transparent 60%),
+    linear-gradient(180deg, transparent 70%, var(--bg-primary) 100%);
+  pointer-events: none;
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+  max-width: 1000px;
+}
+
+/* Staggered entrance */
+.badge,
+.title,
+.subtitle,
+.ctas,
+.stats {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.entered .badge    { opacity: 1; transform: translateY(0); transition-delay: 0ms; }
+.entered .title    { opacity: 1; transform: translateY(0); transition-delay: 120ms; }
+.entered .subtitle { opacity: 1; transform: translateY(0); transition-delay: 240ms; }
+.entered .ctas     { opacity: 1; transform: translateY(0); transition-delay: 360ms; }
+.entered .stats    { opacity: 1; transform: translateY(0); transition-delay: 480ms; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 100px;
+  border: 1px solid var(--border);
+  background: rgba(168, 85, 247, 0.06);
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--accent-light);
+  margin-bottom: 32px;
+}
+
+.badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.title {
+  font-size: clamp(2.5rem, 6vw, 4.2rem);
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 28px;
+  letter-spacing: -0.03em;
+}
+
+.gradient {
+  background: linear-gradient(135deg, #a855f7, #3b82f6, #22c55e);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradientShift 6s ease-in-out infinite;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.subtitle {
+  font-size: 1.2rem;
+  color: var(--text-2);
+  line-height: 1.7;
+  max-width: 600px;
+  margin: 0 auto 40px;
+}
+
+.ctas {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Stat pills — horizontal row */
+.stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 48px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 16px 28px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statValue {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--accent-light);
+}
+
+.statLabel {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 768px) {
+  .stats {
+    gap: 10px;
+  }
+
+  .stat {
+    padding: 12px 20px;
+  }
+
+  .statValue {
+    font-size: 0.95rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero {
+    padding: 120px 20px 60px;
+  }
+
+  .subtitle {
+    font-size: 1.05rem;
+  }
+
+  .stats {
+    flex-direction: column;
+    max-width: 280px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .stat {
+    flex-direction: row;
+    gap: 10px;
+  }
+}
