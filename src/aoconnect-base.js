@@ -37,12 +37,11 @@ let onRecovery = {}
 let ongoing = {}
 
 export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
-  return (mem, { cache, log = false, extensions = {}, hb, variant } = {}) => {
+  return (mem, { cache, log = false, extensions = {}, hb, variant, storage, d1, r2, kv, ar_url } = {}) => {
     const isMem = mem?.__type__ === "mem"
     if (!isMem) {
-      let args = { cache }
+      let args = { cache, storage, scheduler, d1, r2, kv, ar_url }
       if (mem?.SU_URL) {
-        args.scheduler = scheduler
         args.variant = variant
         args = mergeLeft(mem, args)
       }
@@ -78,7 +77,9 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         scheduler: "Scheduler",
         module: "Module",
       }
-      for (let v of __tags) v.name = cap[v.name] ?? v.name
+      for (let v of __tags) {
+        v.name = cap[v.name] ?? v.name
+      }
       return __tags
     }
 
@@ -166,6 +167,50 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         opt.tags = buildTags(null, __tags)
         if (opt.item) opt.data = base64url.decode(item.data)
         await ar.postItems(item, su.jwk)
+      }
+
+      // Remote CU — delegate WASM execution to satellite CU
+      if (opt._cu_url) {
+        const _tags = tags(opt.tags)
+        const ext = _tags.Extension || "WeaveDrive"
+        let p = {
+          _cu_url: opt._cu_url,
+          extension: ext,
+          format,
+          id,
+          epochs: [],
+          module: mod,
+          hash: id,
+          memory: null,
+          owner,
+          height: 0,
+          results: [id],
+        }
+        try {
+          const cuResult = await fetch(`${opt._cu_url}/cu/evaluate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: id,
+              process: id,
+              data: opt.data ?? "",
+              tags: opt.tags,
+              from: owner,
+              is_spawn: true,
+            }),
+          }).then(r => r.json())
+          const _msg = {
+            ...o(dissoc("signer"), dissoc("memory"))(opt),
+            res: cuResult,
+            msg: null,
+          }
+          await mem.set(_msg, "msgs", id)
+        } catch (e) {
+          console.log("Remote CU spawn error:", e)
+        }
+        await mem.set(p, "env", id)
+        delete ongoing[id]
+        return id
       }
 
       const now = Date.now
@@ -316,6 +361,93 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       } else {
         await ar.postItems(item, su.jwk)
       }
+
+      // Remote CU — delegate WASM execution to satellite CU
+      if (p._cu_url) {
+        try {
+          let evalData = _opt?.data ?? ""
+          let evalTags = _opt?.tags
+          let evalFrom = _opt?.from ?? opt.from
+          if (_opt?.item) {
+            const decoded = base64url.decode(_opt.item.data)
+            evalData = typeof decoded === "string" ? decoded : Buffer.from(decoded).toString("utf-8")
+            evalTags = _opt.item.tags
+            const t = tags(evalTags)
+            if (t["From-Process"]) evalFrom = t["From-Process"]
+            if (!evalFrom) {
+              evalFrom = await arweave.wallets.jwkToAddress({
+                kty: "RSA", n: _opt.item.owner, e: "AQAB",
+              })
+            }
+          }
+          // Cranked messages use MU addr as From for AOS trust
+          if (_opt?.for) evalFrom = mu.addr
+          const cuResult = await fetch(`${p._cu_url}/cu/evaluate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: opt.message,
+              process: opt.process,
+              data: evalData,
+              tags: evalTags,
+              from: evalFrom,
+            }),
+          }).then(r => r.json())
+          p.results.push(opt.message)
+          await mem.set(p, "env", opt.process)
+          const _msg = { ...dissoc("signer", _opt), res: cuResult, msg: null }
+          await mem.set(_msg, "msgs", opt.message)
+          // Route outbox from CU response
+          for (const v of cuResult?.Messages ?? []) {
+            const envExists = await mem.get("env", v.Target)
+            if (envExists) {
+              await message({
+                for: opt.message,
+                process: v.Target,
+                tags: v.Tags,
+                data: v.Data,
+                signer: mu.signer,
+                from: opt.process,
+                target: v.Target,
+              })
+            } else if (mem._remote) {
+              // Forward to main AR's MU for routing
+              const fwdTags = buildTags(null, mergeLeft(tags(v.Tags), {
+                "Data-Protocol": "ao",
+                Variant: variant ?? "ao.TN.1",
+                Type: "Message",
+                "From-Process": opt.process,
+                "Pushed-For": opt.message,
+              }))
+              await record({
+                for: opt.message,
+                tags: fwdTags,
+                data: v.Data,
+                signer: mu.signer,
+                from: opt.process,
+                target: v.Target,
+              })
+            }
+          }
+          for (const v of cuResult?.Spawns ?? []) {
+            const __tags = tags(v.Tags)
+            await spawn({
+              for: opt.message,
+              module: __tags.Module,
+              scheduler,
+              tags: v.Tags,
+              data: v.Data,
+              from: __tags["From-Process"],
+              signer: mu.signer,
+            })
+          }
+          return id
+        } catch (e) {
+          console.log("Remote CU assign error:", e)
+          return null
+        }
+      }
+
       try {
         let data = _opt.data ?? ""
         let _tags = _opt.tags
@@ -333,6 +465,9 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             })
           }
         }
+        // Cranked messages (inter-process) use MU addr as From for AOS trust
+        // From-Process tag still tracks the originating process
+        if (_opt.for) from = mu.addr
         // check: is owner=mu.addr right?
         const _owner = opt.message_item?.owner
           ? toAddr(opt.message_item.owner)
@@ -352,7 +487,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             spawn: (await mem.getTx(p.id))?.item,
             module: await mem.getTx(mod),
           })
-          mem.env[opt.process].handle = p.handle
+          if (mem.env[opt.process]) mem.env[opt.process].handle = p.handle
         }
         if (p.compressed) {
           const start = Date.now()
@@ -486,6 +621,25 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
               } catch (e) {
                 console.log(e)
               }
+            } else if (mem._remote) {
+              // Remote mode: forward to main AR's MU for routing
+              try {
+                const di = await ar.dataitem({
+                  data: v.Data ?? "",
+                  signer: mu.signer,
+                  tags: mergeLeft(tags(v.Tags), {
+                    "Data-Protocol": "ao",
+                    Variant: variant ?? "ao.TN.1",
+                    Type: "Message",
+                    "From-Process": opt.process,
+                    "Pushed-For": opt.message,
+                  }),
+                  target: v.Target,
+                })
+                await mem._remote.postMU(di.item.getRaw())
+              } catch (e) {
+                console.log("Remote MU forward error:", e)
+              }
             } else {
               await record({
                 for: opt.message,
@@ -608,7 +762,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
               spawn: (await mem.getTx(p.id))?.item,
               module: await mem.getTx(mod),
             })
-            mem.env[opt.process].handle = p.handle
+            if (mem.env[opt.process]) mem.env[opt.process].handle = p.handle
           }
           if (p.compressed) {
             const start = Date.now()
@@ -738,6 +892,92 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
       return { recovered: count, pid, success }
     }
 
+    // Satellite CU evaluate: WASM execution only, no DataItem creation or AR posting.
+    // Used by cu_post_evaluate on remote CU workers.
+    const evaluate = async ({
+      message: msgId,
+      process: pid,
+      data,
+      tags: msgTags,
+      from,
+      is_spawn,
+      module: modId,
+      scheduler: sch,
+    }) => {
+      if (is_spawn) {
+        const mod = modId || tags(msgTags || []).Module
+        if (!mod) throw Error("module missing for evaluate spawn")
+        const { mod: resolvedMod, wasm, format } = await mem.getWasm(mod)
+        const _tags = tags(msgTags || [])
+        const ext = _tags.Extension || "WeaveDrive"
+        const wdrive = extensions[ext]
+        const spawnTx = await mem.getTx(pid)
+        const moduleTx = await mem.getTx(resolvedMod)
+        const handle = await AoLoader(wasm, {
+          format,
+          WeaveDrive: wdrive,
+          spawn: spawnTx?.item ?? spawnTx ?? null,
+          module: moduleTx,
+        })
+        const owner = from || mu.addr
+        let p = {
+          extension: ext,
+          format,
+          id: pid,
+          epochs: [],
+          handle,
+          module: resolvedMod,
+          hash: pid,
+          memory: null,
+          owner,
+          height: 0,
+          results: [pid],
+        }
+        let bootData = ""
+        if (_tags["On-Boot"] === "Data") bootData = data ?? ""
+        else bootData = data ?? ""
+        const msg = await genMsg(pid, p, bootData, msgTags || [], owner, owner, true)
+        const _env = await genEnv({ pid, owner, module: resolvedMod })
+        const res = await handle(null, msg, _env)
+        p.memory = res.Memory
+        delete res.Memory
+        await mem.set({ tags: msgTags, data, res, msg }, "msgs", pid)
+        await mem.set(p, "env", pid)
+        return res
+      }
+
+      // Message evaluation with state update
+      const p = await mem.get("env", pid)
+      if (!p) throw Error(`process ${pid} not found on satellite CU`)
+      if (!p.handle) {
+        const { format, mod, wasm } = await mem.getWasm(p.module)
+        const wdrive = extensions[p.extension]
+        const spawnTx = await mem.getTx(p.id)
+        const moduleTx = await mem.getTx(mod)
+        p.handle = await AoLoader(wasm, {
+          format,
+          WeaveDrive: wdrive,
+          spawn: spawnTx?.item ?? spawnTx ?? null,
+          module: moduleTx,
+        })
+      }
+      if (p.compressed) {
+        p.memory = mem.decompress(p.memory, p.original_size)
+        p.compressed = false
+      }
+      p.height += 1
+      const owner = from || mu.addr
+      const msg = await genMsg(msgId, p, data ?? "", msgTags || [], owner, owner)
+      const _env = await genEnv({ pid, owner: p.owner, module: p.module })
+      const res = await p.handle(p.memory, msg, _env)
+      p.memory = res.Memory
+      delete res.Memory
+      p.results.push(msgId)
+      await mem.set(p, "env", pid)
+      await mem.set({ tags: msgTags, data, from, res, msg }, "msgs", msgId)
+      return res
+    }
+
     const result = async opt => {
       return (await mem.get("msgs", opt.message))?.res
     }
@@ -828,7 +1068,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
               spawn: (await mem.getTx(p.id)).item,
               module: await mem.getTx(mod),
             })
-            mem.env[opt.process].handle = p.handle
+            if (mem.env[opt.process]) mem.env[opt.process].handle = p.handle
           }
           if (p.compressed) {
             const start = Date.now()
@@ -844,6 +1084,7 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
         return null
       },
       recover,
+      evaluate,
       mem,
     }
   }
