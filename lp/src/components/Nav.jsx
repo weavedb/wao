@@ -46,7 +46,7 @@ export default function Nav() {
           </div>
 
           <div className={s.ctas}>
-            <a href="https://docs.wao.eco" className={s.docsBtn} target="_blank" rel="noopener noreferrer">Docs</a>
+            <a href="https://docs.wao.arweaveoasis.com" className={s.docsBtn} target="_blank" rel="noopener noreferrer">Docs</a>
             <a href="#get-started" className={s.startBtn} onClick={e => handleNav(e, 'get-started')}>
               Get Started
             </a>
@@ -69,7 +69,7 @@ export default function Nav() {
           </a>
         ))}
         <div className={s.mobileCtas}>
-          <a href="https://docs.wao.eco" className={s.docsBtn} target="_blank" rel="noopener noreferrer" onClick={closeMenu}>Docs</a>
+          <a href="https://docs.wao.arweaveoasis.com" className={s.docsBtn} target="_blank" rel="noopener noreferrer" onClick={closeMenu}>Docs</a>
           <a href="#get-started" className={s.startBtn} onClick={e => handleNav(e, 'get-started')}>
             Get Started
           </a>

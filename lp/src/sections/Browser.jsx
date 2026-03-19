@@ -35,7 +35,7 @@ export default function Browser() {
               <span className="browser-chrome-dot" />
               <span className="browser-chrome-dot" />
               <span className="browser-chrome-dot" />
-              <span className="browser-chrome-url">preview.wao.eco</span>
+              <span className="browser-chrome-url">preview.wao.arweaveoasis.com</span>
             </div>
             <img src="/images/wao-web.png" alt="WizardAO in the Browser" />
           </div>
