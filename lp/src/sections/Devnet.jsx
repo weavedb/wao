@@ -41,7 +41,7 @@ export default function Devnet() {
             </div>
           </div>
 
-          <a href="https://docs.wao.eco/devnet/overview" className={`btn-primary ${s.ctaBtn}`} target="_blank" rel="noopener noreferrer">
+          <a href="https://docs.wao.arweaveoasis.com/devnet/overview" className={`btn-primary ${s.ctaBtn}`} target="_blank" rel="noopener noreferrer">
             Try WAO DEVNET
           </a>
         </div>

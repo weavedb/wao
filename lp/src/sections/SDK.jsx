@@ -60,7 +60,7 @@ export default function SDK() {
             ))}
           </div>
 
-          <a href="https://docs.wao.eco/api/overview" className="btn-primary" style={{ marginTop: '24px', width: 'fit-content' }} target="_blank" rel="noopener noreferrer">
+          <a href="https://docs.wao.arweaveoasis.com/api/overview" className="btn-primary" style={{ marginTop: '24px', width: 'fit-content' }} target="_blank" rel="noopener noreferrer">
             Explore the SDK
           </a>
         </div>
