@@ -32,7 +32,7 @@ export default function HyperADD() {
             ))}
           </div>
 
-          <a href="https://docs.wao.eco/add/overview" className={`btn-primary ${s.ctaBtn}`} target="_blank" rel="noopener noreferrer">
+          <a href="https://docs.wao.arweaveoasis.com/add/overview" className={`btn-primary ${s.ctaBtn}`} target="_blank" rel="noopener noreferrer">
             Build with HyperADD
           </a>
         </div>

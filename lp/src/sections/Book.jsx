@@ -30,10 +30,10 @@ export default function Book() {
             </div>
           </div>
           <div className={s.btnRow}>
-            <a href="https://docs.wao.eco/book" className={`btn-primary ${s.ctaBtn}`} target="_blank" rel="noopener noreferrer">
+            <a href="https://docs.wao.arweaveoasis.com/book" className={`btn-primary ${s.ctaBtn}`} target="_blank" rel="noopener noreferrer">
               Read the Book
             </a>
-            <a href="https://docs.wao.eco/hyperbeam" className={`btn-ghost ${s.ctaBtn}`} target="_blank" rel="noopener noreferrer">
+            <a href="https://docs.wao.arweaveoasis.com/hyperbeam" className={`btn-ghost ${s.ctaBtn}`} target="_blank" rel="noopener noreferrer">
               Go to Reference
             </a>
           </div>

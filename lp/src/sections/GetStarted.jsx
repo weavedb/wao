@@ -38,7 +38,7 @@ export default function GetStarted() {
         </div>
 
         <div className={s.ctas}>
-          <a href="https://docs.wao.eco" className="btn-primary" target="_blank" rel="noopener noreferrer">
+          <a href="https://docs.wao.arweaveoasis.com" className="btn-primary" target="_blank" rel="noopener noreferrer">
             Read the Docs
           </a>
           <a href="https://github.com/arweaveoasis/wao" className="btn-ghost" target="_blank" rel="noopener noreferrer">
