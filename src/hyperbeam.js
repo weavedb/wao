@@ -36,6 +36,7 @@ export default class HyperBEAM {
     genesis_wasm = false,
     arweave_gateway,
     force_signed = false,
+    linkify_mode, // v0.9-FINAL: HB linkify mode. undefined => HB default; pass "false" for hbsig-style inline-only responses
     rebar3, // Use rebar3 shell (true) or direct erl (false). Defaults to HB_REBAR3 env or true
   } = {}) {
     // Determine rebar3 mode: option > env var > default (true)
@@ -49,6 +50,7 @@ export default class HyperBEAM {
     }
     this.genesis_wasm = genesis_wasm
     this.force_signed = force_signed
+    this.linkify_mode = linkify_mode
     this.cu_port = cu_port
     this.arweave_gateway = arweave_gateway || process.env.ARWEAVE_GATEWAY
     this.devices = devices
@@ -523,7 +525,11 @@ export default class HyperBEAM {
     // {error, no_valid_device_stack} when loading from the corrupted cache.
     const _cache_control = `, <<"cache-control">> => <<"always">>, <<"process-snapshot-slots">> => 1, <<"process-async-cache">> => false`
 
-    const start = `${clearProxy}${initPrometheus}${preRegisterAtoms}${loadHbsig}${ensureInit}hb_http_server:start_node(#{ ${_port}${_gateway}${_priv_wallet}${_faff}${_bundler}${_bundler_ans104}${_on}${_p4_non_chargable}${_operator}${_spp}${_genesis_wasm_port}${_force_signed}${_devices}${_node_processes}${_cache_writers}${_relay_http_client}${_routes}${_store}${_verify_assignments}${_cache_control}, <<"prometheus">> => false, <<"linkify-mode">> => false}).`
+    const _linkify =
+      this.linkify_mode === undefined
+        ? ""
+        : `, <<"linkify-mode">> => ${this.linkify_mode === false ? "false" : (this.linkify_mode === true ? "true" : this.linkify_mode)}`
+    const start = `${clearProxy}${initPrometheus}${preRegisterAtoms}${loadHbsig}${ensureInit}hb_http_server:start_node(#{ ${_port}${_gateway}${_priv_wallet}${_faff}${_bundler}${_bundler_ans104}${_on}${_p4_non_chargable}${_operator}${_spp}${_genesis_wasm_port}${_force_signed}${_devices}${_node_processes}${_cache_writers}${_relay_http_client}${_routes}${_store}${_verify_assignments}${_cache_control}, <<"prometheus">> => false${_linkify}}).`
 
     return start
   }

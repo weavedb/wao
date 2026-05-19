@@ -12,7 +12,7 @@ import { erl_str_from, erl_str_to } from "../src/erl_str.js"
 describe("Hyperbeam Signer", function () {
   let hbeam, sign
   before(async () => {
-    hbeam = await new HyperBEAM({ reset: true }).ready()
+    hbeam = await new HyperBEAM({ reset: true, linkify_mode: false }).ready()
     sign = createSigner(hbeam.jwk, hbeam.url)
   })
   after(async () => hbeam.kill())

@@ -182,7 +182,7 @@ const genTest = ({ desc = "HyperBEAM", its = [] }) => {
   describe(desc, function () {
     let hbeam, sign
     before(async () => {
-      hbeam = await new HyperBEAM({ reset: true }).ready()
+      hbeam = await new HyperBEAM({ reset: true, linkify_mode: false }).ready()
       sign = createSigner(hbeam.jwk, hbeam.url)
     })
     after(async () => hbeam.kill())
