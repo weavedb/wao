@@ -40,6 +40,7 @@ export default {
   p4: { name: "p4@1.0", module: "dev_p4" },
   "node-process": { name: "node-process@1.0", module: "dev_node_process" },
   "simple-pay": { name: "simple-pay@1.0", module: "dev_simple_pay" },
+  metering: { name: "metering@1.0", module: "dev_metering" },
 
   // tested
   cron: { name: "cron@1.0", module: "dev_cron" },
@@ -51,12 +52,16 @@ export default {
   "local-name": { name: "local-name@1.0", module: "dev_local_name" },
   lookup: { name: "lookup@1.0", module: "dev_lookup" },
   name: { name: "name@1.0", module: "dev_name" },
+  location: { name: "location@1.0", module: "dev_location" },
+  trie: { name: "trie@1.0", module: "dev_trie" },
 
   // others
   compute: { name: "compute@1.0", module: "dev_cu" },
   dedup: { name: "dedup@1.0", module: "dev_dedup" },
   manifest: { name: "manifest@1.0", module: "dev_manifest" },
   monitor: { name: "monitor@1.0", module: "dev_monitor" },
+  blacklist: { name: "blacklist@1.0", module: "dev_blacklist" },
+  "rate-limit": { name: "rate-limit@1.0", module: "dev_rate_limit" },
 
   // advanced
   snp: { name: "snp@1.0", module: "dev_snp" },
