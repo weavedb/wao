@@ -4,7 +4,7 @@ import HyperBEAM from "../../src/hyperbeam.js"
 
 describe("Stack Device", function () {
   let hb, hbeam
-  before(async () => (hbeam = await new HyperBEAM({ reset: true }).ready()))
+  before(async () => (hbeam = await new HyperBEAM({ reset: true, linkify_mode: false }).ready()))
   beforeEach(async () => (hb = hbeam.hb))
   after(async () => hbeam.kill())
 

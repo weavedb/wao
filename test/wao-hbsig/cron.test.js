@@ -8,7 +8,7 @@ const URL = "http://localhost:10001"
 describe("Hyperbeam Device", function () {
   let hb, hbeam
   before(async () => {
-    hbeam = await new HyperBEAM({ clearCache: true }).ready()
+    hbeam = await new HyperBEAM({ reset: true, linkify_mode: false }).ready()
   })
 
   beforeEach(async () => (hb = hbeam.hb))

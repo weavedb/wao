@@ -11,7 +11,7 @@ import { commit } from "../src/commit.js"
 describe("Hyperbeam commit", function () {
   let hbeam, sign, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ reset: true }).ready()
+    hbeam = await new HyperBEAM({ reset: true, linkify_mode: false }).ready()
     sign = createSigner(hbeam.jwk, hbeam.url)
     hb = hbeam.hb
   })
