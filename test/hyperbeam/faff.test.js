@@ -36,12 +36,12 @@ describe("Hyperbeam Legacynet", function () {
     await assert.rejects(disallowed_user.hb.p(...msg))
 
     const info = await operator.hb.g("/~meta@1.0/info")
-    assert.deepEqual(info.faff_allow_list, [operator.addr, allowed_user.addr])
+    assert.deepEqual(info["faff-allow-list"], [operator.addr, allowed_user.addr])
 
     // remove allowed_user
-    await operator.hb.p("/~meta@1.0/info", { faff_allow_list: [operator.addr] })
+    await operator.hb.p("/~meta@1.0/info", { "faff-allow-list": [operator.addr] })
     const info2 = await operator.hb.g("/~meta@1.0/info")
-    assert.deepEqual(info2.faff_allow_list, [operator.addr])
+    assert.deepEqual(info2["faff-allow-list"], [operator.addr])
 
     // now previously allowed_user fails too
     await assert.rejects(allowed_user.hb.p(...msg))
