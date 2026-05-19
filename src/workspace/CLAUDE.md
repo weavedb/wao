@@ -109,7 +109,7 @@ Runs: `node --experimental-wasm-memory64 --test --test-concurrency=1`
 - **Remote nodes**: Use `push-1` through `push-10` for full compute. `push.forward.computer` is push-only (no compute).
 - **Lua mode**: Faster but no `receive()` — use `msg.reply()` pattern instead.
 - **Wallet**: Run `yarn keygen` to generate `.wallet.json`.
-- **HyperBEAM fork**: `git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git`
+- **HyperBEAM fork**: `git clone -b wao-final https://github.com/weavedb/HyperBEAM.git`
 
 ### Frontend Commands
 

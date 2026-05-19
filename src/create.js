@@ -141,7 +141,7 @@ const ask = (question) => new Promise(res => {
 })
 
 const HB_REPO = "https://github.com/permaweb/HyperBEAM.git"
-const HB_TAG = "v0.9-milestone-3-beta-3"
+const HB_TAG = "v0.9-FINAL"
 
 const yellow = t => `\x1b[33m${t}\x1b[39m`
 

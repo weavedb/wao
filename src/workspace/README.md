@@ -52,7 +52,7 @@ yarn deploy --local-hb --lua src/counter.lua
 
 **Remote nodes**: Use `push-1` through `push-10` for full compute. `push.forward.computer` is push-only (no compute).
 
-**HyperBEAM fork**: `git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git && cd HyperBEAM && rebar3 compile`
+**HyperBEAM fork**: `git clone -b wao-final https://github.com/weavedb/HyperBEAM.git && cd HyperBEAM && rebar3 compile`
 
 ---
 

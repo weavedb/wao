@@ -192,7 +192,7 @@ const ask = question =>
 
 
 const HB_REPO = "https://github.com/permaweb/HyperBEAM.git"
-const HB_TAG = "v0.9-milestone-3-beta-3"
+const HB_TAG = "v0.9-FINAL"
 
 const which = async cmd => {
   try {
