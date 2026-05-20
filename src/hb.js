@@ -17,6 +17,36 @@ import aos_wamr from "./aos_wamr.js"
 import { ArweaveSigner } from "@ar.io/sdk"
 import { createData } from "@dha-team/arbundles"
 
+// Convert objects whose keys are sequential numeric strings (e.g.
+// `{1: "a", 2: "b"}`) into arrays. v0.9-FINAL's multipart re-encoder treats
+// numbered TABMs as lists; JS hbsig only emits `.="list"` in ao-types when
+// the value is an Array, so without this conversion the content-digest of
+// the request body diverges from HB's recomputation and rsa-pss verification
+// fails with `process_not_verified`.
+const normalizeNumberedObjects = v => {
+  if (v === null || v === undefined) return v
+  if (Array.isArray(v)) return v.map(normalizeNumberedObjects)
+  if (Buffer.isBuffer(v) || v instanceof Blob) return v
+  if (typeof v !== "object") return v
+  const keys = Object.keys(v)
+  if (
+    keys.length > 0 &&
+    keys.every(k => /^[1-9][0-9]*$/.test(k)) &&
+    keys
+      .map(k => parseInt(k, 10))
+      .sort((a, b) => a - b)
+      .every((n, i) => n === i + 1)
+  ) {
+    return keys
+      .map(k => parseInt(k, 10))
+      .sort((a, b) => a - b)
+      .map(i => normalizeNumberedObjects(v[String(i)]))
+  }
+  const out = {}
+  for (const [k, val] of Object.entries(v)) out[k] = normalizeNumberedObjects(val)
+  return out
+}
+
 const toMsg = async req => {
   let msg = {}
   req?.headers?.forEach((v, k) => {
@@ -448,6 +478,13 @@ class HB {
   }
   async spawn(tags = {}) {
     await this.setInfo()
+    // v0.9-FINAL multipart re-encoding sees a numbered-key object as a list
+    // (TABM with .="list" in ao-types). JS hbsig's structured codec encodes
+    // a plain numeric-keyed object without that marker, so HB's recomputed
+    // content-digest doesn't match what JS signed and verify fails. Pre-
+    // normalize any numbered-key object value into an array so the array
+    // path (which already emits .="list") is used.
+    tags = normalizeNumberedObjects(tags)
     let res = null
     if (this.format === "ans104") {
       res = await this.post104({
