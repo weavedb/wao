@@ -17,12 +17,15 @@ describe("Hyperbeam Device", function () {
 
   it("should test cron@1.0", async () => {
     const { pid } = await hb.spawn({ "execution-device": "wao@1.0" })
-    const { body: task } = await hb.post({
+    // v0.9-FINAL responds with a bundled multipart; the task ID is in `out.body`
+    // (parsed), not `body` (raw multipart bytes).
+    const res = await hb.post({
       path: "/~cron@1.0/every",
       "cron-path": `/~wao@1.0/cron`,
       interval: "1000-milliseconds",
       target: pid,
     })
+    const task = res.out?.body ?? res.body
     await wait(3000)
     await hb.post({ path: "/~cron@1.0/stop", task: task })
     const { count } = await hb.now({ pid })
