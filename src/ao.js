@@ -99,7 +99,15 @@ class AO {
     if (_hb) {
       this.format = _hb === "ans104" ? _hb : "httpsig"
       const _hbOpt = { format: this.format }
-      if (typeof _hb === "string" && _hb !== "ans104") _hbOpt.url = _hb
+      // `hb` can be "ans104" / "httpsig" (format selector with default URL),
+      // or an actual URL string. Only treat it as a URL when it looks like one.
+      if (
+        typeof _hb === "string" &&
+        _hb !== "ans104" &&
+        _hb !== "httpsig" &&
+        /^(https?:\/\/|\/\/|[a-zA-Z0-9_.-]+:\d+)/.test(_hb)
+      )
+        _hbOpt.url = _hb
       this.hb = new HB(_hbOpt)
       this.mode = mode ?? "legacy"
     }
