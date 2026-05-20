@@ -347,6 +347,12 @@ export default class HyperBEAM {
     const asyncThreads = "+A 4"
     if (!_env.ERL_ZFLAGS) _env.ERL_ZFLAGS = asyncThreads
     else if (!_env.ERL_ZFLAGS.includes("+A")) _env.ERL_ZFLAGS += ` ${asyncThreads}`
+    // Skip the hb application's default-port HTTP server start (8734). We call
+    // hb_http_server:start_node/1 explicitly with the actual port via genEval,
+    // so the default binding is redundant; skipping it avoids eaddrinuse and
+    // the downstream case_clause crashes when multiple HyperBEAM instances
+    // run side-by-side (p4.test.js, p4-lua.test.js).
+    _env.WAO_NO_DEFAULT_HTTP_SERVER = "1"
     return _env
   }
 
