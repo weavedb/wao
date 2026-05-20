@@ -7,6 +7,7 @@
   "module": "dist/src/index.js",
   "types": "./types/index.d.ts",
   "scripts": {
+    "postinstall": "patch-package",
     "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs --ignore 'src/workspace' && cp src/waosm-node/waosm_bg.wasm dist/cjs/waosm-node/ && cp -rf src/workspace dist/cjs/",
     "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/ && cp src/lua/* dist/cjs/lua -rf && rm -rf dist/esm/workspace && cp -rf src/workspace dist/esm/",
     "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
@@ -78,6 +79,8 @@
     "@babel/cli": "^7.24.8",
     "@babel/core": "^7.25.2",
     "@babel/plugin-transform-modules-commonjs": "^7.24.8",
-    "@babel/preset-env": "^7.25.3"
+    "@babel/preset-env": "^7.25.3",
+    "patch-package": "^8.0.1",
+    "postinstall-postinstall": "^2.1.0"
   }
 }

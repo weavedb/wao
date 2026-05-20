@@ -1,0 +1,64 @@
+diff --git a/node_modules/@permaweb/ao-loader/dist/index.cjs b/node_modules/@permaweb/ao-loader/dist/index.cjs
+index da47416..6dc73e1 100644
+--- a/node_modules/@permaweb/ao-loader/dist/index.cjs
++++ b/node_modules/@permaweb/ao-loader/dist/index.cjs
+@@ -10822,9 +10822,17 @@ var require_emscripten3 = __commonJS({
+         }
+         var growMemory = (size) => {
+           var b = wasmMemory.buffer;
+-          var pages = (size - b.byteLength + 65535) / 65536;
++          // Node 24+ wasm-memory64: wasmMemory.grow needs an integer page
++          // count, and if the underlying memory is memory64, grow() expects
++          // a BigInt (Number args are rejected). Compute as integer pages,
++          // then try BigInt first and fall back to Number for memory32.
++          var pages = Math.ceil((size - b.byteLength + 65535) / 65536);
+           try {
+-            wasmMemory.grow(pages);
++            try {
++              wasmMemory.grow(BigInt(pages));
++            } catch (_e) {
++              wasmMemory.grow(pages);
++            }
+             updateMemoryViews();
+             return 1;
+           } catch (e) {
+@@ -15678,9 +15686,17 @@ var require_emscripten4 = __commonJS({
+         _emscripten_get_now = () => deterministicNow();
+         var growMemory = (size) => {
+           var b = wasmMemory.buffer;
+-          var pages = (size - b.byteLength + 65535) / 65536;
++          // Node 24+ wasm-memory64: wasmMemory.grow needs an integer page
++          // count, and if the underlying memory is memory64, grow() expects
++          // a BigInt (Number args are rejected). Compute as integer pages,
++          // then try BigInt first and fall back to Number for memory32.
++          var pages = Math.ceil((size - b.byteLength + 65535) / 65536);
+           try {
+-            wasmMemory.grow(pages);
++            try {
++              wasmMemory.grow(BigInt(pages));
++            } catch (_e) {
++              wasmMemory.grow(pages);
++            }
+             updateMemoryViews();
+             return 1;
+           } catch (e) {
+@@ -20811,9 +20827,17 @@ var require_wasm64_emscripten = __commonJS({
+         _emscripten_get_now = () => deterministicNow();
+         var growMemory = (size) => {
+           var b = wasmMemory.buffer;
+-          var pages = (size - b.byteLength + 65535) / 65536;
++          // Node 24+ wasm-memory64: wasmMemory.grow needs an integer page
++          // count, and if the underlying memory is memory64, grow() expects
++          // a BigInt (Number args are rejected). Compute as integer pages,
++          // then try BigInt first and fall back to Number for memory32.
++          var pages = Math.ceil((size - b.byteLength + 65535) / 65536);
+           try {
+-            wasmMemory.grow(pages);
++            try {
++              wasmMemory.grow(BigInt(pages));
++            } catch (_e) {
++              wasmMemory.grow(pages);
++            }
+             updateMemoryViews();
+             return 1;
+           } catch (e) {
