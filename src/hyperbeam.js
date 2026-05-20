@@ -287,7 +287,11 @@ export default class HyperBEAM {
       CHECKPOINT_GRAPHQL_URL: graphqlUrl,
     }
 
-    this.cuProc = spawn("node", ["--experimental-wasm-memory64", "-r", "dotenv/config", "src/app.js"], {
+    // Node 26 enables wasm-memory64 by default and rejects the experimental
+    // flag; older Node versions still need it. Detect from process.versions.
+    const nodeMajor = parseInt((process.versions.node || "0").split(".")[0], 10)
+    const memory64Flag = nodeMajor >= 24 ? [] : ["--experimental-wasm-memory64"]
+    this.cuProc = spawn("node", [...memory64Flag, "-r", "dotenv/config", "src/app.js"], {
       cwd: cuDir,
       env,
       detached: true,

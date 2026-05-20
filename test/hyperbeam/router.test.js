@@ -9,7 +9,8 @@ describe("Router Device Comprehensive Test Suite", function () {
   before(async () => (hbeam = await new HyperBEAM({ reset: true }).ready()))
   beforeEach(async () => {
     hb = hbeam.hb
-    await hb.p("/~meta@1.0/info", { route_owners: [hb.addr] })
+    // v0.9-FINAL: route-owners key is binary-key with dash, not underscore
+    await hb.p("/~meta@1.0/info", { "route-owners": [hb.addr] })
   })
   after(async () => hbeam.kill())
 
@@ -87,9 +88,12 @@ describe("Router Device Comprehensive Test Suite", function () {
 
       const routes = await hb.g("/~router@1.0/routes")
 
-      // Find the routes and check their order
+      // Find the routes and check their order.
+      // v0.9-FINAL: route.template may be a string or an object containing the
+      // pattern. Coerce to string before substring-matching.
+      const tmplStr = t => (typeof t === "string" ? t : JSON.stringify(t ?? ""))
       const routeArray = Object.entries(routes)
-        .filter(([_, r]) => r.template && r.template.includes("priority-test"))
+        .filter(([_, r]) => r && r.template && tmplStr(r.template).includes("priority-test"))
         .map(([idx, route]) => ({ idx: parseInt(idx), ...route }))
         .sort((a, b) => a.idx - b.idx)
 
@@ -116,9 +120,9 @@ describe("Router Device Comprehensive Test Suite", function () {
     it("should support multiple route owners", async () => {
       const unauthorizedAddr = toAddr(acc[1].jwk.n)
 
-      // Add second owner
+      // Add second owner (v0.9-FINAL: binary-key with dash)
       await hb.p("/~meta@1.0/info", {
-        route_owners: [hb.addr, unauthorizedAddr],
+        "route-owners": [hb.addr, unauthorizedAddr],
       })
 
       // Now the second wallet should be able to add routes
