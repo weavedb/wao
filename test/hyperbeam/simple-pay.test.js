@@ -40,13 +40,13 @@ describe("Hyperbeam Legacynet", function () {
     assert.equal(await user.hb.p(balance), "9")
 
     const info1 = await operator.hb.g("/~meta@1.0/info")
-    assert.equal(info1.simple_pay_price, 2)
+    assert.equal(info1["simple-pay-price"], 2)
 
-    // change simple_pay_price
-    assert(await operator.hb.p("/~meta@1.0/info", { simple_pay_price: 3 }))
+    // change simple-pay-price (v0.9-FINAL: binary-key with dash)
+    assert(await operator.hb.p("/~meta@1.0/info", { "simple-pay-price": 3 }))
 
     const info2 = await operator.hb.g("/~meta@1.0/info")
-    assert.equal(info2.simple_pay_price, 3)
+    assert.equal(info2["simple-pay-price"], 3)
 
     assert(await user.hb.p(...msg)) // cost = 3 * 3 = 9
     assert.equal(await user.hb.p(balance), "0")
