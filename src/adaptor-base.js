@@ -455,7 +455,11 @@ class Adaptor {
     if (valid || true) item = new DataItem(body)
     await item.setSignature(item.rawSignature)
     const _tags = tags(item.tags)
-    if (_tags.Variant && _tags.Variant !== this.network) {
+    // Allow both ao.TN.1 (legacy testnet) and ao.DN.1 (WAO Devnet) variants
+    // through the local emulator. The variant is informational here; the
+    // local emulator doesn't actually need to enforce a strict network.
+    const _allowedNetworks = new Set([this.network, "ao.TN.1", "ao.DN.1"])
+    if (_tags.Variant && !_allowedNetworks.has(_tags.Variant)) {
       return { status: 400, json: { error: `Variant mismatch: expected ${this.network}, got ${_tags.Variant}` } }
     }
     let err = null
