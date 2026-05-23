@@ -51,5 +51,6 @@ yarn test
 - Check `package.json` has `"wao"` in dependencies
 
 ### WASM memory error
-- Ensure `--experimental-wasm-memory64` flag is in the test command
-- Node.js 20+ required
+- Node 24+ enables wasm-memory64 by default — DO NOT pass `--experimental-wasm-memory64` (it's rejected with "bad option")
+- Node 22: set `NODE_OPTIONS=--experimental-wasm-memory64` before running
+- Node.js 22+ required

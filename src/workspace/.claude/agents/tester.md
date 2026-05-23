@@ -29,7 +29,7 @@ yarn test                          # all tests
 yarn test test/aos.test.js         # specific file
 ```
 
-The test command runs: `node --experimental-wasm-memory64 --test --test-concurrency=1`
+The test command runs: `node --test --test-concurrency=1` (Node 24+ enables wasm-memory64 by default and rejects the experimental flag; Node 22 users add `--experimental-wasm-memory64` via NODE_OPTIONS).
 
 ## Systematic Debugging
 
@@ -59,7 +59,7 @@ Report test results with specifics: which tests pass, which fail, and the error 
 ## Common Issues
 
 - **Port already in use**: Kill stale `beam.smp` processes
-- **WASM memory error**: Ensure `--experimental-wasm-memory64` flag is present
+- **WASM memory error**: On Node 22 set `NODE_OPTIONS=--experimental-wasm-memory64`. On Node 24+ the flag is default-on (and rejected if passed explicitly — "bad option: --experimental-wasm-memory64")
 - **Process not found**: Check that `src_data` path is correct
 - **HyperBEAM timeout**: Ensure `hbeam.kill()` is called in `after()`
 - **Send().receive() hangs**: Does NOT work on genesis-wasm — use fire-and-forget `Send()` + separate Handlers.add calls
