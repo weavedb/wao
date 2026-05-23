@@ -104,6 +104,16 @@ export default class HyperBEAM {
     if (shell) this.shell()
   }
   shell() {
+    // Kill any stale beam.smp / process listening on our HB port before
+    // spawning a new shell. Without this, sequential test runs can hit a
+    // lingering Erlang VM from the previous test (kill() returned but the
+    // OS hadn't released the port yet) and end up either failing to bind
+    // 10001 or talking to the stale node with stale process registry —
+    // surface symptom is 400 "No scheduler information provided." on the
+    // first schedule of an otherwise-known process.
+    try {
+      spawnSync("bash", ["-c", `lsof -ti:${this.port} | xargs -r kill -9 2>/dev/null`], { stdio: "ignore" })
+    } catch (_e) {}
     const evalCmd = this.genEval({ gateway: this.gateway, wallet: this.wallet })
     const cwd = resolve(process.cwd(), this.cwd)
     const env = this.genEnv() // genEnv() returns filtered process.env without proxy vars
