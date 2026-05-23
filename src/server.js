@@ -151,7 +151,13 @@ class Server {
     return new Promise(res => {
       if (this.servers.length === 0) return res()
       let count = 0
-      for (const v of this.servers)
+      for (const v of this.servers) {
+        // close() waits for active connections to drain; force-close any
+        // hanging keepalive sockets so the test process can exit when a
+        // dependent HyperBEAM instance dies mid-request.
+        if (typeof v.closeAllConnections === "function") {
+          try { v.closeAllConnections() } catch (_e) {}
+        }
         v.close(() => {
           count += 1
           if (count >= this.servers.length) {
@@ -159,6 +165,7 @@ class Server {
             res()
           }
         })
+      }
     })
   }
 }
