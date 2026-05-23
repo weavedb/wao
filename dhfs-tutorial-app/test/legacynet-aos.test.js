@@ -23,7 +23,11 @@ end)`
 describe("Legacynet AOS", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ reset: true, as: ["genesis_wasm"] }).ready()
+    // v0.9-FINAL: 'as: ["genesis_wasm"]' enables the rebar3 build profile
+    // but doesn't auto-start the genesis-wasm CU server. Pass
+    // 'genesis_wasm: true' so wao spawns the CU on port 6363 — without it,
+    // every /<pid>/compute call lands at the missing CU and returns 400.
+    hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true, as: ["genesis_wasm"] }).ready()
     hb = hbeam.hb
   })
   after(async () => hbeam.kill())
