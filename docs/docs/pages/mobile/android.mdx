@@ -102,7 +102,7 @@ You'll see these phases:
 ================================
 HyperBEAM Android Installer
 ================================
-Installing: v0.9-milestone-3-beta-1
+Installing: v0.9-FINAL
 ================================
 ```
 
@@ -148,7 +148,7 @@ These are OS monitoring tools that don't work in Termux due to Android restricti
 **Perfect for**: Users who want to see what's happening
 
 :::tip[Version Selection]
-These commands use `v0.9-milestone-3-beta-1`. For beta-3, replace the version in `git checkout`.
+These commands use `v0.9-FINAL`.
 :::
 
 ::::steps
@@ -177,7 +177,7 @@ apk update && \
 apk add build-base cmake git pkgconfig ncurses openssl openssl-dev curl ca-certificates erlang27 erlang27-dev rust cargo linux-headers lmdb lmdb-dev && \
 cd /tmp && wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3 && mv rebar3 /usr/local/bin/ && \
 cd ~ && git clone https://github.com/permaweb/HyperBEAM.git && cd HyperBEAM && \
-git checkout v0.9-milestone-3-beta-1 && \
+git checkout v0.9-FINAL && \
 sed -i 's/WAMR_BUILD_TARGET = X86_64/WAMR_BUILD_TARGET = AARCH64/g' Makefile && \
 sed -i '172s/long ptr, size;/long ptr;\n        int size;/' native/hb_beamr/hb_beamr.c && \
 sed -i '178s/long size_l = (long)size;/size_t size_l = (size_t)size;/' native/hb_beamr/hb_beamr.c && \
@@ -258,7 +258,7 @@ echo "✓✓✓ SETUP COMPLETE ✓✓✓"
 **Perfect for**: Users who want to understand every step and learn the architecture
 
 :::tip[Version Selection]
-These commands use `v0.9-milestone-3-beta-1`. For beta-3, replace the version in `git checkout`.
+These commands use `v0.9-FINAL`.
 :::
 
 :::info[Understanding the Architecture]
@@ -323,7 +323,7 @@ mv rebar3 /usr/local/bin/
 cd ~
 git clone https://github.com/permaweb/HyperBEAM.git
 cd HyperBEAM
-git checkout v0.9-milestone-3-beta-1
+git checkout v0.9-FINAL
 ```
 
 Apply ARM64 patches:
