@@ -6,7 +6,11 @@ import { verify, rsaid, hmacid } from "hbsig"
 describe("Custom Devices and Codecs", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ reset: true }).ready()
+    // v0.9-FINAL linkifies nested JSON response objects (msg2 comes back
+    // as "msg2+link": ID instead of inline). The test wants the inline
+    // commitments to verify the signature round-trip, so opt out of
+    // linkify for this HB instance.
+    hbeam = await new HyperBEAM({ reset: true, linkify_mode: false }).ready()
     hb = hbeam.hb
   })
   after(async () => hbeam.kill())

@@ -40,7 +40,11 @@ describe("Devices and Pathing", function () {
     const { out } = await hb.get({ path: "/~meta@1.0/info" })
     assert.equal(out.test_config, "abc")
     assert.equal(out.test_config2, 123)
-    assert.deepEqual(out.test_config3, { abc: 123 })
+    // v0.9-FINAL: nested-object config values come back with a
+    // `commitments` subkey populated by the signing pipeline. Strip
+    // before comparing against the input.
+    const { commitments: _c, ...t3 } = out.test_config3
+    assert.deepEqual(t3, { abc: 123 })
   })
 
   it("should get a specific key", async () => {
