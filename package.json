@@ -10,9 +10,9 @@
     "postinstall": "patch-package",
     "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs --ignore 'src/workspace' && cp src/waosm-node/waosm_bg.wasm dist/cjs/waosm-node/ && cp -rf src/workspace dist/cjs/",
     "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/ && cp src/lua/* dist/cjs/lua -rf && rm -rf dist/esm/workspace && cp -rf src/workspace dist/esm/",
-    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
-    "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
-    "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js",
+    "test": "bash scripts/node-test.sh",
+    "test-only": "bash scripts/node-test.sh --test-only",
+    "test-all": "bash scripts/node-test.sh test/**/*.test.js",
     "server": "node cli-esm.js",
     "keygen": "node src/keygen.js"
   },
