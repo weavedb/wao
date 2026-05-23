@@ -95,7 +95,7 @@ yarn deploy --mainnet                    # remote HyperBEAM (push-1)
 yarn deploy --mainnet --lua              # remote HyperBEAM (Lua mode)
 ```
 
-Runs: `node --experimental-wasm-memory64 --test --test-concurrency=1`
+Runs: `node --test --test-concurrency=1` (Node 24+; on Node 22 prefix with `--experimental-wasm-memory64`)
 
 ## Deployment Targets
 
