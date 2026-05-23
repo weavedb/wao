@@ -9,7 +9,9 @@
  *
  * Each mode tests: deploy/spawn, messages, counter state, eval.
  *
- * Run: node --experimental-wasm-memory64 --test --test-concurrency=1 test/deployment/multinet.test.js
+ * Run: node --test --test-concurrency=1 test/deployment/multinet.test.js
+ *   (on Node 22 prefix with --experimental-wasm-memory64; on Node 24+
+ *   wasm-memory64 is default-on and the flag is rejected)
  */
 import assert from "assert"
 import { describe, it, before, after } from "node:test"
