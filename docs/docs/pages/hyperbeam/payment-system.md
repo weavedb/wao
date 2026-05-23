@@ -392,6 +392,25 @@ The user's balance decreased after the POST request. The `p4@1.0` device automat
 
 Congratulations on having come this far! The `p4@1.0` payment system with inline Lua scripts using `node-process@1.0` is one of the most advanced usages of HyperBEAM. With the inline approach in v0.9-FINAL, the setup is significantly simpler -- no need to cache scripts or start a second node. If you got this to work, most other things are less complex, so you should be ready to build anything on top of HyperBEAM now.
 
+## Dynamic Pricing — `metering@1.0` (v0.9-FINAL)
+
+v0.9-FINAL ships a new `metering@1.0` pricing device for `p4@1.0` that records actual resource usage (Arweave bytes, BEAM reductions, etc.) over the request/response lifecycle instead of charging a flat price.
+
+The operator sets `metering-rates` in the node message — a map of resource name to AO token units per resource unit:
+
+```js
+hbeam = await new HyperBEAM({
+  operator: HyperBEAM.OPERATOR,
+  on: {
+    request: { device: "p4@1.0", "pricing-device": "metering@1.0", "ledger-device": "simple-pay@1.0" },
+    response: { device: "p4@1.0", "pricing-device": "metering@1.0", "ledger-device": "simple-pay@1.0" },
+  },
+  "metering-rates": { "arweave-bytes": 1, "beam-reductions": 0 },
+}).ready()
+```
+
+`metering@1.0`'s `estimate/3` opens a process-local session, `consume/3` increments usage during evaluation, and `price/3` closes the session and returns the integer charge. Calls to `consume/3` outside an active session are no-ops, so device authors don't need to check whether metering is enabled.
+
 ## Running Tests
 
 You can find the working test file for this chapter here:
