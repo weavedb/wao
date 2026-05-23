@@ -73,4 +73,14 @@ export default {
   hyperbuddy: { name: "hyperbuddy@1.0", module: "dev_hyperbuddy" },
   ans104: { name: "ans104@1.0", module: "dev_codec_ans104" },
   cacheviz: { name: "cacheviz@1.0", module: "dev_cacheviz" },
+
+  // v0.9-FINAL additions
+  arweave: { name: "arweave@2.9", module: "dev_arweave" },
+  "b32-name": { name: "b32-name@1.0", module: "dev_b32_name" },
+  bundler: { name: "bundler@1.0", module: "dev_bundler" },
+  copycat: { name: "copycat@1.0", module: "dev_copycat" },
+  gzip: { name: "gzip@1.0", module: "dev_gzip" },
+  secret: { name: "secret@1.0", module: "dev_secret" },
+  tx: { name: "tx@1.0", module: "dev_codec_tx" },
+  whois: { name: "whois@1.0", module: "dev_whois" },
 }
