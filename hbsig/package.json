@@ -7,9 +7,9 @@
   "scripts": {
     "build:cjs": "babel src --out-dir dist/cjs --config-file ./.babelrc-cjs",
     "build": "rm -rf dist && npm run build:cjs && cp src -rf dist/esm && node make.js && cp .npmignore dist/",
-    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
-    "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
-    "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js"
+    "test": "node --test --test-concurrency=1",
+    "test-only": "node --test-only --test-concurrency=1",
+    "test-all": "node --test --test-concurrency=1 test/**/*.test.js"
   },
   "license": "MIT",
   "exports": {
