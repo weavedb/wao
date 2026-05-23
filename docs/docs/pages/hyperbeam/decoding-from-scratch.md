@@ -61,13 +61,13 @@ This series follows a carefully crafted path from basics to advanced topics. Eac
 | 11 | **[Legacynet Compatible AOS](/hyperbeam/legacynet-aos)** - Integrating with the AOS ecosystem |
 | 12 | **[Payment System](/hyperbeam/payment-system)** - Building complex payment systems with p4@1.0 |
 
-This tutorial works with the [HyperBEAM v0.9 Milestone 3 Beta 3](https://github.com/permaweb/HyperBEAM/tree/v0.9-milestone-3-beta-3) release.
+This tutorial works with the [HyperBEAM v0.9-FINAL](https://github.com/permaweb/HyperBEAM/releases/tag/v0.9-FINAL) release.
 
 ## Resources
 
 - **[Working Test Suite](https://github.com/weavedb/wao/tree/master/dhfs-tutorial-app)** - Complete test files for all chapters
-- **[HyperBEAM v0.9-milestone-3-beta-3](https://github.com/permaweb/HyperBEAM/tree/v0.9-milestone-3-beta-3)** - Compatible HyperBEAM release
-- **[HyperBEAM Implementation with Tutorial Devices](https://github.com/weavedb/HyperBEAM/tree/wao)** - HyperBEAM fork with all custom devices from this tutorial
+- **[HyperBEAM v0.9-FINAL](https://github.com/permaweb/HyperBEAM/releases/tag/v0.9-FINAL)** - Compatible HyperBEAM release
+- **[HyperBEAM Implementation with Tutorial Devices](https://github.com/weavedb/HyperBEAM/tree/wao-final)** - HyperBEAM fork with all custom devices from this tutorial
 
 ---
 

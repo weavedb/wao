@@ -128,7 +128,7 @@ describe("Payment System simple-pay@1.0", function () {
 
 ## p4@1.0
 
-`p4@1.0` allows you to use Lua scripts with `node-process@1.0` to manage node access. The current beta3 release uses the `hyper-token` script family, which provides a full token ledger with admin `charge` support for collecting fees.
+`p4@1.0` allows you to use Lua scripts with `node-process@1.0` to manage node access. The current v0.9-FINAL release uses the `hyper-token` script family, which provides a full token ledger with admin `charge` support for collecting fees.
 
 ### Required Configurations
 
@@ -390,7 +390,7 @@ assert(Number(balance2) < 1000)
 
 The user's balance decreased after the POST request. The `p4@1.0` device automatically called the `charge` function in the client script, which forwarded the charge to the processor, debiting the user's account.
 
-Congratulations on having come this far! The `p4@1.0` payment system with inline Lua scripts using `node-process@1.0` is one of the most advanced usages of HyperBEAM. With the inline approach in beta3, the setup is significantly simpler -- no need to cache scripts or start a second node. If you got this to work, most other things are less complex, so you should be ready to build anything on top of HyperBEAM now.
+Congratulations on having come this far! The `p4@1.0` payment system with inline Lua scripts using `node-process@1.0` is one of the most advanced usages of HyperBEAM. With the inline approach in v0.9-FINAL, the setup is significantly simpler -- no need to cache scripts or start a second node. If you got this to work, most other things are less complex, so you should be ready to build anything on top of HyperBEAM now.
 
 ## Running Tests
 
