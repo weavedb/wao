@@ -19,8 +19,11 @@ for p in "${ports[@]}"; do
     fi
 done
 
-# Belt-and-suspenders cleanups for stray Erlang VMs or node test child procs.
+# Belt-and-suspenders cleanups for stray Erlang VMs.
 pkill -9 -f beam.smp 2>/dev/null || true
-pkill -9 -f 'node --test' 2>/dev/null || true
+# Don't pkill node --test here — pkill -f matches the full command line, which
+# would kill the parent shell if this script is invoked as part of a one-liner
+# that contains "node --test" (e.g. `bash clean-test-state.sh && node --test`).
+# The HB port-cleanup in startCU/shell already handles the relevant cases.
 
 echo "test-state cleaned" >&2
