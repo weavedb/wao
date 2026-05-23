@@ -259,6 +259,18 @@ export default class HyperBEAM {
     // Ensure DB directory exists
     spawnSync("mkdir", ["-p", dbDir])
 
+    // Kill any stale CU process listening on cu_port before spawning a new
+    // one. Sequential test runs in the same OS share port 6363; if a prior
+    // run's CU lingered (e.g. detached but its parent died before SIGKILL
+    // could propagate), the new CU's bind silently fails and HB ends up
+    // talking to the stale CU, which has a different process registry and
+    // throws confusing 500/400s on the next spawn/schedule.
+    try {
+      spawnSync("bash", ["-c", `lsof -ti:${this.cu_port} | xargs -r kill -9 2>/dev/null`], { stdio: "ignore" })
+    } catch (_e) {}
+    // Brief settle so the OS can release the port.
+    await new Promise(r => setTimeout(r, 200))
+
     // Use arweave_gateway option or ARWEAVE_GATEWAY env var for proxy environments
     const gatewayUrl = this.arweave_gateway || process.env.GATEWAY_URL || "https://arweave.net"
     const graphqlUrl = process.env.GRAPHQL_URL || `${gatewayUrl}/graphql`
