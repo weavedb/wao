@@ -348,7 +348,7 @@ const result = await hb.computeLegacy({ pid, slot })
 **Limitations:**
 - External CU is single-pass — **`Send().receive()` does NOT work**
 - Auto-starts CU server at port 6363
-- Requires `--experimental-wasm-memory64` Node.js flag
+- Requires wasm-memory64 (Node 24+ default; Node 22 needs `--experimental-wasm-memory64`)
 
 Functions: `init/3`, `compute/3`, `snapshot/3`, `import/3`
 

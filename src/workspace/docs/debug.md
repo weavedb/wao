@@ -206,7 +206,8 @@ The `yarn test` script ships without the flag (Node 24+ default); set `NODE_OPTI
 | `badarg in list_to_atom` | Atom not pre-registered | Add to preRegisterAtoms |
 | `multiple_matches` | Duplicate message content | Add nonce to messages |
 | `timeout` | Process or server hung | Kill stale processes, increase timeout |
-| `WASM memory error` | Missing memory64 flag | Add `--experimental-wasm-memory64` |
+| `WASM memory error` | Missing memory64 (Node 22) | Set `NODE_OPTIONS=--experimental-wasm-memory64` (Node 22) — Node 24+ has it default-on |
+| `bad option: --experimental-wasm-memory64` | Passing the flag on Node 24+ | Remove the flag — Node 24+ rejects it |
 | `Process not found` | Bad pid or deploy failed | Check deploy result, verify pid |
 | `Insufficient balance` | Payment balance too low | Top up via simple-pay or p4 |
 | `Not signed` | Missing wallet/JWK | Call `.init(jwk)` before operations |
