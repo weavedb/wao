@@ -13,6 +13,7 @@
     "test": "bash scripts/node-test.sh",
     "test-only": "bash scripts/node-test.sh --test-only",
     "test-all": "bash scripts/node-test.sh test/**/*.test.js",
+    "test-clean": "bash scripts/clean-test-state.sh",
     "server": "node cli-esm.js",
     "keygen": "node src/keygen.js"
   },
