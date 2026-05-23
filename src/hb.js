@@ -539,7 +539,7 @@ class HB {
       })
       return { res, pid: res.out.process }
     } else {
-      // Use httpsig-signed multipart POST (beta3-compatible approach)
+      // Use httpsig-signed multipart POST
       const spawnTags = mergeLeft(tags, {
         "random-seed": seed(16),
         type: "Process",
@@ -819,7 +819,7 @@ class HB {
         i++
       }
     }
-    // Add accept-bundle header to get inline data instead of links (beta3 compatibility)
+    // Add accept-bundle header to get inline data instead of links
     const url = `${this.url}${path}${_json}${_params}`
     let response
     for (let attempt = 0; attempt < 3; attempt++) {
