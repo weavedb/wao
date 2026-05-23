@@ -13,24 +13,22 @@ json.bin = {
   wao: "./cjs/cli.js",
   "wao-esm": "./esm/cli.js",
 }
-// Ship patches/ and a postinstall hook so end users get the Node 24+
-// wasm-memory64 BigInt patch applied to @permaweb/ao-loader@0.0.44 on
-// `npm install wao`. patch-package is a regular dependency here (not
-// devDependency) so it's available in user-side node_modules.
-const patchesSrc = resolve(import.meta.dirname, "patches")
-const patchesDst = resolve(import.meta.dirname, "dist/patches")
-if (existsSync(patchesSrc)) {
-  mkdirSync(patchesDst, { recursive: true })
-  cpSync(patchesSrc, patchesDst, { recursive: true })
+// Ship a postinstall script that patches @permaweb/ao-loader@0.0.44 for
+// Node 24+ wasm-memory64. patch-package can't reach ao-loader when npm
+// hoists it out of node_modules/wao/node_modules/, so we use a custom
+// script that resolves the file directly and edits in place. The script
+// is idempotent and fail-open: re-runs are no-ops, version drift skips.
+const scriptSrc = resolve(
+  import.meta.dirname,
+  "scripts/postinstall-patch-ao-loader.cjs"
+)
+const scriptDst = resolve(import.meta.dirname, "dist/postinstall.cjs")
+if (existsSync(scriptSrc)) {
+  cpSync(scriptSrc, scriptDst)
 }
-json.dependencies = {
-  ...(json.dependencies || {}),
-  "patch-package": json.devDependencies?.["patch-package"] || "^8.0.1",
-}
-if (json.devDependencies) delete json.devDependencies["patch-package"]
 json.scripts = {
   server: "node cjs/run.js",
-  postinstall: "patch-package || true",
+  postinstall: "node postinstall.cjs || true",
 }
 
 writeFileSync(packageJsonDist, JSON.stringify(json, undefined, 2))
