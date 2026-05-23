@@ -144,13 +144,17 @@ await hb.schedule({
 
 **Problem:** `WebAssembly.Memory` errors or WASM module fails to load.
 
-**Fix:** Ensure the `--experimental-wasm-memory64` flag is present:
+**Fix:** Node 24+ enables wasm-memory64 by default (and rejects the experimental flag at startup with "bad option"). On Node 22 or older, prefix with `--experimental-wasm-memory64`:
 
 ```bash
+# Node 24+: no flag needed
+node --test test/aos.test.js
+
+# Node 22:
 node --experimental-wasm-memory64 --test test/aos.test.js
 ```
 
-The `yarn test` script should already include this flag.
+The `yarn test` script ships without the flag (Node 24+ default); set `NODE_OPTIONS=--experimental-wasm-memory64` if you're on older Node.
 
 ### Genesis-WASM Server
 
@@ -215,7 +219,7 @@ When tests fail, check in order:
 
 1. **Ports clear?** `lsof -ti :10000-10010 | xargs -r kill -9`
 2. **beam.smp killed?** `pkill -f beam.smp`
-3. **WASM flag?** `--experimental-wasm-memory64` in test command
+3. **WASM flag?** Node 24+ default-on; on Node 22 add `--experimental-wasm-memory64` (and on Node 24+ remove it — it's rejected)
 4. **HyperBEAM dir?** `ls ./HyperBEAM` exists
 5. **Wallet exists?** `.wallet.json` present (auto-generated)
 6. **hbeam.kill() in after()?** Always clean up
