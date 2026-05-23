@@ -1,4 +1,7 @@
-#!/usr/bin/env -S node --experimental-wasm-memory64
+#!/usr/bin/env node
+// Note: this script is normally launched by src/cli.js via pm2, which
+// gates --experimental-wasm-memory64 to Node <24. If you run this file
+// directly on Node <24, prefix with the flag: NODE_OPTIONS=--experimental-wasm-memory64
 import yargs from "yargs"
 import { resolve } from "path"
 import { unlinkSync } from "fs"

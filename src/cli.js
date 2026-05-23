@@ -527,10 +527,14 @@ else {
       process.exit(2)
     }
 
+    // Node 24+ enables wasm-memory64 by default and rejects the
+    // experimental flag at startup; older Node still needs it.
+    const _nodeMajor = parseInt((process.versions.node || "0").split(".")[0], 10)
+    const _wasm64Flag = _nodeMajor >= 24 ? "" : "--experimental-wasm-memory64"
     pm2.start(
       {
         script: resolve(await dirname(), cmd.script),
-        nodeArgs: "--experimental-wasm-memory64",
+        nodeArgs: _wasm64Flag,
         instances: 1,
         force: true,
         args: args,

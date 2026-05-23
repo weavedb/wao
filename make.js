@@ -14,7 +14,7 @@ json.bin = {
   "wao-esm": "./esm/cli.js",
 }
 json.scripts = {
-  server: "node --experimental-wasm-memory64 cjs/run.js",
+  server: "node cjs/run.js",
 }
 
 writeFileSync(packageJsonDist, JSON.stringify(json, undefined, 2))
