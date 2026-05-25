@@ -380,8 +380,11 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
               })
             }
           }
-          // Cranked messages use MU addr as From for AOS trust
-          if (_opt?.for) evalFrom = mu.addr
+          // Cranked messages historically used MU addr as From. But AOS's
+          // msg.reply targets msg.From, so overwriting From to mu.addr
+          // breaks the X-Reference round-trip for Send().receive(). Only
+          // override when no explicit from is supplied by the caller.
+          if (_opt?.for && !_opt?.from) evalFrom = mu.addr
           const cuResult = await fetch(`${p._cu_url}/cu/evaluate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -465,9 +468,13 @@ export default ({ AR, scheduler, mu, su, cu, acc, AoLoader, ArMem } = {}) => {
             })
           }
         }
-        // Cranked messages (inter-process) use MU addr as From for AOS trust
-        // From-Process tag still tracks the originating process
-        if (_opt.for) from = mu.addr
+        // Cranked messages (inter-process) historically used MU addr as
+        // From for AOS trust. But AOS's msg.reply uses msg.From as Target,
+        // so overwriting From to mu.addr breaks the X-Reference round-trip
+        // needed for Send().receive() coroutine resumption. Preserve the
+        // originating process (passed via _opt.from = opt.process from the
+        // outbox-dispatch loop) so replies land back on it.
+        if (_opt.for && !_opt.from) from = mu.addr
         // check: is owner=mu.addr right?
         const _owner = opt.message_item?.owner
           ? toAddr(opt.message_item.owner)
