@@ -257,7 +257,7 @@ When builds stall, run `/debug`. The wizard cross-references errors with the kno
 
 Common issues:
 - **Port conflicts** — stale HyperBEAM instances on the same port. `/test-hb` kills `beam.smp` automatically.
-- **WASM memory** — Node.js needs `--experimental-wasm-memory64` for AOS tests.
+- **WASM memory** — wasm-memory64 is default-on in Node 24+; for Node 22 set `NODE_OPTIONS=--experimental-wasm-memory64` before running AOS tests.
 - **Compile errors** — The Device Wizard reads rebar3 output and fixes Erlang issues automatically.
 
 ---
