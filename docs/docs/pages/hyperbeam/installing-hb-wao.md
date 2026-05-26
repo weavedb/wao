@@ -33,7 +33,7 @@ Edit `package.json` to enable ESM and test commands, and disable concurrency so 
   },
   "dependencies": {
 	"hbsig": "^0.3.0",
-    "wao": "^0.40.0"
+    "wao": "^0.41.0"
   }
 }
 ```

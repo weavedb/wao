@@ -32,8 +32,8 @@ Add `test` and `test-only` commands to your `package.json`.
 ```json
 {
   "scripts": {
-    "test": "node --experimental-wasm-memory64",
-    "test-only": "node --experimental-wasm-memory64 --test-only"
+    "test": "node --test --test-concurrency=1",
+    "test-only": "node --test --test-only --test-concurrency=1"
   }
 }
 ```
