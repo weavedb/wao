@@ -12,6 +12,16 @@ export default function store(initial) {
     return state
   })
 
+  // Expose the underlying zustand store on window in dev so Playwright E2E
+  // tests can drive UI state (tab, modal toggles, dryrun) directly without
+  // brittle clicking on unlabeled icons.
+  if (
+    typeof window !== "undefined" &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    window.__waoStore = zustandStore
+  }
+
   function Use(key) {
     const value = useStore(zustandStore, s => s[key])
     const setter = zustandStore.getState()[`set${capitalize(key)}`]
