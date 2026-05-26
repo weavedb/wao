@@ -6,7 +6,8 @@ import { Spinner } from "@chakra-ui/react"
 import { FaNetworkWired } from "react-icons/fa6"
 import g from "/lib/global"
 
-import { hb_url, src_data_lua } from "/lib/scripts"
+import { src_data_lua } from "/lib/scripts"
+import { hb_url } from "/lib/data"
 import { Adaptor } from "wao/web"
 import WebRTC from "/lib/webrtc"
 

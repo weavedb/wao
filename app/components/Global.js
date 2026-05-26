@@ -198,14 +198,20 @@ export default function Global({}) {
 
   useEffect(() => {
     ;(async () => {
+      // wao 0.41.x: the AO constructor accepts `hb` (URL or "ans104"/"httpsig"
+      // selector), not the old `hb_url`. `log` is no longer a recognized option.
       try {
-        g.ao = await new AO({ variant: cache, cache, hb_url, log: false }).init(
-          acc[0]
-        )
+        g.ao = await new AO({ variant: cache, hb: hb_url }).init(acc[0])
       } catch (e) {
-        g.ao = await new AO({ variant: cache, cache, log: false }).init(acc[0])
+        g.ao = await new AO({ variant: cache }).init(acc[0])
       }
       await g.ao.mem.init()
+      // Expose `g` on window in dev so Playwright E2E tests can probe state
+      // (AO instance, mem, processes, modules). Stripped automatically from
+      // production bundles because process.env.NODE_ENV folds to "production".
+      if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+        window.g = g
+      }
       g.listModules()
       g.listProcesses()
       g.listMessages()

@@ -11,7 +11,10 @@
     "deploy": "node node_modules/arnext-arkb deploy out",
     "deploy:turbo": "turbo upload-folder --folder-path out",
     "build:arweave": "cross-env NEXT_PUBLIC_DEPLOY_TARGET='arweave' next build && node arweave.mjs",
-    "test": "mocha"
+    "test": "mocha --reporter spec test/unit/**/*.test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.6.0",
@@ -39,18 +42,21 @@
     "react-icons": "^5.5.0",
     "react-resizable-panels": "^2.1.7",
     "uuid": "^11.1.0",
-    "wao": "^0.20.1",
+    "wao": "^0.41.1",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@ardrive/turbo-sdk": "^1.19.0",
+    "@playwright/test": "^1.49.1",
     "arnext-arkb": "^0.0.1",
     "cheerio": "^1.0.0",
+    "chai": "^5.1.2",
     "cross-env": "^7.0.3",
     "eslint": "8.57.1",
     "eslint-config-next": "14.2.13",
     "express": "^4.21.0",
     "http-proxy-middleware": "^3.0.2",
+    "mocha": "^11.1.0",
     "starknet": "^6.11.0"
   }
 }
