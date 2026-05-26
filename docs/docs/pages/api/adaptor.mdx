@@ -1,0 +1,100 @@
+# Adaptor
+
+`Adaptor` is the bridge that lets a browser-side WAO IDE (e.g. WAO Studio) expose its in-memory `ArMem` state over HTTP / WebSocket so that an external HyperBEAM node, a remote Wander client, or another peer can hit the same MU / SU / CU endpoints they'd hit on a real network.
+
+It runs inside the page (`wao/web`) or inside a Cloudflare worker (`wao/cf`) and translates incoming HTTP-shaped requests into calls against the same `aoconnect`-bound `mem`, `message`, `spawn`, `dryrun`, `result`, etc. that the AO class uses internally.
+
+## Instantiate
+
+```js
+import { AO, Adaptor } from "wao/web"
+
+const ao = await new AO({ variant: "ao.TN.1" }).init(acc[0])
+await ao.mem.init()
+
+const adaptor = new Adaptor({
+  hb_url: "http://localhost:10001",
+  aoconnect: ao.mem,
+})
+```
+
+## Constructor Options
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `hb_url` | `string` | - | HyperBEAM node URL. When set, the Adaptor wires an [HB](/api/hb) client into the underlying `connect()`. |
+| `aoconnect` | `ArMem` \| `object` | - | The in-memory `ArMem` instance (`ao.mem`) or a Wander aoconnect config. The Adaptor delegates message / spawn / dryrun calls to this backend. |
+| `log` | `boolean` \| `"none"` \| `"info"` \| `"debug"` | `false` | Forwarded to the internal `connect()` call. |
+| `db` | `object` | - | Optional KV-style storage backend (e.g. Cloudflare D1, IndexedDB wrapper). |
+| `storage` | `object` | - | Optional blob storage backend. |
+| `connect` | `function` | wao's built-in | Override the `connect()` implementation (rare). |
+| `GQL` | `class` | wao's built-in | Override the GQL class used for queries (rare). |
+| `cu` / `su` / `mu` | `signer` | - | Wallet signers for CU / SU / MU endpoints. |
+| `d1` / `r2` / `kv` | object | - | Cloudflare Workers bindings (used by `wao/cf`). |
+| `network` | `string` | `"ao.DN.1"` | Variant identifier ("ao.TN.1" or "ao.DN.1"). |
+
+## get
+
+The primary entry point. Dispatches a request to the appropriate handler based on `req.device`:
+
+- `bd` → bundler (data items)
+- `ar` → Arweave gateway (transactions, GraphQL)
+- `su` → Scheduler Unit
+- `mu` → Message Unit
+- `cu` → Compute Unit
+
+```js
+await adaptor.get(req, res => {
+  // res handler is called with the response payload
+})
+```
+
+## Per-device entry points
+
+Each device method dispatches by HTTP method (`req.method`):
+
+```js
+await adaptor.bd(req)   // bundler: bd_get / bd_post / bd_post_tx
+await adaptor.ar(req)   // Arweave: ar_get / ar_post
+await adaptor.su(req)   // SU: su_get / su_post
+await adaptor.mu(req)   // MU: mu_get / mu_delete / mu_post
+await adaptor.cu(req)   // CU: cu_get / cu_post
+```
+
+## Underlying Wander Methods
+
+The Adaptor stores the `connect()` bindings so you can drive raw aoconnect-compatible calls directly:
+
+```js
+adaptor.spawn(...)
+adaptor.message(...)
+adaptor.result(...)
+adaptor.dryrun(...)
+adaptor.monitor(...)
+adaptor.recover(processId)
+adaptor.evaluate(...)
+```
+
+## `adaptor.mem` and `adaptor.gql`
+
+`adaptor.mem` is the same `ArMem` instance used by `aoconnect`. `adaptor.gql` is a `GQL` instance backed by `mem` (or `d1` when on Cloudflare).
+
+## Typical Setup with a Hub
+
+In WAO Studio the Adaptor is wired up alongside a `Hub` WebSocket client so a remote HyperBEAM (or peer) can talk to the in-browser AO:
+
+```js
+import { Adaptor } from "wao/web"
+import Hub from "/lib/hub"
+
+const adaptor = new Adaptor({ hb_url, aoconnect: g.ao.mem })
+const hub = new Hub("ws://localhost:7777")
+hub.onMsg = async obj => {
+  adaptor.get(obj.req, res => {
+    hub.socket.send(JSON.stringify({ id: obj.id, res }))
+  })
+}
+hub.connect()
+```
+
+See the [WAO Studio source](https://github.com/weavedb/wao/tree/master/app) for a full integration.

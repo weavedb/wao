@@ -41,6 +41,21 @@ describe("HyperBEAM", function () {
 hbeam.kill()
 ```
 
+## Instance Fields
+
+After `.ready()`, the `HyperBEAM` instance exposes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `hbeam.hb` | `HB` | Initialized [HB](/api/hb) client targeting the spawned node. Use this for most interactions. |
+| `hbeam.url` | `string` | `http://127.0.0.1:<port>` — the node URL. |
+| `hbeam.jwk` | `JWK` | Operator wallet JWK loaded from `wallet_location`. |
+| `hbeam.addr` | `string` | Operator wallet address (derived from `jwk.n`). |
+| `hbeam.operator` | `string` | Operator address from the `operator` option (defaults to `addr`). `HyperBEAM.OPERATOR` is resolved to `addr` automatically. |
+| `hbeam.cuProc` | `ChildProcess` | Genesis-wasm CU child process handle when `genesis_wasm: true`. |
+| `hbeam.dirname` | `string` | Resolved absolute path of the HyperBEAM source tree (`cwd`). |
+| `hbeam.wallet_location` | `string` | Resolved absolute path of the wallet JWK. |
+
 ## Parameters
 
 | Name | Default | Description |
