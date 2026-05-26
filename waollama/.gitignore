@@ -112,3 +112,9 @@ tests
 cached.json
 cached-arlocal.json
 .vercel
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright-cache/
