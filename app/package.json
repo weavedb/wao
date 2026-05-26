@@ -12,9 +12,9 @@
     "deploy:turbo": "turbo upload-folder --folder-path out",
     "build:arweave": "cross-env NEXT_PUBLIC_DEPLOY_TARGET='arweave' next build && node arweave.mjs",
     "test": "mocha --reporter spec test/unit/**/*.test.mjs",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e": "cross-env WAO_E2E_FROM_ROOT=1 node test/e2e/run-from-root.mjs",
+    "test:e2e:headed": "cross-env WAO_E2E_FROM_ROOT=1 PWPLAYHEADED=1 node test/e2e/run-from-root.mjs",
+    "test:e2e:ui": "cross-env WAO_E2E_FROM_ROOT=1 PWUI=1 node test/e2e/run-from-root.mjs"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.6.0",
