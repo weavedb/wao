@@ -14,27 +14,24 @@ test.describe("WAO Studio — HyperBEAM integration (real local HB)", () => {
     )
   })
 
-  test("Global.js created an AO instance (HB-connected or in-memory fallback)", async ({
+  test("Global.js created an in-memory AO instance with mem ready", async ({
     page,
   }) => {
-    // Global.js tries `new AO({ hb: hb_url })` first. With CORS/init quirks
-    // in a browser context the constructor may still throw and fall back to
-    // in-memory mode — either path is acceptable here. The important thing
-    // is that g.ao exists and mem is initialized.
+    // Global.js runs the IDE in in-memory mode (the sidebar/middle panels
+    // read from ao.mem). HB integration is exposed via the Adaptor in
+    // ProxyModal/FSModal, not directly through the AO constructor.
     const aoInfo = await page.evaluate(() => {
       const ao = globalThis.g.ao
       return {
         hasAO: Boolean(ao),
         hasMem: Boolean(ao?.mem),
-        hasHb: Boolean(ao?.hb),
-        hbUrl: ao?.hb?.url ?? null,
+        memInitialized:
+          Boolean(ao?.mem?.env) && Boolean(ao?.mem?.modules),
       }
     })
     expect(aoInfo.hasAO).toBe(true)
     expect(aoInfo.hasMem).toBe(true)
-    if (aoInfo.hasHb) {
-      expect(aoInfo.hbUrl).toMatch(/localhost:10001|127\.0\.0\.1:10001/)
-    }
+    expect(aoInfo.memInitialized).toBe(true)
   })
 
   test("can fetch /~meta@1.0/info/address directly from HB", async ({
