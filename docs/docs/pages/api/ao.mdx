@@ -22,7 +22,8 @@ The `AO` constructor accepts the following options. You can also pass a port num
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `hb` | `"ans104"` \| `"httpsig"` \| `false` | `undefined` | Enable HyperBEAM mode with format |
+| `hb` | `string` \| `false` | `undefined` | Enable HyperBEAM mode. `"ans104"` / `"httpsig"` are format selectors (defaults to local HB URL); pass a full URL like `"https://push-1.forward.computer"` to target a remote node |
+| `mode` | `"legacy"` \| `"aos"` \| `"wasm"` \| `"lua"` | `"legacy"` when `hb` is set | Selects spawn/schedule/compute path: `legacy` → genesis-wasm CU; `aos`/`wasm` → wasm-64; `lua` → hyper-aos `lua@5.3a` |
 | `module` | `string` | auto by `module_type` | Module ID |
 | `module_type` | `"aos2"` \| `"sqlite"` \| `"mainnet"` | `"aos2"` | Selects default module |
 | `scheduler` | `string` | built-in default | Scheduler address |
