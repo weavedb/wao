@@ -20,13 +20,13 @@ describe("Hyperbeam Device", function () {
       body: bin,
     })
     const path = h.path
-    assert.equal(await hb.g("/~cache@1.0/read", { target: path }), "abc")
+    assert.equal(await hb.g("/~cache@1.0/read", { read: path }), "abc")
     await hb.p("/~cache@1.0/link", {
       source: path,
       destination: "new_location",
     })
     assert.equal(
-      await hb.g("/~cache@1.0/read", { target: "new_location" }),
+      await hb.g("/~cache@1.0/read", { read: "new_location" }),
       "abc"
     )
   })

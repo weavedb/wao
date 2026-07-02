@@ -36,6 +36,7 @@ export default class HyperBEAM {
     genesis_wasm = false,
     arweave_gateway,
     force_signed = false,
+    linkify_mode, // v0.9-FINAL: HB linkify mode. undefined => HB default; pass "false" for hbsig-style inline-only responses
     rebar3, // Use rebar3 shell (true) or direct erl (false). Defaults to HB_REBAR3 env or true
   } = {}) {
     // Determine rebar3 mode: option > env var > default (true)
@@ -49,6 +50,7 @@ export default class HyperBEAM {
     }
     this.genesis_wasm = genesis_wasm
     this.force_signed = force_signed
+    this.linkify_mode = linkify_mode
     this.cu_port = cu_port
     this.arweave_gateway = arweave_gateway || process.env.ARWEAVE_GATEWAY
     this.devices = devices
@@ -84,7 +86,7 @@ export default class HyperBEAM {
     this.c = c
     this.cmake = cmake
     this.port = port
-    this.url = `http://localhost:${this.port}`
+    this.url = `http://127.0.0.1:${this.port}`
     if (bundler) this.bundler = `http://localhost::${bundler}`
     this.bundler_ans104 = bundler_ans104
     if (bundler_httpsig) this.bundler = bundler_httpsig
@@ -102,6 +104,16 @@ export default class HyperBEAM {
     if (shell) this.shell()
   }
   shell() {
+    // Kill any stale beam.smp / process listening on our HB port before
+    // spawning a new shell. Without this, sequential test runs can hit a
+    // lingering Erlang VM from the previous test (kill() returned but the
+    // OS hadn't released the port yet) and end up either failing to bind
+    // 10001 or talking to the stale node with stale process registry —
+    // surface symptom is 400 "No scheduler information provided." on the
+    // first schedule of an otherwise-known process.
+    try {
+      spawnSync("bash", ["-c", `lsof -ti:${this.port} | xargs -r kill -9 2>/dev/null`], { stdio: "ignore" })
+    } catch (_e) {}
     const evalCmd = this.genEval({ gateway: this.gateway, wallet: this.wallet })
     const cwd = resolve(process.cwd(), this.cwd)
     const env = this.genEnv() // genEnv() returns filtered process.env without proxy vars
@@ -257,6 +269,18 @@ export default class HyperBEAM {
     // Ensure DB directory exists
     spawnSync("mkdir", ["-p", dbDir])
 
+    // Kill any stale CU process listening on cu_port before spawning a new
+    // one. Sequential test runs in the same OS share port 6363; if a prior
+    // run's CU lingered (e.g. detached but its parent died before SIGKILL
+    // could propagate), the new CU's bind silently fails and HB ends up
+    // talking to the stale CU, which has a different process registry and
+    // throws confusing 500/400s on the next spawn/schedule.
+    try {
+      spawnSync("bash", ["-c", `lsof -ti:${this.cu_port} | xargs -r kill -9 2>/dev/null`], { stdio: "ignore" })
+    } catch (_e) {}
+    // Brief settle so the OS can release the port.
+    await new Promise(r => setTimeout(r, 200))
+
     // Use arweave_gateway option or ARWEAVE_GATEWAY env var for proxy environments
     const gatewayUrl = this.arweave_gateway || process.env.GATEWAY_URL || "https://arweave.net"
     const graphqlUrl = process.env.GRAPHQL_URL || `${gatewayUrl}/graphql`
@@ -285,7 +309,11 @@ export default class HyperBEAM {
       CHECKPOINT_GRAPHQL_URL: graphqlUrl,
     }
 
-    this.cuProc = spawn("node", ["--experimental-wasm-memory64", "-r", "dotenv/config", "src/app.js"], {
+    // Node 26 enables wasm-memory64 by default and rejects the experimental
+    // flag; older Node versions still need it. Detect from process.versions.
+    const nodeMajor = parseInt((process.versions.node || "0").split(".")[0], 10)
+    const memory64Flag = nodeMajor >= 24 ? [] : ["--experimental-wasm-memory64"]
+    this.cuProc = spawn("node", [...memory64Flag, "-r", "dotenv/config", "src/app.js"], {
       cwd: cuDir,
       env,
       detached: true,
@@ -341,6 +369,12 @@ export default class HyperBEAM {
     const asyncThreads = "+A 4"
     if (!_env.ERL_ZFLAGS) _env.ERL_ZFLAGS = asyncThreads
     else if (!_env.ERL_ZFLAGS.includes("+A")) _env.ERL_ZFLAGS += ` ${asyncThreads}`
+    // Skip the hb application's default-port HTTP server start (8734). We call
+    // hb_http_server:start_node/1 explicitly with the actual port via genEval,
+    // so the default binding is redundant; skipping it avoids eaddrinuse and
+    // the downstream case_clause crashes when multiple HyperBEAM instances
+    // run side-by-side (p4.test.js, p4-lua.test.js).
+    _env.WAO_NO_DEFAULT_HTTP_SERVER = "1"
     return _env
   }
 
@@ -360,14 +394,14 @@ export default class HyperBEAM {
       }
     }
     if (_devs.length > 0) {
-      _devices = `, preloaded_devices => [${_devs.join(", ")}]`
+      _devices = `, <<"preloaded-devices">> => [${_devs.join(", ")}]`
     }
-    const _wallet = `, priv_key_location => <<"${wallet}">>`
+    const _wallet = `, <<"priv-key-location">> => <<"${wallet}">>`
     // Use arweave_gateway (Cloudflare proxy) if set, otherwise local gateway port, otherwise default
     const _gateway = this.arweave_gateway
-      ? `, gateway => <<"${this.arweave_gateway}">>`
+      ? `, <<"gateway">> => <<"${this.arweave_gateway}">>`
       : gateway
-        ? `, gateway => <<"http://localhost:${gateway}">>`
+        ? `, <<"gateway">> => <<"http://localhost:${gateway}">>`
         : ""
 
     // Store config: use single hb_store_fs matching HyperBEAM eunit test pattern.
@@ -375,35 +409,35 @@ export default class HyperBEAM {
     // because list_numbered/resolve interactions across stores break symlink following.
     // The wao@1.0 device handles Arweave TX resolution independently via HTTP.
     const _store = this.store_prefix
-      ? `, store => #{ <<"store-module">> => hb_store_fs, <<"name">> => <<"${this.store_prefix}">> }`
+      ? `, <<"store">> => #{ <<"store-module">> => hb_store_fs, <<"name">> => <<"${this.store_prefix}">> }`
       : ""
     let _bundler = this.bundler
-      ? `, bundler_httpsig => <<"${this.bundler}">>`
+      ? `, <<"bundler-httpsig">> => <<"${this.bundler}">>`
       : ""
     // Only include bundler_ans104 if it's a truthy value (port number or URL)
     // When false or omitted, don't include it - Erlang code expects either no option or a valid URL
     let _bundler_ans104 = this.bundler_ans104 && this.bundler_ans104 !== false
-      ? `, bundler_ans104 => <<"http://localhost:${this.bundler_ans104}">>`
+      ? `, <<"bundler-ans104">> => <<"http://localhost:${this.bundler_ans104}">>`
       : ""
     /*
     const _routes = `, routes => [#{ <<"template">> => <<"/result/.*">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${this.cu}">> } }, #{ <<\"template\">> => <<\"/dry-run\">>, <<\"node\">> => #{ <<\"prefix\">> => <<\"http://localhost:${this.cu}\">> } }, #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [#{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => httpc, protocol => http2 } }, #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }] }, #{ <<"template">> => <<"/raw">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${gateway}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } } }]`
     */
     const _p4_non_chargable = this.p4_non_chargable
-      ? `, p4_non_chargable_routes => [${this.p4_non_chargable_routes
+      ? `, <<"p4-non-chargable-routes">> => [${this.p4_non_chargable_routes
           .map(() => `#{ <<"template">> => <<"/*~node-process@1.0/*">> }`)
           .join(", ")}]`
       : this.p4_lua
-        ? `, p4_non_chargable_routes => [#{ <<"template">> => <<"/*~node-process@1.0/*">> }, #{ <<"template">> => <<"/~wao@1.0/*">> }, #{ <<"template">> => <<"/~p4@1.0/balance">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }]`
+        ? `, <<"p4-non-chargable-routes">> => [#{ <<"template">> => <<"/*~node-process@1.0/*">> }, #{ <<"template">> => <<"/~wao@1.0/*">> }, #{ <<"template">> => <<"/~p4@1.0/balance">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }]`
         : !this.simple_pay
           ? ""
-          : `, p4_non_chargable_routes => [#{ <<"template">> => <<"/~simple-pay@1.0/topup">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }, #{ <<"template">> => <<"/~simple-pay@1.0/balance">> }]`
+          : `, <<"p4-non-chargable-routes">> => [#{ <<"template">> => <<"/~simple-pay@1.0/topup">> }, #{ <<"template">> => <<"/~meta@1.0/*">> }, #{ <<"template">> => <<"/~simple-pay@1.0/balance">> }]`
 
     const _operator = this.operator
-      ? `, operator => <<"${this.operator}">>`
+      ? `, <<"operator">> => <<"${this.operator}">>`
       : ""
-    const _spp = this.spp ? `, simple_pay_price => ${this.spp}` : ""
-    const _genesis_wasm_port = this.genesis_wasm ? `, genesis_wasm_port => ${this.cu_port}` : ""
-    const _force_signed = this.force_signed ? `, force_signed_requests => true, force_signed => true` : ""
+    const _spp = this.spp ? `, <<"simple-pay-price">> => ${this.spp}` : ""
+    const _genesis_wasm_port = this.genesis_wasm ? `, <<"genesis-wasm-port">> => ${this.cu_port}` : ""
+    const _force_signed = this.force_signed ? `, <<"force-signed-requests">> => true, <<"force-signed">> => true` : ""
 
     // Helper to format module(s) for Erlang - supports ID string, inline object, or array
     const formatModule = (mod) => {
@@ -427,30 +461,30 @@ export default class HyperBEAM {
     }
 
     const _node_processes = this.p4_lua
-      ? `, node_processes => #{ <<"ledger">> => #{ <<"device">> => <<"process@1.0">>, <<"execution-device">> => <<"lua@5.3a">>, <<"scheduler-device">> => <<"scheduler@1.0">>, <<"module">> => ${formatModule(this.p4_lua.processor)}, <<"operator">> => <<"${this.operator}">>${this.p4_lua.admin ? `, <<"admin">> => <<"${this.p4_lua.admin}">>` : ""}${this.p4_lua.balance ? `, <<"balance">> => #{ ${Object.entries(this.p4_lua.balance).map(([k, v]) => `<<"${k}">> => ${v}`).join(", ")} }` : ""} } }`
+      ? `, <<"node-processes">> => #{ <<"ledger">> => #{ <<"device">> => <<"process@1.0">>, <<"execution-device">> => <<"lua@5.3a">>, <<"scheduler-device">> => <<"scheduler@1.0">>, <<"module">> => ${formatModule(this.p4_lua.processor)}, <<"operator">> => <<"${this.operator}">>${this.p4_lua.admin ? `, <<"admin">> => <<"${this.p4_lua.admin}">>` : ""}${this.p4_lua.balance ? `, <<"balance">> => #{ ${Object.entries(this.p4_lua.balance).map(([k, v]) => `<<"${k}">> => ${v}`).join(", ")} }` : ""} } }`
       : ""
     const processor = this.p4_lua
       ? `#{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"simple-pay@1.0">>, <<"ledger-device">> => <<"lua@5.3a">>, <<"module">> => ${formatModule(this.p4_lua.client)}, <<"ledger-path">> => <<"/ledger~node-process@1.0">> }`
       : ""
-    const _port = `port => ${this.port}`
+    const _port = `<<"port">> => ${this.port}`
     const _faff = isNil(this.faff)
       ? ""
-      : `, faff_allow_list => [ ${map(addr => `<<"${addr}">>`)(this.faff).join(", ")} ]`
+      : `, <<"faff-allow-list">> => [ ${map(addr => `<<"${addr}">>`)(this.faff).join(", ")} ]`
 
     const _on = this.p4_lua
-      ? `, on => #{ <<"request">> => ${processor}, <<"response">> => ${processor} }`
+      ? `, <<"on">> => #{ <<"request">> => ${processor}, <<"response">> => ${processor} }`
       : this.simple_pay
-        ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"simple-pay@1.0">>, <<"ledger-device">> => <<"simple-pay@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"simple-pay@1.0">>, <<"ledger-device">> => <<"simple-pay@1.0">> } }`
+        ? `, <<"on">> => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"simple-pay@1.0">>, <<"ledger-device">> => <<"simple-pay@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"simple-pay@1.0">>, <<"ledger-device">> => <<"simple-pay@1.0">> } }`
         : !isNil(this.faff)
-          ? `, on => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
+          ? `, <<"on">> => #{ <<"request">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> }, <<"response">> => #{ <<"device">> => <<"p4@1.0">>, <<"pricing-device">> => <<"faff@1.0">>, <<"ledger-device">> => <<"faff@1.0">> } }`
           : ""
     // Add cache_writers to allow the wallet to write to cache (needed for WASM module uploads)
     // Use the wallet address (this.addr) which is always available from the wallet file
-    const _cache_writers = `, cache_writers => [<<"${this.addr}">>]`
+    const _cache_writers = `, <<"cache-writers">> => [<<"${this.addr}">>]`
 
     // Use gun HTTP client for relay calls instead of httpc
     // gun doesn't use system proxy settings, avoiding the proxy issue with localhost CU
-    const _relay_http_client = `, relay_http_client => gun, http_client => gun`
+    const _relay_http_client = `, <<"relay-http-client">> => gun, <<"http-client">> => gun`
 
     // Custom routes using Cloudflare proxy instead of arweave.net
     // Also add CU routes for genesis_wasm when enabled
@@ -460,7 +494,7 @@ export default class HyperBEAM {
           #{ <<"template">> => <<"/dry-run">>, <<"node">> => #{ <<"prefix">> => <<"http://localhost:${this.cu_port}">> } },`
       : ""
     const _routes = this.arweave_gateway || this.genesis_wasm
-      ? `, routes => [
+      ? `, <<"routes">> => [
           ${cuRoutes}
           #{ <<"template">> => <<"/graphql">>, <<"nodes">> => [
               #{ <<"prefix">> => <<"${this.arweave_gateway || 'https://arweave.net'}">>, <<"opts">> => #{ http_client => gun, protocol => http2 } }
@@ -487,7 +521,7 @@ export default class HyperBEAM {
 
     // Pre-register device name atoms so hb_util:atom/1 (which uses list_to_existing_atom)
     // doesn't crash with badarg when resolving device names from HTTP headers/binaries
-    const preRegisterAtoms = `lists:foreach(fun list_to_atom/1, ["wao@1.0", "hbsig@1.0", "stack@1.0", "patch@1.0", "inc@1.0", "double@1.0", "add@1.0", "mul@1.0", "inc2@1.0", "square@1.0", "mydev@1.0", "lua@5.3a", "process@1.0", "scheduler@1.0", "message@1.0", "meta@1.0", "cache@1.0", "json@1.0", "structured@1.0", "httpsig@1.0", "flat@1.0", "genesis-wasm@1.0", "compute@1.0", "delegated-compute@1.0", "relay@1.0", "router@1.0", "cron@1.0", "node-process@1.0", "p4@1.0", "simple-pay@1.0", "faff@1.0", "ans104@1.0", "test-device@1.0", "lookup@1.0", "local-name@1.0", "upload@1.0", "hook@1.0", "auth-hook@1.0", "http-auth@1.0", "greenzone@1.0", "apply@1.0", "dedup@1.0", "cookie@1.0", "push@1.0", "query@1.0", "manifest@1.0", "name@1.0", "profile@1.0", "monitor@1.0", "multipass@1.0", "poda@1.0", "snp@1.0", "trie@1.0", "volume@1.0", "secret@1.0", "wasi@1.0", "wasm-64@1.0", "whois@1.0", "cacheviz@1.0", "hyperbuddy@1.0", "copycat@1.0", "json-iface@1.0", "arweave@2.9-pre"]), `
+    const preRegisterAtoms = `lists:foreach(fun list_to_atom/1, ["wao@1.0", "hbsig@1.0", "stack@1.0", "patch@1.0", "inc@1.0", "double@1.0", "add@1.0", "mul@1.0", "inc2@1.0", "square@1.0", "mydev@1.0", "lua@5.3a", "process@1.0", "scheduler@1.0", "message@1.0", "meta@1.0", "cache@1.0", "json@1.0", "structured@1.0", "httpsig@1.0", "flat@1.0", "genesis-wasm@1.0", "compute@1.0", "delegated-compute@1.0", "relay@1.0", "router@1.0", "cron@1.0", "node-process@1.0", "p4@1.0", "simple-pay@1.0", "faff@1.0", "ans104@1.0", "test-device@1.0", "lookup@1.0", "local-name@1.0", "upload@1.0", "hook@1.0", "auth-hook@1.0", "http-auth@1.0", "greenzone@1.0", "apply@1.0", "dedup@1.0", "cookie@1.0", "push@1.0", "query@1.0", "manifest@1.0", "name@1.0", "profile@1.0", "monitor@1.0", "multipass@1.0", "poda@1.0", "snp@1.0", "trie@1.0", "volume@1.0", "secret@1.0", "wasi@1.0", "wasm-64@1.0", "whois@1.0", "cacheviz@1.0", "hyperbuddy@1.0", "copycat@1.0", "json-iface@1.0", "arweave@2.9", "b32-name@1.0", "blacklist@1.0", "bundler@1.0", "gzip@1.0", "location@1.0", "metering@1.0", "rate-limit@1.0", "tx@1.0"]), `
 
     // Pre-create prometheus ETS tables owned by the shell process.
     // dev_hbsig on_load also does this, but the module loads lazily so this
@@ -506,13 +540,13 @@ export default class HyperBEAM {
     // This affects both node_processes definitions (which include 'authority' via
     // augment_definition) and push device re-scheduling (which signs outbox messages
     // with httpsig). Disable verification until upstream fixes the codec.
-    const _verify_assignments = (this.p4_lua || this.genesis_wasm) ? `, verify_assignments => false` : ""
+    const _verify_assignments = (this.p4_lua || this.genesis_wasm) ? `, <<"verify-assignments">> => false` : ""
 
     // Use hb_http_server:start_node directly instead of hb:start_mainnet.
     // start_mainnet always overwrites the store config with a single hb_store_fs,
     // which prevents hb_store_gateway from resolving Arweave TX IDs.
     // start_node preserves user-provided store via set_default_opts.
-    const _priv_wallet = `, priv_wallet => hb:wallet(<<"${wallet}">>)`
+    const _priv_wallet = `, <<"priv-wallet">> => hb:wallet(<<"${wallet}">>)`
     // cache_control => <<"always">> ensures compute results/snapshots are cached.
     // process_snapshot_slots => 1 takes a snapshot every slot (not just every 60s).
     // process_async_cache => false writes snapshots synchronously before returning
@@ -521,9 +555,13 @@ export default class HyperBEAM {
     // Without these, hb_cache:write strips uncommitted keys (like device-stack)
     // from the cached process state, and subsequent computes fail with
     // {error, no_valid_device_stack} when loading from the corrupted cache.
-    const _cache_control = `, cache_control => <<"always">>, process_snapshot_slots => 1, process_async_cache => false`
+    const _cache_control = `, <<"cache-control">> => <<"always">>, <<"process-snapshot-slots">> => 1, <<"process-async-cache">> => false`
 
-    const start = `${clearProxy}${initPrometheus}${preRegisterAtoms}${loadHbsig}${ensureInit}hb_http_server:start_node(#{ ${_port}${_gateway}${_priv_wallet}${_faff}${_bundler}${_bundler_ans104}${_on}${_p4_non_chargable}${_operator}${_spp}${_genesis_wasm_port}${_force_signed}${_devices}${_node_processes}${_cache_writers}${_relay_http_client}${_routes}${_store}${_verify_assignments}${_cache_control}, prometheus => false, linkify_mode => false}).`
+    const _linkify =
+      this.linkify_mode === undefined
+        ? ""
+        : `, <<"linkify-mode">> => ${this.linkify_mode === false ? "false" : (this.linkify_mode === true ? "true" : this.linkify_mode)}`
+    const start = `${clearProxy}${initPrometheus}${preRegisterAtoms}${loadHbsig}${ensureInit}hb_http_server:start_node(#{ ${_port}${_gateway}${_priv_wallet}${_faff}${_bundler}${_bundler_ans104}${_on}${_p4_non_chargable}${_operator}${_spp}${_genesis_wasm_port}${_force_signed}${_devices}${_node_processes}${_cache_writers}${_relay_http_client}${_routes}${_store}${_verify_assignments}${_cache_control}, <<"prometheus">> => false${_linkify}}).`
 
     return start
   }

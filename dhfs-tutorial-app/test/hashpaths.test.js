@@ -28,10 +28,14 @@ describe("Hashpaths", function () {
 
   it("should extract hashpath", async () => {
     const { out } = await hb.post({ path: "/~mydev@1.0/forward" })
-    const { msg1, msg2 } = JSON.parse(out)
-    // Verify ids can be computed from the message parts
-    const id1 = id(msg1)
-    const id2 = id(msg2)
+    // v0.9-FINAL linkifies large nested objects in JSON responses — the
+    // body shape is `{ "msg1+link": ID, "msg2+link": ID, "opts+link": ID }`
+    // instead of inline message objects. The link value IS the message ID
+    // (a hash-path resolvable via /<id>), so we can verify the response is
+    // well-formed by checking we have valid ID strings.
+    const parsed = JSON.parse(out)
+    const id1 = parsed["msg1+link"] ?? (parsed.msg1 && id(parsed.msg1))
+    const id2 = parsed["msg2+link"] ?? (parsed.msg2 && id(parsed.msg2))
     console.log("msg1 id:", id1)
     console.log("msg2 id:", id2)
     assert.ok(id1, "msg1 should have a computable id")

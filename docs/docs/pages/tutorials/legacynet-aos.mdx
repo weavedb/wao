@@ -32,6 +32,7 @@ describe("Hyperbeam Legacynet", function () {
     hbeam = await new HyperBEAM({
       cwd,
       reset: true,
+      genesis_wasm: true,
       as: ["genesis_wasm"],
     }).ready()
   })

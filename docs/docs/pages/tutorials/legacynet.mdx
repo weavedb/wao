@@ -32,8 +32,8 @@ Add `test` and `test-only` commands to your `package.json`.
 ```json
 {
   "scripts": {
-    "test": "node --experimental-wasm-memory64",
-    "test-only": "node --experimental-wasm-memory64 --test-only"
+    "test": "node --test --test-concurrency=1",
+    "test-only": "node --test --test-only --test-concurrency=1"
   }
 }
 ```
@@ -439,7 +439,7 @@ Once your process works in the in-memory emulator, you can deploy it to HyperBEA
 Run a local HyperBEAM node with `genesis-wasm@1.0` for full legacynet compatibility:
 
 ```bash
-git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git
+git clone -b wao-final https://github.com/weavedb/HyperBEAM.git
 cd HyperBEAM && rebar3 compile
 ```
 

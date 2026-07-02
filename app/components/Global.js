@@ -198,14 +198,19 @@ export default function Global({}) {
 
   useEffect(() => {
     ;(async () => {
-      try {
-        g.ao = await new AO({ variant: cache, cache, hb_url, log: false }).init(
-          acc[0]
-        )
-      } catch (e) {
-        g.ao = await new AO({ variant: cache, cache, log: false }).init(acc[0])
-      }
+      // wao 0.41.x: in-memory mode is the app's primary runtime — the IDE's
+      // sidebar/middle panels read from `ao.mem.{env,msgs,txs,modules,wasms,
+      // blockmap}` and the Adaptor proxy/FS modal exposes that state to a
+      // separately-connected HyperBEAM via WebSocket. `hb_url` is consumed by
+      // ProxyModal/FSModal/LeftNetworks when the user wires up a connection.
+      g.ao = await new AO({ variant: cache }).init(acc[0])
       await g.ao.mem.init()
+      // Expose `g` on window in dev so Playwright E2E tests can probe state
+      // (AO instance, mem, processes, modules). Stripped automatically from
+      // production bundles because process.env.NODE_ENV folds to "production".
+      if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+        window.g = g
+      }
       g.listModules()
       g.listProcesses()
       g.listMessages()

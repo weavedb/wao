@@ -48,3 +48,21 @@ const ao2 = new AO({ mem: ao.mem })
 ```
 
 This will connect the two.
+
+## State Inspection
+
+The `ArMem` instance exposes the in-memory state as plain object maps. These are read-only from a consumer's perspective and useful for introspecting what's been deployed/messaged during a test.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mem.env` | `{ [pid: string]: ProcessState }` | All spawned processes by pid. Each entry carries the AOS module handle, memory snapshot, message results history, etc. |
+| `mem.msgs` | `{ [mid: string]: MessageRecord }` | All scheduled messages by message id, with the compute result and the original signed message item. |
+| `mem.txs` | `{ [txid: string]: TxRecord }` | All Arweave transactions: module wasm uploads, process spawns, messages, data items. Each has `id`, `block`, `owner`, `tags`. |
+| `mem.modules` | `{ [name: string]: txid }` | Map of named module wasm IDs (e.g. `"aos2_0_4_32"` → its tx id). |
+| `mem.wasms` | `{ [txid: string]: { file, format, variant? } }` | Reverse map: wasm tx id → file name + module format. |
+| `mem.blockmap` | `{ [height: number]: BlockRecord }` | Block records by height. |
+| `mem.addrmap` | `{ [scheduler: string]: { address } }` | Scheduler-address aliases. |
+| `mem.modmap` | `{ [txid: string]: name }` | Reverse of `mem.modules`. |
+| `mem.height` | `number` | Current Arweave block height counter (advances per write). |
+
+`mem.init()` (auto-called when AO is constructed in-memory) seeds the default modules + scheduler so a freshly-instantiated AO has functioning module / scheduler txs.

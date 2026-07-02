@@ -19,7 +19,7 @@ mkdir myapp && cd myapp && yarn init && yarn add wao hbsig
 mkdir test && touch test/hyperbeam.js
 ```
 
-Edit `package.json` to enable ESM and test commands with the `--experimental-wasm-memory64` flag and disable concurrency so the test won't try running multiple HyperBEAM nodes:
+Edit `package.json` to enable ESM and test commands, and disable concurrency so the test won't try running multiple HyperBEAM nodes. On Node 24+ wasm-memory64 is default-on; on Node 22 set `NODE_OPTIONS=--experimental-wasm-memory64` before running:
 
 ```json [/package.json]
 {
@@ -27,13 +27,13 @@ Edit `package.json` to enable ESM and test commands with the `--experimental-was
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
-    "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
-    "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js"
+    "test": "node --test --test-concurrency=1",
+    "test-only": "node --test-only --test-concurrency=1",
+    "test-all": "node --test --test-concurrency=1 test/**/*.test.js"
   },
   "dependencies": {
 	"hbsig": "^0.3.0",
-    "wao": "^0.40.0"
+    "wao": "^0.41.0"
   }
 }
 ```

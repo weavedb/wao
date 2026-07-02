@@ -9,7 +9,7 @@ const testJwk = acc[0].jwk
 describe("WAO Device Tests", function () {
   let hb, hbeam
   before(async () => {
-    hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true }).ready()
+    hbeam = await new HyperBEAM({ reset: true, genesis_wasm: true, linkify_mode: false }).ready()
   })
   beforeEach(async () => (hb = await new HB({ url: hbeam.url }).init(testJwk)))
   after(async () => {

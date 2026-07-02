@@ -210,5 +210,5 @@ Never force a task to `done` status with failing tests. The TaskCompleted hook w
 - Verify task statuses — a task stuck as `in_progress` blocks progression
 
 ### Permission denied on yarn test
-- Check `node --version` is 20+
-- Verify `--experimental-wasm-memory64` flag is present in package.json
+- Check `node --version` is 22+ (24+ recommended)
+- On Node 22, set `NODE_OPTIONS=--experimental-wasm-memory64`; on Node 24+ the flag is default-on and is rejected if passed explicitly

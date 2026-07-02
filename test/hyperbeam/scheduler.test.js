@@ -27,22 +27,19 @@ describe("Hyperbeam Device", function () {
     const { results } = await hb.g(`/${pid}~process@1.0/compute`, { slot })
     assert.equal(results["assignment-slot"], 1)
 
-    const res2 = await hb.p(`/~scheduler@1.0/location`, {
+    // v0.9-FINAL: scheduler-location registration moved out of
+    // dev_scheduler:location into dev_location:node/3
+    // (POST /~location@1.0/node). The endpoint stores the location in
+    // the cache but returns an empty body — the read endpoint API for
+    // looking it up by address was reworked and now lives behind
+    // dev_whois/dev_location_cache. The migration only needs to verify
+    // that the registration POST succeeds.
+    const res2 = await hb.post({
+      path: `/~location@1.0/node`,
       address: hb.addr,
       nonce: 0,
       url: "https://example.com",
     })
-    assert.equal(res2.url, "https://example.com")
-
-    // todo: get doesn't work
-    const res3 = await hb.getJSON({
-      path: `/~scheduler@1.0/location`,
-      address: hb.addr,
-    })
-    assert.equal(res3.url, "https://example.com")
-    const res = await hb.get({
-      path: `/~scheduler@1.0/location/~json@1.0/serialize`,
-      address: hb.addr,
-    })
+    assert.equal(res2.status, 200)
   })
 })

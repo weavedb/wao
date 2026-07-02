@@ -33,10 +33,11 @@ end)`
 describe("Processes and Scheduler", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ 
-	  reset: true, 
-	  as: ["genesis_wasm"]
-	}).ready()
+    hbeam = await new HyperBEAM({
+      reset: true,
+      genesis_wasm: true,
+      as: ["genesis_wasm"],
+    }).ready()
 	hb = hbeam.hb
   })
   after(async () => hbeam.kill())

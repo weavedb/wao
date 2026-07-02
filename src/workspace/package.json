@@ -3,16 +3,16 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1",
-    "test-only": "node --experimental-wasm-memory64 --test-only --test-concurrency=1",
-    "test-all": "node --experimental-wasm-memory64 --test --test-concurrency=1 test/**/*.test.js",
+    "test": "node --test --test-concurrency=1",
+    "test-only": "node --test-only --test-concurrency=1",
+    "test-all": "node --test --test-concurrency=1 test/**/*.test.js",
     "start": "trap 'kill $(jobs -p)' EXIT; node dashboard/server.js & cd dashboard && npx vite",
     "start:api": "node dashboard/server.js",
     "keygen": "node scripts/keygen.js",
     "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
-    "hbsig": "0.3.0",
-    "wao": "0.40.2"
+    "hbsig": "0.3.1",
+    "wao": "0.41.3"
   }
 }

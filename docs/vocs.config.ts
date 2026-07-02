@@ -422,6 +422,10 @@ export default defineConfig({
           text: "HBSig",
           link: "/api/hbsig",
         },
+        {
+          text: "Adaptor",
+          link: "/api/adaptor",
+        },
       ],
     },
     {

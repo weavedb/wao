@@ -348,7 +348,7 @@ const result = await hb.computeLegacy({ pid, slot })
 **Limitations:**
 - External CU is single-pass — **`Send().receive()` does NOT work**
 - Auto-starts CU server at port 6363
-- Requires `--experimental-wasm-memory64` Node.js flag
+- Requires wasm-memory64 (Node 24+ default; Node 22 needs `--experimental-wasm-memory64`)
 
 Functions: `init/3`, `compute/3`, `snapshot/3`, `import/3`
 
@@ -537,6 +537,55 @@ General query interface for data retrieval.
 ### dev_query_arweave — Arweave GraphQL
 
 Query Arweave via GraphQL from within HyperBEAM.
+
+---
+
+## v0.9-FINAL Devices (new since beta3)
+
+### location@1.0 — Scheduler-Location Registry
+
+Replaces the old `/~scheduler@1.0/location` endpoint. Stores per-address scheduler-location records (with DNS/IP resolution and a TTL) in a node-local cache, with fallback to the Arweave gateway.
+
+- `POST /~location@1.0/node` — operator generates and registers a record (signed)
+- `POST /~location@1.0/known` — cache a peer's record if newer than the local one
+- Read via `dev_whois` / `dev_location_cache`
+
+### metering@1.0 — Dynamic P4 Pricing
+
+A P4 pricing device that records resource usage per request/response lifecycle.
+
+- `estimate/3` opens a process-local session
+- `consume/3` increments usage during the session
+- `price/3` closes the session and returns the integer charge
+- Operator sets `metering-rates` in node message (resource → AO units per resource unit)
+
+### blacklist@1.0 — Content Moderation by Blacklist
+
+A request hook for filtering. Operator configures `blacklist-providers` (list) in node message; each provider returns a moderation set.
+
+### bundler@1.0 — ANS-104 Bundler Integration
+
+Outbound bundler for posting ANS-104 transactions to upstream Arweave bundlers (e.g. `up.arweave.net`).
+
+### gzip@1.0 — gzip Codec
+
+Compress/decompress message bodies via gzip during processing.
+
+### rate-limit@1.0 — Per-Address Rate Limiting
+
+Operator-configurable per-address rate limits applied as a request hook.
+
+### tx@1.0 — Arweave TX Helpers
+
+Helpers for fetching and validating Arweave transactions inline.
+
+### b32-name@1.0 — Base-32 Name Encoding
+
+Helpers for base-32 name encoding/decoding used by other devices.
+
+### arweave@2.9 — Arweave Block + GraphQL Integration
+
+Renamed in v0.9-FINAL (was `arweave@2.9-pre`). Provides Arweave block cache, offset helpers, and common Arweave protocol primitives.
 
 ---
 

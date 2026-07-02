@@ -17,6 +17,83 @@ import aos_wamr from "./aos_wamr.js"
 import { ArweaveSigner } from "@ar.io/sdk"
 import { createData } from "@dha-team/arbundles"
 
+// Convert objects whose keys are sequential numeric strings (e.g.
+// `{1: "a", 2: "b"}`) into arrays. v0.9-FINAL's multipart re-encoder treats
+// numbered TABMs as lists; JS hbsig only emits `.="list"` in ao-types when
+// the value is an Array, so without this conversion the content-digest of
+// the request body diverges from HB's recomputation and rsa-pss verification
+// fails with `process_not_verified`.
+const normalizeNumberedObjects = v => {
+  if (v === null || v === undefined) return v
+  if (Array.isArray(v)) return v.map(normalizeNumberedObjects)
+  if (Buffer.isBuffer(v) || v instanceof Blob) return v
+  if (typeof v !== "object") return v
+  const keys = Object.keys(v)
+  if (
+    keys.length > 0 &&
+    keys.every(k => /^[1-9][0-9]*$/.test(k)) &&
+    keys
+      .map(k => parseInt(k, 10))
+      .sort((a, b) => a - b)
+      .every((n, i) => n === i + 1)
+  ) {
+    return keys
+      .map(k => parseInt(k, 10))
+      .sort((a, b) => a - b)
+      .map(i => normalizeNumberedObjects(v[String(i)]))
+  }
+  const out = {}
+  for (const [k, val] of Object.entries(v)) out[k] = normalizeNumberedObjects(val)
+  return out
+}
+
+// v0.9-FINAL returns Messages with lowercase fields (data, target, anchor, from)
+// where legacy AOS-format consumers expect capitalised (Data, Target, Anchor,
+// From). Also lower-cases tag {name, value} pairs and may emit them as a
+// numbered-key map under "tags" rather than an array under "Tags". Normalise
+// so existing callers that read `Messages[0].Data` keep working.
+const _normalizeLegacyResult = res => {
+  if (!res || typeof res !== "object") return res
+  const _msgs = res.Messages ?? res.messages
+  if (!Array.isArray(_msgs)) return res
+  const _tagsArray = t => {
+    if (!t) return []
+    if (Array.isArray(t)) {
+      return t.map(x => ({
+        name: x?.name ?? x?.Name,
+        value: x?.value ?? x?.Value,
+      })).filter(x => x.name != null)
+    }
+    if (typeof t === "object") {
+      return Object.keys(t)
+        .filter(k => /^\d+$/.test(k))
+        .sort((a, b) => Number(a) - Number(b))
+        .map(k => {
+          const x = t[k]
+          return {
+            name: x?.name ?? x?.Name,
+            value: x?.value ?? x?.Value,
+          }
+        })
+        .filter(x => x.name != null)
+    }
+    return []
+  }
+  const Messages = _msgs.map(m => {
+    if (!m || typeof m !== "object") return m
+    const tags = _tagsArray(m.Tags ?? m.tags)
+    return {
+      ...m,
+      Data: m.Data ?? m.data,
+      Target: m.Target ?? m.target,
+      Anchor: m.Anchor ?? m.anchor,
+      From: m.From ?? m.from,
+      Tags: tags,
+    }
+  })
+  return { ...res, Messages }
+}
+
 const toMsg = async req => {
   let msg = {}
   req?.headers?.forEach((v, k) => {
@@ -251,24 +328,17 @@ class HB {
   async computeLegacy({ pid, slot }) {
     // Match master: compute and parse results.json.body
     const json = await this.compute({ pid, slot })
+    let parsed = json
     if (json?.results?.json?.body) {
-      return JSON.parse(json.results.json.body)
-    }
-    // Fallback: try compute/results/json/body structure
-    if (json?.["compute/results/json"]?.body) {
-      return JSON.parse(json["compute/results/json"].body)
-    }
-    // Remote nodes return results.raw with CU format directly
-    if (json?.results?.raw) {
+      parsed = JSON.parse(json.results.json.body)
+    } else if (json?.["compute/results/json"]?.body) {
+      parsed = JSON.parse(json["compute/results/json"].body)
+    } else if (json?.results?.raw) {
       const raw = typeof json.results.raw === "string"
         ? JSON.parse(json.results.raw) : json.results.raw
-      if (raw?.Messages || raw?.Output) return raw
+      if (raw?.Messages || raw?.Output) parsed = raw
     }
-    // Another fallback: check if it's the raw CU format
-    if (json?.Messages || json?.Output) {
-      return json
-    }
-    return json
+    return _normalizeLegacyResult(parsed)
   }
 
   async cacheScript(data, type = "application/lua") {
@@ -448,6 +518,13 @@ class HB {
   }
   async spawn(tags = {}) {
     await this.setInfo()
+    // v0.9-FINAL multipart re-encoding sees a numbered-key object as a list
+    // (TABM with .="list" in ao-types). JS hbsig's structured codec encodes
+    // a plain numeric-keyed object without that marker, so HB's recomputed
+    // content-digest doesn't match what JS signed and verify fails. Pre-
+    // normalize any numbered-key object value into an array so the array
+    // path (which already emits .="list") is used.
+    tags = normalizeNumberedObjects(tags)
     let res = null
     if (this.format === "ans104") {
       res = await this.post104({
@@ -462,7 +539,7 @@ class HB {
       })
       return { res, pid: res.out.process }
     } else {
-      // Use httpsig-signed multipart POST (beta3-compatible approach)
+      // Use httpsig-signed multipart POST
       const spawnTags = mergeLeft(tags, {
         "random-seed": seed(16),
         type: "Process",
@@ -742,7 +819,7 @@ class HB {
         i++
       }
     }
-    // Add accept-bundle header to get inline data instead of links (beta3 compatibility)
+    // Add accept-bundle header to get inline data instead of links
     const url = `${this.url}${path}${_json}${_params}`
     let response
     for (let attempt = 0; attempt < 3; attempt++) {

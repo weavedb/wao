@@ -3,6 +3,8 @@ _build/
 arguments.js
 .db/
 .wallet.json
+plan.md
+.claude/settings.local.json
 # Logs
 logs
 *.log

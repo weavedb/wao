@@ -4,7 +4,7 @@ Build a custom Lua execution module and deploy it to HyperBEAM's `lua@5.3a` devi
 
 ## Prerequisites
 
-- WAO HyperBEAM fork (`git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git`)
+- WAO HyperBEAM fork (`git clone -b wao-final https://github.com/weavedb/HyperBEAM.git`)
 - Node.js 22+
 
 ## How It Works
@@ -199,7 +199,7 @@ describe("Custom Lua on Local HB", function () {
 Run with:
 
 ```bash
-node --experimental-wasm-memory64 --test test/custom-lua.test.js
+node --test test/custom-lua.test.js
 ```
 
 ## Deploy to Arweave

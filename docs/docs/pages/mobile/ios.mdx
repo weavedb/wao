@@ -147,7 +147,7 @@ curl -sL https://hb-mobile.vercel.app/compile.sh | bash
 ```
 
 ```sh [Beta-3]
-curl -sL https://hb-mobile.vercel.app/compile.sh | HB_VERSION=v0.9-milestone-3-beta-3 bash
+curl -sL https://hb-mobile.vercel.app/compile.sh | HB_VERSION=v0.9-FINAL bash
 ```
 
 :::
@@ -186,7 +186,7 @@ cd /tmp && wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3 && mv 
 
 # Clone HyperBEAM
 cd ~ && rm -rf HyperBEAM && git clone https://github.com/permaweb/HyperBEAM.git && cd HyperBEAM
-git checkout v0.9-milestone-3-beta-1
+git checkout v0.9-FINAL
 
 # Apply ARM64 patches
 sed -i 's/WAMR_BUILD_TARGET = X86_64/WAMR_BUILD_TARGET = AARCH64/g' Makefile

@@ -99,7 +99,15 @@ class AO {
     if (_hb) {
       this.format = _hb === "ans104" ? _hb : "httpsig"
       const _hbOpt = { format: this.format }
-      if (typeof _hb === "string" && _hb !== "ans104") _hbOpt.url = _hb
+      // `hb` can be "ans104" / "httpsig" (format selector with default URL),
+      // or an actual URL string. Only treat it as a URL when it looks like one.
+      if (
+        typeof _hb === "string" &&
+        _hb !== "ans104" &&
+        _hb !== "httpsig" &&
+        /^(https?:\/\/|\/\/|[a-zA-Z0-9_.-]+:\d+)/.test(_hb)
+      )
+        _hbOpt.url = _hb
       this.hb = new HB(_hbOpt)
       this.mode = mode ?? "legacy"
     }
@@ -679,8 +687,19 @@ class AO {
           mid = (await this.hb.scheduleLegacy(schedArgs)).slot
           try {
             res = await this.hb.computeLegacy({ pid, slot: mid })
+            // v0.9-FINAL's push device can enter long-running recursive loops
+            // for cross-process Send().receive() coroutines. Race the push
+            // call against a 20s timeout so msg() can return rather than
+            // wait forever; the now/results probe below still has a chance
+            // to pick up a partial reply.
+            const _pushTimeoutMs = 20000
             try {
-              await this.hb.get({ path: `/${pid}/push`, slot: mid })
+              await Promise.race([
+                this.hb.get({ path: `/${pid}/push`, slot: mid }),
+                new Promise((_r, rej) =>
+                  setTimeout(() => rej(new Error("push timeout")), _pushTimeoutMs)
+                ),
+              ])
             } catch (_e2) {}
             // Push updates now/ to its recursive resolution result, which may
             // include errors from other processes (cross-process trust errors).

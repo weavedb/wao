@@ -5,7 +5,9 @@ import { HyperBEAM } from "wao/test"
 describe("Httpsig Codec", function () {
   let hbeam, hb
   before(async () => {
-    hbeam = await new HyperBEAM({ reset: true }).ready()
+    // v0.9-FINAL linkifies nested objects in responses; the round-trip
+    // pipeline test needs inline values to compare against the input.
+    hbeam = await new HyperBEAM({ reset: true, linkify_mode: false }).ready()
     hb = hbeam.hb
   })
   after(async () => hbeam.kill())

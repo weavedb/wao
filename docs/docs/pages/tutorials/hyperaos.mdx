@@ -13,7 +13,7 @@ yarn add wao
 You will also need the WAO HyperBEAM fork:
 
 ```bash
-git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git
+git clone -b wao-final https://github.com/weavedb/HyperBEAM.git
 cd HyperBEAM && rebar3 compile
 ```
 
@@ -36,7 +36,7 @@ Make sure your `package.json` has the right test config:
 {
   "type": "module",
   "scripts": {
-    "test": "node --experimental-wasm-memory64 --test --test-concurrency=1"
+    "test": "node --test --test-concurrency=1"
   }
 }
 ```

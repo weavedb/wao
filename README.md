@@ -79,7 +79,7 @@ A lightweight edge implementation of the full AO network (AR, SU, MU, CU, BD) on
 
 ### Reference
 - [WAO SDK API →](https://docs.wao.eco/api/overview)
-- [HyperBEAM API (139 modules) →](https://docs.wao.eco/hyperbeam)
+- [HyperBEAM API →](https://docs.wao.eco/hyperbeam) — core module reference
 
 ---
 

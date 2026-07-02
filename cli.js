@@ -23,10 +23,12 @@ pm2.connect(false, err => {
     process.exit(2)
   }
 
+  const _nodeMajor = parseInt((process.versions.node || "0").split(".")[0], 10)
+  const _wasm64Flag = _nodeMajor >= 24 ? "" : "--experimental-wasm-memory64"
   pm2.start(
     {
       script: "./cjs/run.js",
-      nodeArgs: "--experimental-wasm-memory64",
+      nodeArgs: _wasm64Flag,
       instances: 1,
       force: true,
       args: args,

@@ -14,7 +14,7 @@ describe("Hyperbeam Device", function () {
 
   after(async () => {
     hbeam.kill()
-    server.end()
+    await server.end()
   })
 
   it("should test relay@1.0", async () => {

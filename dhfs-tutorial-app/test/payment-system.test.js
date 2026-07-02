@@ -35,12 +35,12 @@ describe("Payment System faff@1.0", function () {
     await assert.rejects(disallowed_user.hb.p(...msg))
 
     const info = await operator.hb.g("/~meta@1.0/info")
-    assert.deepEqual(info.faff_allow_list, [operator.addr, allowed_user.addr])
+    assert.deepEqual(info["faff-allow-list"], [operator.addr, allowed_user.addr])
 
     // remove allowed_user
-    await operator.hb.p("/~meta@1.0/info", { faff_allow_list: [operator.addr] })
+    await operator.hb.p("/~meta@1.0/info", { "faff-allow-list": [operator.addr] })
     const info2 = await operator.hb.g("/~meta@1.0/info")
-    assert.deepEqual(info2.faff_allow_list, [operator.addr])
+    assert.deepEqual(info2["faff-allow-list"], [operator.addr])
 
     // now previously allowed_user fails too
     await assert.rejects(allowed_user.hb.p(...msg))
@@ -80,13 +80,13 @@ describe("Payment System simple-pay@1.0", function () {
     assert.equal(await user.hb.p(balance), "9")
 
     const info1 = await operator.hb.g("/~meta@1.0/info")
-    assert.equal(info1.simple_pay_price, 2)
+    assert.equal(info1["simple-pay-price"], 2)
 
-    // change simple_pay_price
-    assert(await operator.hb.p("/~meta@1.0/info", { simple_pay_price: 3 }))
+    // change simple-pay-price (v0.9-FINAL: binary key with hyphen)
+    assert(await operator.hb.p("/~meta@1.0/info", { "simple-pay-price": 3 }))
 
     const info2 = await operator.hb.g("/~meta@1.0/info")
-    assert.equal(info2.simple_pay_price, 3)
+    assert.equal(info2["simple-pay-price"], 3)
 
     assert(await user.hb.p(...msg)) // cost = 3 * 3 = 9
     assert.equal(await user.hb.p(balance), "0")

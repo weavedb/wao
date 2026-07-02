@@ -5,7 +5,7 @@ Build a custom WASM64 execution module in Rust and deploy it to HyperBEAM's `was
 ## Prerequisites
 
 - [Rust nightly](https://rustup.rs/) with `wasm64-unknown-unknown` target
-- WAO HyperBEAM fork (`git clone -b wao-beta3 https://github.com/weavedb/HyperBEAM.git`)
+- WAO HyperBEAM fork (`git clone -b wao-final https://github.com/weavedb/HyperBEAM.git`)
 - Node.js 22+
 
 Install the nightly toolchain:
@@ -324,7 +324,7 @@ describe("Custom WASM64 on Local HB", function () {
 Run with:
 
 ```bash
-node --experimental-wasm-memory64 --test test/custom-wasm.test.js
+node --test test/custom-wasm.test.js
 ```
 
 ## Deploy to Arweave

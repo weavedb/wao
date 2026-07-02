@@ -28,7 +28,11 @@ class Adaptor {
     this.network = network
     this.data = {}
     this._dataTimestamps = {}
-    // Clean up abandoned chunk uploads every 60 seconds
+    // Clean up abandoned chunk uploads every 60 seconds.
+    // unref() so this interval doesn't keep the Node event loop alive after
+    // the host server closes — without it, test processes that use Server
+    // (e.g. test/hyperbeam/relay.test.js) hang indefinitely waiting on this
+    // timer even after every other handle is cleaned up.
     this._chunkCleanupInterval = setInterval(() => {
       const now = Date.now()
       for (const key of Object.keys(this._dataTimestamps)) {
@@ -38,6 +42,9 @@ class Adaptor {
         }
       }
     }, 60 * 1000)
+    if (typeof this._chunkCleanupInterval?.unref === "function") {
+      this._chunkCleanupInterval.unref()
+    }
     let hb = null
     if (hb_url) hb = new HB({ url: hb_url })
     const {
@@ -455,7 +462,11 @@ class Adaptor {
     if (valid || true) item = new DataItem(body)
     await item.setSignature(item.rawSignature)
     const _tags = tags(item.tags)
-    if (_tags.Variant && _tags.Variant !== this.network) {
+    // Allow both ao.TN.1 (legacy testnet) and ao.DN.1 (WAO Devnet) variants
+    // through the local emulator. The variant is informational here; the
+    // local emulator doesn't actually need to enforce a strict network.
+    const _allowedNetworks = new Set([this.network, "ao.TN.1", "ao.DN.1"])
+    if (_tags.Variant && !_allowedNetworks.has(_tags.Variant)) {
       return { status: 400, json: { error: `Variant mismatch: expected ${this.network}, got ${_tags.Variant}` } }
     }
     let err = null

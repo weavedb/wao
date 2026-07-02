@@ -13,22 +13,23 @@ import { describe, it, before, after } from "node:test"
 describe("HyperBEAM", function () {
   let hbeam
   before(async () => {
-	hbeam = await new HyperBEAM({ 
+    hbeam = await new HyperBEAM({
       port: 10001,
-	  wallet: ".wallet.json",
-      cwd: "./HyperBEAM", 
+      wallet: ".wallet.json",
+      cwd: "./HyperBEAM",
       reset: true,
-	  bundler: 4001,
-	  gateway: 4000,
-	  logs: true,
-	  shell: true,
-	  as: [ "genesis_wasm" ],
-	  devices: [ "flat", "structured", "httpsig", "json", "meta" ],
-	  faff: [ addr, addr2, addr3 ],
-	  simple_pay: true,
-	  simple_pay_price: 3,
-	  p4_lua: { processor: pid, client: cid },
-	  operator: addr
+      bundler: 4001,
+      gateway: 4000,
+      logs: true,
+      shell: true,
+      as: ["genesis_wasm"],
+      genesis_wasm: true,
+      devices: ["flat", "structured", "httpsig", "json", "meta"],
+      faff: [addr, addr2, addr3],
+      simple_pay: true,
+      simple_pay_price: 3,
+      p4_lua: { processor: pid, client: cid },
+      operator: addr,
     }).ready()
   })
   after(() => hbeam.kill())
@@ -39,6 +40,21 @@ describe("HyperBEAM", function () {
 
 hbeam.kill()
 ```
+
+## Instance Fields
+
+After `.ready()`, the `HyperBEAM` instance exposes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `hbeam.hb` | `HB` | Initialized [HB](/api/hb) client targeting the spawned node. Use this for most interactions. |
+| `hbeam.url` | `string` | `http://127.0.0.1:<port>` — the node URL. |
+| `hbeam.jwk` | `JWK` | Operator wallet JWK loaded from `wallet_location`. |
+| `hbeam.addr` | `string` | Operator wallet address (derived from `jwk.n`). |
+| `hbeam.operator` | `string` | Operator address from the `operator` option (defaults to `addr`). `HyperBEAM.OPERATOR` is resolved to `addr` automatically. |
+| `hbeam.cuProc` | `ChildProcess` | Genesis-wasm CU child process handle when `genesis_wasm: true`. |
+| `hbeam.dirname` | `string` | Resolved absolute path of the HyperBEAM source tree (`cwd`). |
+| `hbeam.wallet_location` | `string` | Resolved absolute path of the wallet JWK. |
 
 ## Parameters
 
@@ -53,7 +69,7 @@ hbeam.kill()
 | `gateway` | - | gateway service port |
 | `logs` | `true` | set `false` to disable HyperBEAM logs |
 | `shell` | `true` | `false` to not auto-start `rebar3 shell` |
-| `rebar3` | `true` | use `rebar3 shell` (`true`) or direct `erl` (`false`) |
+| `rebar3` | `true` | use `rebar3 shell` (`true`) or direct `erl` (`false`); honors `HB_REBAR3` env |
 | `as` | `[]` | `rocksdb`, `genesis_wasm`, `http3` |
 | `devices` | - | array of preloaded devices, `undefined` to load everything |
 | `faff` | - | array of addresses (likely for funding/faucet) |
@@ -64,9 +80,11 @@ hbeam.kill()
 | `genesis_wasm` | `false` | start a genesis-wasm CU alongside HyperBEAM |
 | `arweave_gateway` | - | custom Arweave gateway URL (e.g. Cloudflare proxy) |
 | `force_signed` | `false` | require signed requests |
+| `linkify_mode` | (HB default) | v0.9-FINAL HB `linkify-mode` option; pass `false` for hbsig-style inline-only responses (lets cache reads stay in the same multipart body instead of being relinked) |
 | `store_prefix` | - | custom store prefix (randomized if set) |
 | `bundler_ans104` | - | ANS-104 bundler port |
 | `bundler_httpsig` | - | HTTPSig bundler URL |
+| `p4_non_chargable_routes` | - | list of route patterns the p4 device should skip charging on |
 | `c` | - | GCC version for compilation (sets CC/CXX) |
 | `cmake` | - | CMAKE_POLICY_VERSION_MINIMUM value |
 
@@ -129,6 +147,19 @@ CMAKE_POLICY_VERSION_MINIMUM=3.5
 | `ans104` | `ans104@1.0` | `dev_codec_ans104` |
 | `cacheviz` | `cacheviz@1.0` | `dev_cacheviz` |
 | `wao` | `wao@1.0` | `dev_wao` |
+| `metering` | `metering@1.0` | `dev_metering` (v0.9-FINAL) |
+| `location` | `location@1.0` | `dev_location` (v0.9-FINAL) |
+| `trie` | `trie@1.0` | `dev_trie` (v0.9-FINAL) |
+| `blacklist` | `blacklist@1.0` | `dev_blacklist` (v0.9-FINAL) |
+| `rate-limit` | `rate-limit@1.0` | `dev_rate_limit` (v0.9-FINAL) |
+| `secret` | `secret@1.0` | `dev_secret` (v0.9-FINAL) |
+| `copycat` | `copycat@1.0` | `dev_copycat` (v0.9-FINAL) |
+| `arweave` | `arweave@2.9` | `dev_arweave` (v0.9-FINAL) |
+| `b32-name` | `b32-name@1.0` | `dev_b32_name` (v0.9-FINAL) |
+| `bundler` | `bundler@1.0` | `dev_bundler` (v0.9-FINAL) |
+| `gzip` | `gzip@1.0` | `dev_gzip` (v0.9-FINAL) |
+| `tx` | `tx@1.0` | `dev_codec_tx` (v0.9-FINAL) |
+| `whois` | `whois@1.0` | `dev_whois` (v0.9-FINAL) |
 
 If the device is not listed, you need to define it yourself.
 
